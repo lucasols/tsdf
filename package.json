@@ -22,7 +22,7 @@
   "scripts": {
     "test": "vitest --ui",
     "lint": "pnpm tsc && pnpm eslint && pnpm format",
-    "eslint": "eslint --ext .jsx,.js,.ts,.tsx src/",
+    "eslint": "CI=true eslint --ext .jsx,.js,.ts,.tsx src/",
     "format": "prettier --write src/**/*.ts",
     "tsc": "tsc -p tsconfig.prod.json",
     "test:run": "vitest run",
@@ -54,7 +54,9 @@
     "vitest": "^0.26.2"
   },
   "dependencies": {
-    "t-state": "^7.1.0"
+    "mitt": "^3.0.0",
+    "runcheck": "^0.8.0",
+    "t-state": "^7.1.2"
   },
   "peerDependencies": {
     "react": "^18.0.0",

@@ -13,3 +13,5 @@ resources
 coverage
 .yarn/cache
 dist
+.quokka.ts
+.DS_Store

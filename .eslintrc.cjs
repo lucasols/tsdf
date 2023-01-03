@@ -1,6 +1,10 @@
+const isCI = process.env.CI === 'true';
+
 const OFF = 0;
 const WARN = 1;
 const ERROR = 2;
+const ERROR_IN_CI = isCI ? ERROR : WARN;
+const ERROR_IN_CI_ONLY = isCI ? ERROR : 0;
 
 module.exports = {
   parser: '@typescript-eslint/parser',
@@ -21,15 +25,17 @@ module.exports = {
 
   rules: {
     'no-warning-comments': [WARN, { terms: ['FIX:'] }],
-    'no-constant-binary-expression': ERROR,
-    'object-shorthand': ERROR,
-    'no-useless-rename': ERROR,
-    'no-param-reassign': ERROR,
+    'no-constant-binary-expression': ERROR_IN_CI,
+    'object-shorthand': ERROR_IN_CI,
+    'no-useless-rename': ERROR_IN_CI,
+    'no-param-reassign': ERROR_IN_CI,
 
     'no-prototype-builtins': OFF,
+    'no-undef': OFF,
+    'no-console': [ERROR_IN_CI, { allow: ['warn', 'error', 'info'] }],
 
     /* typescript */
-    '@typescript-eslint/no-explicit-any': OFF,
+    '@typescript-eslint/no-unnecessary-condition': ERROR_IN_CI,
     '@typescript-eslint/naming-convention': [
       'error',
       {
@@ -37,20 +43,28 @@ module.exports = {
         format: ['PascalCase'],
       },
     ],
-    '@typescript-eslint/no-throw-literal': ERROR,
-    '@typescript-eslint/no-unused-expressions': ERROR,
-    '@typescript-eslint/no-unused-vars': [ERROR, { argsIgnorePattern: '^_' }],
-    '@typescript-eslint/no-shadow': [ERROR, { ignoreOnInitialization: true }],
-    '@typescript-eslint/no-non-null-assertion': OFF,
+    '@typescript-eslint/no-throw-literal': ERROR_IN_CI,
+    '@typescript-eslint/no-unused-expressions': ERROR_IN_CI,
+    '@typescript-eslint/no-unused-vars': [
+      ERROR_IN_CI,
+      { argsIgnorePattern: '^_' },
+    ],
+    '@typescript-eslint/no-shadow': [
+      ERROR_IN_CI,
+      { ignoreOnInitialization: true },
+    ],
+    'no-restricted-syntax': [
+      ERROR_IN_CI_ONLY,
+      {
+        selector:
+          'CallExpression[callee.object.name="test"][callee.property.name="only"]',
+        message: 'No test.only',
+      },
+    ],
 
-    /* jest */
-    'jest/expect-expect': [ERROR, { assertFunctionNames: ['expect*'] }],
-    'jest/no-deprecated-functions': OFF,
+    '@typescript-eslint/no-non-null-assertion': OFF,
+    '@typescript-eslint/no-empty-function': OFF,
+    '@typescript-eslint/no-explicit-any': OFF,
   },
-  extends: [
-    'eslint:recommended',
-    'plugin:@typescript-eslint/recommended',
-    'plugin:jest/recommended',
-    'plugin:jest/style',
-  ],
+  extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended'],
 };
