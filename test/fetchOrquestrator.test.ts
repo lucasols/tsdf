@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createTestStore, TestStore } from './mocks/fetchOrquestratorEnv';
-import { dedent } from './utils/dedent';
-import { waitTimeline, delayCall } from './utils/delayCall';
-import { filterAndMap } from './utils/filterAndMap';
+import { delayCall, waitTimeline } from './utils/delayCall';
 import { sleep } from './utils/sleep';
 
 /** default time 60ms */
@@ -433,6 +431,34 @@ test.concurrent('very slow revalidation then mutation', async () => {
   `);
 });
 
+test.concurrent('fetch error', async () => {
+  const store = createTestStore(0);
+
+  await waitTimeline(
+    [
+      [0, () => store.fetch('lowPriority')],
+      [50, () => store.errorInNextFetch()],
+      [220, () => store.fetch('lowPriority')],
+    ],
+    300,
+  );
+
+  expect(store.server.history).toEqual([0, 'error']);
+  expect(store.ui.changesHistory).toEqual([0, 'error']);
+  expect(store.numOfFetchs).toBe(2);
+  expect(store.actions).toMatchTimeline(`
+    "
+    fetch-started
+    fetch-finished
+    fetch-ui-commit
+    error - server-data-changed
+    fetch-started
+    fetch-error
+    error - fetch-ui-commit
+    "
+  `);
+});
+
 const defaultRTUMutation = {
   withOptimisticUpdate: true,
   duration: 200 as const,
@@ -662,7 +688,51 @@ describe('realtime updates', () => {
     `);
     },
   );
+
+  test.concurrent('rtu mutations without optimistic updates', async () => {
+    const store = createTestStore(0);
+
+    const rtuWithoutOptimisticUpdate = {
+      withOptimisticUpdate: false,
+      duration: 200,
+      triggerRTU: true,
+    };
+
+    await waitTimeline(
+      [
+        [0, () => store.fetch('lowPriority', 20)],
+        [110, () => action(store, 1, rtuWithoutOptimisticUpdate)],
+        [110 + 220, () => action(store, 2, rtuWithoutOptimisticUpdate)],
+      ],
+      1000,
+    );
+
+    expect(store.server.history).toEqual([0, 1, 2]);
+    expect(store.ui.changesHistory).toEqual([0, 2]);
+
+    expect(store.numOfFetchs).toEqual(3);
+
+    expect(store.actions).toMatchTimeline(`
+      "
+      fetch-started
+      fetch-finished
+      fetch-ui-commit
+      1 - mutation-started
+      1 - server-data-changed
+      1 - mutation-finished
+      rt-fetch-scheduled
+      scheduled-rt-fetch-started
+        2 - mutation-started
+      1 - fetch-aborted
+        2 - server-data-changed
+        2 - mutation-finished
+        rt-fetch-scheduled
+        scheduled-rt-fetch-started
+        2 - fetch-finished
+        2 - fetch-ui-commit
+      "
+    `);
+  });
 });
 
-// FIX: test errors scenarios
 // FIX: test mutiple fetch queries not canceling each other

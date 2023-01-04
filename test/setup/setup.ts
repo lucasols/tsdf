@@ -25,7 +25,7 @@ expect.extend(matchers);
 
 expect.extend({
   toMatchTimeline(received, expected) {
-    const expectedPossibleValues = (() => {
+    const expectedPossibleValues: string[] = (() => {
       const result: string[] = [];
 
       if (expected.includes('OR')) {
@@ -36,11 +36,11 @@ expect.extend({
         for (const orGroup of orGroups) {
           result.push(expected.replace(/---([\s\S]+)---/, orGroup));
         }
-      } else {
-        result.push(expected);
-      }
 
-      return result;
+        return result;
+      } else {
+        return [expected];
+      }
     })();
 
     function checkIfPass(_received: any, _expected: any) {

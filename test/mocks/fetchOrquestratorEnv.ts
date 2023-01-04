@@ -3,7 +3,6 @@ import {
   FetchType,
   ShouldAbortFetch,
 } from '../../src/fetchOrquestrator';
-import { clampMax, clampMin } from '../../src/utils/math';
 import { sleep } from '../utils/sleep';
 
 type Data = number | 'error' | null;
@@ -60,7 +59,7 @@ function serverEmulator(initialData: Data, addAction: AddAction) {
 function uiEmulator(initialData: Data, addAction: AddAction) {
   const uiHistory: Data[] = [initialData];
 
-  function setUi(value: number, reason: 'optimistic' | 'fetch') {
+  function setUi(value: number | 'error', reason: 'optimistic' | 'fetch') {
     uiHistory.push(value);
     addAction(`${reason}-ui-commit`, value);
   }
@@ -130,11 +129,13 @@ export function createTestStore(
 
     if (serverResponse === 'error') {
       addAction('fetch-error');
+      ui.setUi('error', 'fetch');
       return false;
     }
 
     if (shouldAbortResult()) {
       addAction(`fetch-aborted`, serverResponse);
+
       return false;
     }
 
@@ -206,6 +207,9 @@ export function createTestStore(
     mutateData: server.mutateData,
     optimisticUpdate(value: number) {
       ui.setUi(value, 'optimistic');
+    },
+    errorInNextFetch() {
+      server.setData('error');
     },
     waitForNoPendingRequests,
     addAction,

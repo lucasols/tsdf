@@ -28,22 +28,6 @@ async function actionWithoutOptimisticUpdate(
   void store.fetch({ type: 'forceUpdate' });
 }
 
-describe('realtime updates', () => {
-  test('fetch update is missing', async () => {
-    const store = new TestStore(0, true, true);
-
-    const promises = [
-      actionWithoutOptimisticUpdate(store, 1),
-      delay(380, () => actionWithoutOptimisticUpdate(store, 2)),
-    ];
-
-    await Promise.all(promises);
-
-    await sleep(1000);
-    expect(store.uiHistory).toStrictEqual([0, 2]);
-  });
-});
-
 describe('stores with query fetchs', () => {
   test('fetchs with different ids do not cancel each other', async () => {
     const store = new TestMultiQueryStore({ a: 0, b: 0 }, false, false, {
