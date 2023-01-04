@@ -3,6 +3,7 @@ import {
   FetchType,
   ShouldAbortFetch,
 } from '../../src/fetchOrquestrator';
+import { clampMax, clampMin } from '../../src/utils/math';
 import { sleep } from '../utils/sleep';
 
 type Data = number | 'error' | null;
@@ -11,27 +12,44 @@ type AddAction = (action: string, value?: Data) => void;
 
 function serverEmulator(initialData: Data, addAction: AddAction) {
   const serverDataHistory: Data[] = [initialData];
-
+  /** default duration: 60 */
   async function mutateData(
     newData: Data,
     {
-      preTime = 50,
-      postTime = 10,
-    }: { preTime?: number; postTime?: number } = {},
+      duration = 60,
+      setDataAt = duration * 0.7,
+      onServerDataChange,
+      addServerDataChangeAction,
+    }: {
+      duration?: number;
+      setDataAt?: number;
+      onServerDataChange?: () => void;
+      addServerDataChangeAction?: boolean;
+    } = {},
   ) {
     addAction(`mutation-started`, newData);
 
-    await sleep(preTime);
+    await sleep(setDataAt);
 
     serverDataHistory.push(newData);
 
-    await sleep(postTime);
+    if (addServerDataChangeAction) {
+      addAction(`server-data-changed`, newData);
+    }
+
+    onServerDataChange?.();
 
     addAction(`mutation-finished`, newData);
+
+    await sleep(duration - setDataAt);
   }
 
   return {
     mutateData,
+    setData(value: Data) {
+      addAction(`server-data-changed`, value);
+      serverDataHistory.push(value);
+    },
     get current() {
       return serverDataHistory.at(-1)!;
     },
@@ -84,9 +102,7 @@ export function createTestStore(
   const initialTime = Date.now();
 
   function getRelativeTime() {
-    const relativeTime = Date.now() - initialTime;
-
-    return Math.round(relativeTime / 10) * 10;
+    return Date.now() - initialTime;
   }
 
   const addAction: AddAction = (action, value) => {
@@ -101,12 +117,16 @@ export function createTestStore(
   const ui = uiEmulator(uiInitialData, addAction);
   let numOfFetchs = 0;
 
-  async function mockFetch(shouldAbortResult: ShouldAbortFetch, ms: number) {
-    await sleep(ms);
+  const dbReadAt = 0.62;
 
-    numOfFetchs++;
+  async function mockFetch(shouldAbortResult: ShouldAbortFetch, ms: number) {
+    await sleep(ms * dbReadAt);
 
     const serverResponse = server.current;
+
+    await sleep(ms * (1 - dbReadAt));
+
+    numOfFetchs++;
 
     if (serverResponse === 'error') {
       addAction('fetch-error');
@@ -124,12 +144,12 @@ export function createTestStore(
     return true;
   }
 
-  async function waitForNoPendingRequests() {
+  async function waitForNoPendingRequests(chekcInterval = 10) {
     while (
       fetchOrquestrator.hasPendingFetch ||
       fetchOrquestrator.mutationIsInProgress
     ) {
-      await sleep(10);
+      await sleep(chekcInterval);
     }
   }
 
@@ -138,11 +158,12 @@ export function createTestStore(
     on(event) {
       addAction(event);
     },
+    getDynamicRealtimeThrottleMs,
   });
 
   /** default duration = 40 */
-  function scheduleFetch(priority: FetchType, duration = 40) {
-    const result = fetchOrquestrator.scheduleFetch(priority, duration);
+  function fetch(fetchType: FetchType, duration = 40) {
+    const result = fetchOrquestrator.fetch(fetchType, duration);
 
     if (result === 'started') {
       addAction('fetch-started');
@@ -155,76 +176,30 @@ export function createTestStore(
     if (result === 'scheduled') {
       addAction('fetch-scheduled');
     }
+
+    if (result === 'rt-scheduled') {
+      addAction('rt-fetch-scheduled');
+    }
+  }
+
+  async function emulateExternalRTU(newServerValue: number, duration = 40) {
+    server.setData(newServerValue);
+
+    await sleep(5);
+
+    fetch('realtimeUpdate', duration);
   }
 
   return {
     ui,
     server,
-    get timeline(): string {
-      const timeline: string[] = [];
-
-      for (const { action, time, value } of actionsHistory) {
-        const lastAction = timeline.at(-1);
-
-        let actionText = action;
-
-        if (value) {
-          actionText = `${stringFromLength(
-            value === 'error' ? 0 : (value - 1) * 2,
-          )}${value} - ${action}`;
-        }
-
-        if (lastAction?.startsWith(`${time}ms:`)) {
-          timeline.push(`${time}ms:--${actionText}`);
-        } else {
-          timeline.push(`${time}ms: ${actionText}`);
-        }
-      }
-
-      const maxTimeLength = Math.max(
-        ...timeline.map((action) => action.split(':')[0]!.length),
-      );
-
-      const timelineWithBalancedStart = timeline.map((action) => {
-        const [time, actionType] = action.split(':');
-
-        return `${stringFromLength(
-          maxTimeLength - time!.length,
-        )}${time}:${actionType}`;
-      });
-
-      return `\n${timelineWithBalancedStart
-        .map((action) => {
-          if (action.includes('--')) {
-            const [time, actionType] = action.split(':--');
-
-            return ` ${stringFromLength(time!.length - 1)}: ${actionType}`;
-          }
-
-          return action;
-        })
-        .join('\n')}\n`;
+    timeline(groupByTime = 10, startAt = 0): string {
+      return getTimeline(actionsHistory, groupByTime, startAt);
     },
     get actions() {
-      return [
-        '\n',
-        actionsHistory
-          .map(({ action, value }) => {
-            let actionText = action;
-
-            if (value) {
-              actionText = `${stringFromLength(
-                value === 'error' ? 0 : (value - 1) * 2,
-              )}${value} - ${action}`;
-            }
-
-            return actionText;
-          })
-          .join('\n'),
-        '\n',
-      ].join('');
+      return getActions(actionsHistory);
     },
-    scheduleFetch,
+    fetch,
     get numOfFetchs() {
       return numOfFetchs;
     },
@@ -233,14 +208,149 @@ export function createTestStore(
       ui.setUi(value, 'optimistic');
     },
     waitForNoPendingRequests,
+    addAction,
+    emulateExternalRTU,
     startMutation: fetchOrquestrator.startMutation,
   };
 }
 
 export type TestStore = ReturnType<typeof createTestStore>;
 
+function getActions(
+  actionsHistory: { action: string; time: number; value: Data | undefined }[],
+) {
+  let lastIdentation = '';
+
+  return [
+    '\n',
+    actionsHistory
+      .map(({ action, value }) => {
+        if (value) {
+          lastIdentation = stringFromLength(
+            value === 'error' ? 0 : (value - 1) * 2,
+          );
+
+          return `${lastIdentation}${value} - ${action}`;
+        } else {
+          return `${lastIdentation}${action}`;
+        }
+      })
+      .join('\n'),
+    '\n',
+  ].join('');
+}
+
+type Action = {
+  action: string;
+  time: number;
+  value: Data | undefined;
+};
+
+function getTimeline(
+  actionsHistory: Action[],
+  groupByTime: number,
+  startAt: number,
+) {
+  const timeline: string[] = [];
+  let lastIdentation = '';
+  let lastAction = '';
+
+  const dividerText = '.';
+
+  const actionsWithNormalizedTime: Action[] = [];
+
+  actionsHistory.forEach((action) => {
+    if (action.time < startAt) {
+      return;
+    }
+
+    let time = action.time;
+
+    time = time - (time % groupByTime);
+
+    actionsWithNormalizedTime.push({
+      ...action,
+      time,
+    });
+  });
+
+  for (const [{ action, time, value }, prev] of arrayWithPrev(
+    actionsWithNormalizedTime,
+  )) {
+    if (prev) {
+      const timeDiff = time - prev.time;
+
+      if (timeDiff > 50) {
+        timeline.push(dividerText);
+      }
+    }
+
+    let actionText: string;
+
+    if (value) {
+      lastIdentation = stringFromLength(
+        value === 'error' ? 0 : (value - 1) * 2,
+      );
+
+      actionText = `${lastIdentation}${value} - ${action}`;
+    } else {
+      actionText = `${lastIdentation}${action}`;
+    }
+
+    if (lastAction.startsWith(`${time}ms:`)) {
+      lastAction = `${time}ms:--${actionText}`;
+    } else {
+      lastAction = `${time}ms: ${actionText}`;
+    }
+
+    timeline.push(lastAction);
+  }
+
+  const maxTimeLength = Math.max(
+    ...timeline.map((action) =>
+      action.includes(':') ? action.split(':')[0]!.length : 0,
+    ),
+  );
+
+  const timelineWithBalancedStart = timeline.map((action) => {
+    if (action.startsWith(dividerText)) {
+      return `${stringFromLength(maxTimeLength)}-`;
+    }
+
+    const [time, actionType] = action.split(':');
+
+    return `${stringFromLength(
+      maxTimeLength - time!.length,
+    )}${time}:${actionType}`;
+  });
+
+  return `\n${timelineWithBalancedStart
+    .map((action) => {
+      if (action.includes('--')) {
+        const [time, actionType] = action.split(':--');
+
+        return ` ${stringFromLength(time!.length - 1)}: ${actionType}`;
+      }
+
+      return action;
+    })
+    .join('\n')}\n`;
+}
+
 function stringFromLength(length: number, string = ' ') {
   return Array.from({ length })
     .map((_) => string)
     .join('');
+}
+
+function getDynamicRealtimeThrottleMs(lastDuration: number): number {
+  if (lastDuration > 300) {
+    return 300;
+  }
+
+  return 100;
+}
+
+function arrayWithPrev<T>(array: T[]): [T, T | null][] {
+  return array.map((item, i) => [item, array[i - 1] ?? null]);
 }
