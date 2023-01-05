@@ -1,44 +1,54 @@
+import produce from 'immer';
 import mitt from 'mitt';
 import { useEffect } from 'react';
-import { RcType } from 'runcheck';
 import { Store } from 't-state';
+import {
+  createFetchOrquestrator,
+  FetchType,
+  ScheduleFetchResults,
+  ShouldAbortFetch,
+} from './fetchOrquestrator';
+import { Status, ValidStoreState } from './storeShared';
 import { useOnMittEvent } from './utils/useOnMittEvent';
 
-type Status = 'idle' | 'loading' | 'refetching' | 'error' | 'success';
+type DocumentStatus = Status | 'idle';
 
-type StoreError = {
-  exception: unknown;
-  message: string;
-};
-
-export type DocumentStoreState<State> = {
+export type TSDFDocumentStoreState<State extends ValidStoreState, Error> = {
   data: State | null;
-  error: StoreError | null;
-  status: Status;
+  error: Error | null;
+  status: DocumentStatus;
   refetchOnMount: boolean;
 };
 
-type UseDocumentReturn<State> = {
-  status: Status;
-  data: State | null;
-  error: StoreError | null;
+export type TSDFUseDocumentReturn<Selected, Error> = {
+  status: DocumentStatus;
+  data: Selected;
+  error: Error | null;
   isLoading: boolean;
 };
 
-type CreateDocumentStoreProps<State> = {
-  debugName?: string;
-  responseValidator?: RcType<State>;
-  fetchFn: () => Promise<State>;
-  initialData?: State;
-};
-
-export function createDocumentStore<State>({
+export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
   debugName,
   fetchFn,
-  responseValidator,
   initialData,
-}: CreateDocumentStoreProps<State>) {
-  const store = new Store<DocumentStoreState<State>>({
+  disableRefetchOnWindowFocus,
+  disableRefetchOnMount: globalDisableRefetchOnMount,
+  lowPriorityThrottleMs,
+  mediumPriorityThrottleMs,
+  getDynamicRealtimeThrottleMs,
+  errorNormalizer,
+}: {
+  debugName?: string;
+  fetchFn: () => Promise<State>;
+  initialData?: State;
+  errorNormalizer: (exception: unknown) => Error;
+  disableRefetchOnWindowFocus?: boolean;
+  disableRefetchOnMount?: boolean;
+  lowPriorityThrottleMs?: number;
+  mediumPriorityThrottleMs?: number;
+  getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+}) {
+  const store = new Store<TSDFDocumentStoreState<State, Error>>({
     debugName,
     state: {
       data: initialData ?? null,
@@ -48,96 +58,190 @@ export function createDocumentStore<State>({
     },
   });
 
-  async function scheduleFetch(): Promise<void> {
-    const { status } = store.state;
-
-    if (status === 'loading' || status === 'refetching') {
-      return;
-    }
-
-    store.setPartialState({
-      status: store.state.status === 'success' ? 'refetching' : 'loading',
-      error: null,
-      refetchOnMount: false,
-    });
+  async function fetch(
+    shouldAbort: ShouldAbortFetch,
+    _: null,
+  ): Promise<boolean> {
+    store.setPartialState(
+      {
+        status: store.state.status === 'success' ? 'refetching' : 'loading',
+        error: null,
+        refetchOnMount: false,
+      },
+      {
+        action:
+          store.state.status === 'success'
+            ? 'fetch-start-refetching'
+            : 'fetch-start-loading',
+      },
+    );
 
     try {
       const data = await fetchFn();
 
-      store.setPartialState({
-        data,
-        status: 'success',
-      });
+      if (shouldAbort()) return false;
+
+      store.setPartialState(
+        {
+          data,
+          status: 'success',
+        },
+        { action: 'fetch-success' },
+      );
+
+      return true;
     } catch (exception) {
-      store.setPartialState({
-        error: normalizeError(exception),
-        status: 'error',
-      });
+      if (shouldAbort()) return false;
+
+      store.setPartialState(
+        {
+          error: errorNormalizer(exception),
+          status: 'error',
+        },
+        { action: 'fetch-error' },
+      );
+
+      return false;
     }
   }
 
-  const storeEvents = mitt<{
-    invalidateData: undefined;
-  }>();
+  const fetchOrquestrator = createFetchOrquestrator<null>({
+    fetchFn: fetch,
+    lowPriorityThrottleMs,
+    getDynamicRealtimeThrottleMs,
+    mediumPriorityThrottleMs,
+  });
 
-  function invalidateData() {
-    store.setKey('refetchOnMount', true);
-    storeEvents.emit('invalidateData');
+  function scheduleFetch(fetchType: FetchType): ScheduleFetchResults {
+    return fetchOrquestrator.scheduleFetch(fetchType, null);
   }
 
-  // FIX: data selector
-  // FIX: return idle status
-  // FIX: add disabled option
-  // FIX: ignore refreshing status by default
-  function useDocument() {
-    const storeState = store.useSelector((state): UseDocumentReturn<State> => {
-      const { data, error } = state;
+  async function awaitFetch(): Promise<
+    { data: State; error: null } | { data: null; error: Error }
+  > {
+    const wasAborted = await fetchOrquestrator.awaitFetch(null);
 
-      const status = state.status === 'idle' ? 'loading' : state.status;
+    if (wasAborted) {
+      return { data: null, error: errorNormalizer(new Error('Aborted')) };
+    }
 
-      return {
-        data,
-        error,
-        status,
-        isLoading: status === 'loading',
-      };
-    });
+    if (!store.state.data) {
+      return { data: null, error: errorNormalizer(new Error('No data')) };
+    }
 
-    useOnMittEvent(storeEvents, 'invalidateData', () => {
-      scheduleFetch();
+    return store.state.error
+      ? { data: null, error: store.state.error }
+      : { data: store.state.data, error: null };
+  }
+
+  const storeEvents = mitt<{ invalidateData: FetchType }>();
+
+  let invalidationWasTriggered = false;
+
+  function invalidateData(
+    priority: 'highPriority' | 'lowPriority' = 'highPriority',
+  ) {
+    store.setKey('refetchOnMount', true, { action: 'invalidate-data' });
+    invalidationWasTriggered = false;
+    storeEvents.emit('invalidateData', priority);
+  }
+
+  function useDocument<Selected = State | null>({
+    selector,
+    disabled,
+    returnIdleStatus = !!disabled,
+    returnRefetchingStatus,
+    disableRefetchOnMount = globalDisableRefetchOnMount,
+  }: {
+    selector?: (data: State | null) => Selected;
+    disabled?: boolean;
+    disableRefetchOnMount?: boolean;
+    returnIdleStatus?: boolean;
+    returnRefetchingStatus?: boolean;
+  } = {}) {
+    const storeState = store.useSelector(
+      (state): TSDFUseDocumentReturn<Selected, Error> => {
+        const { error } = state;
+
+        const data = selector ? selector(state.data) : (state.data as Selected);
+
+        let status = state.status;
+
+        if (!returnIdleStatus && status === 'idle') {
+          status = 'loading';
+        }
+
+        if (!returnRefetchingStatus && status === 'refetching') {
+          status = 'success';
+        }
+
+        return {
+          data,
+          error,
+          status,
+          isLoading: status === 'loading',
+        };
+      },
+    );
+
+    useOnMittEvent(storeEvents, 'invalidateData', (priority) => {
+      if (!invalidationWasTriggered) {
+        scheduleFetch(priority);
+        invalidationWasTriggered = true;
+      }
     });
 
     useEffect(() => {
-      if (store.state.refetchOnMount || store.state.status === 'idle') {
-        scheduleFetch();
+      if (disabled) return;
+
+      if (disableRefetchOnMount) {
+        if (store.state.refetchOnMount || store.state.status === 'idle') {
+          scheduleFetch('lowPriority');
+        }
+      } else {
+        scheduleFetch('lowPriority');
       }
-    }, []);
+    }, [disableRefetchOnMount, disabled]);
 
     return storeState;
   }
 
-  return {
-    store,
-    scheduleFetch,
-    invalidateData,
-    useDocument,
-  };
-}
+  function updateState(
+    produceNewData: (draftData: State) => State | void | undefined,
+  ) {
+    store.setKey(
+      'data',
+      (current) => {
+        if (!current) return current;
 
-export type DocumentStore<State> = ReturnType<
-  typeof createDocumentStore<State>
->;
+        return produce(current, produceNewData);
+      },
+      { action: 'update-state' },
+    );
+  }
 
-function normalizeError(exception: unknown): StoreError {
-  if (exception instanceof Error) {
-    return {
-      exception,
-      message: exception.message,
-    };
+  if (!disableRefetchOnWindowFocus) {
+    function handleFocus() {
+      invalidateData('lowPriority');
+    }
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleFocus);
   }
 
   return {
-    exception,
-    message: String(exception),
+    store,
+    awaitFetch,
+    scheduleFetch,
+    invalidateData,
+    useDocument,
+    updateState,
+    startMutation: fetchOrquestrator.startMutation,
   };
 }
+
+// FIX: create a proper type for this
+export type TSDFDocumentStore<
+  State extends ValidStoreState,
+  Error,
+> = ReturnType<typeof newTSDFDocumentStore<State, Error>>;

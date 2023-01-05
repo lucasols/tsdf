@@ -1,10 +1,32 @@
-import { clampMax, clampMin } from './utils/math';
-
 export type ShouldAbortFetch = () => boolean;
 
 export type FetchType = 'lowPriority' | 'highPriority' | 'realtimeUpdate';
 
 type Events = 'scheduled-fetch-started' | 'scheduled-rt-fetch-started';
+
+export type ScheduleFetchResults =
+  | 'skipped'
+  | 'started'
+  | 'scheduled'
+  | 'rt-scheduled';
+
+export type FetchOrquestrator<T> = {
+  scheduleFetch: (fetchType: FetchType, params: T) => ScheduleFetchResults;
+  awaitFetch: (params: T) => Promise<boolean>;
+  startMutation: () => () => boolean;
+  readonly hasPendingFetch: boolean;
+  readonly fetchIsInProgress: boolean;
+  readonly mutationIsInProgress: boolean;
+};
+
+export type CreateFetchOrquestratorOptions<T> = {
+  fetchFn: (shouldAbort: ShouldAbortFetch, params: T) => Promise<boolean>;
+  on?: (event: Events) => void;
+  lowPriorityThrottleMs?: number;
+  mediumPriorityThrottleMs?: number;
+  disableRealtimeDynamicThrottling?: boolean;
+  getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+};
 
 export function createFetchOrquestrator<T>({
   fetchFn,
@@ -13,14 +35,7 @@ export function createFetchOrquestrator<T>({
   lowPriorityThrottleMs = 200,
   disableRealtimeDynamicThrottling,
   getDynamicRealtimeThrottleMs,
-}: {
-  fetchFn: (shouldAbort: ShouldAbortFetch, params: T) => Promise<boolean>;
-  on?: (event: Events) => void;
-  lowPriorityThrottleMs?: number;
-  mediumPriorityThrottleMs?: number;
-  disableRealtimeDynamicThrottling?: boolean;
-  getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-}) {
+}: CreateFetchOrquestratorOptions<T>): FetchOrquestrator<T> {
   const fetchs: {
     inProgress: { startTime: number; onEnd: (() => void)[] } | false;
     scheduled: { params: T } | null;
@@ -35,6 +50,7 @@ export function createFetchOrquestrator<T>({
   let lastFetchStartTime = 0;
   let lastFetchDuration = 0;
   let onMutationEnd: (() => void)[] = [];
+  let lastFetchWasAborted = false;
 
   function flushScheduledFetch() {
     if (fetchs.scheduled) {
@@ -75,10 +91,13 @@ export function createFetchOrquestrator<T>({
       return;
     }
 
+    lastFetchWasAborted = false;
     fetchs.inProgress = { startTime, onEnd: [] };
     lastFetchStartTime = startTime;
 
     function shouldAbort() {
+      lastFetchWasAborted = mutationIsInProgress;
+
       return mutationIsInProgress;
     }
 
@@ -104,10 +123,10 @@ export function createFetchOrquestrator<T>({
     flushScheduledFetch();
   }
 
-  function fetch(
+  function scheduleFetch(
     fetchType: FetchType,
     params: T,
-  ): 'skipped' | 'started' | 'scheduled' | 'rt-scheduled' {
+  ): ScheduleFetchResults {
     const startTime = Date.now();
 
     if (!disableRealtimeDynamicThrottling && fetchType === 'realtimeUpdate') {
@@ -120,7 +139,7 @@ export function createFetchOrquestrator<T>({
       return 'skipped';
     }
 
-    if (scheduleFetch(fetchType, params)) {
+    if (shouldScheduleFetch(fetchType, params)) {
       return 'scheduled';
     }
 
@@ -157,7 +176,7 @@ export function createFetchOrquestrator<T>({
     return false;
   }
 
-  function scheduleFetch(priority: FetchType, params: T): boolean {
+  function shouldScheduleFetch(priority: FetchType, params: T): boolean {
     const shouldSchedule = (() => {
       if (priority === 'lowPriority') {
         return false;
@@ -222,7 +241,7 @@ export function createFetchOrquestrator<T>({
 
         if (!added) {
           on?.('scheduled-rt-fetch-started');
-          fetch('highPriority', params);
+          scheduleFetch('highPriority', params);
         }
       });
 
@@ -236,13 +255,35 @@ export function createFetchOrquestrator<T>({
     return true;
   }
 
+  function addOnFetchEnd(cb: () => void) {
+    if (fetchs.inProgress) {
+      fetchs.inProgress.onEnd.push(cb);
+    }
+  }
+
+  async function awaitFetch(params: T): Promise<boolean> {
+    scheduleFetch('highPriority', params);
+
+    if (fetchs.inProgress) {
+      await new Promise<true>((resolve) => {
+        addOnFetchEnd(() => resolve(true));
+      });
+    }
+
+    return lastFetchWasAborted;
+  }
+
   return {
-    fetch,
+    scheduleFetch,
+    awaitFetch,
     startMutation,
     get hasPendingFetch() {
       return (
-        fetchs.inProgress || !!fetchs.scheduled || !!fetchs.realtimeScheduled
+        !!fetchs.inProgress || !!fetchs.scheduled || !!fetchs.realtimeScheduled
       );
+    },
+    get fetchIsInProgress() {
+      return !!fetchs.inProgress;
     },
     get mutationIsInProgress() {
       return mutationIsInProgress;

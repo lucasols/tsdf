@@ -5,7 +5,7 @@ import matchers, {
   TestingLibraryMatchers,
 } from '@testing-library/jest-dom/matchers';
 import { dedent } from '../utils/dedent';
-import { filterAndMap } from '../utils/filterAndMap';
+import { filterAndMap } from '../../src/utils/filterAndMap';
 
 interface ToMatchTimeline<R = unknown> {
   toMatchTimeline(timeline: string): R;

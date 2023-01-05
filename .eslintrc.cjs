@@ -29,10 +29,23 @@ module.exports = {
     'object-shorthand': ERROR_IN_CI,
     'no-useless-rename': ERROR_IN_CI,
     'no-param-reassign': ERROR_IN_CI,
+    'prefer-template': ERROR_IN_CI,
 
     'no-prototype-builtins': OFF,
+    'no-inner-declarations': OFF,
     'no-undef': OFF,
     'no-console': [ERROR_IN_CI, { allow: ['warn', 'error', 'info'] }],
+    'no-restricted-imports': [
+      ERROR_IN_CI,
+      {
+        patterns: [
+          {
+            group: ['*.test'],
+            message: 'Do not import test files',
+          },
+        ],
+      },
+    ],
 
     /* typescript */
     '@typescript-eslint/no-unnecessary-condition': ERROR_IN_CI,
@@ -66,5 +79,9 @@ module.exports = {
     '@typescript-eslint/no-empty-function': OFF,
     '@typescript-eslint/no-explicit-any': OFF,
   },
-  extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended'],
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/recommended',
+    'plugin:react-hooks/recommended',
+  ],
 };

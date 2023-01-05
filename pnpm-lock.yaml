@@ -12,13 +12,15 @@ specifiers:
   '@vitest/ui': 0.26.2
   eslint: ^8.30.0
   eslint-plugin-jest: ^27.1.7
+  eslint-plugin-react-hooks: ^4.6.0
+  immer: ^9.0.17
   jsdom: ^20.0.3
   mitt: ^3.0.0
   prettier: ^2.8.1
   react: ^18.2.0
   react-dom: ^18.2.0
   runcheck: ^0.8.0
-  t-state: ^7.1.2
+  t-state: ^7.2.0
   tiny-glob: ^0.2.9
   tsm: ^2.3.0
   tsup: ^6.5.0
@@ -27,9 +29,10 @@ specifiers:
   vitest: ^0.26.2
 
 dependencies:
+  immer: 9.0.17
   mitt: 3.0.0
   runcheck: 0.8.0
-  t-state: 7.1.2_biqbaboplfbrettd7655fr4n2y
+  t-state: 7.2.0_biqbaboplfbrettd7655fr4n2y
 
 devDependencies:
   '@testing-library/jest-dom': 5.16.5
@@ -43,6 +46,7 @@ devDependencies:
   '@vitest/ui': 0.26.2
   eslint: 8.31.0
   eslint-plugin-jest: 27.1.7_re2fdaxy66targbjljsnt7eyu4
+  eslint-plugin-react-hooks: 4.6.0_eslint@8.31.0
   jsdom: 20.0.3
   prettier: 2.8.1
   react: 18.2.0
@@ -1380,6 +1384,15 @@ packages:
       - typescript
     dev: true
 
+  /eslint-plugin-react-hooks/4.6.0_eslint@8.31.0:
+    resolution: {integrity: sha512-oFc7Itz9Qxh2x4gNHStv3BqJq54ExXmfC+a1NjAta66IAN87Wu0R/QArgIS9qKzX3dXKPI9H5crl9QchNMY9+g==}
+    engines: {node: '>=10'}
+    peerDependencies:
+      eslint: ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0
+    dependencies:
+      eslint: 8.31.0
+    dev: true
+
   /eslint-scope/5.1.1:
     resolution: {integrity: sha512-2NxwbF/hZ0KpepYN0cNbo+FN6XoK7GaHlQhgx/hIZl6Va0bF45RQOOwhLIy8lQDbuCiadSLCBnH2CFYquit5bw==}
     engines: {node: '>=8.0.0'}
@@ -1810,8 +1823,8 @@ packages:
     engines: {node: '>= 4'}
     dev: true
 
-  /immer/9.0.16:
-    resolution: {integrity: sha512-qenGE7CstVm1NrHQbMh8YaSzTZTFNP3zPqr3YU0S0UY441j4bJTg4A2Hh5KAhwgaiU6ZZ1Ar6y/2f4TblnMReQ==}
+  /immer/9.0.17:
+    resolution: {integrity: sha512-+hBruaLSQvkPfxRiTLK/mi4vLH+/VQS6z2KJahdoxlleFOI8ARqzOF17uy12eFDlqWmPoygwc5evgwcp+dlHhg==}
     dev: false
 
   /import-fresh/3.3.0:
@@ -2794,15 +2807,15 @@ packages:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
     dev: true
 
-  /t-state/7.1.2_biqbaboplfbrettd7655fr4n2y:
-    resolution: {integrity: sha512-Ls/+VBcihdrI+ymkcZ40CWNmwP+vccN6vURvjNnyDWGg0F2HT3GlXNfyloI3BLv8ynwcgTNexfN4XFwxuSlb/w==}
+  /t-state/7.2.0_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-Gl3RALs2NsUjSTU4QHB3PmAl01CiXn4wHnzUCz9WptopsA0BnO9QNVjwr4zVEczLkge0gI2Z+nPGYFFMJwwQGg==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       react: ^18.0.0
       react-dom: ^18.0.0
     dependencies:
       dequal: 2.0.3
-      immer: 9.0.16
+      immer: 9.0.17
       react: 18.2.0
       react-dom: 18.2.0_react@18.2.0
       use-sync-external-store: 1.2.0_react@18.2.0

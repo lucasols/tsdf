@@ -593,8 +593,14 @@ describe('realtime updates', () => {
         scheduled-rt-fetch-started
           2 - server-data-changed
           rt-fetch-scheduled
+
+        ---
+        2 - fetch-finished
+        2 - fetch-ui-commit
+        OR
         1 - fetch-finished
         1 - fetch-ui-commit
+        ---
 
           scheduled-rt-fetch-started
           2 - fetch-finished

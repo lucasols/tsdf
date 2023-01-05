@@ -164,7 +164,7 @@ export function createTestStore(
 
   /** default duration = 40 */
   function fetch(fetchType: FetchType, duration = 40) {
-    const result = fetchOrquestrator.fetch(fetchType, duration);
+    const result = fetchOrquestrator.scheduleFetch(fetchType, duration);
 
     if (result === 'started') {
       addAction('fetch-started');
