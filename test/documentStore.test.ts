@@ -33,7 +33,7 @@ describe('fetch lifecicle', () => {
       status: 'loading',
     });
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(documentStore.store.state).toEqual<DocumentStoreState>({
       data: {
@@ -59,7 +59,7 @@ describe('fetch lifecicle', () => {
       status: 'refetching',
     });
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(documentStore.store.state).toEqual<DocumentStoreState>({
       data: {
@@ -78,7 +78,7 @@ describe('fetch lifecicle', () => {
 
     documentStore.scheduleFetch('highPriority');
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(documentStore.store.state).toEqual<DocumentStoreState>({
       data: {
@@ -139,7 +139,7 @@ test.concurrent(
       status: 'refetching',
     });
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(serverMock.numOfFetchs).toBe(1);
 

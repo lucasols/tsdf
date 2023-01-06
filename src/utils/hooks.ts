@@ -45,18 +45,20 @@ export function useOnMittEvent<
 >(mitt: Emitter<T>, event: E, callback: (payload: T[E]) => void) {
   const latestCallback = useLatestValue(callback);
 
-  useEffect(() => {
-    mitt.on(event, latestCallback.insideEffect);
+  useLayoutEffect(() => {
+    const cb = (payload: T[E]) => {
+      latestCallback.insideEffect(payload);
+    };
+
+    mitt.on(event, cb);
 
     return () => {
-      mitt.off(event, latestCallback.insideEffect);
+      mitt.off(event, cb);
     };
   }, [mitt, event, latestCallback]);
 }
 
-export function usePrevious<T>(value: T): T | undefined;
-export function usePrevious<T>(value: T, initial: T): T;
-export function usePrevious<T>(value: T, initial?: T): T | undefined {
+function usePrevious<T>(value: T, initial?: T): T | undefined {
   const ref = useRef<T | undefined>(initial);
   useEffect(() => {
     ref.current = value;
@@ -95,4 +97,14 @@ export function useOnChange<T>(
       return callBack({ prev, current: value });
     }
   });
+}
+
+export function useConst<T>(getValue: () => T) {
+  const store = useRef<T>();
+
+  if (store.current === undefined) {
+    store.current = getValue();
+  }
+
+  return store.current;
 }

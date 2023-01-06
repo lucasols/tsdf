@@ -4,9 +4,11 @@ import { sleep } from '../utils/sleep';
 export function mockServerResource<Data, S = Data>({
   initialData,
   randomTimeout,
+  logFetchs,
   fetchSelector = (data) => data as unknown as S,
 }: {
   initialData: Data;
+  logFetchs?: boolean;
   randomTimeout?: [number, number] | true;
   fetchSelector?: (data: Data | null, params: string) => S;
 }) {
@@ -18,6 +20,22 @@ export function mockServerResource<Data, S = Data>({
   let lastTimeoutMs = 0;
   let error: Error | string | null = null;
   let numOfFetchs = 0;
+  let waitNextFetchCompleteCall = 0;
+
+  let startTime = Date.now();
+
+  function reset() {
+    data = initialData;
+    timeout = randomTimeout ? [30, 100] : 30;
+    lastTimeout = timeout;
+    lastTimeoutMs = 0;
+    error = null;
+    numOfFetchs = 0;
+    startTime = Date.now();
+    waitNextFetchCompleteCall = 0;
+  }
+
+  let onFetchComplete: (() => void) | null = null;
 
   const dbReadAt = 0.62;
 
@@ -30,6 +48,15 @@ export function mockServerResource<Data, S = Data>({
       timeoutToUse = timeout(params);
     } else {
       timeoutToUse = timeout;
+    }
+
+    if (logFetchs) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `${numOfFetchs} - fetch${params ? ` ${params}` : ''} - started ${
+          Date.now() - startTime
+        }ms - duration: ${timeoutToUse}ms`,
+      );
     }
 
     lastTimeoutMs = timeoutToUse;
@@ -50,6 +77,11 @@ export function mockServerResource<Data, S = Data>({
       throw new Error('No data');
     }
 
+    if (onFetchComplete) {
+      onFetchComplete();
+      onFetchComplete = null;
+    }
+
     return response;
   }
 
@@ -61,7 +93,7 @@ export function mockServerResource<Data, S = Data>({
     data = { ...data, ...newData };
   }
 
-  function setTimeout(newTimeout: typeof timeout) {
+  function setFetchDuration(newTimeout: typeof timeout) {
     lastTimeout = timeout;
     timeout = newTimeout;
   }
@@ -107,19 +139,56 @@ export function mockServerResource<Data, S = Data>({
     return data;
   }
 
+  async function waitNextFetchComplete(extraWait = 0, maxWait = 500) {
+    waitNextFetchCompleteCall++;
+
+    const currentWaitNextFetchCompleteCall = waitNextFetchCompleteCall;
+
+    if (onFetchComplete) {
+      return;
+    }
+
+    const errorObj = new Error(
+      `Wait for next fetch complete ${currentWaitNextFetchCompleteCall} timeout`,
+    );
+
+    return new Promise<true>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        onFetchComplete = null;
+        reject(errorObj);
+      }, maxWait);
+
+      onFetchComplete = () => {
+        clearTimeout(timeoutId);
+
+        setTimeout(() => {
+          resolve(true);
+        }, 10 + extraWait);
+      };
+    });
+  }
+
   return {
     fetch,
     mutateData,
     fetchWitoutSelector,
-    setTimeout,
+    waitNextFetchComplete,
+    setFetchDuration,
+    get data() {
+      return data;
+    },
+    reset,
     trhowErrorInNextFetch,
     emulateMutation,
     undoTimeoutChange,
     get numOfFetchs() {
       return numOfFetchs;
     },
-    get timeout() {
+    get fetchDuration() {
       return lastTimeoutMs;
+    },
+    relativeTime() {
+      return Date.now() - startTime;
     },
     numOfFetchsFromHere() {
       const currentNumOfFetchs = numOfFetchs;

@@ -32,9 +32,15 @@ export type DefaultDocStoreData = {
 export function createDefaultDocumentStore({
   serverHello = 'world',
   storeWithInitialData,
-}: { serverHello?: string; storeWithInitialData?: boolean } = {}) {
+  debug,
+}: {
+  serverHello?: string;
+  storeWithInitialData?: boolean;
+  debug?: never;
+} = {}) {
   const serverMock = mockServerResource<DefaultDocStoreData>({
     initialData: { hello: serverHello },
+    logFetchs: debug,
   });
 
   const documentStore = newTSDFDocumentStore({
@@ -49,6 +55,13 @@ export function createDefaultDocumentStore({
     return Date.now() - startTime;
   }
 
+  if (debug as any) {
+    documentStore.store.subscribe(({ current }) => {
+      // eslint-disable-next-line no-console
+      console.log(serverMock.relativeTime(), current);
+    });
+  }
+
   return { serverMock, documentStore, getElapsedTime };
 }
 
@@ -58,7 +71,7 @@ type Todo = {
   description?: string;
 };
 
-type ServerData = Record<string, Todo>;
+type ServerData = Record<string, Todo | null>;
 
 export type DefaultCollectionState = TSFDCollectionState<
   Todo,
@@ -74,15 +87,17 @@ export type DefaultCollectionStore = TSDFCollectionStore<
 >;
 
 export function createDefaultCollectionStore({
-  initialData = { '1': { title: 'todo', completed: false } },
+  serverInitialData = { '1': { title: 'todo', completed: false } },
+  initializeStoreWithServerData,
   randomTimeout,
 }: {
-  initialData?: ServerData;
+  serverInitialData?: ServerData;
+  initializeStoreWithServerData?: boolean;
   /** default: 30-100 */
   randomTimeout?: true;
 } = {}) {
   const serverMock = mockServerResource<ServerData, Todo>({
-    initialData,
+    initialData: serverInitialData,
     randomTimeout,
     fetchSelector(data, params) {
       const todo = data && data[params];
@@ -100,6 +115,22 @@ export function createDefaultCollectionStore({
     errorNormalizer: normalizeError,
     getCollectionItemPayload: (data) => data,
   });
+
+  if (initializeStoreWithServerData) {
+    const initialState: DefaultCollectionState = {};
+
+    for (const [id, todo] of Object.entries(serverInitialData)) {
+      initialState[id] = {
+        data: todo,
+        status: 'success',
+        error: null,
+        payload: id,
+        refetchOnMount: false,
+      };
+    }
+
+    collectionStore.store.setState(initialState);
+  }
 
   const startTime = Date.now();
 
@@ -161,8 +192,8 @@ export function createRenderStore() {
 
   return {
     add,
-    reset() {
-      renders = [];
+    reset(keepLastRender = false) {
+      renders = keepLastRender ? [renders.at(-1)] : [];
       rendersTime = [];
       startTime = Date.now();
     },
@@ -187,7 +218,7 @@ export function createRenderStore() {
   };
 }
 
-export function createStore<T>(initialValue: T) {
+export function createValueStore<T>(initialValue: T) {
   const store = new Store({
     state: { value: initialValue },
   });
@@ -199,6 +230,6 @@ export function createStore<T>(initialValue: T) {
     },
     set(value: T) {
       store.setState({ value });
-    }
+    },
   };
 }

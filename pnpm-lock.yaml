@@ -20,7 +20,7 @@ specifiers:
   react: ^18.2.0
   react-dom: ^18.2.0
   runcheck: ^0.8.0
-  t-state: ^7.3.1
+  t-state: ^7.5.0-beta.0
   tiny-glob: ^0.2.9
   tsm: ^2.3.0
   tsup: ^6.5.0
@@ -32,7 +32,7 @@ dependencies:
   immer: 9.0.17
   mitt: 3.0.0
   runcheck: 0.8.0
-  t-state: 7.3.1_biqbaboplfbrettd7655fr4n2y
+  t-state: 7.5.0-beta.0_biqbaboplfbrettd7655fr4n2y
 
 devDependencies:
   '@testing-library/jest-dom': 5.16.5
@@ -2816,8 +2816,8 @@ packages:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
     dev: true
 
-  /t-state/7.3.1_biqbaboplfbrettd7655fr4n2y:
-    resolution: {integrity: sha512-T5ZR7zb9+XcNnWlggpjseVEAVf6T7sDCA5eLFd4ocvwCyM24txhY8KFHLzbVXGdKOgMIl/e6yA/mumDCh8L3Ww==}
+  /t-state/7.5.0-beta.0_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-KTw22HdjGqEgzjaybaEa1KnnJGcZ4hy2J0svn0j4DmcHWpAvEAGDdhD7y45CwqQskDJUDaX4anSh9pS1RqgE2g==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       react: ^18.0.0

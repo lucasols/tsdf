@@ -58,7 +58,7 @@
     "immer": "^9.0.17",
     "mitt": "^3.0.0",
     "runcheck": "^0.8.0",
-    "t-state": "^7.3.1"
+    "t-state": "^7.5.0-beta.0"
   },
   "peerDependencies": {
     "react": "^18.0.0",

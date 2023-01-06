@@ -1,13 +1,21 @@
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { Store } from 't-state';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'vitest';
 import { MultipleItemsQuery } from '../src/collectionStore';
+import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
   createDefaultCollectionStore,
   createRenderStore,
-  createStore,
+  createValueStore,
 } from './utils/storeUtils';
 
 const defaultTodo = { title: 'todo', completed: false };
@@ -19,7 +27,7 @@ describe('useMultipleItems', () => {
 
   const { serverMock, collectionStore } = createDefaultCollectionStore({
     randomTimeout: true,
-    initialData: { '1': defaultTodo, '2': defaultTodo },
+    serverInitialData: { '1': defaultTodo, '2': defaultTodo },
   });
   const renders1 = createRenderStore();
   const renders2 = createRenderStore();
@@ -126,7 +134,7 @@ describe('useMultipleItems', () => {
     renders2.reset();
 
     act(() => {
-      serverMock.setTimeout((param) => {
+      serverMock.setFetchDuration((param) => {
         return param === '1' ? 20 : 40;
       });
 
@@ -205,12 +213,12 @@ describe('useItem', async () => {
   });
 
   const { serverMock, collectionStore } = createDefaultCollectionStore({
-    initialData: { '1': defaultTodo, '2': defaultTodo },
+    serverInitialData: { '1': defaultTodo, '2': defaultTodo },
   });
 
   const renders1 = createRenderStore();
 
-  const itemFetchParams = createStore<string | undefined | false>(false);
+  const itemFetchParams = createValueStore<string | undefined | false>(false);
 
   beforeAll(() => {
     renderHook(() => {
@@ -218,11 +226,7 @@ describe('useItem', async () => {
 
       const selectionResult = collectionStore.useItem(fetchParams);
 
-      renders1.add({
-        status: selectionResult.status,
-        payload: selectionResult.payload,
-        data: selectionResult.data,
-      });
+      renders1.add(pick(selectionResult, ['status', 'payload', 'data']));
     });
   });
 
@@ -272,7 +276,7 @@ describe('useItem', async () => {
       return <div />;
     };
 
-    const mountComp2 = createStore(false);
+    const mountComp2 = createValueStore(false);
 
     const Comp = () => {
       const data = collectionStore.useItem('2', {
@@ -318,11 +322,7 @@ describe('useItem', async () => {
         itemFetchParams.useValue(),
       );
 
-      renders.add({
-        status: selectionResult.status,
-        payload: selectionResult.payload,
-        data: selectionResult.data,
-      });
+      renders.add(pick(selectionResult, ['status', 'payload', 'data']));
     });
 
     async function actionWithOptimisticUpdateAndRevalidation(
@@ -362,6 +362,117 @@ describe('useItem', async () => {
       "
       status: success -- payload: 1 -- data: {title:todo, completed:false}
       status: success -- payload: 1 -- data: {title:was updated, completed:false}
+      "
+    `);
+  });
+
+  test('use deleted item', async () => {
+    const renders = createRenderStore();
+
+    renderHook(() => {
+      const selectionResult = collectionStore.useItem('2');
+
+      renders.add(pick(selectionResult, ['status', 'payload', 'data']));
+    });
+
+    act(() => {
+      collectionStore.deleteItemState('2');
+      serverMock.mutateData({ '2': null });
+    });
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      status: deleted -- payload: 2 -- data: null
+      "
+    `);
+  });
+});
+
+const serverInitialData = { '1': defaultTodo, '2': defaultTodo };
+
+describe('useItem isolated tests', () => {
+  test('use ensureIsLoaded prop', async () => {
+    const { collectionStore, serverMock } = createDefaultCollectionStore({
+      serverInitialData,
+      initializeStoreWithServerData: true,
+    });
+
+    const renders = createRenderStore();
+
+    renderHook(() => {
+      const selectionResult = collectionStore.useItem('1', {
+        ensureIsLoaded: true,
+      });
+
+      renders.add(
+        pick(selectionResult, ['status', 'payload', 'isLoading', 'data'], {
+          isLoading: 'L',
+        }),
+      );
+    });
+
+    await serverMock.waitNextFetchComplete();
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: 1 -- L: true -- data: {title:todo, completed:false}
+      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
+      "
+    `);
+
+    expect(collectionStore.scheduleFetch('highPriority', '1')).toBe('started');
+
+    await serverMock.waitNextFetchComplete();
+
+    // ignore refetching status
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: 1 -- L: true -- data: {title:todo, completed:false}
+      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
+      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
+      "
+    `);
+  });
+
+  test('use ensureIsLoaded prop with disabled', async () => {
+    const { collectionStore, serverMock } = createDefaultCollectionStore({
+      serverInitialData,
+      initializeStoreWithServerData: true,
+    });
+
+    const renders = createRenderStore();
+
+    const loadItem = createValueStore<string | false>(false);
+
+    renderHook(() => {
+      const selectionResult = collectionStore.useItem(loadItem.useValue(), {
+        ensureIsLoaded: true,
+      });
+
+      renders.add(
+        pick(selectionResult, ['status', 'payload', 'isLoading', 'data'], {
+          isLoading: 'L',
+        }),
+      );
+    });
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: idle -- payload: undefined -- L: false -- data: null
+      "
+    `);
+
+    // enable loading
+    loadItem.set('1');
+
+    await serverMock.waitNextFetchComplete();
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: idle -- payload: undefined -- L: false -- data: null
+      status: loading -- payload: 1 -- L: true -- data: {title:todo, completed:false}
+      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
       "
     `);
   });

@@ -1,37 +1,50 @@
-import { useMemo, useState } from 'react';
-import { useOnChange } from './utils/hooks';
+import mitt from 'mitt';
+import { useEffect, useMemo, useState } from 'react';
+import { useConst, useOnChange, useOnMittEvent } from './utils/hooks';
 
-export function useEnsureIsLoaded<
-  T extends { isLoading: boolean; status: string },
->(
+export function useEnsureIsLoaded(
   ensureIsLoaded: boolean | undefined,
   enabled: boolean,
-  isNotLoading: boolean,
   forceFetch: () => void,
-  result: T,
-): T {
+) {
+  const isLoadedEvtEmitter = useConst(() => mitt<{ isLoaded: boolean }>());
+
   const [isForceLoading, setIsForceLoading] = useState(true);
 
-  useOnChange(ensureIsLoaded && enabled, () => {
-    if (ensureIsLoaded && enabled) {
-      forceFetch();
-    }
-  });
+  useOnChange(
+    ensureIsLoaded && isForceLoading && enabled,
+    ({ current }) => {
+      if (current) {
+        forceFetch();
+      }
+    },
+    { callOnMount: true },
+  );
 
-  useOnChange(ensureIsLoaded && result.status, () => {
-    if (ensureIsLoaded && isForceLoading && isNotLoading) {
+  useOnMittEvent(isLoadedEvtEmitter, 'isLoaded', (isLoaded) => {
+    if (ensureIsLoaded && enabled && isLoaded) {
       setIsForceLoading(false);
     }
   });
 
-  return useMemo(() => {
-    if (ensureIsLoaded) {
-      return {
-        ...result,
-        isLoading: isForceLoading,
-      };
-    }
+  function useModifyResult<T extends { isLoading: boolean; status: string }>(
+    result: T,
+  ) {
+    return useMemo(() => {
+      if (ensureIsLoaded) {
+        const newStatus = enabled && isForceLoading ? 'loading' : result.status;
 
-    return result;
-  }, [ensureIsLoaded, isForceLoading, result]);
+        return {
+          ...result,
+          isLoading: newStatus === 'loading',
+          status: newStatus,
+        };
+      }
+
+      return result;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ensureIsLoaded, isForceLoading, result]);
+  }
+
+  return [useModifyResult, isLoadedEvtEmitter.emit] as const;
 }

@@ -1,11 +1,27 @@
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+} from '@testing-library/react';
 import { useEffect, useState } from 'react';
-import { afterEach, describe, expect, test } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'vitest';
 import { TSDFDocumentStore, TSDFUseDocumentReturn } from '../src/documentStore';
 import { ServerMock } from './mocks/fetchMock';
+import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
   createDefaultDocumentStore,
+  createRenderStore,
+  createValueStore,
   DefaultDocStoreData as DefaultDocumentStoreData,
 } from './utils/storeUtils';
 
@@ -58,7 +74,7 @@ test('load data', async () => {
   expect(getByTestId('isLoading').textContent).toBe('true');
   expect(getByTestId('data').textContent).toBe('null');
 
-  await sleep(serverMock.timeout + 5);
+  await sleep(serverMock.fetchDuration + 5);
 
   expect(getByTestId('status').textContent).toBe('success');
   expect(getByTestId('isLoading').textContent).toBe('false');
@@ -79,7 +95,7 @@ test('invalidate data', async () => {
   serverMock.mutateData({ hello: 'was invalidated' });
   documentStore.invalidateData();
 
-  await sleep(serverMock.timeout + 5);
+  await sleep(serverMock.fetchDuration + 5);
 
   expect(getByTestId('data').textContent).toBe('{"hello":"was invalidated"}');
 });
@@ -592,6 +608,92 @@ test('rollback on error', async () => {
       ],
     ]
   `);
+});
+
+describe('isolated tests', () => {
+  test('use ensureIsLoaded prop', async () => {
+    const { serverMock, documentStore } = createDefaultDocumentStore({
+      storeWithInitialData: false,
+    });
+
+    const renders = createRenderStore();
+
+    renderHook(() => {
+      const selectionResult = documentStore.useDocument({
+        ensureIsLoaded: true,
+      });
+
+      renders.add(
+        pick(selectionResult, ['status', 'isLoading', 'data'], {
+          isLoading: 'L',
+        }),
+      );
+    });
+
+    await serverMock.waitNextFetchComplete();
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: loading -- L: true -- data: null
+      status: loading -- L: true -- data: {hello:world}
+      status: success -- L: false -- data: {hello:world}
+      "
+    `);
+
+    renders.reset();
+
+    expect(documentStore.scheduleFetch('highPriority')).toBe('started');
+
+    await serverMock.waitNextFetchComplete();
+
+    // ignore refetching status
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- L: false -- data: {hello:world}
+      "
+    `);
+  });
+
+  test('use ensureIsLoaded prop with disabled', async () => {
+    const { serverMock, documentStore } = createDefaultDocumentStore({
+      storeWithInitialData: false,
+    });
+
+    const renders = createRenderStore();
+
+    const disabled = createValueStore<boolean>(true);
+
+    renderHook(() => {
+      const res = documentStore.useDocument({
+        ensureIsLoaded: true,
+        disabled: disabled.useValue(),
+      });
+
+      renders.add(
+        pick(res, ['status', 'isLoading', 'data'], { isLoading: 'L' }),
+      );
+    });
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: idle -- L: false -- data: null
+      "
+    `);
+
+    // enable loading
+    disabled.set(false);
+
+    await serverMock.waitNextFetchComplete();
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: idle -- L: false -- data: null
+      status: loading -- L: true -- data: null
+      status: loading -- L: true -- data: {hello:world}
+      status: success -- L: false -- data: {hello:world}
+      "
+    `);
+  });
 });
 
 async function actionWithOptimisticUpdate(

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { sleep } from './utils/sleep';
 import {
   createDefaultCollectionStore,
@@ -9,6 +9,34 @@ async function waitInitializationFetch(store: any) {
   store.scheduleFetch('lowPriority', '1');
   await sleep(35);
 }
+
+const defaultTodo = { title: 'todo', completed: false };
+
+describe('test helpers', () => {
+  test('start with store initialized state', () => {
+    const { collectionStore } = createDefaultCollectionStore({
+      serverInitialData: { '1': defaultTodo, '2': defaultTodo },
+      initializeStoreWithServerData: true,
+    });
+
+    expect(collectionStore.store.state).toEqual({
+      '1': {
+        data: { completed: false, title: 'todo' },
+        error: null,
+        payload: '1',
+        refetchOnMount: false,
+        status: 'success',
+      },
+      '2': {
+        data: { completed: false, title: 'todo' },
+        error: null,
+        payload: '2',
+        refetchOnMount: false,
+        status: 'success',
+      },
+    });
+  });
+});
 
 describe('fetch lifecicle', () => {
   const { serverMock, collectionStore } = createDefaultCollectionStore();
@@ -28,7 +56,7 @@ describe('fetch lifecicle', () => {
       },
     });
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
@@ -63,7 +91,7 @@ describe('fetch lifecicle', () => {
       },
     });
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
@@ -83,7 +111,7 @@ describe('fetch lifecicle', () => {
 
     collectionStore.scheduleFetch('highPriority', '1');
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
@@ -117,7 +145,7 @@ test.concurrent(
       },
     });
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(serverMock.numOfFetchs).toEqual(1);
 
@@ -180,16 +208,15 @@ test.concurrent('await fetch', async () => {
 test.concurrent(
   'multiple fetchs with different payloads not cancel each other, but cancel same payload fetchs',
   async () => {
-    const todo = { title: 'todo', completed: false };
     const { serverMock, collectionStore } = createDefaultCollectionStore({
-      initialData: {
-        '1': todo,
-        '2': todo,
-        '3': todo,
-        '4': todo,
-        '5': todo,
-        '6': todo,
-        '7': todo,
+      serverInitialData: {
+        '1': defaultTodo,
+        '2': defaultTodo,
+        '3': defaultTodo,
+        '4': defaultTodo,
+        '5': defaultTodo,
+        '6': defaultTodo,
+        '7': defaultTodo,
       },
     });
 
@@ -211,12 +238,12 @@ test.concurrent(
     collectionStore.scheduleFetch('lowPriority', '6');
     collectionStore.scheduleFetch('lowPriority', '7');
 
-    await sleep(serverMock.timeout + 5);
+    await sleep(serverMock.fetchDuration + 5);
 
     expect(serverMock.numOfFetchs).toEqual(7);
 
     const defaultState = {
-      data: todo,
+      data: defaultTodo,
       error: null,
       refetchOnMount: false,
       status: 'success' as const,
@@ -233,3 +260,217 @@ test.concurrent(
     });
   },
 );
+
+describe('update state functions', async () => {
+  const serverInitialData = {
+    '1': { ...defaultTodo, completed: true },
+    '2': { ...defaultTodo, completed: true },
+    '3': defaultTodo,
+    '4': defaultTodo,
+    '5': defaultTodo,
+  };
+
+  describe('updateItemState', () => {
+    test('update state of one item', () => {
+      const { collectionStore } = createDefaultCollectionStore({
+        serverInitialData,
+        initializeStoreWithServerData: true,
+      });
+
+      expect(collectionStore.getItemState('1')?.data).toEqual({
+        completed: true,
+        title: 'todo',
+      });
+
+      collectionStore.updateItemState('1', (data) => {
+        data.title = 'new title';
+      });
+
+      expect(collectionStore.getItemState('1')?.data).toEqual({
+        completed: true,
+        title: 'new title',
+      });
+    });
+
+    test('update multiple itens state', () => {
+      const { collectionStore } = createDefaultCollectionStore({
+        serverInitialData,
+        initializeStoreWithServerData: true,
+      });
+
+      collectionStore.updateItemState(['1', '2'], () => {
+        return {
+          title: 'new title 2',
+          completed: false,
+        };
+      });
+
+      expect(
+        collectionStore.getItemState(['1', '2', '3'])?.map((item) => {
+          return { id: item.payload, ...item.data };
+        }),
+      ).toEqual([
+        { completed: false, id: '1', title: 'new title 2' },
+        { completed: false, id: '2', title: 'new title 2' },
+        // 3 is not updated
+        { completed: false, id: '3', title: 'todo' },
+      ]);
+    });
+
+    test('update multiple itens state with filter fn', () => {
+      const { collectionStore } = createDefaultCollectionStore({
+        serverInitialData,
+        initializeStoreWithServerData: true,
+      });
+
+      collectionStore.updateItemState(
+        (_, data) => !!data?.completed,
+        (data) => {
+          data.completed = false;
+          data.title = 'modified';
+        },
+      );
+
+      expect(
+        collectionStore
+          .getItemState(() => true)
+          .map((item) => {
+            return { id: item.payload, ...item.data };
+          }),
+      ).toEqual([
+        { completed: false, id: '1', title: 'modified' },
+        { completed: false, id: '2', title: 'modified' },
+        { completed: false, id: '3', title: 'todo' },
+        { completed: false, id: '4', title: 'todo' },
+        { completed: false, id: '5', title: 'todo' },
+      ]);
+    });
+
+    test('create if not exist', () => {
+      const { collectionStore } = createDefaultCollectionStore({
+        serverInitialData,
+        initializeStoreWithServerData: true,
+      });
+
+      let storeUpdates = 0;
+      collectionStore.store.subscribe(() => {
+        storeUpdates++;
+      });
+
+      collectionStore.updateItemState(
+        '6',
+        (data) => {
+          data.title = 'item 6';
+        },
+        () => {
+          collectionStore.addItemToState('6', {
+            title: 'item 6',
+            completed: false,
+          });
+        },
+      );
+
+      expect(storeUpdates).toEqual(1);
+
+      expect(collectionStore.getItemState('6')).toEqual({
+        data: { completed: false, title: 'item 6' },
+        error: null,
+        payload: '6',
+        refetchOnMount: false,
+        status: 'success',
+      });
+    });
+
+    test('create multiple if not exist', () => {
+      const { collectionStore } = createDefaultCollectionStore({
+        serverInitialData,
+        initializeStoreWithServerData: true,
+      });
+
+      let storeUpdates = 0;
+      collectionStore.store.subscribe(() => {
+        storeUpdates++;
+      });
+
+      collectionStore.updateItemState(
+        (id) => id === '?',
+        (data) => {
+          data.title = 'item 6';
+        },
+        () => {
+          collectionStore.addItemToState('6', {
+            title: 'item 6',
+            completed: false,
+          });
+          collectionStore.addItemToState('7', {
+            title: 'item 7',
+            completed: false,
+          });
+        },
+      );
+
+      expect(storeUpdates).toEqual(1);
+
+      expect(collectionStore.getItemState(['6', '7', '5'])).toEqual([
+        {
+          data: { completed: false, title: 'item 6' },
+          error: null,
+          payload: '6',
+          refetchOnMount: false,
+          status: 'success',
+        },
+        {
+          data: { completed: false, title: 'item 7' },
+          error: null,
+          payload: '7',
+          refetchOnMount: false,
+          status: 'success',
+        },
+        {
+          data: { completed: false, title: 'todo' },
+          error: null,
+          payload: '5',
+          refetchOnMount: false,
+          status: 'success',
+        },
+      ]);
+    });
+  });
+
+  test('addItemToState', () => {
+    const { collectionStore } = createDefaultCollectionStore({
+      serverInitialData,
+      initializeStoreWithServerData: true,
+    });
+
+    expect(collectionStore.getItemState('6')).toBeUndefined();
+
+    collectionStore.addItemToState('6', {
+      title: 'item 6',
+      completed: false,
+    });
+
+    expect(collectionStore.getItemState('6')).toEqual({
+      data: { completed: false, title: 'item 6' },
+      error: null,
+      payload: '6',
+      refetchOnMount: false,
+      status: 'success',
+    });
+  });
+
+  test('deleteItemState', () => {
+    const { collectionStore } = createDefaultCollectionStore({
+      serverInitialData,
+      initializeStoreWithServerData: true,
+    });
+
+    expect(collectionStore.getItemState('1')).toBeDefined();
+
+    collectionStore.deleteItemState('1');
+
+    expect(collectionStore.getItemState('1')).toBeNull();
+
+    expect(collectionStore.scheduleFetch('highPriority', '1')).toBe('skipped');
+  });
+});

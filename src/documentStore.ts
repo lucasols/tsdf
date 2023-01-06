@@ -1,7 +1,7 @@
 import produce from 'immer';
 import mitt from 'mitt';
 import { useCallback, useEffect } from 'react';
-import { Store } from 't-state';
+import { Store, useSubscribeToStore } from 't-state';
 import {
   createFetchOrquestrator,
   FetchType,
@@ -213,18 +213,25 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
       }
     }, [disableRefetchOnMount, disabled]);
 
-    // FIX: test this
-    return useEnsureIsLoaded(
+    const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
       ensureIsLoaded,
       !disabled,
-      storeState.status !== 'loading' &&
-        storeState.status !== 'refetching' &&
-        storeState.status !== 'idle',
       () => {
         scheduleFetch('highPriority');
       },
-      storeState,
     );
+
+    useSubscribeToStore(store, ({ observe }) => {
+      observe
+        .ifSelector((state) => state.status)
+        .change.then(({ current }) => {
+          if (current === 'success' || current === 'error') {
+            emitIsLoadedEvt('isLoaded', true);
+          }
+        });
+    });
+
+    return useModifyResult(storeState);
   }
 
   function updateState(
