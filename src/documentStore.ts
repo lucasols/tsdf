@@ -1,6 +1,6 @@
 import produce from 'immer';
 import mitt from 'mitt';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Store } from 't-state';
 import {
   createFetchOrquestrator,
@@ -9,7 +9,8 @@ import {
   ShouldAbortFetch,
 } from './fetchOrquestrator';
 import { Status, ValidStoreState } from './storeShared';
-import { useOnMittEvent } from './utils/useOnMittEvent';
+import { useEnsureIsLoaded } from './useEnsureIsLoaded';
+import { useOnMittEvent } from './utils/hooks';
 
 type DocumentStatus = Status | 'idle';
 
@@ -48,7 +49,9 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
   mediumPriorityThrottleMs?: number;
   getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 }) {
-  const store = new Store<TSDFDocumentStoreState<State, Error>>({
+  type DocState = TSDFDocumentStoreState<State, Error>;
+
+  const store = new Store<DocState>({
     debugName,
     state: {
       data: initialData ?? null,
@@ -149,18 +152,20 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
   function useDocument<Selected = State | null>({
     selector,
     disabled,
-    returnIdleStatus = !!disabled,
     returnRefetchingStatus,
     disableRefetchOnMount = globalDisableRefetchOnMount,
+    returnIdleStatus = !!disabled,
+    ensureIsLoaded,
   }: {
     selector?: (data: State | null) => Selected;
     disabled?: boolean;
     disableRefetchOnMount?: boolean;
     returnIdleStatus?: boolean;
+    ensureIsLoaded?: boolean;
     returnRefetchingStatus?: boolean;
   } = {}) {
-    const storeState = store.useSelector(
-      (state): TSDFUseDocumentReturn<Selected, Error> => {
+    const storeStateSelector = useCallback(
+      (state: DocState): TSDFUseDocumentReturn<Selected, Error> => {
         const { error } = state;
 
         const data = selector ? selector(state.data) : (state.data as Selected);
@@ -182,7 +187,12 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
           isLoading: status === 'loading',
         };
       },
+      [returnRefetchingStatus, returnIdleStatus, selector],
     );
+
+    const storeState = store.useSelector(storeStateSelector, {
+      useExternalDeps: true,
+    });
 
     useOnMittEvent(storeEvents, 'invalidateData', (priority) => {
       if (!invalidationWasTriggered) {
@@ -203,7 +213,18 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
       }
     }, [disableRefetchOnMount, disabled]);
 
-    return storeState;
+    // FIX: test this
+    return useEnsureIsLoaded(
+      ensureIsLoaded,
+      !disabled,
+      storeState.status !== 'loading' &&
+        storeState.status !== 'refetching' &&
+        storeState.status !== 'idle',
+      () => {
+        scheduleFetch('highPriority');
+      },
+      storeState,
+    );
   }
 
   function updateState(

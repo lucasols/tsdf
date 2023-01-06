@@ -1,67 +1,24 @@
 import { describe, expect, test } from 'vitest';
-import {
-  newTSDFCollectionStore,
-  TSFDCollectionState,
-} from '../src/collectionStore';
 import { sleep } from './utils/sleep';
-import { mockServerResource } from './mocks/fetchMock';
-import { normalizeError, StoreError } from './utils/storeUtils';
-
-type Todo = {
-  title: string;
-  completed: boolean;
-  description?: string;
-};
-
-type ServerData = Record<string, Todo>;
-
-export function createDefaultCollectionStore({
-  initialData = { '1': { title: 'todo', completed: false } },
-}: { initialData?: ServerData } = {}) {
-  const serverMock = mockServerResource<ServerData, Todo>({
-    initialData,
-    fetchSelector(data, params) {
-      const todo = data && data[params];
-
-      if (!todo) {
-        throw new Error('Not found');
-      }
-
-      return todo;
-    },
-  });
-
-  const collectionStore = newTSDFCollectionStore({
-    fetchFn: serverMock.fetch,
-    errorNormalizer: normalizeError,
-    getCollectionItemPayload: (data) => data,
-  });
-
-  const startTime = Date.now();
-
-  function getElapsedTime() {
-    return Date.now() - startTime;
-  }
-
-  return { serverMock, collectionStore, getElapsedTime };
-}
+import {
+  createDefaultCollectionStore,
+  DefaultCollectionState,
+} from './utils/storeUtils';
 
 async function waitInitializationFetch(store: any) {
   store.scheduleFetch('lowPriority', '1');
   await sleep(35);
 }
 
-type CollectionState = TSFDCollectionState<Todo, string, StoreError>;
-
 describe('fetch lifecicle', () => {
   const { serverMock, collectionStore } = createDefaultCollectionStore();
 
   test('fetch resource', async () => {
-    expect(collectionStore.store.state).toEqual<CollectionState>({});
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({});
 
     collectionStore.scheduleFetch('lowPriority', '1');
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
         data: null,
         error: null,
@@ -73,7 +30,7 @@ describe('fetch lifecicle', () => {
 
     await sleep(serverMock.timeout + 5);
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
         data: { title: 'todo', completed: false },
         error: null,
@@ -96,7 +53,7 @@ describe('fetch lifecicle', () => {
 
     collectionStore.scheduleFetch('highPriority', '1');
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
         data: { title: 'todo', completed: false },
         error: null,
@@ -108,7 +65,7 @@ describe('fetch lifecicle', () => {
 
     await sleep(serverMock.timeout + 5);
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
         data: { title: 'new title', completed: false },
         error: null,
@@ -128,7 +85,7 @@ describe('fetch lifecicle', () => {
 
     await sleep(serverMock.timeout + 5);
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
         data: { title: 'new title', completed: false },
         error: { message: 'error' },
@@ -150,7 +107,7 @@ test.concurrent(
     collectionStore.scheduleFetch('lowPriority', '1');
     collectionStore.scheduleFetch('lowPriority', '1');
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
         data: null,
         error: null,
@@ -164,7 +121,7 @@ test.concurrent(
 
     expect(serverMock.numOfFetchs).toEqual(1);
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
         data: { title: 'todo', completed: false },
         error: null,
@@ -181,7 +138,7 @@ test.concurrent('initialization fetch', async () => {
 
   await waitInitializationFetch(collectionStore);
 
-  expect(collectionStore.store.state).toEqual<CollectionState>({
+  expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
     '1': {
       data: { title: 'todo', completed: false },
       error: null,
@@ -265,7 +222,7 @@ test.concurrent(
       status: 'success' as const,
     };
 
-    expect(collectionStore.store.state).toEqual<CollectionState>({
+    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': { ...defaultState, payload: '1' },
       '2': { ...defaultState, payload: '2' },
       '3': { ...defaultState, payload: '3' },

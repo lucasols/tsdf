@@ -3,6 +3,7 @@ import {
   FetchType,
   ShouldAbortFetch,
 } from '../../src/fetchOrquestrator';
+import { arrayWithPrev } from '../utils/arrayUtils';
 import { sleep } from '../utils/sleep';
 
 type Data = number | 'error' | null;
@@ -355,6 +356,3 @@ function getDynamicRealtimeThrottleMs(lastDuration: number): number {
   return 100;
 }
 
-function arrayWithPrev<T>(array: T[]): [T, T | null][] {
-  return array.map((item, i) => [item, array[i - 1] ?? null]);
-}
