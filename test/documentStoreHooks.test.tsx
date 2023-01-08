@@ -85,7 +85,7 @@ test('load data', async () => {
 
 test('invalidate data', async () => {
   const { serverMock, documentStore } = createDefaultDocumentStore({
-    storeWithInitialData: true,
+    useLoadedSnapshot: true,
   });
 
   const { getByTestId } = render(<Component store={documentStore} />);
@@ -102,7 +102,7 @@ test('invalidate data', async () => {
 
 test('revalidation with multiple components do not trigger multiple fetchs', async () => {
   const { serverMock, documentStore } = createDefaultDocumentStore({
-    storeWithInitialData: true,
+    useLoadedSnapshot: true,
   });
 
   const { getByTestId } = render(
@@ -154,7 +154,7 @@ test('revalidation with multiple components do not trigger multiple fetchs', asy
 
 test('data selector', async () => {
   const { documentStore } = createDefaultDocumentStore({
-    storeWithInitialData: true,
+    useLoadedSnapshot: true,
   });
 
   const Comp = () => {
@@ -272,7 +272,7 @@ describe('disable', () => {
 
 test('disableRefetchOnMount', async () => {
   const { serverMock, documentStore } = createDefaultDocumentStore({
-    storeWithInitialData: false,
+    useLoadedSnapshot: false,
   });
 
   const renders: any[] = [];
@@ -353,7 +353,7 @@ test('disableRefetchOnMount', async () => {
 
 test('do not return refetchin status by default', async () => {
   const { serverMock, documentStore } = createDefaultDocumentStore({
-    storeWithInitialData: true,
+    useLoadedSnapshot: true,
   });
 
   const renders: any[] = [];
@@ -391,7 +391,7 @@ test('do not return refetchin status by default', async () => {
 describe('action types', () => {
   test('action with optmistic update', async () => {
     const { serverMock, documentStore } = createDefaultDocumentStore({
-      storeWithInitialData: true,
+      useLoadedSnapshot: true,
     });
 
     const renders: any[] = [];
@@ -427,7 +427,7 @@ describe('action types', () => {
 
   test('action with optmistic update and revalidation', async () => {
     const { serverMock, documentStore } = createDefaultDocumentStore({
-      storeWithInitialData: true,
+      useLoadedSnapshot: true,
     });
 
     const renders: any[] = [];
@@ -476,7 +476,7 @@ describe('action types', () => {
 
   test('action without optimistic update', async () => {
     const { serverMock, documentStore } = createDefaultDocumentStore({
-      storeWithInitialData: true,
+      useLoadedSnapshot: true,
     });
 
     const renders: any[] = [];
@@ -512,7 +512,7 @@ describe('action types', () => {
 
   test('action with revalition and without optimistic update', async () => {
     const { serverMock, documentStore } = createDefaultDocumentStore({
-      storeWithInitialData: true,
+      useLoadedSnapshot: true,
     });
 
     const renders: any[] = [];
@@ -558,7 +558,7 @@ describe('action types', () => {
 
 test('rollback on error', async () => {
   const { serverMock, documentStore } = createDefaultDocumentStore({
-    storeWithInitialData: true,
+    useLoadedSnapshot: true,
   });
 
   const renders: any[] = [];
@@ -613,7 +613,7 @@ test('rollback on error', async () => {
 describe('isolated tests', () => {
   test('use ensureIsLoaded prop', async () => {
     const { serverMock, documentStore } = createDefaultDocumentStore({
-      storeWithInitialData: false,
+      useLoadedSnapshot: false,
     });
 
     const renders = createRenderStore();
@@ -656,7 +656,7 @@ describe('isolated tests', () => {
 
   test('use ensureIsLoaded prop with disabled', async () => {
     const { serverMock, documentStore } = createDefaultDocumentStore({
-      storeWithInitialData: false,
+      useLoadedSnapshot: false,
     });
 
     const renders = createRenderStore();
@@ -688,6 +688,7 @@ describe('isolated tests', () => {
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
       status: idle -- L: false -- data: null
+      ---
       status: loading -- L: true -- data: null
       status: loading -- L: true -- data: {hello:world}
       status: success -- L: false -- data: {hello:world}

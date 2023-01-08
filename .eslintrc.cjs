@@ -34,6 +34,7 @@ module.exports = {
     'no-useless-rename': ERROR_IN_CI,
     'no-param-reassign': ERROR_IN_CI,
     'prefer-template': ERROR_IN_CI,
+    'prefer-const': [ERROR_IN_CI, { destructuring: 'all' }],
 
     'no-prototype-builtins': OFF,
     'no-inner-declarations': OFF,

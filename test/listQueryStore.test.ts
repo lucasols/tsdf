@@ -26,11 +26,11 @@ describe.concurrent('test helpers', () => {
 
     const withUserSnapshot = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: 'users',
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
-    expect(loaded.listQueryStore.store.state).toEqual(
-      withUserSnapshot.listQueryStore.store.state,
+    expect(loaded.store.store.state).toEqual(
+      withUserSnapshot.store.store.state,
     );
 
     loaded.forceListUpdate({ tableId: 'products' });
@@ -39,18 +39,18 @@ describe.concurrent('test helpers', () => {
 
     const withSnapshot = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users', 'products'],
+      useLoadedSnapshots: { tables: ['users', 'products'] },
     });
 
-    expect(loaded.listQueryStore.store.state).toEqual(
-      withSnapshot.listQueryStore.store.state,
+    expect(loaded.store.store.state).toEqual(
+      withSnapshot.store.store.state,
     );
   });
 });
 
 describe.concurrent('fetch query', () => {
   test('fetch query', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
     });
 
@@ -101,9 +101,9 @@ describe.concurrent('fetch query', () => {
   });
 
   test('refetch list with updated data', async ({ expect }) => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: 'users',
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     serverMock.produceData((draft) => {
@@ -169,10 +169,10 @@ describe.concurrent('fetch query', () => {
 
   // FIXLATER: add error tests to other stores
   test('refetch list with error', async () => {
-    const { serverMock, listQueryStore, forceListUpdate } =
+    const { serverMock, store: listQueryStore, forceListUpdate } =
       createDefaultListQueryStore({
         initialServerData,
-        loadLoadedTablesSnapshot: 'users',
+        useLoadedSnapshots: { tables: ['users'] },
       });
 
     serverMock.setFetchError('error');
@@ -255,7 +255,7 @@ describe.concurrent('fetch query', () => {
   });
 
   test('load list with error', async () => {
-    const { serverMock, listQueryStore, forceListUpdate } =
+    const { serverMock, store: listQueryStore, forceListUpdate } =
       createDefaultListQueryStore({
         initialServerData,
       });
@@ -330,7 +330,7 @@ describe.concurrent('fetch query', () => {
   test('fetch with size', async ({ expect }) => {
     const query = { tableId: 'products' as const };
 
-    const { serverMock, listQueryStore, forceListUpdate } =
+    const { serverMock, store: listQueryStore, forceListUpdate } =
       createDefaultListQueryStore({
         initialServerData,
         defaultQuerySize: 5,
@@ -446,9 +446,9 @@ describe.concurrent('fetch query', () => {
   });
 
   test('do not load more if the query not exists or hasMore === false', async () => {
-    const { listQueryStore } = createDefaultListQueryStore({
+    const { store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: 'users',
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     expect(listQueryStore.loadMore(usersQueryParams, 10)).toBe('skipped');
@@ -460,7 +460,7 @@ describe.concurrent('fetch query', () => {
   test.concurrent(
     'multiple fetchs with different payloads not cancel each other, but cancel same payload fetchs',
     async () => {
-      const { serverMock, listQueryStore } = createDefaultListQueryStore({
+      const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
         initialServerData,
       });
 
@@ -500,9 +500,9 @@ describe.concurrent('fetch query', () => {
 });
 
 test.concurrent('await fetch', async () => {
-  const { serverMock, listQueryStore } = createDefaultListQueryStore({
+  const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
     initialServerData,
-    loadLoadedTablesSnapshot: 'users',
+    useLoadedSnapshots: { tables: ['users'] },
   });
 
   serverMock.produceData((draft) => {
@@ -538,7 +538,7 @@ test.concurrent('await fetch', async () => {
 
 describe.concurrent('fetch item', () => {
   test('fetch item', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
     });
 
@@ -585,25 +585,25 @@ describe.concurrent('fetch item', () => {
   test.concurrent('test helpers inital snapshot', async () => {
     const loaded = createDefaultListQueryStore({ initialServerData });
 
-    loaded.listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
+    loaded.store.scheduleItemFetch('lowPriority', 'users||1');
 
     await loaded.serverMock.waitFetchIdle();
 
     const withStateSnapshot = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedItemsSnapshot: ['users||1'],
+      useLoadedSnapshots: { items: ['users||1'] },
     });
 
-    expect(withStateSnapshot.listQueryStore.store.state).toEqual(
-      loaded.listQueryStore.store.state,
+    expect(withStateSnapshot.store.store.state).toEqual(
+      loaded.store.store.state,
     );
   });
 
   test.concurrent('test helpers inital snapshot 2', async () => {
     const loaded = createDefaultListQueryStore({ initialServerData });
 
-    loaded.listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
-    loaded.listQueryStore.scheduleListQueryFetch('lowPriority', {
+    loaded.store.scheduleItemFetch('lowPriority', 'users||1');
+    loaded.store.scheduleListQueryFetch('lowPriority', {
       tableId: 'users',
     });
 
@@ -611,19 +611,18 @@ describe.concurrent('fetch item', () => {
 
     const withStateSnapshot = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedItemsSnapshot: ['users||1'],
-      loadLoadedTablesSnapshot: 'users',
+      useLoadedSnapshots: { tables: ['users'], items: ['users||1'] },
     });
 
-    expect(withStateSnapshot.listQueryStore.store.state).toEqual(
-      loaded.listQueryStore.store.state,
+    expect(withStateSnapshot.store.store.state).toEqual(
+      loaded.store.store.state,
     );
   });
 
   test('refetch item with updated data', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedItemsSnapshot: ['users||1'],
+      useLoadedSnapshots: { items: ['users||1'] },
     });
 
     serverMock.produceData((draft) => {
@@ -673,9 +672,9 @@ describe.concurrent('fetch item', () => {
   });
 
   test('refetch item with error', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedItemsSnapshot: ['users||1'],
+      useLoadedSnapshots: { items: ['users||1'] },
     });
 
     serverMock.setFetchError('error');
@@ -733,7 +732,7 @@ describe.concurrent('fetch item', () => {
   });
 
   test('load item with error', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
     });
 
@@ -795,7 +794,7 @@ describe.concurrent('fetch item', () => {
   test.concurrent(
     'multiple item fetchs with different ids do not cancel each other, but cancel the ones with same id',
     async () => {
-      const { serverMock, listQueryStore } = createDefaultListQueryStore({
+      const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
         initialServerData,
       });
 
@@ -832,9 +831,9 @@ describe.concurrent('fetch item', () => {
   );
 
   test('load a item that was previously loaded by a query', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     listQueryStore.scheduleItemFetch('highPriority', 'users||1');
@@ -872,7 +871,7 @@ describe.concurrent('fetch item', () => {
   test.concurrent(
     'load item should share the lowPriority throttle context of the queries',
     async () => {
-      const { listQueryStore } = createDefaultListQueryStore({
+      const { store: listQueryStore } = createDefaultListQueryStore({
         initialServerData,
       });
 

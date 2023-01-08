@@ -61,10 +61,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     },
   });
 
-  async function fetch(
-    shouldAbort: FetchContext,
-    _: null,
-  ): Promise<boolean> {
+  async function fetch(fetchCtx: FetchContext, _: null): Promise<boolean> {
     store.setPartialState(
       {
         status: store.state.status === 'success' ? 'refetching' : 'loading',
@@ -82,7 +79,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     try {
       const data = await fetchFn();
 
-      if (shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) return false;
 
       store.setPartialState(
         {
@@ -94,7 +91,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 
       return true;
     } catch (exception) {
-      if (shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) return false;
 
       store.setPartialState(
         {

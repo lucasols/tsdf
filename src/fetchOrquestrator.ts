@@ -99,6 +99,8 @@ export function createFetchOrquestrator<T>({
 
     lastFetchWasAborted = false;
     fetchs.inProgress = { startTime, onEnd: [] };
+    const prevFetchStartTime = lastFetchStartTime;
+    lastFetchStartTime = startTime;
 
     function shouldAbort() {
       lastFetchWasAborted = mutationIsInProgress;
@@ -115,9 +117,10 @@ export function createFetchOrquestrator<T>({
     );
 
     if (success) {
-      // FIX: test: if the fetch has error or was aborted it should not considered in the throttling
-      lastFetchStartTime = startTime;
+      // FIX: test: if the fetch has error or was aborted it should not considered in the throttling, consider possible concurrent problems
       lastFetchDuration = Date.now() - startTime;
+    } else {
+      lastFetchStartTime = prevFetchStartTime;
     }
 
     if (fetchs.realtimeScheduled) {

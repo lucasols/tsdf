@@ -14,9 +14,9 @@ const defaultTodo = { title: 'todo', completed: false };
 
 describe('test helpers', () => {
   test('start with store initialized state', () => {
-    const { collectionStore } = createDefaultCollectionStore({
+    const { store: collectionStore } = createDefaultCollectionStore({
       serverInitialData: { '1': defaultTodo, '2': defaultTodo },
-      initializeStoreWithServerData: true,
+      useLoadedSnapshot: true,
     });
 
     expect(collectionStore.store.state).toEqual({
@@ -39,7 +39,7 @@ describe('test helpers', () => {
 });
 
 describe('fetch lifecicle', () => {
-  const { serverMock, collectionStore } = createDefaultCollectionStore();
+  const { serverMock, store: collectionStore } = createDefaultCollectionStore();
 
   test('fetch resource', async () => {
     expect(collectionStore.store.state).toEqual<DefaultCollectionState>({});
@@ -128,7 +128,7 @@ describe('fetch lifecicle', () => {
 test.concurrent(
   'multiple low priority fetchs at same time trigger only one fetch',
   async () => {
-    const { serverMock, collectionStore } = createDefaultCollectionStore();
+    const { serverMock, store: collectionStore } = createDefaultCollectionStore();
 
     collectionStore.scheduleFetch('lowPriority', '1');
     collectionStore.scheduleFetch('lowPriority', '1');
@@ -162,7 +162,7 @@ test.concurrent(
 );
 
 test.concurrent('initialization fetch', async () => {
-  const { collectionStore } = createDefaultCollectionStore();
+  const { store: collectionStore } = createDefaultCollectionStore();
 
   await waitInitializationFetch(collectionStore);
 
@@ -178,7 +178,7 @@ test.concurrent('initialization fetch', async () => {
 });
 
 test.concurrent('await fetch', async () => {
-  const { serverMock, collectionStore } = createDefaultCollectionStore();
+  const { serverMock, store: collectionStore } = createDefaultCollectionStore();
 
   await waitInitializationFetch(collectionStore);
 
@@ -208,7 +208,7 @@ test.concurrent('await fetch', async () => {
 test.concurrent(
   'multiple fetchs with different payloads not cancel each other, but cancel same payload fetchs',
   async () => {
-    const { serverMock, collectionStore } = createDefaultCollectionStore({
+    const { serverMock, store: collectionStore } = createDefaultCollectionStore({
       serverInitialData: {
         '1': defaultTodo,
         '2': defaultTodo,
@@ -272,9 +272,9 @@ describe('update state functions', async () => {
 
   describe('updateItemState', () => {
     test('update state of one item', () => {
-      const { collectionStore } = createDefaultCollectionStore({
+      const { store: collectionStore } = createDefaultCollectionStore({
         serverInitialData,
-        initializeStoreWithServerData: true,
+        useLoadedSnapshot: true,
       });
 
       expect(collectionStore.getItemState('1')?.data).toEqual({
@@ -293,9 +293,9 @@ describe('update state functions', async () => {
     });
 
     test('update multiple itens state', () => {
-      const { collectionStore } = createDefaultCollectionStore({
+      const { store: collectionStore } = createDefaultCollectionStore({
         serverInitialData,
-        initializeStoreWithServerData: true,
+        useLoadedSnapshot: true,
       });
 
       collectionStore.updateItemState(['1', '2'], () => {
@@ -318,9 +318,9 @@ describe('update state functions', async () => {
     });
 
     test('update multiple itens state with filter fn', () => {
-      const { collectionStore } = createDefaultCollectionStore({
+      const { store: collectionStore } = createDefaultCollectionStore({
         serverInitialData,
-        initializeStoreWithServerData: true,
+        useLoadedSnapshot: true,
       });
 
       collectionStore.updateItemState(
@@ -347,9 +347,9 @@ describe('update state functions', async () => {
     });
 
     test('create if not exist', () => {
-      const { collectionStore } = createDefaultCollectionStore({
+      const { store: collectionStore } = createDefaultCollectionStore({
         serverInitialData,
-        initializeStoreWithServerData: true,
+        useLoadedSnapshot: true,
       });
 
       let storeUpdates = 0;
@@ -382,9 +382,9 @@ describe('update state functions', async () => {
     });
 
     test('create multiple if not exist', () => {
-      const { collectionStore } = createDefaultCollectionStore({
+      const { store: collectionStore } = createDefaultCollectionStore({
         serverInitialData,
-        initializeStoreWithServerData: true,
+        useLoadedSnapshot: true,
       });
 
       let storeUpdates = 0;
@@ -438,9 +438,9 @@ describe('update state functions', async () => {
   });
 
   test('addItemToState', () => {
-    const { collectionStore } = createDefaultCollectionStore({
+    const { store: collectionStore } = createDefaultCollectionStore({
       serverInitialData,
-      initializeStoreWithServerData: true,
+      useLoadedSnapshot: true,
     });
 
     expect(collectionStore.getItemState('6')).toBeUndefined();
@@ -460,9 +460,9 @@ describe('update state functions', async () => {
   });
 
   test('deleteItemState', () => {
-    const { collectionStore } = createDefaultCollectionStore({
+    const { store: collectionStore } = createDefaultCollectionStore({
       serverInitialData,
-      initializeStoreWithServerData: true,
+      useLoadedSnapshot: true,
     });
 
     expect(collectionStore.getItemState('1')).toBeDefined();
@@ -471,6 +471,6 @@ describe('update state functions', async () => {
 
     expect(collectionStore.getItemState('1')).toBeNull();
 
-    expect(collectionStore.scheduleFetch('highPriority', '1')).toBe('skipped');
+    expect(collectionStore.scheduleFetch('highPriority', '1')).toBe('started');
   });
 });

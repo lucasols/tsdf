@@ -7,12 +7,7 @@ import {
   ScheduleFetchResults,
   FetchContext as FetchCtx,
 } from './fetchOrquestrator';
-import {
-  MultipleItemsQuery,
-  Status,
-  ValidPayload,
-  ValidStoreState,
-} from './storeShared';
+import { Status, ValidPayload, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
@@ -792,7 +787,7 @@ export function newTSDFListQueryStore<
             const itemQuery = state.itemQueries[itemId];
             const itemState = state.items[itemId];
 
-            if (itemState === null && itemQuery?.status !== 'error') {
+            if (itemQuery === null) {
               return {
                 status: 'deleted',
                 error: null,

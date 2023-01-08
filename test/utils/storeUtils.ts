@@ -5,9 +5,10 @@ import {
   TSFDCollectionState,
 } from '../../src/collectionStore';
 import { newTSDFDocumentStore } from '../../src/documentStore';
+import { filterAndMap } from '../../src/utils/filterAndMap';
 import { clampMin } from '../../src/utils/math';
 import { mockServerResource } from '../mocks/fetchMock';
-import { arrayWithPrev } from './arrayUtils';
+import { arrayWithPrev, arrayWithPrevAndIndex } from './arrayUtils';
 import { pick } from './objectUtils';
 
 export type StoreError = {
@@ -32,11 +33,11 @@ export type DefaultDocStoreData = {
 
 export function createDefaultDocumentStore({
   serverHello = 'world',
-  storeWithInitialData,
+  useLoadedSnapshot,
   debug,
 }: {
   serverHello?: string;
-  storeWithInitialData?: boolean;
+  useLoadedSnapshot?: boolean;
   debug?: never;
 } = {}) {
   const serverMock = mockServerResource<DefaultDocStoreData>({
@@ -46,7 +47,7 @@ export function createDefaultDocumentStore({
 
   const documentStore = newTSDFDocumentStore({
     fetchFn: serverMock.fetchWitoutSelector,
-    initialData: storeWithInitialData ? { hello: 'world' } : undefined,
+    initialData: useLoadedSnapshot ? { hello: 'world' } : undefined,
     errorNormalizer: normalizeError,
   });
 
@@ -88,17 +89,20 @@ export type DefaultCollectionStore = TSDFCollectionStore<
 
 export function createDefaultCollectionStore({
   serverInitialData = { '1': { title: 'todo', completed: false } },
-  initializeStoreWithServerData,
+  useLoadedSnapshot,
   randomTimeout,
+  debug,
 }: {
   serverInitialData?: ServerData;
-  initializeStoreWithServerData?: boolean;
+  useLoadedSnapshot?: boolean;
   /** default: 30-100 */
   randomTimeout?: true;
+  debug?: never;
 } = {}) {
   const serverMock = mockServerResource<ServerData, Todo>({
     initialData: serverInitialData,
     randomTimeout,
+    logFetchs: debug,
     fetchSelector(data, params) {
       const todo = data && data[params];
 
@@ -115,7 +119,7 @@ export function createDefaultCollectionStore({
     errorNormalizer: normalizeError,
   });
 
-  if (initializeStoreWithServerData) {
+  if (useLoadedSnapshot) {
     const initialState: DefaultCollectionState = {};
 
     for (const [id, todo] of Object.entries(serverInitialData)) {
@@ -143,12 +147,24 @@ export function createDefaultCollectionStore({
     renderResults.push(renderResult);
   }
 
+  if (debug as any) {
+    collectionStore.store.subscribe(({ current }) => {
+      // eslint-disable-next-line no-console
+      console.log(serverMock.relativeTime(), current);
+    });
+  }
+
   return {
     serverMock,
-    collectionStore,
+    store: collectionStore,
     getElapsedTime,
     onRender,
     renderResults,
+    shouldNotSkip(scheduleResult: any) {
+      if (scheduleResult === 'skipped') {
+        throw new Error('Should not skip');
+      }
+    },
   };
 }
 
@@ -156,10 +172,19 @@ export function createRenderStore() {
   let renders: Record<string, unknown>[] = [];
   let rendersTime: number[] = [];
   let startTime = Date.now();
+  let onNextRender: () => void = () => {};
+
+  function reset(keepLastRender = false) {
+    renders = keepLastRender ? [renders.at(-1)!] : [];
+    rendersTime = [];
+    startTime = Date.now();
+  }
 
   function add(render: Record<string, unknown>) {
     renders.push(render);
     rendersTime.push(Date.now() - startTime);
+
+    onNextRender();
 
     if (renders.length > 100) {
       throw new Error('Too many renders');
@@ -167,86 +192,106 @@ export function createRenderStore() {
   }
 
   function renderCount() {
-    return renders.length;
+    return renders.filter((item) => !item._lastSnapshotMark).length;
+  }
+
+  async function waitNextRender(timeout = 50) {
+    return new Promise<void>((resolve) => {
+      const timeoutId = setTimeout(() => {
+        throw new Error('Timeout');
+      }, timeout);
+
+      onNextRender = () => {
+        clearTimeout(timeoutId);
+        resolve();
+      };
+    });
   }
 
   function getSnapshot({
     arrays = { firstNItems: 1 },
     changesOnly = true,
     filterKeys,
+    includeLastSnapshotEndMark = true,
   }: {
     arrays?: 'all' | 'firstAndLast' | 'lenght' | { firstNItems: number };
     changesOnly?: boolean;
     filterKeys?: string[];
+    includeLastSnapshotEndMark?: boolean;
   } = {}) {
     let rendersToUse = renders;
 
     if (changesOnly || filterKeys) {
       rendersToUse = [];
 
-      for (let [current, prev] of arrayWithPrev(renders)) {
+      for (let { item, prev } of arrayWithPrevAndIndex(renders)) {
         if (filterKeys) {
           prev = prev && pick(prev, filterKeys);
-          current = pick(current, filterKeys);
+          item = pick(item, filterKeys);
         }
 
-        if (!deepEqual(prev, current)) {
-          rendersToUse.push(current);
+        if (!deepEqual(prev, item)) {
+          rendersToUse.push(item);
         }
       }
     }
 
-    return `\n${rendersToUse
-      .map((render) => {
-        let line = '';
+    renders.push({ _lastSnapshotMark: true });
 
-        for (const [key, _value] of Object.entries(render)) {
-          let value = _value;
+    return `\n${filterAndMap(rendersToUse, (render, ignore, i) => {
+      if (render._lastSnapshotMark) {
+        if (includeLastSnapshotEndMark && i !== rendersToUse.length - 1) {
+          return '---';
+        } else {
+          return ignore;
+        }
+      }
 
-          if (Array.isArray(value)) {
-            if (arrays === 'lenght') {
-              value = `Array(${value.length})`;
-            } else if (arrays === 'firstAndLast' && value.length > 2) {
-              const intermediateSize = clampMin(value.length - 2, 0);
+      let line = '';
 
-              value = [
-                value[0],
-                `...(${intermediateSize} between)`,
-                value.at(-1),
-              ];
-            } else if (typeof arrays === 'object' && value.length > 2) {
-              value = [
-                ...value.slice(0, arrays.firstNItems),
-                `...(${value.length - arrays.firstNItems} more)`,
-              ];
-            }
+      for (const [key, _value] of Object.entries(render)) {
+        let value = _value;
+
+        if (Array.isArray(value)) {
+          if (arrays === 'lenght') {
+            value = `Array(${value.length})`;
+          } else if (arrays === 'firstAndLast' && value.length > 2) {
+            const intermediateSize = clampMin(value.length - 2, 0);
+
+            value = [
+              value[0],
+              `...(${intermediateSize} between)`,
+              value.at(-1),
+            ];
+          } else if (typeof arrays === 'object' && value.length > 2) {
+            value = [
+              ...value.slice(0, arrays.firstNItems),
+              `...(${value.length - arrays.firstNItems} more)`,
+            ];
           }
-
-          if (value === '') {
-            value = `''`;
-          }
-
-          if (typeof value === 'object' && value !== null) {
-            value = JSON.stringify(value).replace(/"/g, '').replace(/,/g, ', ');
-          }
-
-          line += `${key}: ${value} -- `;
         }
 
-        line = line.slice(0, -4);
-        return line;
-      })
-      .join('\n')}\n`;
+        if (value === '') {
+          value = `''`;
+        }
+
+        if (typeof value === 'object' && value !== null) {
+          value = JSON.stringify(value).replace(/"/g, '').replace(/,/g, ', ');
+        }
+
+        line += `${key}: ${value} -- `;
+      }
+
+      line = line.slice(0, -4);
+      return line;
+    }).join('\n')}\n`;
   }
 
   return {
     add,
-    reset(keepLastRender = false) {
-      renders = keepLastRender ? [renders.at(-1)!] : [];
-      rendersTime = [];
-      startTime = Date.now();
-    },
+    reset,
     getSnapshot,
+    waitNextRender,
     get changesSnapshot() {
       return getSnapshot({ changesOnly: true });
     },

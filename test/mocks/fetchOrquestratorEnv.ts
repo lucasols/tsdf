@@ -119,7 +119,7 @@ export function createTestStore(
 
   const dbReadAt = 0.62;
 
-  async function mockFetch(shouldAbortResult: FetchContext, ms: number) {
+  async function mockFetch(fetchCtx: FetchContext, ms: number) {
     await sleep(ms * dbReadAt);
 
     const serverResponse = server.current;
@@ -134,7 +134,7 @@ export function createTestStore(
       return false;
     }
 
-    if (shouldAbortResult()) {
+    if (fetchCtx.shouldAbort()) {
       addAction(`fetch-aborted`, serverResponse);
 
       return false;
@@ -355,4 +355,3 @@ function getDynamicRealtimeThrottleMs(lastDuration: number): number {
 
   return 100;
 }
-

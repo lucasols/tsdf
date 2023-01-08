@@ -154,7 +154,7 @@ test.concurrent(
 
 test.concurrent('await fetch', async () => {
   const { serverMock, documentStore } = createDefaultDocumentStore({
-    storeWithInitialData: true,
+    useLoadedSnapshot: true,
   });
 
   serverMock.mutateData({ hello: 'new data' });

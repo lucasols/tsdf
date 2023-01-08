@@ -25,6 +25,7 @@
     "eslint": "CI=true eslint --ext .jsx,.js,.ts,.tsx src/",
     "format": "prettier --write src/**/*.ts",
     "tsc": "tsc -p tsconfig.prod.json",
+    "tsc:watch": "tsc -p tsconfig.prod.json --watch",
     "test:run": "vitest run",
     "build": "pnpm test:run && pnpm lint && pnpm build:no-test",
     "build:no-test": "tsup --minify --dts",

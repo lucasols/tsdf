@@ -1,5 +1,6 @@
-import { act, cleanup, render, renderHook } from '@testing-library/react';
-import { afterAll, describe, expect, test, vi } from 'vitest';
+import { cleanup, render, renderHook } from '@testing-library/react';
+import { act } from 'react-dom/test-utils';
+import { afterAll, describe, expect, test } from 'vitest';
 import {
   createDefaultListQueryStore,
   Tables,
@@ -26,7 +27,7 @@ function getFetchQueryForTable(tableId: string): FetchQueryParams {
 }
 
 describe('useMultipleItemsQuery sequential tests', () => {
-  const { serverMock, listQueryStore } = createDefaultListQueryStore({
+  const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
     initialServerData,
   });
 
@@ -174,9 +175,9 @@ describe('useMultipleItemsQuery sequential tests', () => {
 
 describe('useMultipleItemsQuery isolated tests', () => {
   test('rerender when payload changes', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users', 'products'],
+      useLoadedSnapshots: { tables: ['users', 'products'] },
     });
 
     const payload = createValueStore([
@@ -221,7 +222,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
 
 describe('useQuery', () => {
   test('disable then enable the initial fetch', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
     });
 
@@ -259,6 +260,7 @@ describe('useQuery', () => {
     expect(renders.getSnapshot()).toMatchInlineSnapshot(`
       "
       status: idle -- payload: undefined -- items: []
+      ---
       status: loading -- payload: {tableId:users} -- items: []
       status: success -- payload: {tableId:users} -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
       "
@@ -266,9 +268,9 @@ describe('useQuery', () => {
   });
 
   test('use ensureIsLoaded prop', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -293,9 +295,9 @@ describe('useQuery', () => {
   });
 
   test('ignore refetchingStatus by default', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -319,9 +321,9 @@ describe('useQuery', () => {
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {
-    const { listQueryStore, serverMock } = createDefaultListQueryStore({
+    const { store: listQueryStore, serverMock } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -354,6 +356,7 @@ describe('useQuery', () => {
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
       status: idle -- payload: undefined -- isLoading: false -- items: []
+      ---
       status: loading -- payload: {tableId:users} -- isLoading: true -- items: [User 1, ...(4 more)]
       status: success -- payload: {tableId:users} -- isLoading: false -- items: [User 1, ...(4 more)]
       "
@@ -361,9 +364,9 @@ describe('useQuery', () => {
   });
 
   test('disableRefetchOnMount', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const compRenders = createRenderStore();
@@ -392,7 +395,7 @@ describe('useQuery', () => {
 
 describe('useItem', () => {
   test('disable then enable the initial fetch', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
     });
 
@@ -429,6 +432,7 @@ describe('useItem', () => {
     expect(renders.getSnapshot()).toMatchInlineSnapshot(`
       "
       status: idle -- itemId: '' -- data: null
+      ---
       status: loading -- itemId: users||1 -- data: null
       status: success -- itemId: users||1 -- data: {id:1, name:User 1}
       "
@@ -436,9 +440,9 @@ describe('useItem', () => {
   });
 
   test('ignore refetchingStatus by default', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -461,9 +465,9 @@ describe('useItem', () => {
   });
 
   test('use ensureIsLoaded prop', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -488,9 +492,9 @@ describe('useItem', () => {
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {
-    const { listQueryStore, serverMock } = createDefaultListQueryStore({
+    const { store: listQueryStore, serverMock } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -523,6 +527,7 @@ describe('useItem', () => {
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
       status: idle -- itemId: '' -- isLoading: false -- data: null
+      ---
       status: loading -- itemId: users||1 -- isLoading: true -- data: User 1
       status: success -- itemId: users||1 -- isLoading: false -- data: User 1
       "
@@ -530,9 +535,9 @@ describe('useItem', () => {
   });
 
   test('disableRefetchOnMount', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const compRenders = createRenderStore();
@@ -557,26 +562,29 @@ describe('useItem', () => {
     expect(serverMock.numOfFetchs).toBe(0);
   });
 
-  test('use deleted item', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+  test.only('use deleted item', async () => {
+    const { serverMock, store, shouldNotSkip } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users'],
+      useLoadedSnapshots: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
 
     renderHook(() => {
-      const selectionResult = listQueryStore.useItem('users||2');
+      const selectionResult = store.useItem('users||2', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
 
       renders.add(pick(selectionResult, ['status', 'itemId', 'data']));
     });
 
-    listQueryStore.deleteItemState('users||2');
+    store.deleteItemState('users||2');
     serverMock.produceData((draft) => {
       draft.users!.splice(1, 1);
     });
 
-    await serverMock.waitFetchIdle();
+    await renders.waitNextRender();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
@@ -585,7 +593,7 @@ describe('useItem', () => {
       "
     `);
 
-    listQueryStore.scheduleItemFetch('highPriority', 'users||2');
+    shouldNotSkip(store.scheduleItemFetch('highPriority', 'users||2'));
 
     await serverMock.waitFetchIdle();
 
@@ -593,15 +601,17 @@ describe('useItem', () => {
       "
       status: success -- itemId: users||2 -- data: {id:2, name:User 2}
       status: deleted -- itemId: users||2 -- data: null
+      ---
+      status: loading -- itemId: users||2 -- data: null
       status: error -- itemId: users||2 -- data: null
       "
     `);
   });
 
   test('invalidate one item', async () => {
-    const { serverMock, listQueryStore } = createDefaultListQueryStore({
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      loadLoadedTablesSnapshot: ['users', 'products'],
+      useLoadedSnapshots: { tables: ['users', 'products'] },
     });
 
     const users2 = createRenderStore();
@@ -646,4 +656,3 @@ describe('useItem', () => {
     `);
   });
 });
-

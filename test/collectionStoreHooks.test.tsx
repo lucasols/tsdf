@@ -1,19 +1,11 @@
 import { act, cleanup, render, renderHook } from '@testing-library/react';
-import { useEffect, useState } from 'react';
 import { Store } from 't-state';
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from 'vitest';
-import { MultipleItemsQuery } from '../src/storeShared';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
   createDefaultCollectionStore,
+  createDefaultDocumentStore,
   createRenderStore,
   createValueStore,
 } from './utils/storeUtils';
@@ -25,17 +17,14 @@ describe('useMultipleItems', () => {
     cleanup();
   });
 
-  const { serverMock, collectionStore } = createDefaultCollectionStore({
+  const { serverMock, store: collectionStore } = createDefaultCollectionStore({
     randomTimeout: true,
     serverInitialData: { '1': defaultTodo, '2': defaultTodo },
   });
   const renders1 = createRenderStore();
   const renders2 = createRenderStore();
 
-  const itemsToUse: MultipleItemsQuery<string, string>[] = [
-    { payload: '1', queryData: '1' },
-    { payload: '2', queryData: '2' },
-  ];
+  const itemsToUse = ['1', '2'];
 
   const state = new Store({
     state: { itemsToUse },
@@ -50,14 +39,14 @@ describe('useMultipleItems', () => {
     const [item1, item2] = selectionResult;
 
     renders1.add({
-      status: item1?.result.status,
-      payload: item1?.result.payload,
-      data: item1?.result.data,
+      status: item1?.status,
+      payload: item1?.payload,
+      data: item1?.data,
     });
     renders2.add({
-      status: item2?.result.status,
-      payload: item2?.result.payload,
-      data: item2?.result.data,
+      status: item2?.status,
+      payload: item2?.payload,
+      data: item2?.data,
     });
   });
 
@@ -81,32 +70,6 @@ describe('useMultipleItems', () => {
     expect(serverMock.numOfFetchs).toBe(2);
   });
 
-  test('invalidate 1 item', async () => {
-    renders1.reset();
-    renders2.reset();
-
-    act(() => {
-      serverMock.mutateData({ '1': { title: 'todo', completed: true } });
-      collectionStore.invalidateData('1');
-    });
-
-    await sleep(120);
-
-    expect(renders1.renderCount()).toBeGreaterThan(0);
-
-    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
-      "
-      status: refetching -- payload: 1 -- data: {title:todo, completed:true}
-      status: success -- payload: 1 -- data: {title:todo, completed:true}
-      "
-    `);
-    expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
-      "
-    `);
-  });
-
   const renders3 = createRenderStore();
 
   let initialFetchCount: number;
@@ -125,30 +88,24 @@ describe('useMultipleItems', () => {
         },
       );
 
-      renders3.add({
-        status: selectionResult[0]?.result.status,
-        payload: selectionResult[0]?.result.payload,
-        data: selectionResult[0]?.result.data,
-      });
+      renders3.add(pick(selectionResult[0], ['status', 'payload', 'data']));
     });
 
     renders1.reset();
     renders2.reset();
 
-    act(() => {
-      serverMock.setFetchDuration((param) => {
-        return param === '1' ? 20 : 40;
-      });
-
-      serverMock.mutateData({
-        '1': { title: 'todo 1', completed: true },
-        '2': { title: 'todo 2', completed: true },
-      });
-
-      collectionStore.invalidateData(() => true);
+    serverMock.setFetchDuration((param) => {
+      return param === '1' ? 20 : 40;
     });
 
-    await sleep(120);
+    serverMock.mutateData({
+      '1': { title: 'todo 1', completed: true },
+      '2': { title: 'todo 2', completed: true },
+    });
+
+    collectionStore.invalidateData(() => true);
+
+    await serverMock.waitFetchIdle();
 
     serverMock.undoTimeoutChange();
 
@@ -162,12 +119,13 @@ describe('useMultipleItems', () => {
   test('refetch data after invalidations', () => {
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
+      status: refetching -- payload: 1 -- data: {title:todo, completed:false}
       status: success -- payload: 1 -- data: {title:todo 1, completed:true}
       "
     `);
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      status: refetching -- payload: 2 -- data: {title:todo, completed:false}
       status: success -- payload: 2 -- data: {title:todo 2, completed:true}
       "
     `);
@@ -187,10 +145,7 @@ describe('useMultipleItems', () => {
     renders2.reset();
 
     act(() => {
-      state.setKey('itemsToUse', [
-        { payload: '1', queryData: '1' },
-        { payload: '3', queryData: '3' },
-      ]);
+      state.setKey('itemsToUse', ['1', '3']);
     });
 
     await sleep(120);
@@ -209,12 +164,58 @@ describe('useMultipleItems', () => {
   });
 });
 
+describe('useMultipleItems isolated tests', () => {
+  test('invalidate 1 item', async () => {
+    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
+      {
+        serverInitialData,
+        useLoadedSnapshot: true,
+      },
+    );
+
+    const renders1 = createRenderStore();
+    const renders2 = createRenderStore();
+
+    renderHook(() => {
+      const [item1, item2] = collectionStore.useMultipleItems(['1', '2'], {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders1.add(pick(item1, ['status', 'payload', 'data']));
+      renders2.add(pick(item2, ['status', 'payload', 'data']));
+    });
+
+    act(() => {
+      serverMock.mutateData({ '1': { title: 'todo', completed: true } });
+      collectionStore.invalidateData('1');
+    });
+
+    await serverMock.waitFetchIdle();
+
+    expect(renders1.renderCount()).toBeGreaterThan(0);
+
+    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: 1 -- data: {title:todo, completed:false}
+      status: refetching -- payload: 1 -- data: {title:todo, completed:false}
+      status: success -- payload: 1 -- data: {title:todo, completed:true}
+      "
+    `);
+    expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      "
+    `);
+  });
+});
+
 describe('useItem', async () => {
   afterAll(() => {
     cleanup();
   });
 
-  const { serverMock, collectionStore } = createDefaultCollectionStore({
+  const { serverMock, store: collectionStore } = createDefaultCollectionStore({
     serverInitialData: { '1': defaultTodo, '2': defaultTodo },
   });
 
@@ -256,6 +257,7 @@ describe('useItem', async () => {
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
       status: idle -- payload: undefined -- data: null
+      ---
       status: loading -- payload: 1 -- data: null
       status: success -- payload: 1 -- data: {title:todo, completed:false}
       "
@@ -368,50 +370,62 @@ describe('useItem', async () => {
       "
     `);
   });
-
-  test('use deleted item', async () => {
-    const renders = createRenderStore();
-
-    renderHook(() => {
-      const selectionResult = collectionStore.useItem('2');
-
-      renders.add(pick(selectionResult, ['status', 'payload', 'data']));
-    });
-
-    collectionStore.deleteItemState('2');
-    serverMock.mutateData({ '2': null });
-
-    await serverMock.waitFetchIdle();
-
-    expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
-      status: deleted -- payload: 2 -- data: null
-      "
-    `);
-
-    collectionStore.scheduleFetch('highPriority', '2');
-
-    await serverMock.waitFetchIdle();
-
-    expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
-      status: deleted -- payload: 2 -- data: null
-      status: error -- payload: 2 -- data: null
-      "
-    `);
-  });
 });
 
 const serverInitialData = { '1': defaultTodo, '2': defaultTodo };
 
 describe('useItem isolated tests', () => {
-  test('use ensureIsLoaded prop', async () => {
-    const { collectionStore, serverMock } = createDefaultCollectionStore({
+  test.only('use deleted item', async () => {
+    const { serverMock, store, shouldNotSkip } = createDefaultCollectionStore({
       serverInitialData,
-      initializeStoreWithServerData: true,
+      useLoadedSnapshot: true,
     });
+
+    const renders = createRenderStore();
+
+    renderHook(() => {
+      const selectionResult = store.useItem('2', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add(pick(selectionResult, ['status', 'payload', 'data']));
+    });
+
+    act(() => {
+      store.deleteItemState('2');
+      serverMock.mutateData({ '2': null });
+    });
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      status: deleted -- payload: 2 -- data: null
+      "
+    `);
+
+    shouldNotSkip(store.scheduleFetch('highPriority', '2'));
+
+    await serverMock.waitFetchIdle();
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      status: deleted -- payload: 2 -- data: null
+      ---
+      status: loading -- payload: 2 -- data: null
+      status: error -- payload: 2 -- data: null
+      "
+    `);
+  });
+
+  test('use ensureIsLoaded prop', async () => {
+    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
+      {
+        serverInitialData,
+        useLoadedSnapshot: true,
+      },
+    );
 
     const renders = createRenderStore();
 
@@ -438,10 +452,12 @@ describe('useItem isolated tests', () => {
   });
 
   test('ignore refetchingStatus by default', async () => {
-    const { collectionStore, serverMock } = createDefaultCollectionStore({
-      serverInitialData,
-      initializeStoreWithServerData: true,
-    });
+    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
+      {
+        serverInitialData,
+        useLoadedSnapshot: true,
+      },
+    );
 
     const renders = createRenderStore();
 
@@ -469,10 +485,12 @@ describe('useItem isolated tests', () => {
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {
-    const { collectionStore, serverMock } = createDefaultCollectionStore({
-      serverInitialData,
-      initializeStoreWithServerData: true,
-    });
+    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
+      {
+        serverInitialData,
+        useLoadedSnapshot: true,
+      },
+    );
 
     const renders = createRenderStore();
 
@@ -504,6 +522,7 @@ describe('useItem isolated tests', () => {
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
       status: idle -- payload: undefined -- L: false -- data: null
+      ---
       status: loading -- payload: 1 -- L: true -- data: {title:todo, completed:false}
       status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
       "

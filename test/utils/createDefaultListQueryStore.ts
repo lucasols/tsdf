@@ -27,14 +27,12 @@ export type DefaultListQueryState = TSFDListQueryState<
 
 export function createDefaultListQueryStore({
   initialServerData = {},
-  loadLoadedTablesSnapshot: initializedWithLoaded,
+  useLoadedSnapshots,
   defaultQuerySize,
-  loadLoadedItemsSnapshot: initializeWithItemsLoaded,
   debug,
 }: {
   initialServerData?: Tables;
-  loadLoadedTablesSnapshot?: string | string[];
-  loadLoadedItemsSnapshot?: string[];
+  useLoadedSnapshots?: { tables?: string[]; items?: string[] };
   defaultQuerySize?: number;
   debug?: never;
 } = {}) {
@@ -99,14 +97,10 @@ export function createDefaultListQueryStore({
     defaultQuerySize,
   });
 
-  if (initializedWithLoaded || initializeWithItemsLoaded) {
-    const tablesToSnapshot = initializedWithLoaded
-      ? Array.isArray(initializedWithLoaded)
-        ? initializedWithLoaded
-        : [initializedWithLoaded]
-      : [];
+  if (useLoadedSnapshots) {
+    const tablesToSnapshot = useLoadedSnapshots.tables ?? [];
 
-    if (initializedWithLoaded) {
+    if (useLoadedSnapshots.tables) {
       const allIdsExist = tablesToSnapshot.every((tableId) =>
         initialServerData.hasOwnProperty(tableId),
       );
@@ -152,8 +146,8 @@ export function createDefaultListQueryStore({
       }
     }
 
-    if (initializeWithItemsLoaded) {
-      for (const itemId of initializeWithItemsLoaded) {
+    if (useLoadedSnapshots.items) {
+      for (const itemId of useLoadedSnapshots.items) {
         const itemData = initialServerData[itemId.split('||')[0]!]?.find(
           (item) => item.id === Number(itemId.split('||')[1]),
         );
@@ -195,5 +189,15 @@ export function createDefaultListQueryStore({
     }
   }
 
-  return { serverMock, listQueryStore, getItemId, forceListUpdate };
+  return {
+    serverMock,
+    store: listQueryStore,
+    getItemId,
+    forceListUpdate,
+    shouldNotSkip(scheduleResult: any) {
+      if (scheduleResult === 'skipped') {
+        throw new Error('Should not skip');
+      }
+    },
+  };
 }

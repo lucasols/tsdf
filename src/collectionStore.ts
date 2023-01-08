@@ -193,13 +193,9 @@ export function newTSDFCollectionStore<
     for (const param of payloads) {
       const itemKey = getItemKey(param);
 
-      if (store.state[itemKey] === null) {
-        results.push('skipped');
-      } else {
-        results.push(
-          fetchOrquestrator.get(itemKey).scheduleFetch(fetchType, param),
-        );
-      }
+      results.push(
+        fetchOrquestrator.get(itemKey).scheduleFetch(fetchType, param),
+      );
     }
 
     return multiplePayloads ? results : results[0]!;
