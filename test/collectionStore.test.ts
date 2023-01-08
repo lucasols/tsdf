@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { sleep } from './utils/sleep';
 import {
   createDefaultCollectionStore,
@@ -107,7 +107,7 @@ describe('fetch lifecicle', () => {
   });
 
   test('refetch resource with error', async () => {
-    serverMock.trhowErrorInNextFetch('error');
+    serverMock.setFetchError('error');
 
     collectionStore.scheduleFetch('highPriority', '1');
 
@@ -193,7 +193,7 @@ test.concurrent('await fetch', async () => {
     error: null,
   });
 
-  serverMock.trhowErrorInNextFetch('error');
+  serverMock.setFetchError('error');
 
   expect(await collectionStore.awaitFetch('1')).toEqual({
     data: null,

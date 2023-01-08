@@ -630,7 +630,7 @@ describe('isolated tests', () => {
       );
     });
 
-    await serverMock.waitNextFetchComplete();
+    await serverMock.waitFetchIdle();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
@@ -644,7 +644,7 @@ describe('isolated tests', () => {
 
     expect(documentStore.scheduleFetch('highPriority')).toBe('started');
 
-    await serverMock.waitNextFetchComplete();
+    await serverMock.waitFetchIdle();
 
     // ignore refetching status
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -683,7 +683,7 @@ describe('isolated tests', () => {
     // enable loading
     disabled.set(false);
 
-    await serverMock.waitNextFetchComplete();
+    await serverMock.waitFetchIdle();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "

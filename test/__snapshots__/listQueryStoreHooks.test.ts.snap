@@ -1,0 +1,9 @@
+// Vitest Snapshot v1
+
+exports[`useMultipleItemsQuery sequential tests > invalidate all queries > refetch data after invalidations 2`] = `undefined`;
+
+exports[`useMultipleItemsQuery sequential tests > invalidate all queries > refetch data after invalidations 4`] = `undefined`;
+
+exports[`useMultipleItemsQuery sequential tests > load the queries 2`] = `undefined`;
+
+exports[`useMultipleItemsQuery sequential tests > load the queries 4`] = `undefined`;

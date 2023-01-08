@@ -21,10 +21,14 @@ module.exports = {
   env: {
     browser: true,
   },
-  plugins: ['@typescript-eslint'],
+  plugins: ['@typescript-eslint', '@lucasols/extended-lint'],
 
   rules: {
-    'no-warning-comments': [WARN, { terms: ['FIX:'] }],
+    'no-warning-comments': [ERROR_IN_CI, { terms: ['FIX:'] }],
+    '@lucasols/extended-lint/no-warning-comments': [
+      ERROR_IN_CI_ONLY,
+      { terms: ['FIX-LATER:', 'FIXLATER:'] },
+    ],
     'no-constant-binary-expression': ERROR_IN_CI,
     'object-shorthand': ERROR_IN_CI,
     'no-useless-rename': ERROR_IN_CI,
@@ -46,6 +50,23 @@ module.exports = {
         ],
       },
     ],
+    'no-restricted-syntax': [
+      ERROR_IN_CI_ONLY,
+      {
+        selector:
+          'CallExpression[callee.object.name="test"][callee.property.name="only"]',
+        message: 'No test.only',
+      },
+      {
+        selector:
+          'CallExpression[callee.object.name="test"][callee.property.name="todo"]',
+        message: 'No test.todo',
+      },
+    ],
+    'no-implicit-coercion': [
+      ERROR_IN_CI,
+      { disallowTemplateShorthand: true, allow: ['!!'] },
+    ],
 
     /* typescript */
     '@typescript-eslint/no-unnecessary-condition': ERROR_IN_CI,
@@ -64,14 +85,14 @@ module.exports = {
     ],
     '@typescript-eslint/no-shadow': [
       ERROR_IN_CI,
-      { ignoreOnInitialization: true },
+      { ignoreOnInitialization: true, allow: ['expect'] },
     ],
-    'no-restricted-syntax': [
-      ERROR_IN_CI_ONLY,
+    '@typescript-eslint/ban-types': [
+      ERROR_IN_CI,
       {
-        selector:
-          'CallExpression[callee.object.name="test"][callee.property.name="only"]',
-        message: 'No test.only',
+        types: {
+          Error: 'Dont use error type',
+        },
       },
     ],
 

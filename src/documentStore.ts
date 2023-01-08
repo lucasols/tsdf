@@ -6,7 +6,7 @@ import {
   createFetchOrquestrator,
   FetchType,
   ScheduleFetchResults,
-  ShouldAbortFetch,
+  FetchContext,
 } from './fetchOrquestrator';
 import { Status, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
@@ -14,21 +14,21 @@ import { useOnMittEvent } from './utils/hooks';
 
 type DocumentStatus = Status | 'idle';
 
-export type TSDFDocumentStoreState<State extends ValidStoreState, Error> = {
+export type TSDFDocumentStoreState<State extends ValidStoreState, NError> = {
   data: State | null;
-  error: Error | null;
+  error: NError | null;
   status: DocumentStatus;
   refetchOnMount: boolean;
 };
 
-export type TSDFUseDocumentReturn<Selected, Error> = {
+export type TSDFUseDocumentReturn<Selected, NError> = {
   status: DocumentStatus;
   data: Selected;
-  error: Error | null;
+  error: NError | null;
   isLoading: boolean;
 };
 
-export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
+export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   debugName,
   fetchFn,
   initialData,
@@ -42,14 +42,14 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
   debugName?: string;
   fetchFn: () => Promise<State>;
   initialData?: State;
-  errorNormalizer: (exception: unknown) => Error;
+  errorNormalizer: (exception: unknown) => NError;
   disableRefetchOnWindowFocus?: boolean;
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 }) {
-  type DocState = TSDFDocumentStoreState<State, Error>;
+  type DocState = TSDFDocumentStoreState<State, NError>;
 
   const store = new Store<DocState>({
     debugName,
@@ -62,7 +62,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
   });
 
   async function fetch(
-    shouldAbort: ShouldAbortFetch,
+    shouldAbort: FetchContext,
     _: null,
   ): Promise<boolean> {
     store.setPartialState(
@@ -120,7 +120,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
   }
 
   async function awaitFetch(): Promise<
-    { data: State; error: null } | { data: null; error: Error }
+    { data: State; error: null } | { data: null; error: NError }
   > {
     const wasAborted = await fetchOrquestrator.awaitFetch(null);
 
@@ -165,7 +165,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
     returnRefetchingStatus?: boolean;
   } = {}) {
     const storeStateSelector = useCallback(
-      (state: DocState): TSDFUseDocumentReturn<Selected, Error> => {
+      (state: DocState): TSDFUseDocumentReturn<Selected, NError> => {
         const { error } = state;
 
         const data = selector ? selector(state.data) : (state.data as Selected);
@@ -205,12 +205,13 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
       if (disabled) return;
 
       if (disableRefetchOnMount) {
-        if (store.state.refetchOnMount || store.state.status === 'idle') {
-          scheduleFetch('lowPriority');
-        }
-      } else {
-        scheduleFetch('lowPriority');
+        const shouldFetch =
+          store.state.refetchOnMount || store.state.status === 'idle';
+
+        if (!shouldFetch) return;
       }
+
+      scheduleFetch('lowPriority');
     }, [disableRefetchOnMount, disabled]);
 
     const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
@@ -271,5 +272,5 @@ export function newTSDFDocumentStore<State extends ValidStoreState, Error>({
 // FIX: create a proper type for this
 export type TSDFDocumentStore<
   State extends ValidStoreState,
-  Error,
-> = ReturnType<typeof newTSDFDocumentStore<State, Error>>;
+  NError,
+> = ReturnType<typeof newTSDFDocumentStore<State, NError>>;

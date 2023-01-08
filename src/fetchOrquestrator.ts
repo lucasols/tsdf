@@ -1,4 +1,7 @@
-export type ShouldAbortFetch = () => boolean;
+export type FetchContext = {
+  shouldAbort: () => boolean;
+  getStartTime: () => number;
+};
 
 export type FetchType = 'lowPriority' | 'highPriority' | 'realtimeUpdate';
 
@@ -10,17 +13,12 @@ export type ScheduleFetchResults =
   | 'scheduled'
   | 'rt-scheduled';
 
-export type FetchOrquestrator<T> = {
-  scheduleFetch: (fetchType: FetchType, params: T) => ScheduleFetchResults;
-  awaitFetch: (params: T) => Promise<boolean>;
-  startMutation: () => () => boolean;
-  readonly hasPendingFetch: boolean;
-  readonly fetchIsInProgress: boolean;
-  readonly mutationIsInProgress: boolean;
-};
+export type FetchOrquestrator<T> = ReturnType<
+  typeof createFetchOrquestrator<T>
+>;
 
 export type CreateFetchOrquestratorOptions<T> = {
-  fetchFn: (shouldAbort: ShouldAbortFetch, params: T) => Promise<boolean>;
+  fetchFn: (fetchContext: FetchContext, params: T) => Promise<boolean>;
   on?: (event: Events) => void;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
@@ -35,7 +33,7 @@ export function createFetchOrquestrator<T>({
   lowPriorityThrottleMs = 200,
   disableRealtimeDynamicThrottling,
   getDynamicRealtimeThrottleMs,
-}: CreateFetchOrquestratorOptions<T>): FetchOrquestrator<T> {
+}: CreateFetchOrquestratorOptions<T>) {
   const fetchs: {
     inProgress: { startTime: number; onEnd: (() => void)[] } | false;
     scheduled: { params: T } | null;
@@ -51,6 +49,14 @@ export function createFetchOrquestrator<T>({
   let lastFetchDuration = 0;
   let onMutationEnd: (() => void)[] = [];
   let lastFetchWasAborted = false;
+
+  function setLastFetchDurantion(duration: number) {
+    lastFetchDuration = duration;
+  }
+
+  function setLastFetchStartTime(startTime: number) {
+    lastFetchStartTime = startTime;
+  }
 
   function flushScheduledFetch() {
     if (fetchs.scheduled) {
@@ -93,7 +99,6 @@ export function createFetchOrquestrator<T>({
 
     lastFetchWasAborted = false;
     fetchs.inProgress = { startTime, onEnd: [] };
-    lastFetchStartTime = startTime;
 
     function shouldAbort() {
       lastFetchWasAborted = mutationIsInProgress;
@@ -101,9 +106,17 @@ export function createFetchOrquestrator<T>({
       return mutationIsInProgress;
     }
 
-    const success = await fetchFn(shouldAbort, params);
+    const success = await fetchFn(
+      {
+        shouldAbort,
+        getStartTime: () => startTime,
+      },
+      params,
+    );
 
     if (success) {
+      // FIX: test: if the fetch has error or was aborted it should not considered in the throttling
+      lastFetchStartTime = startTime;
       lastFetchDuration = Date.now() - startTime;
     }
 
@@ -288,6 +301,8 @@ export function createFetchOrquestrator<T>({
     get mutationIsInProgress() {
       return mutationIsInProgress;
     },
+    setLastFetchDurantion,
+    setLastFetchStartTime,
   };
 }
 

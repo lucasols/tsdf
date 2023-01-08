@@ -1,14 +1,16 @@
 /* eslint-disable @typescript-eslint/no-empty-interface */
 /* eslint-disable @typescript-eslint/no-namespace */
-import { expect } from 'vitest';
 import matchers, {
   TestingLibraryMatchers,
 } from '@testing-library/jest-dom/matchers';
-import { dedent } from '../utils/dedent';
+import { format } from 'pretty-format';
+import { expect } from 'vitest';
 import { filterAndMap } from '../../src/utils/filterAndMap';
+import { dedent } from '../utils/dedent';
 
 interface ToMatchTimeline<R = unknown> {
   toMatchTimeline(timeline: string): R;
+  toMatchSnapshotString(snapshot: string): R;
 }
 
 declare global {
@@ -99,6 +101,19 @@ expect.extend({
       message: () => `Timeline does not match`,
       actual: received,
       expected,
+    };
+  },
+  toMatchSnapshotString(received, expected) {
+    const normalizedExpected = dedent(expected);
+    const normalizedReceived = format(received, {
+      printBasicPrototype: false,
+    });
+
+    return {
+      pass: normalizedReceived === normalizedExpected,
+      message: () => `Snapshot string does not match`,
+      actual: normalizedReceived,
+      expected: normalizedExpected,
     };
   },
 });

@@ -9,7 +9,7 @@ import {
   expect,
   test,
 } from 'vitest';
-import { MultipleItemsQuery } from '../src/collectionStore';
+import { MultipleItemsQuery } from '../src/storeShared';
 import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
@@ -33,8 +33,8 @@ describe('useMultipleItems', () => {
   const renders2 = createRenderStore();
 
   const itemsToUse: MultipleItemsQuery<string, string>[] = [
-    { fetchParams: '1', queryData: '1' },
-    { fetchParams: '2', queryData: '2' },
+    { payload: '1', queryData: '1' },
+    { payload: '2', queryData: '2' },
   ];
 
   const state = new Store({
@@ -44,6 +44,7 @@ describe('useMultipleItems', () => {
   renderHook(() => {
     const selectionResult = collectionStore.useMultipleItems(
       state.useKey('itemsToUse'),
+      { returnRefetchingStatus: true },
     );
 
     const [item1, item2] = selectionResult;
@@ -95,6 +96,7 @@ describe('useMultipleItems', () => {
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
+      status: refetching -- payload: 1 -- data: {title:todo, completed:true}
       status: success -- payload: 1 -- data: {title:todo, completed:true}
       "
     `);
@@ -186,8 +188,8 @@ describe('useMultipleItems', () => {
 
     act(() => {
       state.setKey('itemsToUse', [
-        { fetchParams: '1', queryData: '1' },
-        { fetchParams: '3', queryData: '3' },
+        { payload: '1', queryData: '1' },
+        { payload: '3', queryData: '3' },
       ]);
     });
 
@@ -261,6 +263,7 @@ describe('useItem', async () => {
   });
 
   test('disableRefetchOnMount', async () => {
+    // FIXLATER: fix this test
     const numOfFetchs = serverMock.numOfFetchsFromHere();
 
     const comp2Renders = createRenderStore();
@@ -269,6 +272,7 @@ describe('useItem', async () => {
     const Comp2 = () => {
       const data = collectionStore.useItem('2', {
         disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
       });
 
       comp2Renders.add({ status: data.status, data: data.data });
@@ -279,9 +283,7 @@ describe('useItem', async () => {
     const mountComp2 = createValueStore(false);
 
     const Comp = () => {
-      const data = collectionStore.useItem('2', {
-        disableRefetchOnMount: true,
-      });
+      const data = collectionStore.useItem('2');
 
       compRenders.add({ status: data.status, data: data.data });
 
@@ -290,6 +292,7 @@ describe('useItem', async () => {
 
     render(<Comp />);
 
+    // wait the throttle time
     await sleep(200);
 
     expect(compRenders.snapshot).toMatchInlineSnapshot(`
@@ -375,15 +378,27 @@ describe('useItem', async () => {
       renders.add(pick(selectionResult, ['status', 'payload', 'data']));
     });
 
-    act(() => {
-      collectionStore.deleteItemState('2');
-      serverMock.mutateData({ '2': null });
-    });
+    collectionStore.deleteItemState('2');
+    serverMock.mutateData({ '2': null });
+
+    await serverMock.waitFetchIdle();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
       status: success -- payload: 2 -- data: {title:todo, completed:false}
       status: deleted -- payload: 2 -- data: null
+      "
+    `);
+
+    collectionStore.scheduleFetch('highPriority', '2');
+
+    await serverMock.waitFetchIdle();
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      status: deleted -- payload: 2 -- data: null
+      status: error -- payload: 2 -- data: null
       "
     `);
   });
@@ -412,7 +427,7 @@ describe('useItem isolated tests', () => {
       );
     });
 
-    await serverMock.waitNextFetchComplete();
+    await serverMock.waitFetchIdle();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
@@ -420,17 +435,35 @@ describe('useItem isolated tests', () => {
       status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
       "
     `);
+  });
+
+  test('ignore refetchingStatus by default', async () => {
+    const { collectionStore, serverMock } = createDefaultCollectionStore({
+      serverInitialData,
+      initializeStoreWithServerData: true,
+    });
+
+    const renders = createRenderStore();
+
+    renderHook(() => {
+      const selectionResult = collectionStore.useItem('1', {
+        ensureIsLoaded: true,
+      });
+
+      renders.add(
+        pick(selectionResult, ['status', 'isLoading', 'data'], {
+          isLoading: 'L',
+        }),
+      );
+    });
 
     expect(collectionStore.scheduleFetch('highPriority', '1')).toBe('started');
 
-    await serverMock.waitNextFetchComplete();
+    await serverMock.waitFetchIdle();
 
-    // ignore refetching status
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 1 -- L: true -- data: {title:todo, completed:false}
-      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
-      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
+      status: success -- isLoading: false -- data: {title:todo, completed:false}
       "
     `);
   });
@@ -466,7 +499,7 @@ describe('useItem isolated tests', () => {
     // enable loading
     loadItem.set('1');
 
-    await serverMock.waitNextFetchComplete();
+    await serverMock.waitFetchIdle();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "

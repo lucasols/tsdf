@@ -1,6 +1,7 @@
 lockfileVersion: 5.4
 
 specifiers:
+  '@lucasols/eslint-plugin-extended-lint': ^0.1.1
   '@testing-library/jest-dom': ^5.16.5
   '@testing-library/react': ^13.4.0
   '@types/node': ^18.11.18
@@ -11,16 +12,18 @@ specifiers:
   '@typescript-eslint/parser': ^5.47.1
   '@vitest/ui': 0.26.3
   eslint: ^8.30.0
+  eslint-plugin-local-rules: ^1.3.2
   eslint-plugin-react-hooks: ^4.6.0
   happy-dom: ^8.1.3
   immer: ^9.0.17
   jsdom: ^20.0.3
   mitt: ^3.0.0
   prettier: ^2.8.1
+  pretty-format: ^29.3.1
   react: ^18.2.0
   react-dom: ^18.2.0
   runcheck: ^0.8.0
-  t-state: ^7.5.0-beta.0
+  t-state: ^7.5.1
   tiny-glob: ^0.2.9
   tsm: ^2.3.0
   tsup: ^6.5.0
@@ -32,9 +35,10 @@ dependencies:
   immer: 9.0.17
   mitt: 3.0.0
   runcheck: 0.8.0
-  t-state: 7.5.0-beta.0_biqbaboplfbrettd7655fr4n2y
+  t-state: 7.5.1_biqbaboplfbrettd7655fr4n2y
 
 devDependencies:
+  '@lucasols/eslint-plugin-extended-lint': 0.1.1_eslint@8.31.0
   '@testing-library/jest-dom': 5.16.5
   '@testing-library/react': 13.4.0_biqbaboplfbrettd7655fr4n2y
   '@types/node': 18.11.18
@@ -45,10 +49,12 @@ devDependencies:
   '@typescript-eslint/parser': 5.47.1_iukboom6ndih5an6iafl45j2fe
   '@vitest/ui': 0.26.3
   eslint: 8.31.0
+  eslint-plugin-local-rules: 1.3.2
   eslint-plugin-react-hooks: 4.6.0_eslint@8.31.0
   happy-dom: 8.1.3
   jsdom: 20.0.3
   prettier: 2.8.1
+  pretty-format: 29.3.1
   react: 18.2.0
   react-dom: 18.2.0_react@18.2.0
   tiny-glob: 0.2.9
@@ -369,6 +375,18 @@ packages:
       '@types/node': 18.11.18
       '@types/yargs': 17.0.18
       chalk: 4.1.2
+    dev: true
+
+  /@lucasols/eslint-plugin-extended-lint/0.1.1_eslint@8.31.0:
+    resolution: {integrity: sha512-cjy+fKIR16lgryD422nBuPbO9+emjAqGF2Y85gLxq1/yCCK4i2kll3boqkit1gJrvRpdDKi70sGEguq7RE0NFw==}
+    engines: {node: '>=14.6.0'}
+    peerDependencies:
+      eslint: ^8.20.0
+    dependencies:
+      escape-string-regexp: 4.0.0
+      eslint: 8.31.0
+      espree: 9.4.1
+      esutils: 2.0.3
     dev: true
 
   /@nodelib/fs.scandir/2.1.5:
@@ -1361,6 +1379,10 @@ packages:
       optionator: 0.8.3
     optionalDependencies:
       source-map: 0.6.1
+    dev: true
+
+  /eslint-plugin-local-rules/1.3.2:
+    resolution: {integrity: sha512-X4ziX+cjlCYnZa+GB1ly3mmj44v2PeIld3tQVAxelY6AMrhHSjz6zsgsT6nt0+X5b7eZnvL/O7Q3pSSK2kF/+Q==}
     dev: true
 
   /eslint-plugin-react-hooks/4.6.0_eslint@8.31.0:
@@ -2816,8 +2838,8 @@ packages:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
     dev: true
 
-  /t-state/7.5.0-beta.0_biqbaboplfbrettd7655fr4n2y:
-    resolution: {integrity: sha512-KTw22HdjGqEgzjaybaEa1KnnJGcZ4hy2J0svn0j4DmcHWpAvEAGDdhD7y45CwqQskDJUDaX4anSh9pS1RqgE2g==}
+  /t-state/7.5.1_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-NLOOuWcBiWLkMJmXtTGU0qdpf9u6uckhiFrCUCIrEWL6iweoNu4oBz32IkCQSirVLeCXiqWb84Soml5/XqSmRQ==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       react: ^18.0.0

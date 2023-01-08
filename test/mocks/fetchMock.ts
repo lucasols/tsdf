@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-types */
+import produce from 'immer';
 import { randomInt } from '../utils/math';
 import { sleep } from '../utils/sleep';
 
@@ -10,7 +12,7 @@ export function mockServerResource<Data, S = Data>({
   initialData: Data;
   logFetchs?: boolean;
   randomTimeout?: [number, number] | true;
-  fetchSelector?: (data: Data | null, params: string) => S;
+  fetchSelector?: (data: Data | null, params: string) => S | 'notFound';
 }) {
   type Timeout = number | [number, number] | ((param: string) => number);
 
@@ -35,11 +37,15 @@ export function mockServerResource<Data, S = Data>({
     waitNextFetchCompleteCall = 0;
   }
 
-  let onFetchComplete: (() => void) | null = null;
-
   const dbReadAt = 0.62;
 
+  const fetchsInProgress = new Set<symbol>();
+
   async function fetch(params: string): Promise<S> {
+    const fetchId = Symbol();
+
+    fetchsInProgress.add(fetchId);
+
     let timeoutToUse = 0;
 
     if (Array.isArray(timeout)) {
@@ -61,28 +67,30 @@ export function mockServerResource<Data, S = Data>({
 
     lastTimeoutMs = timeoutToUse;
 
-    numOfFetchs += 1;
-
     await sleep(timeoutToUse * dbReadAt);
 
-    if (error) {
-      throw typeof error === 'string' ? new Error(error) : error;
+    try {
+      if (error) {
+        throw typeof error === 'string' ? new Error(error) : error;
+      }
+
+      const response = fetchSelector(data, params);
+
+      if (response === 'notFound') {
+        throw new Error('Not found');
+      }
+
+      await sleep(timeoutToUse * (1 - dbReadAt));
+
+      if (!response) {
+        throw new Error('No data');
+      }
+
+      return response;
+    } finally {
+      fetchsInProgress.delete(fetchId);
+      numOfFetchs += 1;
     }
-
-    const response = fetchSelector(data, params);
-
-    await sleep(timeoutToUse * (1 - dbReadAt));
-
-    if (!response) {
-      throw new Error('No data');
-    }
-
-    if (onFetchComplete) {
-      onFetchComplete();
-      onFetchComplete = null;
-    }
-
-    return response;
   }
 
   async function fetchWitoutSelector() {
@@ -91,6 +99,10 @@ export function mockServerResource<Data, S = Data>({
 
   function mutateData(newData: Partial<Data>) {
     data = { ...data, ...newData };
+  }
+
+  function produceData(recipe: (draft: Data) => void) {
+    data = produce(data, recipe);
   }
 
   function setFetchDuration(newTimeout: typeof timeout) {
@@ -102,7 +114,7 @@ export function mockServerResource<Data, S = Data>({
     timeout = lastTimeout;
   }
 
-  function trhowErrorInNextFetch(newError: Error | string) {
+  function setFetchError(newError: Error | string | null) {
     error = newError;
   }
 
@@ -139,46 +151,50 @@ export function mockServerResource<Data, S = Data>({
     return data;
   }
 
-  async function waitNextFetchComplete(extraWait = 0, maxWait = 500) {
+  async function waitFetchIdle(extraWait = 0, maxWait = 500) {
     waitNextFetchCompleteCall++;
+    const startWaitTime = Date.now();
 
     const currentWaitNextFetchCompleteCall = waitNextFetchCompleteCall;
 
-    if (onFetchComplete) {
-      return;
+    function chekTimeout() {
+      if (Date.now() - startWaitTime > maxWait) {
+        throw new Error(
+          `Wait for fetch idle ${currentWaitNextFetchCompleteCall} timeout`,
+        );
+      }
     }
 
-    const errorObj = new Error(
-      `Wait for next fetch complete ${currentWaitNextFetchCompleteCall} timeout`,
-    );
+    if (fetchsInProgress.size === 0) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      while (fetchsInProgress.size === 0) {
+        await sleep(5);
 
-    return new Promise<true>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        onFetchComplete = null;
-        reject(errorObj);
-      }, maxWait);
+        chekTimeout();
+      }
+    }
 
-      onFetchComplete = () => {
-        clearTimeout(timeoutId);
+    while (fetchsInProgress.size > 0) {
+      await sleep(10);
 
-        setTimeout(() => {
-          resolve(true);
-        }, 10 + extraWait);
-      };
-    });
+      chekTimeout();
+    }
+
+    await sleep(extraWait);
   }
 
   return {
     fetch,
     mutateData,
     fetchWitoutSelector,
-    waitNextFetchComplete,
+    waitFetchIdle,
+    produceData,
     setFetchDuration,
     get data() {
       return data;
     },
     reset,
-    trhowErrorInNextFetch,
+    setFetchError,
     emulateMutation,
     undoTimeoutChange,
     get numOfFetchs() {

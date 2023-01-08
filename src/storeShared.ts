@@ -1,5 +1,5 @@
-export type Status = 'loading' | 'refetching' | 'error' | 'success';
+export type Status = 'loading' | 'error' | 'refetching' | 'success';
 
-export type ValidFetchParams = number | string | null | Record<string, unknown>;
+export type ValidPayload = number | string | Record<string, unknown>;
 
 export type ValidStoreState = Record<string, unknown> | any[];

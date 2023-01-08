@@ -1,7 +1,7 @@
 import {
   createFetchOrquestrator,
   FetchType,
-  ShouldAbortFetch,
+  FetchContext,
 } from '../../src/fetchOrquestrator';
 import { arrayWithPrev } from '../utils/arrayUtils';
 import { sleep } from '../utils/sleep';
@@ -119,7 +119,7 @@ export function createTestStore(
 
   const dbReadAt = 0.62;
 
-  async function mockFetch(shouldAbortResult: ShouldAbortFetch, ms: number) {
+  async function mockFetch(shouldAbortResult: FetchContext, ms: number) {
     await sleep(ms * dbReadAt);
 
     const serverResponse = server.current;

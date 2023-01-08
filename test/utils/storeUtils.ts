@@ -1,13 +1,14 @@
 import { deepEqual, Store } from 't-state';
-import { T } from 'vitest/dist/types-bae746aa';
 import {
   newTSDFCollectionStore,
   TSDFCollectionStore,
   TSFDCollectionState,
 } from '../../src/collectionStore';
 import { newTSDFDocumentStore } from '../../src/documentStore';
+import { clampMin } from '../../src/utils/math';
 import { mockServerResource } from '../mocks/fetchMock';
 import { arrayWithPrev } from './arrayUtils';
+import { pick } from './objectUtils';
 
 export type StoreError = {
   message: string;
@@ -82,7 +83,6 @@ export type DefaultCollectionState = TSFDCollectionState<
 export type DefaultCollectionStore = TSDFCollectionStore<
   Todo,
   StoreError,
-  string,
   string
 >;
 
@@ -113,7 +113,6 @@ export function createDefaultCollectionStore({
   const collectionStore = newTSDFCollectionStore({
     fetchFn: serverMock.fetch,
     errorNormalizer: normalizeError,
-    getCollectionItemPayload: (data) => data,
   });
 
   if (initializeStoreWithServerData) {
@@ -154,7 +153,7 @@ export function createDefaultCollectionStore({
 }
 
 export function createRenderStore() {
-  let renders: any[] = [];
+  let renders: Record<string, unknown>[] = [];
   let rendersTime: number[] = [];
   let startTime = Date.now();
 
@@ -171,17 +170,67 @@ export function createRenderStore() {
     return renders.length;
   }
 
-  function getSnapshot(rendersToSnapshot: any[]) {
-    return `\n${rendersToSnapshot
+  function getSnapshot({
+    arrays = { firstNItems: 1 },
+    changesOnly = true,
+    filterKeys,
+  }: {
+    arrays?: 'all' | 'firstAndLast' | 'lenght' | { firstNItems: number };
+    changesOnly?: boolean;
+    filterKeys?: string[];
+  } = {}) {
+    let rendersToUse = renders;
+
+    if (changesOnly || filterKeys) {
+      rendersToUse = [];
+
+      for (let [current, prev] of arrayWithPrev(renders)) {
+        if (filterKeys) {
+          prev = prev && pick(prev, filterKeys);
+          current = pick(current, filterKeys);
+        }
+
+        if (!deepEqual(prev, current)) {
+          rendersToUse.push(current);
+        }
+      }
+    }
+
+    return `\n${rendersToUse
       .map((render) => {
         let line = '';
 
-        for (const [key, value] of Object.entries(render)) {
-          line += `${key}: ${
-            typeof value === 'object' && value !== null
-              ? JSON.stringify(value).replace(/"/g, '').replace(/,/g, ', ')
-              : value
-          } -- `;
+        for (const [key, _value] of Object.entries(render)) {
+          let value = _value;
+
+          if (Array.isArray(value)) {
+            if (arrays === 'lenght') {
+              value = `Array(${value.length})`;
+            } else if (arrays === 'firstAndLast' && value.length > 2) {
+              const intermediateSize = clampMin(value.length - 2, 0);
+
+              value = [
+                value[0],
+                `...(${intermediateSize} between)`,
+                value.at(-1),
+              ];
+            } else if (typeof arrays === 'object' && value.length > 2) {
+              value = [
+                ...value.slice(0, arrays.firstNItems),
+                `...(${value.length - arrays.firstNItems} more)`,
+              ];
+            }
+          }
+
+          if (value === '') {
+            value = `''`;
+          }
+
+          if (typeof value === 'object' && value !== null) {
+            value = JSON.stringify(value).replace(/"/g, '').replace(/,/g, ', ');
+          }
+
+          line += `${key}: ${value} -- `;
         }
 
         line = line.slice(0, -4);
@@ -193,23 +242,16 @@ export function createRenderStore() {
   return {
     add,
     reset(keepLastRender = false) {
-      renders = keepLastRender ? [renders.at(-1)] : [];
+      renders = keepLastRender ? [renders.at(-1)!] : [];
       rendersTime = [];
       startTime = Date.now();
     },
-    get snapshot() {
-      return getSnapshot(renders);
-    },
+    getSnapshot,
     get changesSnapshot() {
-      const changes: any[] = [];
-
-      for (const [current, prev] of arrayWithPrev(renders)) {
-        if (!deepEqual(current, prev)) {
-          changes.push(current);
-        }
-      }
-
-      return getSnapshot(changes);
+      return getSnapshot({ changesOnly: true });
+    },
+    get snapshot() {
+      return getSnapshot({ changesOnly: false });
     },
     renderCount,
     get rendersTime() {

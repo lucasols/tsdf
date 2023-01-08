@@ -5,9 +5,9 @@ import { createCollectionFetchOrquestrator } from './collectionFetchOrquestrator
 import {
   FetchType,
   ScheduleFetchResults,
-  ShouldAbortFetch,
+  FetchContext,
 } from './fetchOrquestrator';
-import { Status, ValidFetchParams, ValidStoreState } from './storeShared';
+import { Status, ValidPayload, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
@@ -18,11 +18,11 @@ type CollectionItemStatus = Status;
 
 export type TSFDCollectionItem<
   ItemState extends ValidStoreState,
-  ItemPayload,
-  Error,
+  ItemPayload extends ValidPayload,
+  NError,
 > = {
   data: ItemState | null;
-  error: Error | null;
+  error: NError | null;
   status: CollectionItemStatus;
   payload: ItemPayload;
   refetchOnMount: boolean;
@@ -30,24 +30,23 @@ export type TSFDCollectionItem<
 
 export type TSFDCollectionState<
   ItemState extends ValidStoreState,
-  ItemPayload,
-  Error,
-> = Record<string, TSFDCollectionItem<ItemState, ItemPayload, Error> | null>;
+  ItemPayload extends ValidPayload,
+  NError,
+> = Record<string, TSFDCollectionItem<ItemState, ItemPayload, NError> | null>;
 
-export type TSFDUseCollectionItemReturn<Selected, ItemPayload, Error> = {
+export type TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> = {
   data: Selected;
   status: CollectionItemStatus | 'idle' | 'deleted';
   payload: ItemPayload | undefined;
-  error: Error | null;
+  error: NError | null;
   itemStateKey: string;
   isLoading: boolean;
 };
 
 export function newTSDFCollectionStore<
   ItemState extends ValidStoreState,
-  Error,
-  FetchParams extends ValidFetchParams,
-  ItemPayload,
+  NError,
+  ItemPayload extends ValidPayload,
 >({
   debugName,
   fetchFn,
@@ -55,58 +54,62 @@ export function newTSDFCollectionStore<
   lowPriorityThrottleMs,
   errorNormalizer,
   mediumPriorityThrottleMs,
+  disableRefetchOnMount: globalDisableRefetchOnMount,
   getDynamicRealtimeThrottleMs,
-  getCollectionItemPayload,
+  getCollectionItemKey: filterCollectionItemObjKey,
 }: {
   debugName?: string;
-  fetchFn: (params: FetchParams) => Promise<ItemState>;
-  getCollectionItemPayload: (params: FetchParams) => ItemPayload;
-  errorNormalizer: (exception: unknown) => Error;
+  fetchFn: (params: ItemPayload) => Promise<ItemState>;
+  getCollectionItemKey?: (params: ItemPayload) => ValidPayload | any[];
+  errorNormalizer: (exception: unknown) => NError;
   disableRefetchOnWindowFocus?: boolean;
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 }) {
-  type CollectionState = TSFDCollectionState<ItemState, ItemPayload, Error>;
-  type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, Error>;
+  type CollectionState = TSFDCollectionState<ItemState, ItemPayload, NError>;
+  type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, NError>;
 
   const store = new Store<CollectionState>({
     debugName,
     state: {},
   });
 
-  function getItemKey(params: FetchParams): string {
-    return getCacheId(getCollectionItemPayload(params));
+  function getItemKey(params: ItemPayload): string {
+    return getCacheId(
+      filterCollectionItemObjKey ? filterCollectionItemObjKey(params) : params,
+    );
   }
 
   async function fetch(
-    shouldAbort: ShouldAbortFetch,
-    params: FetchParams,
+    fetchCtx: FetchContext,
+    fetchParams: ItemPayload,
   ): Promise<boolean> {
-    const itemId = getItemKey(params);
-    const payload = serializableClone(getCollectionItemPayload(params));
+    const itemId = getItemKey(fetchParams);
+    // FIX: test if this is needed
+    const params = serializableClone(fetchParams);
 
     const itemState = store.state[itemId];
 
     store.produceState(
       (draft) => {
-        if (!draft[itemId]) {
+        const item = draft[itemId];
+
+        if (!item) {
           draft[itemId] = {
             data: null,
             error: null,
             status: 'loading',
-            payload,
+            payload: params,
             refetchOnMount: false,
           };
 
           return;
         }
 
-        const item = draft[itemId]!;
-
         item.status = item.data !== null ? 'refetching' : 'loading';
-        item.payload = payload;
+        item.payload = params;
         item.error = null;
         item.refetchOnMount = false;
       },
@@ -116,7 +119,7 @@ export function newTSDFCollectionStore<
           type: !itemState?.data
             ? 'fetch-start-loading'
             : 'fetch-start-refetching',
-          payload,
+          params,
         },
       },
     );
@@ -124,7 +127,7 @@ export function newTSDFCollectionStore<
     try {
       const data = await fetchFn(params);
 
-      if (shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) return false;
 
       store.produceState(
         (draft) => {
@@ -135,12 +138,14 @@ export function newTSDFCollectionStore<
           item.data = data;
           item.status = 'success';
         },
-        { action: { type: 'fetch-success', payload } },
+        { action: { type: 'fetch-success', params } },
       );
 
       return true;
     } catch (exception) {
-      if (shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) return false;
+
+      const error = errorNormalizer(exception);
 
       store.produceState(
         (draft) => {
@@ -148,10 +153,10 @@ export function newTSDFCollectionStore<
 
           if (!item) return;
 
-          item.error = errorNormalizer(exception);
+          item.error = error;
           item.status = 'error';
         },
-        { action: { type: 'fetch-error', payload } },
+        { action: { type: 'fetch-error', params, error } },
       );
 
       return false;
@@ -169,55 +174,43 @@ export function newTSDFCollectionStore<
 
   function scheduleFetch(
     fetchType: FetchType,
-    fetchParams: FetchParams,
+    payload: ItemPayload,
   ): ScheduleFetchResults;
   function scheduleFetch(
     fetchType: FetchType,
-    fetchParams: FetchParams[],
+    payload: ItemPayload[],
   ): ScheduleFetchResults[];
   function scheduleFetch(
     fetchType: FetchType,
-    fetchParams: FetchParams | FetchParams[],
+    payload: ItemPayload | ItemPayload[],
   ): ScheduleFetchResults | ScheduleFetchResults[] {
-    const fetchMultiple = Array.isArray(fetchParams);
+    const multiplePayloads = Array.isArray(payload);
 
-    if (!fetchMultiple) {
-      const itemKey = getItemKey(fetchParams);
+    const payloads = multiplePayloads ? payload : [payload];
+
+    const results: ScheduleFetchResults[] = [];
+
+    for (const param of payloads) {
+      const itemKey = getItemKey(param);
 
       if (store.state[itemKey] === null) {
-        return 'skipped';
+        results.push('skipped');
+      } else {
+        results.push(
+          fetchOrquestrator.get(itemKey).scheduleFetch(fetchType, param),
+        );
       }
-
-      return fetchOrquestrator
-        .get(itemKey)
-        .scheduleFetch(fetchType, fetchParams);
-    } else {
-      const results: ScheduleFetchResults[] = [];
-
-      for (const param of fetchParams) {
-        const itemKey = getItemKey(param);
-
-        if (store.state[itemKey] === null) {
-          results.push('skipped');
-        } else {
-          results.push(
-            fetchOrquestrator.get(itemKey).scheduleFetch(fetchType, param),
-          );
-        }
-      }
-
-      return results;
     }
+
+    return multiplePayloads ? results : results[0]!;
   }
 
   async function awaitFetch(
-    params: FetchParams,
-  ): Promise<{ data: null; error: Error } | { data: ItemState; error: null }> {
+    params: ItemPayload,
+  ): Promise<{ data: null; error: NError } | { data: ItemState; error: null }> {
     const itemId = getItemKey(params);
 
-    const fetchOrquestratorItem = fetchOrquestrator.get(itemId);
-
-    const wasAborted = await fetchOrquestratorItem.awaitFetch(params);
+    const wasAborted = await fetchOrquestrator.get(itemId).awaitFetch(params);
 
     if (wasAborted) {
       return { data: null, error: errorNormalizer(new Error('Aborted')) };
@@ -235,7 +228,7 @@ export function newTSDFCollectionStore<
   }
 
   function getItemsKeyArray(
-    params: FetchParams[] | FilterItemsFn | FetchParams,
+    params: ItemPayload[] | FilterItemsFn | ItemPayload,
   ): string[] {
     const items = store.state;
 
@@ -243,11 +236,7 @@ export function newTSDFCollectionStore<
       return params.map(getItemKey);
     } else if (typeof params === 'function') {
       return filterAndMap(Object.entries(items), ([itemKey, item], ignore) => {
-        if (item && params(item.payload, item.data)) {
-          return itemKey;
-        }
-
-        return ignore;
+        return item && params(item.payload, item.data) ? itemKey : ignore;
       });
     } else {
       return [getItemKey(params)];
@@ -261,10 +250,10 @@ export function newTSDFCollectionStore<
   const invalidationWasTriggered = new Set<string>();
 
   function invalidateData(
-    fetchParams: FetchParams | FetchParams[] | FilterItemsFn,
+    itemPayload: ItemPayload | ItemPayload[] | FilterItemsFn,
     priority: 'highPriority' | 'lowPriority' = 'highPriority',
   ) {
-    const itemsKey = getItemsKeyArray(fetchParams);
+    const itemsKey = getItemsKeyArray(itemPayload);
 
     for (const itemKey of itemsKey) {
       store.produceState(
@@ -284,13 +273,13 @@ export function newTSDFCollectionStore<
   }
 
   function getItemState(
-    fetchParam: FetchParams,
+    fetchParam: ItemPayload,
   ): CollectionItem | undefined | null;
   function getItemState(
-    fetchParams: FetchParams[] | FilterItemsFn,
+    fetchParams: ItemPayload[] | FilterItemsFn,
   ): CollectionItem[];
   function getItemState(
-    params: FetchParams | FetchParams[] | FilterItemsFn,
+    params: ItemPayload | ItemPayload[] | FilterItemsFn,
   ): CollectionItem | CollectionItem[] | undefined | null {
     if (typeof params === 'function' || Array.isArray(params)) {
       const itemsId = getItemsKeyArray(params);
@@ -303,14 +292,14 @@ export function newTSDFCollectionStore<
     return store.state[getItemKey(params)];
   }
 
-  function useMultipleItems<Selected = ItemState | null, QueryData = undefined>(
-    queries: readonly MultipleItemsQuery<FetchParams, QueryData>[],
+  function useMultipleItems<Selected = ItemState | null>(
+    queries: readonly ItemPayload[],
     {
       selector,
       omitPayload,
       returnIdleStatus,
       returnRefetchingStatus,
-      disableRefetchOnMount,
+      disableRefetchOnMount = globalDisableRefetchOnMount,
     }: {
       selector?: (data: ItemState | null) => Selected;
       omitPayload?: boolean;
@@ -321,17 +310,12 @@ export function newTSDFCollectionStore<
   ) {
     type QueryWithId = {
       itemKey: string;
-      payload: FetchParams;
-      queryData: QueryData;
+      payload: ItemPayload;
     };
 
-    const queriesWithId = useMemo((): QueryWithId[] => {
-      return queries.map((item) => {
-        return {
-          itemKey: getItemKey(item.fetchParams),
-          payload: item.fetchParams,
-          queryData: item.queryData as QueryData,
-        };
+    const queriesWithId = useDeepMemo((): QueryWithId[] => {
+      return queries.map((payload) => {
+        return { itemKey: getItemKey(payload), payload };
       });
     }, [queries]);
 
@@ -342,48 +326,34 @@ export function newTSDFCollectionStore<
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const storeStateSelector = useCallback(
+    const resultSelector = useCallback(
       (state: CollectionState) => {
         return queriesWithId.map(
           ({
             itemKey,
             payload,
-            queryData,
-          }): {
-            result: TSFDUseCollectionItemReturn<Selected, ItemPayload, Error>;
-            queryData: QueryData;
-          } => {
+          }): TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> => {
             const item = state[itemKey];
 
             if (item === null) {
               return {
-                result: {
-                  itemStateKey: itemKey,
-                  status: 'deleted',
-                  data: dataSelector(null),
-                  error: null,
-                  payload: omitPayload
-                    ? undefined
-                    : getCollectionItemPayload(payload),
-                  isLoading: false,
-                },
-                queryData,
+                itemStateKey: itemKey,
+                status: 'deleted',
+                data: dataSelector(null),
+                error: null,
+                payload: omitPayload ? undefined : payload,
+                isLoading: false,
               };
             }
 
             if (!item) {
               return {
-                result: {
-                  itemStateKey: itemKey,
-                  status: returnIdleStatus ? 'idle' : 'loading',
-                  data: dataSelector(null),
-                  error: null,
-                  payload: omitPayload
-                    ? undefined
-                    : getCollectionItemPayload(payload),
-                  isLoading: returnIdleStatus ? false : true,
-                },
-                queryData,
+                itemStateKey: itemKey,
+                status: returnIdleStatus ? 'idle' : 'loading',
+                data: dataSelector(null),
+                error: null,
+                payload: omitPayload ? undefined : payload,
+                isLoading: returnIdleStatus ? false : true,
               };
             }
 
@@ -394,15 +364,12 @@ export function newTSDFCollectionStore<
             }
 
             return {
-              result: {
-                itemStateKey: itemKey,
-                status,
-                data: dataSelector(item.data),
-                error: item.error,
-                isLoading: status === 'loading',
-                payload: omitPayload ? undefined : item.payload,
-              },
-              queryData,
+              itemStateKey: itemKey,
+              status,
+              data: dataSelector(item.data),
+              error: item.error,
+              isLoading: status === 'loading',
+              payload: omitPayload ? undefined : item.payload,
             };
           },
         );
@@ -416,7 +383,7 @@ export function newTSDFCollectionStore<
       ],
     );
 
-    const storeState = store.useSelector(storeStateSelector, {
+    const storeState = store.useSelector(resultSelector, {
       equalityFn: deepEqual,
       useExternalDeps: true,
     });
@@ -438,12 +405,13 @@ export function newTSDFCollectionStore<
           if (disableRefetchOnMount) {
             const itemState = getItemState(payload);
 
-            if (!itemState || itemState.refetchOnMount) {
-              scheduleFetch('lowPriority', payload);
-            }
-          } else {
-            scheduleFetch('lowPriority', payload);
+            // FIX: add was loaded?
+            const shouldFetch = !itemState || itemState.refetchOnMount;
+
+            if (!shouldFetch) return;
           }
+
+          scheduleFetch('lowPriority', payload);
         }
       }
     }, [disableRefetchOnMount, queriesWithId]);
@@ -452,29 +420,30 @@ export function newTSDFCollectionStore<
   }
 
   function useItem<Selected = ItemState | null>(
-    fetchParam: FetchParams | undefined | false,
-    props: {
+    payload: ItemPayload | undefined | false | null,
+    options: {
       selector?: (data: ItemState | null) => Selected;
       omitPayload?: boolean;
-      ignoreRefreshingStatus?: boolean;
+      returnRefetchingStatus?: boolean;
       disableRefetchOnMount?: boolean;
       ensureIsLoaded?: boolean;
     } = {},
   ) {
-    const { selector, ensureIsLoaded } = props;
+    const { selector, ensureIsLoaded } = options;
 
-    const memoizedFetchParam = useDeepMemo(() => fetchParam, [fetchParam]);
-
-    const queries = useMemo(
-      () => (memoizedFetchParam ? [{ fetchParams: memoizedFetchParam }] : []),
-      [memoizedFetchParam],
+    const query = useMemo(
+      () =>
+        payload === false || payload === null || payload === undefined
+          ? []
+          : [payload],
+      [payload],
     );
 
-    const item = useMultipleItems(queries, props);
+    const item = useMultipleItems(query, options);
 
     const result = useMemo(
-      (): TSFDUseCollectionItemReturn<Selected, ItemPayload, Error> =>
-        item[0]?.result ?? {
+      (): TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> =>
+        item[0] ?? {
           payload: undefined,
           data: selector ? selector(null) : (null as Selected),
           error: null,
@@ -488,10 +457,10 @@ export function newTSDFCollectionStore<
 
     const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
       ensureIsLoaded,
-      !!memoizedFetchParam,
+      !!payload,
       () => {
-        if (memoizedFetchParam) {
-          scheduleFetch('highPriority', memoizedFetchParam);
+        if (payload) {
+          scheduleFetch('highPriority', payload);
         }
       },
     );
@@ -512,7 +481,7 @@ export function newTSDFCollectionStore<
   }
 
   function startMutation(
-    fetchParams: FetchParams | FetchParams[] | FilterItemsFn,
+    fetchParams: ItemPayload | ItemPayload[] | FilterItemsFn,
   ) {
     const itemKeys = getItemsKeyArray(fetchParams);
 
@@ -529,7 +498,7 @@ export function newTSDFCollectionStore<
     };
   }
 
-  function addItemToState(fetchParams: FetchParams, data: ItemState) {
+  function addItemToState(fetchParams: ItemPayload, data: ItemState) {
     const itemKey = getItemKey(fetchParams);
 
     store.produceState(
@@ -539,7 +508,7 @@ export function newTSDFCollectionStore<
           status: 'success',
           refetchOnMount: false,
           error: null,
-          payload: getCollectionItemPayload(fetchParams),
+          payload: serializableClone(fetchParams),
         };
       },
       { action: { type: 'create-item-state', payload: fetchParams } },
@@ -547,19 +516,22 @@ export function newTSDFCollectionStore<
   }
 
   function deleteItemState(
-    fetchParams: FetchParams | FetchParams[] | FilterItemsFn,
+    fetchParams: ItemPayload | ItemPayload[] | FilterItemsFn,
   ) {
     const itemKeys = getItemsKeyArray(fetchParams);
 
-    store.produceState((draftState) => {
-      for (const itemKey of itemKeys) {
-        draftState[itemKey] = null;
-      }
-    });
+    store.produceState(
+      (draftState) => {
+        for (const itemKey of itemKeys) {
+          draftState[itemKey] = null;
+        }
+      },
+      { action: { type: 'delete-item-state', payload: fetchParams } },
+    );
   }
 
   function updateItemState(
-    fetchParams: FetchParams | FetchParams[] | FilterItemsFn,
+    fetchParams: ItemPayload | ItemPayload[] | FilterItemsFn,
     produceNewData: (
       draftData: ItemState,
       collectionItem: CollectionItem,
@@ -622,20 +594,8 @@ export function newTSDFCollectionStore<
   };
 }
 
-export type MultipleItemsQuery<
-  FetchParams extends ValidFetchParams,
-  QueryData = undefined,
-> = {
-  fetchParams: FetchParams;
-} & (QueryData extends undefined
-  ? { queryData?: undefined }
-  : { queryData: QueryData });
-
 export type TSDFCollectionStore<
   ItemState extends ValidStoreState,
-  Error,
-  FetchParams extends ValidFetchParams,
-  ItemPayload,
-> = ReturnType<
-  typeof newTSDFCollectionStore<ItemState, Error, FetchParams, ItemPayload>
->;
+  NError,
+  FetchParams extends ValidPayload,
+> = ReturnType<typeof newTSDFCollectionStore<ItemState, NError, FetchParams>>;
