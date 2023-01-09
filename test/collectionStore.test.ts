@@ -5,6 +5,8 @@ import {
   DefaultCollectionState,
 } from './utils/storeUtils';
 
+const createTestEnv = createDefaultCollectionStore;
+
 async function waitInitializationFetch(store: any) {
   store.scheduleFetch('lowPriority', '1');
   await sleep(35);
@@ -14,8 +16,8 @@ const defaultTodo = { title: 'todo', completed: false };
 
 describe('test helpers', () => {
   test('start with store initialized state', () => {
-    const { store: collectionStore } = createDefaultCollectionStore({
-      serverInitialData: { '1': defaultTodo, '2': defaultTodo },
+    const { store: collectionStore } = createTestEnv({
+      initialServerData: { '1': defaultTodo, '2': defaultTodo },
       useLoadedSnapshot: true,
     });
 
@@ -39,7 +41,7 @@ describe('test helpers', () => {
 });
 
 describe('fetch lifecicle', () => {
-  const { serverMock, store: collectionStore } = createDefaultCollectionStore();
+  const { serverMock, store: collectionStore } = createTestEnv();
 
   test('fetch resource', async () => {
     expect(collectionStore.store.state).toEqual<DefaultCollectionState>({});
@@ -128,7 +130,7 @@ describe('fetch lifecicle', () => {
 test.concurrent(
   'multiple low priority fetchs at same time trigger only one fetch',
   async () => {
-    const { serverMock, store: collectionStore } = createDefaultCollectionStore();
+    const { serverMock, store: collectionStore } = createTestEnv();
 
     collectionStore.scheduleFetch('lowPriority', '1');
     collectionStore.scheduleFetch('lowPriority', '1');
@@ -162,7 +164,7 @@ test.concurrent(
 );
 
 test.concurrent('initialization fetch', async () => {
-  const { store: collectionStore } = createDefaultCollectionStore();
+  const { store: collectionStore } = createTestEnv();
 
   await waitInitializationFetch(collectionStore);
 
@@ -178,7 +180,7 @@ test.concurrent('initialization fetch', async () => {
 });
 
 test.concurrent('await fetch', async () => {
-  const { serverMock, store: collectionStore } = createDefaultCollectionStore();
+  const { serverMock, store: collectionStore } = createTestEnv();
 
   await waitInitializationFetch(collectionStore);
 
@@ -208,8 +210,8 @@ test.concurrent('await fetch', async () => {
 test.concurrent(
   'multiple fetchs with different payloads not cancel each other, but cancel same payload fetchs',
   async () => {
-    const { serverMock, store: collectionStore } = createDefaultCollectionStore({
-      serverInitialData: {
+    const { serverMock, store: collectionStore } = createTestEnv({
+      initialServerData: {
         '1': defaultTodo,
         '2': defaultTodo,
         '3': defaultTodo,
@@ -262,7 +264,7 @@ test.concurrent(
 );
 
 describe('update state functions', async () => {
-  const serverInitialData = {
+  const initialServerData = {
     '1': { ...defaultTodo, completed: true },
     '2': { ...defaultTodo, completed: true },
     '3': defaultTodo,
@@ -272,33 +274,33 @@ describe('update state functions', async () => {
 
   describe('updateItemState', () => {
     test('update state of one item', () => {
-      const { store: collectionStore } = createDefaultCollectionStore({
-        serverInitialData,
+      const { store } = createTestEnv({
+        initialServerData,
         useLoadedSnapshot: true,
       });
 
-      expect(collectionStore.getItemState('1')?.data).toEqual({
+      expect(store.getItemState('1')?.data).toEqual({
         completed: true,
         title: 'todo',
       });
 
-      collectionStore.updateItemState('1', (data) => {
+      store.updateItemState('1', (data) => {
         data.title = 'new title';
       });
 
-      expect(collectionStore.getItemState('1')?.data).toEqual({
+      expect(store.getItemState('1')?.data).toEqual({
         completed: true,
         title: 'new title',
       });
     });
 
     test('update multiple itens state', () => {
-      const { store: collectionStore } = createDefaultCollectionStore({
-        serverInitialData,
+      const { store } = createTestEnv({
+        initialServerData,
         useLoadedSnapshot: true,
       });
 
-      collectionStore.updateItemState(['1', '2'], () => {
+      store.updateItemState(['1', '2'], () => {
         return {
           title: 'new title 2',
           completed: false,
@@ -306,7 +308,7 @@ describe('update state functions', async () => {
       });
 
       expect(
-        collectionStore.getItemState(['1', '2', '3'])?.map((item) => {
+        store.getItemState(['1', '2', '3']).map((item) => {
           return { id: item.payload, ...item.data };
         }),
       ).toEqual([
@@ -318,12 +320,12 @@ describe('update state functions', async () => {
     });
 
     test('update multiple itens state with filter fn', () => {
-      const { store: collectionStore } = createDefaultCollectionStore({
-        serverInitialData,
+      const { store } = createTestEnv({
+        initialServerData,
         useLoadedSnapshot: true,
       });
 
-      collectionStore.updateItemState(
+      store.updateItemState(
         (_, data) => !!data?.completed,
         (data) => {
           data.completed = false;
@@ -332,7 +334,7 @@ describe('update state functions', async () => {
       );
 
       expect(
-        collectionStore
+        store
           .getItemState(() => true)
           .map((item) => {
             return { id: item.payload, ...item.data };
@@ -347,23 +349,23 @@ describe('update state functions', async () => {
     });
 
     test('create if not exist', () => {
-      const { store: collectionStore } = createDefaultCollectionStore({
-        serverInitialData,
+      const { store } = createTestEnv({
+        initialServerData,
         useLoadedSnapshot: true,
       });
 
       let storeUpdates = 0;
-      collectionStore.store.subscribe(() => {
+      store.store.subscribe(() => {
         storeUpdates++;
       });
 
-      collectionStore.updateItemState(
+      store.updateItemState(
         '6',
         (data) => {
           data.title = 'item 6';
         },
         () => {
-          collectionStore.addItemToState('6', {
+          store.addItemToState('6', {
             title: 'item 6',
             completed: false,
           });
@@ -372,7 +374,7 @@ describe('update state functions', async () => {
 
       expect(storeUpdates).toEqual(1);
 
-      expect(collectionStore.getItemState('6')).toEqual({
+      expect(store.getItemState('6')).toEqual({
         data: { completed: false, title: 'item 6' },
         error: null,
         payload: '6',
@@ -382,27 +384,27 @@ describe('update state functions', async () => {
     });
 
     test('create multiple if not exist', () => {
-      const { store: collectionStore } = createDefaultCollectionStore({
-        serverInitialData,
+      const { store } = createTestEnv({
+        initialServerData,
         useLoadedSnapshot: true,
       });
 
       let storeUpdates = 0;
-      collectionStore.store.subscribe(() => {
+      store.store.subscribe(() => {
         storeUpdates++;
       });
 
-      collectionStore.updateItemState(
+      store.updateItemState(
         (id) => id === '?',
         (data) => {
           data.title = 'item 6';
         },
         () => {
-          collectionStore.addItemToState('6', {
+          store.addItemToState('6', {
             title: 'item 6',
             completed: false,
           });
-          collectionStore.addItemToState('7', {
+          store.addItemToState('7', {
             title: 'item 7',
             completed: false,
           });
@@ -411,7 +413,7 @@ describe('update state functions', async () => {
 
       expect(storeUpdates).toEqual(1);
 
-      expect(collectionStore.getItemState(['6', '7', '5'])).toEqual([
+      expect(store.getItemState(['6', '7', '5'])).toEqual([
         {
           data: { completed: false, title: 'item 6' },
           error: null,
@@ -438,8 +440,8 @@ describe('update state functions', async () => {
   });
 
   test('addItemToState', () => {
-    const { store: collectionStore } = createDefaultCollectionStore({
-      serverInitialData,
+    const { store: collectionStore } = createTestEnv({
+      initialServerData,
       useLoadedSnapshot: true,
     });
 
@@ -460,17 +462,17 @@ describe('update state functions', async () => {
   });
 
   test('deleteItemState', () => {
-    const { store: collectionStore } = createDefaultCollectionStore({
-      serverInitialData,
+    const { store } = createTestEnv({
+      initialServerData,
       useLoadedSnapshot: true,
     });
 
-    expect(collectionStore.getItemState('1')).toBeDefined();
+    expect(store.getItemState('1')).toBeDefined();
 
-    collectionStore.deleteItemState('1');
+    store.deleteItemState('1');
 
-    expect(collectionStore.getItemState('1')).toBeNull();
+    expect(store.getItemState('1')).toBeNull();
 
-    expect(collectionStore.scheduleFetch('highPriority', '1')).toBe('started');
+    expect(store.scheduleFetch('highPriority', '1')).toBe('started');
   });
 });

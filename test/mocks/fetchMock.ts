@@ -2,6 +2,7 @@
 import produce from 'immer';
 import { randomInt } from '../utils/math';
 import { sleep } from '../utils/sleep';
+import { simplifyArraySnapshot } from '../utils/storeUtils';
 
 export function mockServerResource<Data, S = Data>({
   initialData,
@@ -23,6 +24,15 @@ export function mockServerResource<Data, S = Data>({
   let error: Error | string | null = null;
   let numOfFetchs = 0;
   let waitNextFetchCompleteCall = 0;
+  let onUpdateServerData:
+    | ((prevAndData: { prev: Data; data: Data }) => void)
+    | null = null;
+  let fetchs: {
+    result?: Data;
+    error?: string;
+    params: string;
+    started: number;
+  }[] = [];
 
   let startTime = Date.now();
 
@@ -31,9 +41,11 @@ export function mockServerResource<Data, S = Data>({
     timeout = randomTimeout ? [30, 100] : 30;
     lastTimeout = timeout;
     lastTimeoutMs = 0;
+    fetchs = [];
     error = null;
     numOfFetchs = 0;
     startTime = Date.now();
+    onUpdateServerData = null;
     waitNextFetchCompleteCall = 0;
   }
 
@@ -86,7 +98,12 @@ export function mockServerResource<Data, S = Data>({
         throw new Error('No data');
       }
 
+      fetchs.push({ started: numOfFetchs, result: response as any, params });
+
       return response;
+    } catch (e) {
+      fetchs.push({ started: numOfFetchs, error: JSON.stringify(e), params });
+      throw e;
     } finally {
       fetchsInProgress.delete(fetchId);
       numOfFetchs += 1;
@@ -98,11 +115,19 @@ export function mockServerResource<Data, S = Data>({
   }
 
   function mutateData(newData: Partial<Data>) {
+    const prev = data;
     data = { ...data, ...newData };
+    setTimeout(() => {
+      onUpdateServerData?.({ prev, data });
+    }, 8);
   }
 
   function produceData(recipe: (draft: Data) => void) {
+    const prev = data;
     data = produce(data, recipe);
+    setTimeout(() => {
+      onUpdateServerData?.({ prev, data });
+    }, 8);
   }
 
   function setFetchDuration(newTimeout: typeof timeout) {
@@ -119,16 +144,14 @@ export function mockServerResource<Data, S = Data>({
   }
 
   async function emulateMutation(
-    newData: Partial<Data>,
+    newData: Partial<Data> | ((draft: Data) => void),
     {
       duration = 60,
-      setDataAt = duration * 0.7,
-      triggerRTU,
+      setDataAt = duration * 0.8,
       emulateError,
     }: {
       duration?: number;
       setDataAt?: number;
-      triggerRTU?: boolean;
       emulateError?: Error | string;
     } = {},
   ) {
@@ -144,7 +167,11 @@ export function mockServerResource<Data, S = Data>({
       throw new Error('No data');
     }
 
-    data = { ...data, ...newData };
+    if (typeof newData === 'function') {
+      produceData(newData);
+    } else {
+      mutateData(newData);
+    }
 
     await sleep(duration - setDataAt);
 
@@ -195,6 +222,11 @@ export function mockServerResource<Data, S = Data>({
     },
     reset,
     setFetchError,
+    addOnUpdateServerData(
+      listener: (prevAndData: { prev: Data; data: Data }) => void,
+    ) {
+      onUpdateServerData = listener;
+    },
     emulateMutation,
     undoTimeoutChange,
     get numOfFetchs() {
@@ -209,6 +241,13 @@ export function mockServerResource<Data, S = Data>({
     numOfFetchsFromHere() {
       const currentNumOfFetchs = numOfFetchs;
       return () => numOfFetchs - currentNumOfFetchs;
+    },
+    fetchsSequence(
+      simplifyArray: 'all' | { firstNItems: number } | 'length' = {
+        firstNItems: 1,
+      },
+    ) {
+      return simplifyArraySnapshot(fetchs, simplifyArray);
     },
   };
 }

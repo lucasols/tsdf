@@ -1,7 +1,9 @@
+import { deepEqual } from 't-state';
 import {
   newTSDFListQueryStore,
   TSFDListQueryState,
 } from '../../src/listQueryStore';
+import { getCacheId } from '../../src/utils/getCacheId';
 import { mockServerResource } from '../mocks/fetchMock';
 import { pick } from './objectUtils';
 import { normalizeError, StoreError } from './storeUtils';
@@ -17,24 +19,33 @@ export type Tables = {
   [id: string]: Row[];
 };
 
-type FetchListParams = { tableId: string };
+export type ListQueryParams = {
+  tableId: string;
+  filters?: { idIsGreaterThan?: number };
+};
 
 export type DefaultListQueryState = TSFDListQueryState<
   Row,
   StoreError,
-  FetchListParams
+  ListQueryParams
 >;
 
 export function createDefaultListQueryStore({
   initialServerData = {},
-  useLoadedSnapshots,
+  useLoadedSnapshot,
   defaultQuerySize,
   debug,
+  emulateRTU,
 }: {
   initialServerData?: Tables;
-  useLoadedSnapshots?: { tables?: string[]; items?: string[] };
+  useLoadedSnapshot?: {
+    tables?: string[];
+    items?: string[];
+    queries?: ListQueryParams[];
+  };
   defaultQuerySize?: number;
   debug?: never;
+  emulateRTU?: boolean;
 } = {}) {
   const serverMock = mockServerResource<Tables, Row[] | Row>({
     initialData: initialServerData,
@@ -63,9 +74,9 @@ export function createDefaultListQueryStore({
   const listQueryStore = newTSDFListQueryStore<
     Row,
     StoreError,
-    FetchListParams
+    ListQueryParams
   >({
-    fetchListFn: async ({ tableId }, size) => {
+    fetchListFn: async ({ tableId, filters }, size) => {
       let result = await serverMock.fetch(tableId);
       let hasMore = false;
 
@@ -75,6 +86,10 @@ export function createDefaultListQueryStore({
 
       hasMore = result.length > size;
       result = result.slice(0, size);
+
+      if (filters?.idIsGreaterThan) {
+        result = result.filter((item) => item.id > filters.idIsGreaterThan!);
+      }
 
       return {
         items: result.map((item) => ({
@@ -95,12 +110,20 @@ export function createDefaultListQueryStore({
     },
     errorNormalizer: normalizeError,
     defaultQuerySize,
+    syncMutationsAndInvalidations: {
+      syncItemAndQuery(itemId, query) {
+        return query.tableId === itemId.split('||')[0];
+      },
+      syncQueries(query1, query2) {
+        return query1.tableId === query2.tableId;
+      },
+    },
   });
 
-  if (useLoadedSnapshots) {
-    const tablesToSnapshot = useLoadedSnapshots.tables ?? [];
+  if (useLoadedSnapshot) {
+    const tablesToSnapshot = useLoadedSnapshot.tables ?? [];
 
-    if (useLoadedSnapshots.tables) {
+    if (useLoadedSnapshot.tables) {
       const allIdsExist = tablesToSnapshot.every((tableId) =>
         initialServerData.hasOwnProperty(tableId),
       );
@@ -146,8 +169,43 @@ export function createDefaultListQueryStore({
       }
     }
 
-    if (useLoadedSnapshots.items) {
-      for (const itemId of useLoadedSnapshots.items) {
+    for (const query of useLoadedSnapshot.queries ?? []) {
+      const queryId = getCacheId(query);
+
+      const { tableId } = query;
+
+      const items =
+        initialServerData[query.tableId]?.filter((item) => {
+          if (query.filters?.idIsGreaterThan) {
+            return item.id > query.filters.idIsGreaterThan;
+          }
+
+          return true;
+        }) ?? [];
+
+      state.queries[queryId] = {
+        status: 'success',
+        items: items.map((item) => getItemId({ tableId, id: item.id })),
+        hasMore: false,
+        payload: query,
+        wasLoaded: true,
+        refetchOnMount: false,
+        error: null,
+      };
+
+      for (const item of items) {
+        state.items[getItemId({ tableId, id: item.id })] = item;
+        state.itemQueries[getItemId({ tableId, id: item.id })] = {
+          status: 'success',
+          error: null,
+          refetchOnMount: false,
+          wasLoaded: true,
+        };
+      }
+    }
+
+    if (useLoadedSnapshot.items) {
+      for (const itemId of useLoadedSnapshot.items) {
         const itemData = initialServerData[itemId.split('||')[0]!]?.find(
           (item) => item.id === Number(itemId.split('||')[1]),
         );
@@ -178,7 +236,7 @@ export function createDefaultListQueryStore({
     });
   }
 
-  function forceListUpdate(params: FetchListParams) {
+  function forceListUpdate(params: ListQueryParams) {
     const scheduleResult = listQueryStore.scheduleListQueryFetch(
       'highPriority',
       params,
@@ -187,6 +245,16 @@ export function createDefaultListQueryStore({
     if (scheduleResult !== 'started') {
       throw new Error(`error forceListUpdate: ${scheduleResult}`);
     }
+  }
+
+  if (emulateRTU) {
+    serverMock.addOnUpdateServerData(({ prev, data }) => {
+      for (const tableId of Object.keys(data)) {
+        if (!deepEqual(prev[tableId], data[tableId])) {
+          listQueryStore.invalidateQuery({ tableId });
+        }
+      }
+    });
   }
 
   return {

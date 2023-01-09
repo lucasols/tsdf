@@ -21,7 +21,7 @@ module.exports = {
   env: {
     browser: true,
   },
-  plugins: ['@typescript-eslint', '@lucasols/extended-lint'],
+  plugins: ['@typescript-eslint', '@lucasols/extended-lint', 'vitest'],
 
   rules: {
     'no-warning-comments': [ERROR_IN_CI, { terms: ['FIX:'] }],
@@ -100,6 +100,10 @@ module.exports = {
     '@typescript-eslint/no-non-null-assertion': OFF,
     '@typescript-eslint/no-empty-function': OFF,
     '@typescript-eslint/no-explicit-any': OFF,
+
+    /* vitest */
+    'vitest/expect-expect': ERROR_IN_CI_ONLY,
+    'vitest/no-identical-title': ERROR_IN_CI,
   },
   extends: [
     'eslint:recommended',

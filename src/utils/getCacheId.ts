@@ -1,3 +1,4 @@
+import { filterAndMap } from './filterAndMap';
 import { isObject } from './isObject';
 
 export function getCacheId(input: any) {
@@ -8,7 +9,11 @@ export function getCacheId(input: any) {
 
 function orderedProps(obj: any) {
   // eslint-disable-next-line no-restricted-syntax
-  return Object.keys(obj)
-    .sort()
-    .map((k) => ({ [k]: obj[k] }));
+  return filterAndMap(Object.keys(obj).sort(), (k, ignore) => {
+    const value = obj[k];
+
+    if (value === undefined) return ignore;
+
+    return { [k]: obj[k] };
+  });
 }

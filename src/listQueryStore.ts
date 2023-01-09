@@ -27,7 +27,7 @@ type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
 
 type TSDFItemQuery<NError> = {
   error: NError | null;
-  status: QueryStatus;
+  status: Exclude<QueryStatus, 'loadingMore'>;
   wasLoaded: boolean;
   refetchOnMount: boolean;
 };
@@ -65,6 +65,8 @@ type FetchListFnReturn<ItemState extends ValidStoreState> = {
   hasMore: boolean;
 };
 
+const noFetchFnError = 'No fetchItemFn was provided';
+
 export function newTSDFListQueryStore<
   ItemState extends ValidStoreState,
   NError,
@@ -80,6 +82,7 @@ export function newTSDFListQueryStore<
   lowPriorityThrottleMs,
   mediumPriorityThrottleMs,
   getDynamicRealtimeThrottleMs,
+  syncMutationsAndInvalidations,
 }: {
   debugName?: string;
   fetchListFn: (
@@ -90,6 +93,10 @@ export function newTSDFListQueryStore<
   errorNormalizer: (exception: unknown) => NError;
   defaultQuerySize?: number;
   disableRefetchOnWindowFocus?: boolean;
+  syncMutationsAndInvalidations?: {
+    syncQueries: (query1: QueryPayload, query2: QueryPayload) => boolean;
+    syncItemAndQuery: (itemId: string, query: QueryPayload) => boolean;
+  };
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
@@ -193,12 +200,20 @@ export function newTSDFListQueryStore<
             draft.items[id] = data;
             query.items.push(String(id));
 
-            draft.itemQueries[id] = {
-              error: null,
-              refetchOnMount: false,
-              status: 'success',
-              wasLoaded: true,
-            };
+            const itemQuery = draft.itemQueries[id];
+
+            if (
+              !itemQuery ||
+              (itemQuery.status !== 'loading' &&
+                itemQuery.status !== 'refetching')
+            ) {
+              draft.itemQueries[id] = {
+                error: null,
+                refetchOnMount: false,
+                status: 'success',
+                wasLoaded: true,
+              };
+            }
           }
         },
         {
@@ -242,19 +257,23 @@ export function newTSDFListQueryStore<
     return store.state.queries[getQueryKey(params)];
   }
 
-  function getItemState(id: string[]): { id: string; data: ItemState }[];
+  function getItemState(
+    id: string[] | FilterItemFn,
+  ): { id: string; data: ItemState }[];
   function getItemState(id: string): ItemState | null | undefined;
   function getItemState(
-    id: string | string[],
+    id: string | string[] | FilterItemFn,
   ): ItemState | null | undefined | { id: string; data: ItemState }[] {
-    if (Array.isArray(id)) {
-      return filterAndMap(id, (itemId, ignore) => {
-        const item = store.state.items[itemId];
-        return !item ? ignore : { id: itemId, data: item };
-      });
-    } else {
+    if (typeof id === 'string') {
       return store.state.items[id];
     }
+
+    const itemsId = getItemsIdArray(id);
+
+    return filterAndMap(itemsId, (itemId, ignore) => {
+      const item = store.state.items[itemId];
+      return !item ? ignore : { id: itemId, data: item };
+    });
   }
 
   const fetchListOrquestrator = createCollectionFetchOrquestrator({
@@ -356,22 +375,67 @@ export function newTSDFListQueryStore<
         };
   }
 
-  type FilterQueryFn = (params: QueryPayload, data: Query) => boolean;
+  // FIX: add tests
+  async function awaitItemFetch(
+    itemId: string,
+    size = defaultQuerySize,
+  ): Promise<
+    | { data: null; error: NError }
+    | {
+        data: ItemState;
+        error: null;
+      }
+  > {
+    if (!fetchItemOrquestrator) throw new Error(noFetchFnError);
+
+    const wasAborted = await fetchItemOrquestrator
+      .get(itemId)
+      .awaitFetch(itemId);
+
+    if (wasAborted) {
+      return { data: null, error: errorNormalizer(new Error('Aborted')) };
+    }
+
+    const itemData = store.state.items[itemId];
+    const itemQuery = store.state.itemQueries[itemId];
+
+    if (!itemQuery || !itemData) {
+      return { data: null, error: errorNormalizer(new Error('Not found')) };
+    }
+
+    return itemQuery.error
+      ? { data: null, error: itemQuery.error }
+      : { data: itemData, error: null };
+  }
+
+  type FilterQueryFn = (
+    params: QueryPayload,
+    data: Query,
+    queryKey: string,
+  ) => boolean;
 
   function getQueriesKeyArray(
-    params: QueryPayload | QueryPayload[] | FilterQueryFn,
-  ): string[] {
-    if (Array.isArray(params)) {
-      return params.map(getQueryKey);
-    } else if (typeof params === 'function') {
+    payloads: QueryPayload | QueryPayload[] | FilterQueryFn,
+  ): { key: string; payload: QueryPayload }[] {
+    if (Array.isArray(payloads)) {
+      return payloads.map((payload) => ({
+        key: getQueryKey(payload),
+        payload,
+      }));
+    } else if (typeof payloads === 'function') {
       return filterAndMap(
         Object.entries(store.state.queries),
         ([queryKey, query], ignore) => {
-          return params(query.payload, query) ? queryKey : ignore;
+          return payloads(query.payload, query, queryKey)
+            ? {
+                key: queryKey,
+                payload: query.payload,
+              }
+            : ignore;
         },
       );
     } else {
-      return [getQueryKey(params)];
+      return [{ key: getQueryKey(payloads), payload: payloads }];
     }
   }
 
@@ -385,23 +449,53 @@ export function newTSDFListQueryStore<
   function invalidateQuery(
     queryPayload: QueryPayload | QueryPayload[] | FilterQueryFn,
     priority: 'highPriority' | 'lowPriority' = 'highPriority',
+    ignoreInvalidationSync = false,
   ) {
     const queriesKey = getQueriesKeyArray(queryPayload);
 
-    for (const queryKey of queriesKey) {
+    for (const { key } of queriesKey) {
       store.produceState(
         (draft) => {
-          const query = draft.queries[queryKey];
+          const query = draft.queries[key];
 
           if (!query) return;
 
           query.refetchOnMount = true;
         },
-        { action: { type: 'invalidate-data', queryKey } },
+        { action: { type: 'invalidate-data', key } },
       );
 
-      queryInvalidationWasTriggered.delete(queryKey);
-      storeEvents.emit('invalidateQuery', { priority, queryKey });
+      queryInvalidationWasTriggered.delete(key);
+      storeEvents.emit('invalidateQuery', { priority, queryKey: key });
+    }
+
+    if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
+      invalidateItem(
+        (_, itemId) =>
+          queriesKey.some(({ payload }) => {
+            return syncMutationsAndInvalidations.syncItemAndQuery(
+              itemId,
+              payload,
+            );
+          }),
+        'highPriority',
+        true,
+      );
+
+      invalidateQuery(
+        (queryToInvalidatePayload, _, queryToInvalidateKey) =>
+          queriesKey.some((alreadyInvalidatedQueryPayload) => {
+            return (
+              queryToInvalidateKey !== alreadyInvalidatedQueryPayload.key &&
+              syncMutationsAndInvalidations.syncQueries(
+                alreadyInvalidatedQueryPayload.payload,
+                queryToInvalidatePayload,
+              )
+            );
+          }),
+        'highPriority',
+        true,
+      );
     }
   }
 
@@ -418,6 +512,8 @@ export function newTSDFListQueryStore<
       omitPayload,
       returnIdleStatus,
       returnRefetchingStatus,
+      // FIXLATER: add tests
+      loadSize,
       disableRefetchOnMount = globalDisableRefetchOnMount,
     }: {
       itemSelector?: (id: string, data: ItemState) => SelectedItem;
@@ -425,6 +521,7 @@ export function newTSDFListQueryStore<
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
+      loadSize?: number;
     } = {},
   ) {
     type QueryWithId = {
@@ -520,7 +617,7 @@ export function newTSDFListQueryStore<
             if (!shouldFetch) return;
           }
 
-          scheduleListQueryFetch('lowPriority', fetchParams);
+          scheduleListQueryFetch('lowPriority', fetchParams, loadSize);
         }
       }
     }, [disableRefetchOnMount, queriesWithId]);
@@ -537,6 +634,7 @@ export function newTSDFListQueryStore<
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
       ensureIsLoaded?: boolean;
+      loadSize?: number;
     } = {},
   ) {
     const { ensureIsLoaded } = options;
@@ -595,7 +693,7 @@ export function newTSDFListQueryStore<
     itemId: string,
   ): Promise<boolean> {
     if (!fetchItemOrquestrator) {
-      throw new Error('No fetchItemFn was provided');
+      throw new Error(noFetchFnError);
     }
 
     const isLoaded = !store.state.itemQueries[itemId]?.wasLoaded;
@@ -693,7 +791,7 @@ export function newTSDFListQueryStore<
     itemId: string | string[],
   ): ScheduleFetchResults | ScheduleFetchResults[] {
     if (!fetchItemOrquestrator) {
-      throw new Error('No fetchItemFn was provided');
+      throw new Error(noFetchFnError);
     }
 
     const fetchMultiple = Array.isArray(itemId);
@@ -733,9 +831,10 @@ export function newTSDFListQueryStore<
   function invalidateItem(
     itemId: string | string[] | FilterItemFn,
     priority: 'highPriority' | 'lowPriority' = 'highPriority',
+    ignoreInvalidationSync = false,
   ) {
     if (!fetchItemOrquestrator) {
-      throw new Error('No fetchItemFn was provided');
+      throw new Error(noFetchFnError);
     }
 
     const itemsId = getItemsIdArray(itemId);
@@ -754,6 +853,17 @@ export function newTSDFListQueryStore<
 
       itemInvalidationWasTriggered.delete(id);
       storeEvents.emit('invalidateItem', { priority, itemId: id });
+    }
+
+    if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
+      invalidateQuery(
+        (query) =>
+          itemsId.some((id) =>
+            syncMutationsAndInvalidations.syncItemAndQuery(id, query),
+          ),
+        'highPriority',
+        true,
+      );
     }
   }
 
@@ -927,6 +1037,55 @@ export function newTSDFListQueryStore<
     return useModifyResult(result);
   }
 
+  function updateItemState(
+    itemIds: string | string[] | FilterItemFn,
+    produceNewData: (draftData: ItemState, itemId: string) => void | ItemState,
+    ifNothingWasUpdated?: () => void,
+  ) {
+    const itemKeys = getItemsIdArray(itemIds);
+
+    store.batch(
+      () => {
+        let someItemWasUpdated = false as boolean;
+
+        store.produceState((draftState) => {
+          for (const itemId of itemKeys) {
+            const item = draftState.items[itemId];
+
+            if (!item) continue;
+
+            someItemWasUpdated = true;
+            const newData = produceNewData(item, itemId);
+
+            if (newData) {
+              draftState.items[itemId] = newData;
+            }
+          }
+        });
+
+        if (ifNothingWasUpdated && !someItemWasUpdated) {
+          ifNothingWasUpdated();
+        }
+      },
+      { type: 'update-item-state', item: itemKeys },
+    );
+  }
+
+  function addItemToState(itemId: string, data: ItemState) {
+    store.produceState(
+      (draftState) => {
+        draftState.items[itemId] = data;
+        draftState.itemQueries[itemId] = {
+          status: 'success',
+          wasLoaded: true,
+          refetchOnMount: false,
+          error: null,
+        };
+      },
+      { action: { type: 'create-item-state', itemId } },
+    );
+  }
+
   function deleteItemState(itemId: string | string[] | FilterItemFn) {
     const itemsId = getItemsIdArray(itemId);
 
@@ -935,19 +1094,37 @@ export function newTSDFListQueryStore<
         for (const itemKey of itemsId) {
           draftState.items[itemKey] = null;
           draftState.itemQueries[itemKey] = null;
+
+          for (const query of Object.values(draftState.queries)) {
+            if (query.items.includes(itemKey)) {
+              query.items = query.items.filter((i) => i !== itemKey);
+            }
+          }
         }
       },
       { action: { type: 'delete-item-state', itemId } },
     );
   }
 
+  if (!disableRefetchOnWindowFocus) {
+    function handleFocus() {
+      invalidateQuery(() => true, 'lowPriority');
+      invalidateItem(() => true, 'lowPriority');
+    }
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleFocus);
+  }
+
   return {
     store,
     scheduleListQueryFetch,
     getQueryState,
+    getQueryKey,
     deleteItemState,
     getItemState,
     loadMore,
+    awaitItemFetch,
     invalidateQuery,
     invalidateItem,
     scheduleItemFetch,
@@ -956,5 +1133,7 @@ export function newTSDFListQueryStore<
     useListQuery,
     useItem,
     useMultipleItems,
+    addItemToState,
+    updateItemState,
   };
 }

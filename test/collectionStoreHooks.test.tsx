@@ -19,7 +19,7 @@ describe('useMultipleItems', () => {
 
   const { serverMock, store: collectionStore } = createDefaultCollectionStore({
     randomTimeout: true,
-    serverInitialData: { '1': defaultTodo, '2': defaultTodo },
+    initialServerData: { '1': defaultTodo, '2': defaultTodo },
   });
   const renders1 = createRenderStore();
   const renders2 = createRenderStore();
@@ -168,7 +168,7 @@ describe('useMultipleItems isolated tests', () => {
   test('invalidate 1 item', async () => {
     const { store: collectionStore, serverMock } = createDefaultCollectionStore(
       {
-        serverInitialData,
+        initialServerData: serverInitialData,
         useLoadedSnapshot: true,
       },
     );
@@ -216,7 +216,7 @@ describe('useItem', async () => {
   });
 
   const { serverMock, store: collectionStore } = createDefaultCollectionStore({
-    serverInitialData: { '1': defaultTodo, '2': defaultTodo },
+    initialServerData: { '1': defaultTodo, '2': defaultTodo },
   });
 
   const renders1 = createRenderStore();
@@ -377,7 +377,7 @@ const serverInitialData = { '1': defaultTodo, '2': defaultTodo };
 describe('useItem isolated tests', () => {
   test.only('use deleted item', async () => {
     const { serverMock, store, shouldNotSkip } = createDefaultCollectionStore({
-      serverInitialData,
+      initialServerData: serverInitialData,
       useLoadedSnapshot: true,
     });
 
@@ -422,7 +422,7 @@ describe('useItem isolated tests', () => {
   test('use ensureIsLoaded prop', async () => {
     const { store: collectionStore, serverMock } = createDefaultCollectionStore(
       {
-        serverInitialData,
+        initialServerData: serverInitialData,
         useLoadedSnapshot: true,
       },
     );
@@ -454,7 +454,7 @@ describe('useItem isolated tests', () => {
   test('ignore refetchingStatus by default', async () => {
     const { store: collectionStore, serverMock } = createDefaultCollectionStore(
       {
-        serverInitialData,
+        initialServerData: serverInitialData,
         useLoadedSnapshot: true,
       },
     );
@@ -487,7 +487,7 @@ describe('useItem isolated tests', () => {
   test('use ensureIsLoaded prop with disabled', async () => {
     const { store: collectionStore, serverMock } = createDefaultCollectionStore(
       {
-        serverInitialData,
+        initialServerData: serverInitialData,
         useLoadedSnapshot: true,
       },
     );

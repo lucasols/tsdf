@@ -6,6 +6,7 @@ import {
 } from '../../src/collectionStore';
 import { newTSDFDocumentStore } from '../../src/documentStore';
 import { filterAndMap } from '../../src/utils/filterAndMap';
+import { isObject } from '../../src/utils/isObject';
 import { clampMin } from '../../src/utils/math';
 import { mockServerResource } from '../mocks/fetchMock';
 import { arrayWithPrev, arrayWithPrevAndIndex } from './arrayUtils';
@@ -88,12 +89,14 @@ export type DefaultCollectionStore = TSDFCollectionStore<
 >;
 
 export function createDefaultCollectionStore({
-  serverInitialData = { '1': { title: 'todo', completed: false } },
+  initialServerData: serverInitialData = {
+    '1': { title: 'todo', completed: false },
+  },
   useLoadedSnapshot,
   randomTimeout,
   debug,
 }: {
-  serverInitialData?: ServerData;
+  initialServerData?: ServerData;
   useLoadedSnapshot?: boolean;
   /** default: 30-100 */
   randomTimeout?: true;
@@ -166,6 +169,12 @@ export function createDefaultCollectionStore({
       }
     },
   };
+}
+
+export function shouldNotSkip(scheduleResult: any) {
+  if (scheduleResult === 'skipped') {
+    throw new Error('Should not skip');
+  }
 }
 
 export function createRenderStore() {
@@ -319,4 +328,75 @@ export function createValueStore<T>(initialValue: T) {
       store.setState({ value });
     },
   };
+}
+
+function formatArray(
+  type: 'all' | { firstNItems: number } | 'length',
+  array: any[],
+): string {
+  if (type === 'length') {
+    return `Array(${array.length})`;
+  }
+
+  const normalizedItems: string[] = [];
+
+  for (const item of array) {
+    if (isObject(item)) {
+      normalizedItems.push(`{${formatObject(item)}}`);
+    } else {
+      normalizedItems.push(String(item));
+    }
+
+    if (
+      typeof type === 'object' &&
+      normalizedItems.length >= type.firstNItems
+    ) {
+      normalizedItems.push(`...(${array.length - type.firstNItems} more)`);
+      break;
+    }
+  }
+
+  return `[${normalizedItems.join(', ')}]`;
+}
+
+function formatObject(obj: Record<string, any>, arrayType: any): string {
+  return Object.keys(obj)
+    .map((key) => {
+      let value = obj[key];
+
+      if (Array.isArray(value)) {
+        value = formatArray(arrayType, value);
+      }
+
+      if (isObject(value)) {
+        value = JSON.stringify(value)
+          .replace(/"/g, '')
+          .replace(/,/g, ', ')
+          .replace(/:/g, ': ');
+      }
+
+      return `${key}: ${value}`;
+    })
+    .join(', ');
+}
+
+export function simplifyArraySnapshot(
+  array: any[],
+  arrayType: 'all' | { firstNItems: number } | 'length' = { firstNItems: 4 },
+) {
+  const result = array
+    .map((item) => {
+      if (isObject(item)) {
+        return formatObject(item, arrayType);
+      }
+
+      if (Array.isArray(item)) {
+        return formatArray(arrayType, item);
+      }
+
+      return String(item);
+    })
+    .join('\n');
+
+  return `\n${result}\n`;
 }

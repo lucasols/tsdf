@@ -100,6 +100,7 @@ describe('useMultipleItemsQuery sequential tests', () => {
 
     let getFetchCount: () => number;
 
+    // eslint-disable-next-line vitest/expect-expect
     test('setup block', async () => {
       getFetchCount = serverMock.numOfFetchsFromHere();
 
@@ -177,7 +178,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
   test('rerender when payload changes', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users', 'products'] },
+      useLoadedSnapshot: { tables: ['users', 'products'] },
     });
 
     const payload = createValueStore([
@@ -270,7 +271,7 @@ describe('useQuery', () => {
   test('use ensureIsLoaded prop', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -297,7 +298,7 @@ describe('useQuery', () => {
   test('ignore refetchingStatus by default', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -323,7 +324,7 @@ describe('useQuery', () => {
   test('use ensureIsLoaded prop with disabled', async () => {
     const { store: listQueryStore, serverMock } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -366,7 +367,7 @@ describe('useQuery', () => {
   test('disableRefetchOnMount', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const compRenders = createRenderStore();
@@ -442,7 +443,7 @@ describe('useItem', () => {
   test('ignore refetchingStatus by default', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -467,7 +468,7 @@ describe('useItem', () => {
   test('use ensureIsLoaded prop', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -494,7 +495,7 @@ describe('useItem', () => {
   test('use ensureIsLoaded prop with disabled', async () => {
     const { store: listQueryStore, serverMock } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -537,7 +538,7 @@ describe('useItem', () => {
   test('disableRefetchOnMount', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const compRenders = createRenderStore();
@@ -565,7 +566,7 @@ describe('useItem', () => {
   test.only('use deleted item', async () => {
     const { serverMock, store, shouldNotSkip } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users'] },
+      useLoadedSnapshot: { tables: ['users'] },
     });
 
     const renders = createRenderStore();
@@ -611,7 +612,7 @@ describe('useItem', () => {
   test('invalidate one item', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
-      useLoadedSnapshots: { tables: ['users', 'products'] },
+      useLoadedSnapshot: { tables: ['users', 'products'] },
     });
 
     const users2 = createRenderStore();

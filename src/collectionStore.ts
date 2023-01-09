@@ -561,7 +561,7 @@ export function newTSDFCollectionStore<
           ifNothingWasUpdated();
         }
       },
-      { type: 'update-items-state', items: itemKeys },
+      { type: 'update-item-state', item: itemKeys },
     );
   }
 
