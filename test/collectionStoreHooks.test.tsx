@@ -67,7 +67,7 @@ describe('useMultipleItems', () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(2);
+    expect(serverMock.fetchsCount).toBe(2);
   });
 
   const renders3 = createRenderStore();
@@ -75,7 +75,7 @@ describe('useMultipleItems', () => {
   let initialFetchCount: number;
 
   test('invalidate all items', async () => {
-    initialFetchCount = serverMock.numOfFetchs;
+    initialFetchCount = serverMock.fetchsCount;
 
     // mount a new hook to check if there are more fetchs than expected
     const { unmount } = renderHook(() => {
@@ -113,7 +113,7 @@ describe('useMultipleItems', () => {
   });
 
   test('do not fetch more than expected with multiple components connected to the same items', () => {
-    expect(serverMock.numOfFetchs).toBe(initialFetchCount + 2);
+    expect(serverMock.fetchsCount).toBe(initialFetchCount + 2);
   });
 
   test('refetch data after invalidations', () => {
@@ -242,7 +242,7 @@ describe('useItem', async () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(0);
+    expect(serverMock.fetchsCount).toBe(0);
   });
 
   test('enable the initial fetch', async () => {
@@ -252,7 +252,7 @@ describe('useItem', async () => {
 
     await sleep(120);
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -375,7 +375,7 @@ describe('useItem', async () => {
 const serverInitialData = { '1': defaultTodo, '2': defaultTodo };
 
 describe('useItem isolated tests', () => {
-  test.only('use deleted item', async () => {
+  test('use deleted item', async () => {
     const { serverMock, store, shouldNotSkip } = createDefaultCollectionStore({
       initialServerData: serverInitialData,
       useLoadedSnapshot: true,
@@ -452,28 +452,18 @@ describe('useItem isolated tests', () => {
   });
 
   test('ignore refetchingStatus by default', async () => {
-    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
-      {
-        initialServerData: serverInitialData,
-        useLoadedSnapshot: true,
-      },
-    );
+    const { store, serverMock } = createDefaultCollectionStore({
+      initialServerData: serverInitialData,
+      useLoadedSnapshot: true,
+    });
 
     const renders = createRenderStore();
 
     renderHook(() => {
-      const selectionResult = collectionStore.useItem('1', {
-        ensureIsLoaded: true,
-      });
+      const selectionResult = store.useItem('1');
 
-      renders.add(
-        pick(selectionResult, ['status', 'isLoading', 'data'], {
-          isLoading: 'L',
-        }),
-      );
+      renders.add(pick(selectionResult, ['status', 'isLoading', 'data']));
     });
-
-    expect(collectionStore.scheduleFetch('highPriority', '1')).toBe('started');
 
     await serverMock.waitFetchIdle();
 

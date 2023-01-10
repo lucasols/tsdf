@@ -533,13 +533,13 @@ export function newTSDFCollectionStore<
       collectionItem: CollectionItem,
     ) => void | ItemState,
     ifNothingWasUpdated?: () => void,
-  ) {
+  ): boolean {
     const itemKeys = getItemsKeyArray(fetchParams);
+
+    let someItemWasUpdated = false as boolean;
 
     store.batch(
       () => {
-        let someItemWasUpdated = false as boolean;
-
         store.produceState((draftState) => {
           for (const itemKey of itemKeys) {
             const item = draftState[itemKey];
@@ -563,6 +563,8 @@ export function newTSDFCollectionStore<
       },
       { type: 'update-item-state', item: itemKeys },
     );
+
+    return someItemWasUpdated;
   }
 
   if (!disableRefetchOnWindowFocus) {

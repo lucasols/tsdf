@@ -143,6 +143,7 @@ export function mockServerResource<Data, S = Data>({
     error = newError;
   }
 
+  /** default duration: 60 */
   async function emulateMutation(
     newData: Partial<Data> | ((draft: Data) => void),
     {
@@ -155,6 +156,15 @@ export function mockServerResource<Data, S = Data>({
       emulateError?: Error | string;
     } = {},
   ) {
+    if (logFetchs) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `mutation - started ${
+          Date.now() - startTime
+        }ms - duration: ${duration}ms`,
+      );
+    }
+
     await sleep(setDataAt);
 
     if (emulateError) {
@@ -178,13 +188,13 @@ export function mockServerResource<Data, S = Data>({
     return data;
   }
 
-  async function waitFetchIdle(extraWait = 0, maxWait = 500) {
+  async function waitFetchIdle(extraWait = 0, maxWait = 1000) {
     waitNextFetchCompleteCall++;
     const startWaitTime = Date.now();
 
     const currentWaitNextFetchCompleteCall = waitNextFetchCompleteCall;
 
-    function chekTimeout() {
+    function checkTimeout() {
       if (Date.now() - startWaitTime > maxWait) {
         throw new Error(
           `Wait for fetch idle ${currentWaitNextFetchCompleteCall} timeout`,
@@ -197,14 +207,14 @@ export function mockServerResource<Data, S = Data>({
       while (fetchsInProgress.size === 0) {
         await sleep(5);
 
-        chekTimeout();
+        checkTimeout();
       }
     }
 
     while (fetchsInProgress.size > 0) {
       await sleep(10);
 
-      chekTimeout();
+      checkTimeout();
     }
 
     await sleep(extraWait);
@@ -229,7 +239,7 @@ export function mockServerResource<Data, S = Data>({
     },
     emulateMutation,
     undoTimeoutChange,
-    get numOfFetchs() {
+    get fetchsCount() {
       return numOfFetchs;
     },
     get fetchDuration() {

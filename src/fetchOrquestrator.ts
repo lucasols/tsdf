@@ -35,20 +35,22 @@ export function createFetchOrquestrator<T>({
   getDynamicRealtimeThrottleMs,
 }: CreateFetchOrquestratorOptions<T>) {
   const fetchs: {
-    inProgress: { startTime: number; onEnd: (() => void)[] } | false;
+    inProgress: { startTime: number; onEnd: (() => void)[] } | null;
     scheduled: { params: T } | null;
     realtimeScheduled: { timeoutId: number } | null;
   } = {
-    inProgress: false,
+    inProgress: null,
     scheduled: null,
     realtimeScheduled: null,
   };
-  let lastMutationStarted = 0;
+  let lastMutationIdStarted = 0;
+  let lastFetchIdStarted = 0;
   let mutationIsInProgress = false;
   let lastFetchStartTime = 0;
   let lastFetchDuration = 0;
   let onMutationEnd: (() => void)[] = [];
   let lastFetchWasAborted = false;
+  let abortFetchsBeforeOrEqual = 0;
 
   function setLastFetchDurantion(duration: number) {
     lastFetchDuration = duration;
@@ -69,14 +71,17 @@ export function createFetchOrquestrator<T>({
 
   function startMutation() {
     mutationIsInProgress = true;
+    abortFetchsBeforeOrEqual = lastFetchIdStarted;
+    fetchs.inProgress = null;
+
     const id = getAutoIncrementId();
-    lastMutationStarted = id;
+    lastMutationIdStarted = id;
 
     return () => endMutation(id);
   }
 
   function endMutation(id: number): boolean {
-    if (id === lastMutationStarted) {
+    if (id === lastMutationIdStarted) {
       mutationIsInProgress = false;
 
       if (onMutationEnd.length > 0) {
@@ -91,11 +96,17 @@ export function createFetchOrquestrator<T>({
     return false;
   }
 
-  async function startFetch(params: T, startTime: number) {
+  function getFetchs() {
+    return fetchs;
+  }
+
+  async function startFetch(params: T, startTime: number): Promise<boolean> {
     if (fetchs.inProgress) {
-      console.error('fetch already in progress');
-      return;
+      throw new Error('[tsdf] Fetch already in progress');
     }
+
+    const id = getAutoIncrementId();
+    lastFetchIdStarted = id;
 
     lastFetchWasAborted = false;
     fetchs.inProgress = { startTime, onEnd: [] };
@@ -103,9 +114,14 @@ export function createFetchOrquestrator<T>({
     lastFetchStartTime = startTime;
 
     function shouldAbort() {
-      lastFetchWasAborted = mutationIsInProgress;
+      const abort =
+        id !== lastFetchIdStarted ||
+        mutationIsInProgress ||
+        id <= abortFetchsBeforeOrEqual;
 
-      return mutationIsInProgress;
+      lastFetchWasAborted = abort;
+
+      return abort;
     }
 
     const success = await fetchFn(
@@ -116,6 +132,13 @@ export function createFetchOrquestrator<T>({
       params,
     );
 
+    const currentFetchs = getFetchs();
+
+    if (!currentFetchs.inProgress) {
+      lastFetchStartTime = prevFetchStartTime;
+      return false;
+    }
+
     if (success) {
       // FIX: test: if the fetch has error or was aborted it should not considered in the throttling, consider possible concurrent problems
       lastFetchDuration = Date.now() - startTime;
@@ -123,20 +146,22 @@ export function createFetchOrquestrator<T>({
       lastFetchStartTime = prevFetchStartTime;
     }
 
-    if (fetchs.realtimeScheduled) {
-      clearTimeout(fetchs.realtimeScheduled.timeoutId);
+    if (currentFetchs.realtimeScheduled) {
+      clearTimeout(currentFetchs.realtimeScheduled.timeoutId);
       fetchs.realtimeScheduled = null;
     }
 
-    const onEnd = fetchs.inProgress.onEnd;
+    const onEnd = currentFetchs.inProgress.onEnd;
 
-    fetchs.inProgress = false;
+    currentFetchs.inProgress = null;
 
     if (onEnd.length > 0) {
       onEnd.forEach((cb) => cb());
     }
 
     flushScheduledFetch();
+
+    return true;
   }
 
   function scheduleFetch(
@@ -224,8 +249,8 @@ export function createFetchOrquestrator<T>({
     fetchs.realtimeScheduled = {
       timeoutId: window.setTimeout(() => {
         fetchs.realtimeScheduled = null;
-        startFetch(params, startTime);
         on?.('scheduled-rt-fetch-started');
+        startFetch(params, startTime);
       }, delay),
     };
 

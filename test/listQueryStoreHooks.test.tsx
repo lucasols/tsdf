@@ -51,7 +51,7 @@ describe('useMultipleItemsQuery sequential tests', () => {
   test('load the queries', async () => {
     await serverMock.waitFetchIdle();
 
-    expect(serverMock.numOfFetchs).toBe(2);
+    expect(serverMock.fetchsCount).toBe(2);
 
     expect(usersRender.getSnapshot()).toMatchInlineSnapshot(`
       "
@@ -95,7 +95,7 @@ describe('useMultipleItemsQuery sequential tests', () => {
     `);
   });
 
-  describe('invalidate all queries', async () => {
+  describe('invalidate all queries', () => {
     const extraComponentMounted = createRenderStore();
 
     let getFetchCount: () => number;
@@ -109,7 +109,7 @@ describe('useMultipleItemsQuery sequential tests', () => {
         const selectionResult = listQueryStore.useMultipleListQueries(
           [getFetchQueryForTable('users'), getFetchQueryForTable('products')],
           {
-            itemSelector(_, data) {
+            itemSelector(data) {
               return data.name;
             },
           },
@@ -192,7 +192,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
         payload.useValue(),
-        { itemSelector: (_, data) => data.name },
+        { itemSelector: (data) => data.name },
       );
 
       usersRenders.add(pick(users, ['status', 'payload', 'items']));
@@ -250,13 +250,13 @@ describe('useQuery', () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(0);
+    expect(serverMock.fetchsCount).toBe(0);
 
     rerender({ payload: { tableId: 'users' } });
 
     await serverMock.waitFetchIdle();
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
 
     expect(renders.getSnapshot()).toMatchInlineSnapshot(`
       "
@@ -279,7 +279,7 @@ describe('useQuery', () => {
     renderHook(() => {
       const selectionResult = listQueryStore.useListQuery(
         { tableId: 'users' },
-        { ensureIsLoaded: true, itemSelector: (_, data) => data.name },
+        { ensureIsLoaded: true, itemSelector: (data) => data.name },
       );
 
       renders.add(pick(selectionResult, ['status', 'isLoading', 'items']));
@@ -306,7 +306,7 @@ describe('useQuery', () => {
     renderHook(() => {
       const selectionResult = listQueryStore.useListQuery(
         { tableId: 'users' },
-        { itemSelector: (_, data) => data.name },
+        { itemSelector: (data) => data.name },
       );
 
       renders.add(pick(selectionResult, ['status', 'isLoading', 'items']));
@@ -332,7 +332,7 @@ describe('useQuery', () => {
     const Comp = ({ payload }: { payload?: FetchQueryParams }) => {
       const selectionResult = listQueryStore.useListQuery(payload, {
         ensureIsLoaded: true,
-        itemSelector: (_, data) => data.name,
+        itemSelector: (data) => data.name,
       });
 
       renders.add(
@@ -390,7 +390,7 @@ describe('useQuery', () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(0);
+    expect(serverMock.fetchsCount).toBe(0);
   });
 });
 
@@ -422,13 +422,13 @@ describe('useItem', () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(0);
+    expect(serverMock.fetchsCount).toBe(0);
 
     rerender(<Comp payload="users||1" />);
 
     await serverMock.waitFetchIdle();
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
 
     expect(renders.getSnapshot()).toMatchInlineSnapshot(`
       "
@@ -560,10 +560,10 @@ describe('useItem', () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(0);
+    expect(serverMock.fetchsCount).toBe(0);
   });
 
-  test.only('use deleted item', async () => {
+  test('use deleted item', async () => {
     const { serverMock, store, shouldNotSkip } = createDefaultListQueryStore({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },

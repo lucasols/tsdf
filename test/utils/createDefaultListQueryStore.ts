@@ -35,6 +35,7 @@ export function createDefaultListQueryStore({
   useLoadedSnapshot,
   defaultQuerySize,
   debug,
+  debugRequests: debuFetchs,
   emulateRTU,
 }: {
   initialServerData?: Tables;
@@ -45,11 +46,12 @@ export function createDefaultListQueryStore({
   };
   defaultQuerySize?: number;
   debug?: never;
+  debugRequests?: never;
   emulateRTU?: boolean;
 } = {}) {
   const serverMock = mockServerResource<Tables, Row[] | Row>({
     initialData: initialServerData,
-    logFetchs: debug,
+    logFetchs: (debug as any) || (debuFetchs as any),
     fetchSelector: (data, param) => {
       if (param.includes('||')) {
         const [tableId, id] = param.split('||');
@@ -100,7 +102,7 @@ export function createDefaultListQueryStore({
       };
     },
     fetchItemFn: async (itemId) => {
-      const result = await serverMock.fetch(itemId!);
+      const result = await serverMock.fetch(itemId);
 
       if (Array.isArray(result)) {
         throw new Error('Invalid server response');
@@ -262,7 +264,7 @@ export function createDefaultListQueryStore({
     store: listQueryStore,
     getItemId,
     forceListUpdate,
-    shouldNotSkip(scheduleResult: any) {
+    shouldNotSkip(this: void, scheduleResult: any) {
       if (scheduleResult === 'skipped') {
         throw new Error('Should not skip');
       }

@@ -1,3 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-empty-interface */
 /* eslint-disable @typescript-eslint/no-namespace */
 import matchers, {
@@ -52,8 +56,8 @@ expect.extend({
         normalizedExpected.split('\n'),
         (action, ignore) => {
           if (action === '.') {
-            return dedent`fetch-started
-          fetch-finished
+            return dedent`fetch-started : 1
+          fetch-finished : 1
           fetch-ui-commit`;
           }
 
@@ -104,6 +108,7 @@ expect.extend({
     };
   },
   toMatchSnapshotString(received, expected) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     const normalizedExpected = dedent(expected);
     const normalizedReceived = format(received, {
       printBasicPrototype: false,

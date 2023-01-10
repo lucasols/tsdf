@@ -119,7 +119,13 @@ export function createTestStore(
 
   const dbReadAt = 0.62;
 
+  let fetchId = 0;
+
   async function mockFetch(fetchCtx: FetchContext, ms: number) {
+    fetchId++;
+
+    const fetchIdLocal = fetchId;
+
     await sleep(ms * dbReadAt);
 
     const serverResponse = server.current;
@@ -129,18 +135,18 @@ export function createTestStore(
     numOfFetchs++;
 
     if (serverResponse === 'error') {
-      addAction('fetch-error');
+      addAction(`fetch-error : ${fetchIdLocal}`);
       ui.setUi('error', 'fetch');
       return false;
     }
 
     if (fetchCtx.shouldAbort()) {
-      addAction(`fetch-aborted`, serverResponse);
+      addAction(`fetch-aborted : ${fetchIdLocal}`);
 
       return false;
     }
 
-    addAction(`fetch-finished`, serverResponse);
+    addAction(`fetch-finished : ${fetchIdLocal}`, serverResponse);
     ui.setUi(serverResponse, 'fetch');
 
     return true;
@@ -158,7 +164,14 @@ export function createTestStore(
   const fetchOrquestrator = createFetchOrquestrator({
     fetchFn: mockFetch,
     on(event) {
-      addAction(event);
+      if (event === 'scheduled-fetch-started') {
+        addAction(`scheduled-fetch-started : ${fetchId + 1}`);
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      } else if (event === 'scheduled-rt-fetch-started') {
+        addAction(`scheduled-rt-fetch-started : ${fetchId + 1}`);
+      } else {
+        addAction(event);
+      }
     },
     getDynamicRealtimeThrottleMs,
   });
@@ -168,7 +181,7 @@ export function createTestStore(
     const result = fetchOrquestrator.scheduleFetch(fetchType, duration);
 
     if (result === 'started') {
-      addAction('fetch-started');
+      addAction(`fetch-started : ${fetchId}`);
     }
 
     if (result === 'skipped') {

@@ -149,7 +149,7 @@ test('revalidation with multiple components do not trigger multiple fetchs', asy
     '{"hello":"was invalidated"}',
   );
 
-  expect(serverMock.numOfFetchs).toBe(1);
+  expect(serverMock.fetchsCount).toBe(1);
 });
 
 test('data selector', async () => {
@@ -193,7 +193,7 @@ describe('disable', () => {
 
     expect(getByTestId('data').textContent).toBe('');
     expect(getByTestId('status').textContent).toBe('idle');
-    expect(serverMock.numOfFetchs).toBe(0);
+    expect(serverMock.fetchsCount).toBe(0);
   });
 
   test('disable then enable fetch', async () => {
@@ -228,7 +228,7 @@ describe('disable', () => {
 
     await sleep(40);
 
-    expect(serverMock.numOfFetchs).toBe(0);
+    expect(serverMock.fetchsCount).toBe(0);
     expect(renders).toMatchInlineSnapshot(`
       [
         {
@@ -245,7 +245,7 @@ describe('disable', () => {
 
     await sleep(100);
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
     expect(renders).toMatchInlineSnapshot(`
       [
         {
@@ -332,7 +332,7 @@ test('disableRefetchOnMount', async () => {
     ]
   `);
 
-  expect(serverMock.numOfFetchs).toBe(1);
+  expect(serverMock.fetchsCount).toBe(1);
 
   await sleep(200);
 
@@ -348,7 +348,7 @@ test('disableRefetchOnMount', async () => {
   `);
 
   // does not refetch on mount
-  expect(serverMock.numOfFetchs).toBe(1);
+  expect(serverMock.fetchsCount).toBe(1);
 });
 
 test('do not return refetchin status by default', async () => {

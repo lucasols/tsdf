@@ -15,7 +15,7 @@ const initialServerData: Tables = {
   orders: range(1, 50).map((id) => ({ id, name: `Order ${id}` })),
 };
 
-const createTestEnv = createDefaultListQueryStore;
+export const createTestEnv = createDefaultListQueryStore;
 
 const CompWithItemLoaded = ({
   disableRefetchOnMount = true,
@@ -56,7 +56,7 @@ const CompWithQueryLoaded = ({
     {
       disableRefetchOnMount,
       returnRefetchingStatus: true,
-      itemSelector: (id, data) => data,
+      itemSelector: (data) => data,
     },
   );
 
@@ -177,7 +177,7 @@ test('load an query and item at same time', async () => {
     "
   `);
 
-  expect(serverMock.numOfFetchs).toBe(2);
+  expect(serverMock.fetchsCount).toBe(2);
 });
 
 test('load a query and a few ms after load a item with different data', async () => {
@@ -232,7 +232,7 @@ test('load a query and a few ms after load a item with different data', async ()
     "
   `);
 
-  expect(serverMock.numOfFetchs).toBe(2);
+  expect(serverMock.fetchsCount).toBe(2);
 });
 
 test('load a item and a few ms after load a query with different data', async () => {
@@ -287,7 +287,7 @@ test('load a item and a few ms after load a query with different data', async ()
     "
   `);
 
-  expect(serverMock.numOfFetchs).toBe(2);
+  expect(serverMock.fetchsCount).toBe(2);
 });
 
 describe('syncMutationAndInvalidation', async () => {
@@ -340,7 +340,7 @@ describe('syncMutationAndInvalidation', async () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(2);
+    expect(serverMock.fetchsCount).toBe(2);
   });
 
   test('invalidate related item and query after query invalidation', async () => {
@@ -425,7 +425,7 @@ describe('syncMutationAndInvalidation', async () => {
       "
     `);
 
-    expect(serverMock.numOfFetchs).toBe(3);
+    expect(serverMock.fetchsCount).toBe(3);
   });
 });
 
@@ -480,24 +480,4 @@ test('receive a RTU', async () => {
     status: success -- error: null -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products}
     "
   `);
-});
-
-describe('mutations', () => {
-  test('user updating the name of a record', async () => {});
-
-  test('user updating the name of a record, but a RTU is received for a table while the update is in progress', async () => {});
-
-  test('creation mutation', async () => {});
-
-  test('user change multiple records in sequence with RTU enabled', async () => {});
-
-  test('create a item and then render a component that loads the item by a mount fetch', async () => {});
-
-  test('query receives a RTU while the query is loading by the component mout', async () => {});
-
-  test('delete mutation with RTU', async () => {});
-
-  test('creation mutation with RTU', async () => {});
-
-  test('simple update mutation with RTU', async () => {});
 });

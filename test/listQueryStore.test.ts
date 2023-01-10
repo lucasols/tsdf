@@ -122,7 +122,7 @@ describe.concurrent('fetch query', () => {
       `);
     expect(listQueryStore.store.state.items).toMatchSnapshot();
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
   });
 
   test('refetch list with updated data', async ({ expect }) => {
@@ -189,7 +189,7 @@ describe.concurrent('fetch query', () => {
     `);
     expect(listQueryStore.store.state.items).toMatchSnapshot();
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
   });
 
   // FIXLATER: add error tests to other stores
@@ -395,7 +395,7 @@ describe.concurrent('fetch query', () => {
     `);
     expect(listQueryStore.store.state.items).toMatchSnapshot();
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
 
     // load more
     listQueryStore.loadMore(query, 5);
@@ -516,7 +516,7 @@ describe.concurrent('fetch query', () => {
 
       await serverMock.waitFetchIdle(40);
 
-      expect(serverMock.numOfFetchs).toBe(3);
+      expect(serverMock.fetchsCount).toBe(3);
 
       fetch('lowPriority', { tableId: 'users' });
       fetch('lowPriority', { tableId: 'products' });
@@ -528,7 +528,7 @@ describe.concurrent('fetch query', () => {
 
       await serverMock.waitFetchIdle(40);
 
-      expect(serverMock.numOfFetchs).toBe(6);
+      expect(serverMock.fetchsCount).toBe(6);
     },
   );
 });
@@ -567,7 +567,7 @@ test.concurrent('await fetch', async () => {
     hasMore: false,
   });
 
-  expect(serverMock.numOfFetchs).toEqual(2);
+  expect(serverMock.fetchsCount).toEqual(2);
 });
 
 describe.concurrent('fetch item', () => {
@@ -613,7 +613,7 @@ describe.concurrent('fetch item', () => {
       }
     `);
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
   });
 
   test.concurrent('test helpers inital snapshot', async () => {
@@ -702,7 +702,7 @@ describe.concurrent('fetch item', () => {
       }
     `);
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
   });
 
   test('refetch item with error', async () => {
@@ -848,7 +848,7 @@ describe.concurrent('fetch item', () => {
 
       await serverMock.waitFetchIdle(40);
 
-      expect(serverMock.numOfFetchs).toBe(3);
+      expect(serverMock.fetchsCount).toBe(3);
 
       listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
       listQueryStore.scheduleItemFetch('lowPriority', 'users||2');
@@ -860,7 +860,7 @@ describe.concurrent('fetch item', () => {
 
       await serverMock.waitFetchIdle(40);
 
-      expect(serverMock.numOfFetchs).toBe(6);
+      expect(serverMock.fetchsCount).toBe(6);
     },
   );
 

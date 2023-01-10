@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { deepEqual, Store } from 't-state';
 import {
   newTSDFCollectionStore,
@@ -107,7 +108,7 @@ export function createDefaultCollectionStore({
     randomTimeout,
     logFetchs: debug,
     fetchSelector(data, params) {
-      const todo = data && data[params];
+      const todo: any = data && data[params];
 
       if (!todo) {
         throw new Error('Not found');
@@ -163,7 +164,7 @@ export function createDefaultCollectionStore({
     getElapsedTime,
     onRender,
     renderResults,
-    shouldNotSkip(scheduleResult: any) {
+    shouldNotSkip(this:void, scheduleResult: any) {
       if (scheduleResult === 'skipped') {
         throw new Error('Should not skip');
       }
@@ -342,7 +343,7 @@ function formatArray(
 
   for (const item of array) {
     if (isObject(item)) {
-      normalizedItems.push(`{${formatObject(item)}}`);
+      normalizedItems.push(`{${formatObject(item, type)}}`);
     } else {
       normalizedItems.push(String(item));
     }

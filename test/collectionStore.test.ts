@@ -70,7 +70,7 @@ describe('fetch lifecicle', () => {
       },
     });
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
   });
 
   test('refetch resource with new data', async () => {
@@ -105,7 +105,7 @@ describe('fetch lifecicle', () => {
       },
     });
 
-    expect(serverMock.numOfFetchs).toBe(2);
+    expect(serverMock.fetchsCount).toBe(2);
   });
 
   test('refetch resource with error', async () => {
@@ -149,7 +149,7 @@ test.concurrent(
 
     await sleep(serverMock.fetchDuration + 5);
 
-    expect(serverMock.numOfFetchs).toEqual(1);
+    expect(serverMock.fetchsCount).toEqual(1);
 
     expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
       '1': {
@@ -204,7 +204,7 @@ test.concurrent('await fetch', async () => {
     },
   });
 
-  expect(serverMock.numOfFetchs).toEqual(3);
+  expect(serverMock.fetchsCount).toEqual(3);
 });
 
 test.concurrent(
@@ -242,7 +242,7 @@ test.concurrent(
 
     await sleep(serverMock.fetchDuration + 5);
 
-    expect(serverMock.numOfFetchs).toEqual(7);
+    expect(serverMock.fetchsCount).toEqual(7);
 
     const defaultState = {
       data: defaultTodo,

@@ -70,7 +70,7 @@ describe('fetch lifecicle', () => {
       status: 'success',
     });
 
-    expect(serverMock.numOfFetchs).toBe(2);
+    expect(serverMock.fetchsCount).toBe(2);
   });
 
   test('refetch resource with error', async () => {
@@ -141,7 +141,7 @@ test.concurrent(
 
     await sleep(serverMock.fetchDuration + 5);
 
-    expect(serverMock.numOfFetchs).toBe(1);
+    expect(serverMock.fetchsCount).toBe(1);
 
     expect(documentStore.store.state).toEqual<DocumentStoreState>({
       data: { hello: 'new data' },

@@ -65,8 +65,8 @@ test.concurrent(
     1 - optimistic-ui-commit
     1 - mutation-started
     1 - mutation-finished
-    fetch-started
-    1 - fetch-finished
+    fetch-started : 1
+    1 - fetch-finished : 1
     1 - fetch-ui-commit
     "
   `);
@@ -108,8 +108,8 @@ test.concurrent('simple mutation without optimistic update', async () => {
     "
     1 - mutation-started
     1 - mutation-finished
-    fetch-started
-    1 - fetch-finished
+    fetch-started : 1
+    1 - fetch-finished : 1
     1 - fetch-ui-commit
     "
   `);
@@ -132,11 +132,11 @@ test.concurrent('prevent overfetch of low priority fetchs', async () => {
   expect(store.numOfFetchs).toBe(1);
   expect(store.actions).toMatchTimeline(`
     "
-    fetch-started
+    fetch-started : 1
     fetch-skipped
     fetch-skipped
     fetch-skipped
-    fetch-finished
+    fetch-finished : 1
     fetch-ui-commit
     "
   `);
@@ -172,17 +172,163 @@ test.concurrent(
     1 - optimistic-ui-commit
     1 - mutation-started
     1 - mutation-finished
-    fetch-started
-    1 - fetch-finished
+    fetch-started : 1
+    1 - fetch-finished : 1
     1 - fetch-ui-commit
       2 - optimistic-ui-commit
       2 - mutation-started
       2 - mutation-finished
-      fetch-started
-      2 - fetch-finished
+      fetch-started : 2
+      2 - fetch-finished : 2
       2 - fetch-ui-commit
     "
   `);
+  },
+);
+
+test.concurrent(
+  'multiple mutations with revalidation in sequence 2',
+  async () => {
+    const store = createTestStore(0);
+
+    const mutateValue = (value: number, revalidationDuration: number) =>
+      action(store, value, {
+        withOptimisticUpdate: true,
+        withRevalidation: true,
+        duration: 60,
+        revalidationDuration,
+      });
+
+    const promises = [
+      delayCall(0, () => store.fetch('lowPriority', 438)),
+      delayCall(7, () => mutateValue(1, 400)),
+      delayCall(283, () => mutateValue(2, 476)),
+      delayCall(536, () => mutateValue(3, 400)),
+      delayCall(781, () => mutateValue(4, 407)),
+      delayCall(1_030, () => mutateValue(4, 233)),
+    ];
+
+    await Promise.all(promises);
+
+    await store.waitForNoPendingRequests();
+
+    await sleep(200);
+
+    expect(store.ui.changesHistory).toEqual([0, 1, 2, 3, 4]);
+    expect(store.actions).toMatchTimeline(`
+      "
+      fetch-started : 1
+
+      1 - optimistic-ui-commit
+      1 - mutation-started
+      1 - mutation-finished
+
+        fetch-started : 2
+
+          2 - optimistic-ui-commit
+          2 - mutation-started
+          2 - mutation-finished
+
+            fetch-started : 3
+      fetch-aborted : 1
+        fetch-aborted : 2
+
+            3 - optimistic-ui-commit
+            3 - mutation-started
+            3 - mutation-finished
+
+              fetch-started : 4
+
+                4 - optimistic-ui-commit
+                4 - mutation-started
+                fetch-aborted : 3
+                4 - mutation-finished
+
+                fetch-started : 5
+              fetch-aborted : 4
+
+              4 - optimistic-ui-commit
+              4 - mutation-started
+              4 - mutation-finished
+
+                  fetch-started : 6
+                fetch-aborted : 5
+                  4 - fetch-finished : 6
+                  4 - fetch-ui-commit
+      "
+    `);
+
+    expect(store.numOfFetchs).toBe(6);
+  },
+);
+
+test.concurrent(
+  'multiple mutations with revalidation in sequence 3',
+  async () => {
+    const store = createTestStore(0);
+
+    const mutateValue = (value: number, revalidationDuration: number) =>
+      action(store, value, {
+        withOptimisticUpdate: true,
+        withRevalidation: true,
+        duration: 60,
+        revalidationDuration,
+      });
+
+    const promises = [
+      delayCall(10, () => mutateValue(1, 400)),
+      delayCall(283, () => mutateValue(2, 476)),
+      delayCall(536, () => mutateValue(3, 400)),
+      delayCall(781, () => mutateValue(4, 407)),
+      delayCall(1_030, () => mutateValue(4, 233)),
+    ];
+
+    await Promise.all(promises);
+
+    await store.waitForNoPendingRequests(10);
+
+    await sleep(200);
+
+    expect(store.ui.changesHistory).toEqual([0, 1, 2, 3, 4]);
+    expect(store.actions).toMatchTimeline(`
+      "
+      1 - optimistic-ui-commit
+      1 - mutation-started
+      1 - mutation-finished
+
+        fetch-started : 1
+
+        2 - optimistic-ui-commit
+        2 - mutation-started
+        2 - mutation-finished
+
+          fetch-started : 2
+        fetch-aborted : 1
+
+          3 - optimistic-ui-commit
+          3 - mutation-started
+          3 - mutation-finished
+
+            fetch-started : 3
+
+            4 - optimistic-ui-commit
+            4 - mutation-started
+          fetch-aborted : 2
+            4 - mutation-finished
+
+              fetch-started : 4
+            fetch-aborted : 3
+
+            4 - optimistic-ui-commit
+            4 - mutation-started
+            4 - mutation-finished
+
+                fetch-started : 5
+              fetch-aborted : 4
+                4 - fetch-finished : 5
+                4 - fetch-ui-commit
+      "
+    `);
   },
 );
 
@@ -216,13 +362,13 @@ test.concurrent(
     1 - optimistic-ui-commit
     1 - mutation-started
     1 - mutation-finished
-    fetch-started
+    fetch-started : 1
       2 - optimistic-ui-commit
       2 - mutation-started
-    1 - fetch-aborted
+    fetch-aborted : 1
       2 - mutation-finished
-      fetch-started
-      2 - fetch-finished
+      fetch-started : 2
+      2 - fetch-finished : 2
       2 - fetch-ui-commit
     "
   `);
@@ -266,9 +412,9 @@ test.concurrent(
       2 - mutation-started
       fetch-scheduled
       2 - mutation-finished
-      scheduled-fetch-started
+      scheduled-fetch-started : 1
       fetch-skipped
-      2 - fetch-finished
+      2 - fetch-finished : 1
       2 - fetch-ui-commit
     "
   `);
@@ -293,15 +439,15 @@ test.concurrent('multiple high priority fetchs', async () => {
   expect(store.numOfFetchs).toBe(2);
   expect(store.actions).toMatchTimeline(`
     "
-    fetch-started
+    fetch-started : 1
     fetch-skipped
     fetch-skipped
     fetch-scheduled
     fetch-scheduled
-    fetch-finished
+    fetch-finished : 1
     fetch-ui-commit
-    scheduled-fetch-started
-    fetch-finished
+    scheduled-fetch-started : 2
+    fetch-finished : 2
     fetch-ui-commit
     "
   `);
@@ -326,14 +472,14 @@ test.concurrent('throttle low priority updates', async () => {
 
   expect(store.actions).toMatchTimeline(`
     "
-    fetch-started
-    fetch-finished
+    fetch-started : 1
+    fetch-finished : 1
     fetch-ui-commit
     fetch-skipped
     fetch-skipped
     fetch-skipped
-    fetch-started
-    fetch-finished
+    fetch-started : 2
+    fetch-finished : 2
     fetch-ui-commit
     "
   `);
@@ -376,16 +522,16 @@ test.concurrent(
     fetch-scheduled
     fetch-skipped
       2 - mutation-finished
-      scheduled-fetch-started
+      scheduled-fetch-started : 1
       fetch-skipped
-      2 - fetch-finished
+      2 - fetch-finished : 1
       2 - fetch-ui-commit
     "
   `);
   },
 );
 
-test.concurrent('very slow revalidation then mutation', async () => {
+test.concurrent('very slow mutation with revalidation then mutation', async () => {
   const store = createTestStore(0);
 
   await waitTimeline([
@@ -410,6 +556,8 @@ test.concurrent('very slow revalidation then mutation', async () => {
 
   await store.waitForNoPendingRequests();
 
+  await sleep(400);
+
   expect(store.ui.changesHistory).toEqual([0, 1, 2]);
   expect(store.numOfFetchs).toBe(2);
   expect(store.actions).toMatchTimeline(`
@@ -417,16 +565,15 @@ test.concurrent('very slow revalidation then mutation', async () => {
     1 - optimistic-ui-commit
     1 - mutation-started
     1 - mutation-finished
-    fetch-started
+
+    fetch-started : 1
       2 - optimistic-ui-commit
       2 - mutation-started
       2 - mutation-finished
-      fetch-scheduled
-      2 - fetch-finished
+      fetch-started : 2
+      2 - fetch-finished : 2
       2 - fetch-ui-commit
-      scheduled-fetch-started
-      2 - fetch-finished
-      2 - fetch-ui-commit
+    fetch-aborted : 1
     "
   `);
 });
@@ -448,12 +595,12 @@ test.concurrent('fetch error', async () => {
   expect(store.numOfFetchs).toBe(2);
   expect(store.actions).toMatchTimeline(`
     "
-    fetch-started
-    fetch-finished
+    fetch-started : 1
+    fetch-finished : 1
     fetch-ui-commit
     error - server-data-changed
-    fetch-started
-    fetch-error
+    fetch-started : 2
+    fetch-error : 2
     error - fetch-ui-commit
     "
   `);
@@ -486,40 +633,40 @@ describe('realtime updates', () => {
     expect(store.actions).toMatchTimeline(`
       "
       1 - server-data-changed
-      fetch-started
-      1 - fetch-finished
+      fetch-started : 1
+      1 - fetch-finished : 1
       1 - fetch-ui-commit
         2 - server-data-changed
         rt-fetch-scheduled
           3 - server-data-changed
           rt-fetch-scheduled
 
-          scheduled-rt-fetch-started
+          scheduled-rt-fetch-started : 2
 
           ---
             rt-fetch-scheduled
             4 - server-data-changed
-            3 - fetch-finished
+            3 - fetch-finished : 2
             3 - fetch-ui-commit
           OR
-            3 - fetch-finished
+            3 - fetch-finished : 2
             3 - fetch-ui-commit
             4 - server-data-changed
             rt-fetch-scheduled
           OR
             4 - server-data-changed
-            3 - fetch-finished
+            3 - fetch-finished : 2
             3 - fetch-ui-commit
             rt-fetch-scheduled
           OR
             4 - server-data-changed
             rt-fetch-scheduled
-            3 - fetch-finished
+            3 - fetch-finished : 2
             3 - fetch-ui-commit
           ---
 
-            scheduled-rt-fetch-started
-            4 - fetch-finished
+            scheduled-rt-fetch-started : 3
+            4 - fetch-finished : 3
             4 - fetch-ui-commit
       "
     `);
@@ -557,8 +704,8 @@ describe('realtime updates', () => {
       1 - mutation-finished
 
       rt-fetch-scheduled
-      scheduled-rt-fetch-started
-      1 - fetch-finished
+      scheduled-rt-fetch-started : 2
+      1 - fetch-finished : 2
       1 - fetch-ui-commit
       "
     `);
@@ -590,20 +737,20 @@ describe('realtime updates', () => {
         1 - server-data-changed
         1 - mutation-finished
         rt-fetch-scheduled
-        scheduled-rt-fetch-started
+        scheduled-rt-fetch-started : 2
           2 - server-data-changed
           rt-fetch-scheduled
 
         ---
-        2 - fetch-finished
+        2 - fetch-finished : 2
         2 - fetch-ui-commit
         OR
-        1 - fetch-finished
+        1 - fetch-finished : 2
         1 - fetch-ui-commit
         ---
 
-          scheduled-rt-fetch-started
-          2 - fetch-finished
+          scheduled-rt-fetch-started : 3
+          2 - fetch-finished : 3
           2 - fetch-ui-commit
         "
     `);
@@ -637,19 +784,19 @@ describe('realtime updates', () => {
         1 - mutation-finished
         rt-fetch-scheduled
 
-        scheduled-rt-fetch-started
+        scheduled-rt-fetch-started : 2
 
           2 - optimistic-ui-commit
           2 - mutation-started
 
-        1 - fetch-aborted
+        fetch-aborted : 2
 
           2 - server-data-changed
           2 - mutation-finished
           rt-fetch-scheduled
 
-          scheduled-rt-fetch-started
-          2 - fetch-finished
+          scheduled-rt-fetch-started : 3
+          2 - fetch-finished : 3
           2 - fetch-ui-commit
         "
     `);
@@ -687,8 +834,8 @@ describe('realtime updates', () => {
         2 - server-data-changed
         2 - mutation-finished
         rt-fetch-scheduled
-        scheduled-rt-fetch-started
-        2 - fetch-finished
+        scheduled-rt-fetch-started : 2
+        2 - fetch-finished : 2
         2 - fetch-ui-commit
       "
     `);
@@ -720,25 +867,23 @@ describe('realtime updates', () => {
 
     expect(store.actions).toMatchTimeline(`
       "
-      fetch-started
-      fetch-finished
+      fetch-started : 1
+      fetch-finished : 1
       fetch-ui-commit
       1 - mutation-started
       1 - server-data-changed
       1 - mutation-finished
       rt-fetch-scheduled
-      scheduled-rt-fetch-started
+      scheduled-rt-fetch-started : 2
         2 - mutation-started
-      1 - fetch-aborted
+      fetch-aborted : 2
         2 - server-data-changed
         2 - mutation-finished
         rt-fetch-scheduled
-        scheduled-rt-fetch-started
-        2 - fetch-finished
+        scheduled-rt-fetch-started : 3
+        2 - fetch-finished : 3
         2 - fetch-ui-commit
       "
     `);
   });
 });
-
-// FIX: test mutiple fetch queries not canceling each other

@@ -100,6 +100,10 @@ module.exports = {
     '@typescript-eslint/no-non-null-assertion': OFF,
     '@typescript-eslint/no-empty-function': OFF,
     '@typescript-eslint/no-explicit-any': OFF,
+    '@typescript-eslint/no-floating-promises': OFF,
+    '@typescript-eslint/no-unsafe-assignment': OFF,
+    '@typescript-eslint/no-misused-promises': OFF,
+    '@typescript-eslint/restrict-template-expressions': OFF,
 
     /* vitest */
     'vitest/expect-expect': ERROR_IN_CI_ONLY,
@@ -108,6 +112,7 @@ module.exports = {
   extends: [
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended',
+    'plugin:@typescript-eslint/recommended-requiring-type-checking',
     'plugin:react-hooks/recommended',
   ],
 };
