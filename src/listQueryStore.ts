@@ -21,7 +21,7 @@ type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
   payload: QueryPayload;
   hasMore: boolean;
   wasLoaded: boolean;
-  refetchOnMount: boolean;
+  refetchOnMount: false | FetchType;
   items: string[];
 };
 
@@ -29,7 +29,7 @@ type TSDFItemQuery<NError> = {
   error: NError | null;
   status: Exclude<QueryStatus, 'loadingMore'>;
   wasLoaded: boolean;
-  refetchOnMount: boolean;
+  refetchOnMount: false | FetchType;
 };
 
 export type TSFDListQueryState<
@@ -445,7 +445,7 @@ export function newTSDFListQueryStore<
 
   function invalidateQuery(
     queryPayload: QueryPayload | QueryPayload[] | FilterQueryFn,
-    priority: 'highPriority' | 'lowPriority' = 'highPriority',
+    priority: FetchType = 'highPriority',
     ignoreInvalidationSync = false,
   ) {
     const queriesKey = getQueriesKeyArray(queryPayload);
@@ -457,7 +457,7 @@ export function newTSDFListQueryStore<
 
           if (!query) return;
 
-          query.refetchOnMount = true;
+          query.refetchOnMount = priority;
         },
         { action: { type: 'invalidate-data', key } },
       );
@@ -475,7 +475,7 @@ export function newTSDFListQueryStore<
               payload,
             );
           }),
-        'highPriority',
+        priority,
         true,
       );
 
@@ -490,7 +490,7 @@ export function newTSDFListQueryStore<
               )
             );
           }),
-        'highPriority',
+        priority,
         true,
       );
     }
@@ -613,10 +613,17 @@ export function newTSDFListQueryStore<
             const shouldFetch =
               !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
-            if (!shouldFetch) return;
+            if (shouldFetch) {
+              scheduleListQueryFetch(
+                itemState?.refetchOnMount || 'lowPriority',
+                fetchParams,
+                loadSizeConst,
+              );
+              return;
+            }
+          } else {
+            scheduleListQueryFetch('lowPriority', fetchParams, loadSizeConst);
           }
-
-          scheduleListQueryFetch('lowPriority', fetchParams, loadSizeConst);
         }
       }
     }, [disableRefetchOnMount, loadSizeConst, queriesWithId]);
@@ -829,7 +836,7 @@ export function newTSDFListQueryStore<
 
   function invalidateItem(
     itemId: string | string[] | FilterItemFn,
-    priority: 'highPriority' | 'lowPriority' = 'highPriority',
+    priority: FetchType = 'highPriority',
     ignoreInvalidationSync = false,
   ) {
     if (!fetchItemOrquestrator) {
@@ -845,7 +852,7 @@ export function newTSDFListQueryStore<
 
           if (!query) return;
 
-          query.refetchOnMount = true;
+          query.refetchOnMount = priority;
         },
         { action: { type: 'invalidate-item', queryKey: id } },
       );
@@ -860,7 +867,7 @@ export function newTSDFListQueryStore<
           itemsId.some((id) =>
             syncMutationsAndInvalidations.syncItemAndQuery(id, query),
           ),
-        'highPriority',
+        priority,
         true,
       );
     }
@@ -990,10 +997,16 @@ export function newTSDFListQueryStore<
             const shouldFetch =
               !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
-            if (!shouldFetch) return;
+            if (shouldFetch) {
+              scheduleItemFetch(
+                itemState?.refetchOnMount || 'lowPriority',
+                itemId,
+              );
+              return;
+            }
+          } else {
+            scheduleItemFetch('lowPriority', itemId);
           }
-
-          scheduleItemFetch('lowPriority', itemId);
         }
       }
     }, [disableRefetchOnMount, memoizedItemIds]);

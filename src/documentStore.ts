@@ -18,7 +18,7 @@ export type TSDFDocumentStoreState<State extends ValidStoreState, NError> = {
   data: State | null;
   error: NError | null;
   status: DocumentStatus;
-  refetchOnMount: boolean;
+  refetchOnMount: false | FetchType;
 };
 
 export type TSDFUseDocumentReturn<Selected, NError> = {
@@ -138,10 +138,8 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 
   let invalidationWasTriggered = false;
 
-  function invalidateData(
-    priority: 'highPriority' | 'lowPriority' = 'highPriority',
-  ) {
-    store.setKey('refetchOnMount', true, { action: 'invalidate-data' });
+  function invalidateData(priority: FetchType = 'highPriority') {
+    store.setKey('refetchOnMount', priority, { action: 'invalidate-data' });
     invalidationWasTriggered = false;
     storeEvents.emit('invalidateData', priority);
   }
@@ -205,10 +203,12 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
         const shouldFetch =
           store.state.refetchOnMount || store.state.status === 'idle';
 
-        if (!shouldFetch) return;
+        if (shouldFetch) {
+          scheduleFetch(store.state.refetchOnMount || 'lowPriority');
+        }
+      } else {
+        scheduleFetch('lowPriority');
       }
-
-      scheduleFetch('lowPriority');
     }, [disableRefetchOnMount, disabled]);
 
     const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(

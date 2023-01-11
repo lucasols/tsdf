@@ -253,7 +253,7 @@ export function createDefaultListQueryStore({
     serverMock.addOnUpdateServerData(({ prev, data }) => {
       for (const tableId of Object.keys(data)) {
         if (!deepEqual(prev[tableId], data[tableId])) {
-          listQueryStore.invalidateQuery({ tableId });
+          listQueryStore.invalidateQuery({ tableId }, 'realtimeUpdate');
         }
       }
     });

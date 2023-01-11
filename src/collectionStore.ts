@@ -25,7 +25,7 @@ export type TSFDCollectionItem<
   error: NError | null;
   status: CollectionItemStatus;
   payload: ItemPayload;
-  refetchOnMount: boolean;
+  refetchOnMount: false | FetchType;
 };
 
 export type TSFDCollectionState<
@@ -247,7 +247,7 @@ export function newTSDFCollectionStore<
 
   function invalidateData(
     itemPayload: ItemPayload | ItemPayload[] | FilterItemsFn,
-    priority: 'highPriority' | 'lowPriority' = 'highPriority',
+    priority: FetchType = 'highPriority',
   ) {
     const itemsKey = getItemsKeyArray(itemPayload);
 
@@ -258,7 +258,7 @@ export function newTSDFCollectionStore<
 
           if (!item) return;
 
-          item.refetchOnMount = true;
+          item.refetchOnMount = priority;
         },
         { action: { type: 'invalidate-data', itemKey } },
       );
@@ -404,10 +404,16 @@ export function newTSDFCollectionStore<
             // FIX: add was loaded?
             const shouldFetch = !itemState || itemState.refetchOnMount;
 
-            if (!shouldFetch) return;
+            if (shouldFetch) {
+              scheduleFetch(
+                itemState?.refetchOnMount || 'lowPriority',
+                payload,
+              );
+              return;
+            }
+          } else {
+            scheduleFetch('lowPriority', payload);
           }
-
-          scheduleFetch('lowPriority', payload);
         }
       }
     }, [disableRefetchOnMount, queriesWithId]);

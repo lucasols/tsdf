@@ -211,13 +211,21 @@ export function mockServerResource<Data, S = Data>({
       }
     }
 
-    while (fetchsInProgress.size > 0) {
-      await sleep(10);
+    async function waitUntilFetchsInProgressSizeIsZero() {
+      while (fetchsInProgress.size > 0) {
+        await sleep(10);
 
-      checkTimeout();
+        checkTimeout();
+      }
     }
 
+    await waitUntilFetchsInProgressSizeIsZero();
+
     await sleep(extraWait);
+
+    if (fetchsInProgress.size > 0) {
+      await waitUntilFetchsInProgressSizeIsZero();
+    }
   }
 
   return {
