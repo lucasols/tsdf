@@ -624,7 +624,7 @@ test.concurrent('simple update mutation with RTU', async () => {
   `);
 });
 
-test('RTU throttling', async () => {
+test.concurrent('RTU throttling', async () => {
   const env = createTestEnv({
     initialServerData,
     useLoadedSnapshot: { tables: ['users'] },
@@ -660,49 +660,33 @@ test('RTU throttling', async () => {
   env.serverMock.setFetchDuration(200);
 
   updateItemName(env, 'users', 5, '1', { duration: 100 });
-  // mudation: 7ms => 107ms
-  // fetch: 110ms => 310ms
 
   await waitUntil(350);
 
   env.serverMock.setFetchDuration(30);
 
   updateItemName(env, 'users', 5, '2', { duration: 100 });
-  // mutation: 360ms => 460ms
-  // if throttling where disabled: fetch: 470ms => 500ms
-
-  await waitUntil(510);
-  // throttled fetch: 620ms => 650ms
-
-  expect(
-    env.serverMock.fetchsCount,
-    'rtu of mutaion 2 should not be triggered',
-  ).toBe(1);
 
   await waitUntil(670);
 
-  expect(
-    env.serverMock.fetchsCount,
-    'rtu of mutaion 2 should be triggered',
-  ).toBe(2);
-
   updateItemName(env, 'users', 5, '3', { duration: 100 });
-  // mutation: 670ms => 770ms
-  // if throtthling where enabled with 300ms: fetch: 900ms => 930ms
-
-  await waitUntil(800);
-  expect(
-    env.serverMock.fetchsCount,
-    'rtu of mutaion 3 should not be triggered',
-  ).toBe(2);
-  // throttled fetch: 840ms => 870ms
 
   await waitUntil(890);
 
   expect(
     env.serverMock.fetchsCount,
-    'rtu of mutaion 3 should be triggered',
+    'rtu of mutation 3 should be triggered',
   ).toBe(3);
+
+  expect(
+    env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
+  ).toBeGreaterThan(300);
+
+  const diffLastFetch =
+    env.serverMock.fetchs[2]!.time.start - env.serverMock.fetchs[1]!.time.end;
+
+  expect(diffLastFetch).toBeGreaterThan(200);
+  expect(diffLastFetch).toBeLessThan(300);
 
   expect(renders.getSnapshot({ arrays: 'firstAndLast' }))
     .toMatchSnapshotString(`

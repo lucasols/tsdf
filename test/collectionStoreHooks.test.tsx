@@ -5,10 +5,12 @@ import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
   createDefaultCollectionStore,
-  createDefaultDocumentStore,
   createRenderStore,
   createValueStore,
+  shouldNotSkip,
 } from './utils/storeUtils';
+
+const createTestEnv = createDefaultCollectionStore;
 
 const defaultTodo = { title: 'todo', completed: false };
 
@@ -103,7 +105,7 @@ describe('useMultipleItems', () => {
       '2': { title: 'todo 2', completed: true },
     });
 
-    collectionStore.invalidateData(() => true);
+    collectionStore.invalidateItem(() => true);
 
     await serverMock.waitFetchIdle();
 
@@ -188,7 +190,7 @@ describe('useMultipleItems isolated tests', () => {
 
     act(() => {
       serverMock.mutateData({ '1': { title: 'todo', completed: true } });
-      collectionStore.invalidateData('1');
+      collectionStore.invalidateItem('1');
     });
 
     await serverMock.waitFetchIdle();
@@ -353,7 +355,7 @@ describe('useItem', () => {
 
         return false;
       } finally {
-        collectionStore.invalidateData(itemId);
+        collectionStore.invalidateItem(itemId);
       }
     }
 
@@ -376,7 +378,7 @@ const serverInitialData = { '1': defaultTodo, '2': defaultTodo };
 
 describe('useItem isolated tests', () => {
   test('use deleted item', async () => {
-    const { serverMock, store, shouldNotSkip } = createDefaultCollectionStore({
+    const { serverMock, store } = createDefaultCollectionStore({
       initialServerData: serverInitialData,
       useLoadedSnapshot: true,
     });
@@ -392,10 +394,10 @@ describe('useItem isolated tests', () => {
       renders.add(pick(selectionResult, ['status', 'payload', 'data']));
     });
 
-    act(() => {
-      store.deleteItemState('2');
-      serverMock.mutateData({ '2': null });
-    });
+    store.deleteItemState('2');
+    serverMock.mutateData({ '2': null });
+
+    await renders.waitNextRender();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
@@ -518,4 +520,131 @@ describe('useItem isolated tests', () => {
       "
     `);
   });
+});
+
+test.concurrent('RTU update works', async () => {
+  const env = createTestEnv({
+    initialServerData: { '1': defaultTodo, '2': defaultTodo },
+    useLoadedSnapshot: true,
+    emulateRTU: true,
+    dynamicRTUThrottleMs() {
+      return 300;
+    },
+  });
+
+  const renders = createRenderStore();
+
+  env.serverMock.produceData((draft) => {
+    draft['1']!.title = 'RTU Update';
+  });
+
+  await sleep(100);
+
+  expect(env.store.store.state).toMatchSnapshotString(`
+    {
+      "1": {
+        "data": {
+          "completed": false,
+          "title": "todo",
+        },
+        "error": null,
+        "payload": "1",
+        "refetchOnMount": "realtimeUpdate",
+        "status": "success",
+        "wasLoaded": true,
+      },
+      "2": {
+        "data": {
+          "completed": false,
+          "title": "todo",
+        },
+        "error": null,
+        "payload": "2",
+        "refetchOnMount": false,
+        "status": "success",
+        "wasLoaded": true,
+      },
+    }
+  `);
+
+  renderHook(() => {
+    const { data, status } = env.store.useItem('1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({ status, data });
+  });
+
+  await env.serverMock.waitFetchIdle(0, 1500);
+
+  env.serverMock.produceData((draft) => {
+    draft['1']!.title = 'Throttle update';
+  });
+
+  await env.serverMock.waitFetchIdle(0, 1500);
+
+  expect(
+    env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
+  ).toBeGreaterThan(300);
+
+  expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
+    "
+    status: success -- data: {title:todo, completed:false}
+    status: refetching -- data: {title:todo, completed:false}
+    status: success -- data: {title:RTU Update, completed:false}
+    status: refetching -- data: {title:RTU Update, completed:false}
+    status: success -- data: {title:Throttle update, completed:false}
+    "
+  `);
+});
+
+test.concurrent('fetch error then mount component without error', async () => {
+  const env = createTestEnv({
+    initialServerData: { '1': defaultTodo, '2': defaultTodo },
+  });
+
+  const renders = createRenderStore();
+
+  env.serverMock.setFetchError('error');
+
+  env.store.scheduleFetch('highPriority', '1');
+
+  await env.serverMock.waitFetchIdle();
+
+  expect(env.store.store.state).toMatchSnapshotString(`
+      {
+        "1": {
+          "data": null,
+          "error": {
+            "message": "error",
+          },
+          "payload": "1",
+          "refetchOnMount": false,
+          "status": "error",
+          "wasLoaded": false,
+        },
+      }
+    `);
+
+  env.serverMock.setFetchError(null);
+
+  renderHook(() => {
+    const { data, status } = env.store.useItem('1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({ status, data });
+  });
+
+  await env.serverMock.waitFetchIdle();
+
+  expect(renders.snapshot).toMatchSnapshotString(`
+      "
+      status: error -- data: null
+      status: loading -- data: null
+      status: success -- data: {title:todo, completed:false}
+      "
+    `);
 });

@@ -30,8 +30,10 @@ export function mockServerResource<Data, S = Data>({
   let fetchs: {
     result?: Data;
     error?: string;
+    time: { start: number; end: number };
     params: string;
     started: number;
+    duration: number;
   }[] = [];
 
   let startTime = Date.now();
@@ -54,18 +56,19 @@ export function mockServerResource<Data, S = Data>({
   const fetchsInProgress = new Set<symbol>();
 
   async function fetch(params: string): Promise<S> {
+    const fetchStartTime = Date.now() - startTime;
     const fetchId = Symbol();
 
     fetchsInProgress.add(fetchId);
 
-    let timeoutToUse = 0;
+    let duration = 0;
 
     if (Array.isArray(timeout)) {
-      timeoutToUse = randomInt(timeout[0], timeout[1]);
+      duration = randomInt(timeout[0], timeout[1]);
     } else if (typeof timeout === 'function') {
-      timeoutToUse = timeout(params);
+      duration = timeout(params);
     } else {
-      timeoutToUse = timeout;
+      duration = timeout;
     }
 
     if (logFetchs) {
@@ -73,13 +76,13 @@ export function mockServerResource<Data, S = Data>({
       console.log(
         `${numOfFetchs} - fetch${params ? ` ${params}` : ''} - started ${
           Date.now() - startTime
-        }ms - duration: ${timeoutToUse}ms`,
+        }ms - duration: ${duration}ms`,
       );
     }
 
-    lastTimeoutMs = timeoutToUse;
+    lastTimeoutMs = duration;
 
-    await sleep(timeoutToUse * dbReadAt);
+    await sleep(duration * dbReadAt);
 
     try {
       if (error) {
@@ -92,17 +95,29 @@ export function mockServerResource<Data, S = Data>({
         throw new Error('Not found');
       }
 
-      await sleep(timeoutToUse * (1 - dbReadAt));
+      await sleep(duration * (1 - dbReadAt));
 
       if (!response) {
         throw new Error('No data');
       }
 
-      fetchs.push({ started: numOfFetchs, result: response as any, params });
+      fetchs.push({
+        started: numOfFetchs,
+        result: response as any,
+        params,
+        duration,
+        time: { start: fetchStartTime, end: Date.now() - startTime },
+      });
 
       return response;
     } catch (e) {
-      fetchs.push({ started: numOfFetchs, error: JSON.stringify(e), params });
+      fetchs.push({
+        started: numOfFetchs,
+        error: JSON.stringify(e),
+        params,
+        duration,
+        time: { start: fetchStartTime, end: Date.now() - startTime },
+      });
       throw e;
     } finally {
       fetchsInProgress.delete(fetchId);
@@ -265,7 +280,15 @@ export function mockServerResource<Data, S = Data>({
         firstNItems: 1,
       },
     ) {
-      return simplifyArraySnapshot(fetchs, simplifyArray);
+      return simplifyArraySnapshot(
+        fetchs.map(({ time, duration, ...item }) => ({
+          ...item,
+        })),
+        simplifyArray,
+      );
+    },
+    get fetchs() {
+      return fetchs;
     },
   };
 }

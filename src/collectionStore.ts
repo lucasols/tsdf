@@ -26,6 +26,7 @@ export type TSFDCollectionItem<
   status: CollectionItemStatus;
   payload: ItemPayload;
   refetchOnMount: false | FetchType;
+  wasLoaded: boolean;
 };
 
 export type TSFDCollectionState<
@@ -55,7 +56,7 @@ export function newTSDFCollectionStore<
   errorNormalizer,
   mediumPriorityThrottleMs,
   disableRefetchOnMount: globalDisableRefetchOnMount,
-  getDynamicRealtimeThrottleMs,
+  dynamicRealtimeThrottleMs,
   getCollectionItemKey: filterCollectionItemObjKey,
 }: {
   debugName?: string;
@@ -66,7 +67,7 @@ export function newTSDFCollectionStore<
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
-  getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 }) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload, NError>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, NError>;
@@ -103,6 +104,7 @@ export function newTSDFCollectionStore<
             status: 'loading',
             payload: params,
             refetchOnMount: false,
+            wasLoaded: false,
           };
 
           return;
@@ -137,6 +139,7 @@ export function newTSDFCollectionStore<
 
           item.data = data;
           item.status = 'success';
+          item.wasLoaded = true;
         },
         { action: { type: 'fetch-success', params } },
       );
@@ -166,7 +169,7 @@ export function newTSDFCollectionStore<
   const fetchOrquestrator = createCollectionFetchOrquestrator({
     fetchFn: fetch,
     lowPriorityThrottleMs,
-    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs,
     mediumPriorityThrottleMs,
   });
 
@@ -245,7 +248,7 @@ export function newTSDFCollectionStore<
 
   const invalidationWasTriggered = new Set<string>();
 
-  function invalidateData(
+  function invalidateItem(
     itemPayload: ItemPayload | ItemPayload[] | FilterItemsFn,
     priority: FetchType = 'highPriority',
   ) {
@@ -401,8 +404,10 @@ export function newTSDFCollectionStore<
           if (disableRefetchOnMount) {
             const itemState = getItemState(payload);
 
-            // FIX: add was loaded?
-            const shouldFetch = !itemState || itemState.refetchOnMount;
+            console.log('itemState', itemState);
+
+            const shouldFetch =
+              !itemState?.wasLoaded || itemState.refetchOnMount;
 
             if (shouldFetch) {
               scheduleFetch(
@@ -508,6 +513,7 @@ export function newTSDFCollectionStore<
         draftState[itemKey] = {
           data,
           status: 'success',
+          wasLoaded: true,
           refetchOnMount: false,
           error: null,
           payload: serializableClone(fetchParams),
@@ -575,7 +581,7 @@ export function newTSDFCollectionStore<
 
   if (!disableRefetchOnWindowFocus) {
     function handleFocus() {
-      invalidateData(() => true, 'lowPriority');
+      invalidateItem(() => true, 'lowPriority');
     }
 
     window.addEventListener('focus', handleFocus);
@@ -591,7 +597,7 @@ export function newTSDFCollectionStore<
     getItemKey,
     getItemState,
     startMutation,
-    invalidateData,
+    invalidateItem,
     updateItemState,
     addItemToState,
     deleteItemState,

@@ -114,7 +114,7 @@ export function createDefaultListQueryStore({
     },
     errorNormalizer: normalizeError,
     defaultQuerySize,
-    getDynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
+    dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     syncMutationsAndInvalidations: {
       syncItemAndQuery(itemId, query) {
         return query.tableId === itemId.split('||')[0];

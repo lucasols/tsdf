@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, expect, test } from 'vitest';
 import { sleep } from './utils/sleep';
 import {
@@ -28,6 +30,7 @@ describe('test helpers', () => {
         payload: '1',
         refetchOnMount: false,
         status: 'success',
+        wasLoaded: true,
       },
       '2': {
         data: { completed: false, title: 'todo' },
@@ -35,6 +38,7 @@ describe('test helpers', () => {
         payload: '2',
         refetchOnMount: false,
         status: 'success',
+        wasLoaded: true,
       },
     });
   });
@@ -55,6 +59,7 @@ describe('fetch lifecicle', () => {
         refetchOnMount: false,
         status: 'loading',
         payload: '1',
+        wasLoaded: false,
       },
     });
 
@@ -67,6 +72,7 @@ describe('fetch lifecicle', () => {
         refetchOnMount: false,
         status: 'success',
         payload: '1',
+        wasLoaded: true,
       },
     });
 
@@ -90,6 +96,7 @@ describe('fetch lifecicle', () => {
         refetchOnMount: false,
         status: 'refetching',
         payload: '1',
+        wasLoaded: true,
       },
     });
 
@@ -102,6 +109,7 @@ describe('fetch lifecicle', () => {
         refetchOnMount: false,
         status: 'success',
         payload: '1',
+        wasLoaded: true,
       },
     });
 
@@ -122,6 +130,7 @@ describe('fetch lifecicle', () => {
         refetchOnMount: false,
         status: 'error',
         payload: '1',
+        wasLoaded: true,
       },
     });
   });
@@ -144,6 +153,7 @@ test.concurrent(
         payload: '1',
         refetchOnMount: false,
         status: 'loading',
+        wasLoaded: false,
       },
     });
 
@@ -158,6 +168,7 @@ test.concurrent(
         refetchOnMount: false,
         status: 'success',
         payload: '1',
+        wasLoaded: true,
       },
     });
   },
@@ -175,6 +186,7 @@ test.concurrent('initialization fetch', async () => {
       refetchOnMount: false,
       status: 'success',
       payload: '1',
+      wasLoaded: true,
     },
   });
 });
@@ -247,8 +259,9 @@ test.concurrent(
     const defaultState = {
       data: defaultTodo,
       error: null,
-      refetchOnMount: false,
+      refetchOnMount: false as const,
       status: 'success' as const,
+      wasLoaded: true,
     };
 
     expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
@@ -380,6 +393,7 @@ describe('update state functions', () => {
         payload: '6',
         refetchOnMount: false,
         status: 'success',
+        wasLoaded: true,
       });
     });
 
@@ -420,6 +434,7 @@ describe('update state functions', () => {
           payload: '6',
           refetchOnMount: false,
           status: 'success',
+          wasLoaded: true,
         },
         {
           data: { completed: false, title: 'item 7' },
@@ -427,6 +442,7 @@ describe('update state functions', () => {
           payload: '7',
           refetchOnMount: false,
           status: 'success',
+          wasLoaded: true,
         },
         {
           data: { completed: false, title: 'todo' },
@@ -434,6 +450,7 @@ describe('update state functions', () => {
           payload: '5',
           refetchOnMount: false,
           status: 'success',
+          wasLoaded: true,
         },
       ]);
     });
@@ -458,6 +475,7 @@ describe('update state functions', () => {
       payload: '6',
       refetchOnMount: false,
       status: 'success',
+      wasLoaded: true,
     });
   });
 

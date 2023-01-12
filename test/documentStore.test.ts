@@ -14,7 +14,7 @@ import {
 type DocumentStoreState = TSDFDocumentStoreState<any, StoreError>;
 
 describe('fetch lifecicle', () => {
-  const { serverMock, documentStore } = createDefaultDocumentStore();
+  const { serverMock, store: documentStore } = createDefaultDocumentStore();
 
   test('fetch resource', async () => {
     expect(documentStore.store.state).toEqual<DocumentStoreState>({
@@ -153,7 +153,7 @@ test.concurrent(
 );
 
 test.concurrent('await fetch', async () => {
-  const { serverMock, documentStore } = createDefaultDocumentStore({
+  const { serverMock, store: documentStore } = createDefaultDocumentStore({
     useLoadedSnapshot: true,
   });
 

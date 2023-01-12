@@ -82,7 +82,7 @@ module.exports = {
     '@typescript-eslint/no-unused-expressions': ERROR_IN_CI,
     '@typescript-eslint/no-unused-vars': [
       ERROR_IN_CI,
-      { argsIgnorePattern: '^_' },
+      { argsIgnorePattern: '^_', ignoreRestSiblings: true },
     ],
     '@typescript-eslint/no-shadow': [
       ERROR_IN_CI,

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { deepEqual, Store } from 't-state';
 import {
@@ -10,7 +11,7 @@ import { filterAndMap } from '../../src/utils/filterAndMap';
 import { isObject } from '../../src/utils/isObject';
 import { clampMin } from '../../src/utils/math';
 import { mockServerResource } from '../mocks/fetchMock';
-import { arrayWithPrev, arrayWithPrevAndIndex } from './arrayUtils';
+import { arrayWithPrevAndIndex } from './arrayUtils';
 import { pick } from './objectUtils';
 
 export type StoreError = {
@@ -34,23 +35,28 @@ export type DefaultDocStoreData = {
 };
 
 export function createDefaultDocumentStore({
-  serverHello = 'world',
+  initialServerData: serverHello = 'world',
   useLoadedSnapshot,
+  emulateRTU,
+  dynamicRTUThrottleMs,
   debug,
 }: {
-  serverHello?: string;
+  initialServerData?: string;
   useLoadedSnapshot?: boolean;
   debug?: never;
+  emulateRTU?: boolean;
+  dynamicRTUThrottleMs?: (duration: number) => number;
 } = {}) {
   const serverMock = mockServerResource<DefaultDocStoreData>({
     initialData: { hello: serverHello },
     logFetchs: debug,
   });
 
-  const documentStore = newTSDFDocumentStore({
+  const store = newTSDFDocumentStore({
     fetchFn: serverMock.fetchWitoutSelector,
     initialData: useLoadedSnapshot ? { hello: 'world' } : undefined,
     errorNormalizer: normalizeError,
+    dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
   });
 
   const startTime = Date.now();
@@ -60,13 +66,21 @@ export function createDefaultDocumentStore({
   }
 
   if (debug as any) {
-    documentStore.store.subscribe(({ current }) => {
+    store.store.subscribe(({ current }) => {
       // eslint-disable-next-line no-console
       console.log(serverMock.relativeTime(), current);
     });
   }
 
-  return { serverMock, documentStore, getElapsedTime };
+  if (emulateRTU) {
+    serverMock.addOnUpdateServerData(({ prev, data }) => {
+      if (!deepEqual(prev, data)) {
+        store.invalidateData('realtimeUpdate');
+      }
+    });
+  }
+
+  return { serverMock, store, getElapsedTime };
 }
 
 type Todo = {
@@ -95,10 +109,14 @@ export function createDefaultCollectionStore({
   },
   useLoadedSnapshot,
   randomTimeout,
+  emulateRTU,
+  dynamicRTUThrottleMs,
   debug,
 }: {
   initialServerData?: ServerData;
   useLoadedSnapshot?: boolean;
+  dynamicRTUThrottleMs?: (duration: number) => number;
+  emulateRTU?: boolean;
   /** default: 30-100 */
   randomTimeout?: true;
   debug?: never;
@@ -121,6 +139,7 @@ export function createDefaultCollectionStore({
   const collectionStore = newTSDFCollectionStore({
     fetchFn: serverMock.fetch,
     errorNormalizer: normalizeError,
+    dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
   });
 
   if (useLoadedSnapshot) {
@@ -133,6 +152,7 @@ export function createDefaultCollectionStore({
         error: null,
         payload: id,
         refetchOnMount: false,
+        wasLoaded: true,
       };
     }
 
@@ -155,6 +175,16 @@ export function createDefaultCollectionStore({
     collectionStore.store.subscribe(({ current }) => {
       // eslint-disable-next-line no-console
       console.log(serverMock.relativeTime(), current);
+    });
+  }
+
+  if (emulateRTU) {
+    serverMock.addOnUpdateServerData(({ prev, data }) => {
+      for (const tableId of Object.keys(data)) {
+        if (!deepEqual(prev[tableId], data[tableId])) {
+          collectionStore.invalidateItem(tableId, 'realtimeUpdate');
+        }
+      }
     });
   }
 

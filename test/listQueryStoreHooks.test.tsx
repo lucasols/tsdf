@@ -8,7 +8,11 @@ import {
 import { pick } from './utils/objectUtils';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
-import { createRenderStore, createValueStore } from './utils/storeUtils';
+import {
+  createRenderStore,
+  createValueStore,
+  shouldNotSkip,
+} from './utils/storeUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -564,7 +568,7 @@ describe('useItem', () => {
   });
 
   test('use deleted item', async () => {
-    const { serverMock, store, shouldNotSkip } = createDefaultListQueryStore({
+    const { serverMock, store } = createDefaultListQueryStore({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
     });

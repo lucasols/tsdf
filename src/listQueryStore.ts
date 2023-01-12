@@ -81,7 +81,7 @@ export function newTSDFListQueryStore<
   disableRefetchOnMount: globalDisableRefetchOnMount,
   lowPriorityThrottleMs,
   mediumPriorityThrottleMs,
-  getDynamicRealtimeThrottleMs,
+  dynamicRealtimeThrottleMs,
   syncMutationsAndInvalidations,
 }: {
   debugName?: string;
@@ -100,7 +100,7 @@ export function newTSDFListQueryStore<
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
-  getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 }) {
   type State = TSFDListQueryState<ItemState, NError, QueryPayload>;
   type Query = TSFDListQuery<NError, QueryPayload>;
@@ -279,7 +279,7 @@ export function newTSDFListQueryStore<
   const fetchQueryOrquestrator = createCollectionFetchOrquestrator({
     fetchFn: fetchQuery,
     lowPriorityThrottleMs,
-    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs,
     mediumPriorityThrottleMs,
   });
 
@@ -780,7 +780,7 @@ export function newTSDFListQueryStore<
     createCollectionFetchOrquestrator({
       fetchFn: fetchItem,
       lowPriorityThrottleMs,
-      dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
+      dynamicRealtimeThrottleMs,
       mediumPriorityThrottleMs,
     });
 

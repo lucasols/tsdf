@@ -36,7 +36,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   disableRefetchOnMount: globalDisableRefetchOnMount,
   lowPriorityThrottleMs,
   mediumPriorityThrottleMs,
-  getDynamicRealtimeThrottleMs,
+  dynamicRealtimeThrottleMs,
   errorNormalizer,
 }: {
   debugName?: string;
@@ -47,7 +47,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
-  getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 }) {
   type DocState = TSDFDocumentStoreState<State, NError>;
 
@@ -108,7 +108,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   const fetchOrquestrator = createFetchOrquestrator<null>({
     fetchFn: fetch,
     lowPriorityThrottleMs,
-    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs,
     mediumPriorityThrottleMs,
   });
 
