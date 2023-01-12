@@ -494,3 +494,30 @@ describe('update state functions', () => {
     expect(store.scheduleFetch('highPriority', '1')).toBe('started');
   });
 });
+
+test('mutation a obj passed as payload does not breaks the store', () => {
+  const env = createTestEnv<{ id: { id: string } }>({});
+
+  const obj = { id: { id: '1' } };
+
+  env.store.scheduleFetch('highPriority', obj);
+
+  env.serverMock.waitFetchIdle();
+
+  obj.id.id = '2';
+
+  expect(env.store.getItemState({ id: { id: '1' } })).toMatchInlineSnapshot(`
+    {
+      "data": null,
+      "error": null,
+      "payload": {
+        "id": {
+          "id": "1",
+        },
+      },
+      "refetchOnMount": false,
+      "status": "loading",
+      "wasLoaded": false,
+    }
+  `);
+});

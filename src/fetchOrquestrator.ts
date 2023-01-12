@@ -138,10 +138,7 @@ export function createFetchOrquestrator<T>({
     }
 
     if (success) {
-      // FIX: test: if the fetch has error or was aborted it should not considered in the throttling, consider possible concurrent problems
       lastFetchDuration = Date.now() - startTime;
-    } else {
-      lastFetchStartTime = prevFetchStartTime;
     }
 
     if (currentFetchs.realtimeScheduled) {

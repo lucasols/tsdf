@@ -1,5 +1,5 @@
 import mitt from 'mitt';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useConst, useOnChange, useOnMittEvent } from './utils/hooks';
 
 export function useEnsureIsLoaded(

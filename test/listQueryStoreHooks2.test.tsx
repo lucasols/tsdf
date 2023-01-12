@@ -290,7 +290,7 @@ test('load a item and a few ms after load a query with different data', async ()
   expect(serverMock.fetchsCount).toBe(2);
 });
 
-describe('syncMutationAndInvalidation', async () => {
+describe('syncMutationAndInvalidation', () => {
   test('invalidate related queries after item invalidation', async () => {
     const { store, serverMock } = createTestEnv({
       initialServerData,

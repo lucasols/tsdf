@@ -104,6 +104,7 @@ module.exports = {
     '@typescript-eslint/no-unsafe-assignment': OFF,
     '@typescript-eslint/no-misused-promises': OFF,
     '@typescript-eslint/restrict-template-expressions': OFF,
+    '@typescript-eslint/unbound-method': OFF,
 
     /* vitest */
     'vitest/expect-expect': ERROR_IN_CI_ONLY,

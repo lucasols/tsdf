@@ -85,11 +85,10 @@ export function newTSDFCollectionStore<
 
   async function fetch(
     fetchCtx: FetchContext,
-    fetchParams: ItemPayload,
+    itemPayload: ItemPayload,
   ): Promise<boolean> {
-    const itemId = getItemKey(fetchParams);
-    // FIX: test if this is needed
-    const params = serializableClone(fetchParams);
+    const itemId = getItemKey(itemPayload);
+    const payload = serializableClone(itemPayload);
 
     const itemState = store.state[itemId];
 
@@ -102,7 +101,7 @@ export function newTSDFCollectionStore<
             data: null,
             error: null,
             status: 'loading',
-            payload: params,
+            payload,
             refetchOnMount: false,
             wasLoaded: false,
           };
@@ -111,7 +110,7 @@ export function newTSDFCollectionStore<
         }
 
         item.status = item.data !== null ? 'refetching' : 'loading';
-        item.payload = params;
+        item.payload = payload;
         item.error = null;
         item.refetchOnMount = false;
       },
@@ -121,13 +120,13 @@ export function newTSDFCollectionStore<
           type: !itemState?.data
             ? 'fetch-start-loading'
             : 'fetch-start-refetching',
-          params,
+          payload,
         },
       },
     );
 
     try {
-      const data = await fetchFn(params);
+      const data = await fetchFn(payload);
 
       if (fetchCtx.shouldAbort()) return false;
 
@@ -141,7 +140,7 @@ export function newTSDFCollectionStore<
           item.status = 'success';
           item.wasLoaded = true;
         },
-        { action: { type: 'fetch-success', params } },
+        { action: { type: 'fetch-success', payload } },
       );
 
       return true;
@@ -159,7 +158,7 @@ export function newTSDFCollectionStore<
           item.error = error;
           item.status = 'error';
         },
-        { action: { type: 'fetch-error', params, error } },
+        { action: { type: 'fetch-error', payload, error } },
       );
 
       return false;
@@ -403,8 +402,6 @@ export function newTSDFCollectionStore<
         if (itemId) {
           if (disableRefetchOnMount) {
             const itemState = getItemState(payload);
-
-            console.log('itemState', itemState);
 
             const shouldFetch =
               !itemState?.wasLoaded || itemState.refetchOnMount;

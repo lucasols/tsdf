@@ -22,7 +22,7 @@
   "scripts": {
     "test": "vitest --ui --mode development",
     "lint": "pnpm tsc && pnpm eslint && pnpm format",
-    "eslint": "CI=true eslint --ext .jsx,.js,.ts,.tsx src/",
+    "eslint": "CI=true eslint --color --ext .jsx,.js,.ts,.tsx src/ test/",
     "format": "prettier --write src/**/*.ts",
     "tsc": "tsc -p tsconfig.prod.json",
     "tsc:watch": "tsc -p tsconfig.prod.json --watch",

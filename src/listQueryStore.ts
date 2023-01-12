@@ -12,6 +12,7 @@ import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo, useOnMittEvent } from './utils/hooks';
+import { serializableClone } from './utils/serializableClone';
 
 type QueryStatus = Status | 'loadingMore';
 
@@ -116,13 +117,14 @@ export function newTSDFListQueryStore<
 
   async function fetchQuery(
     fetchCtx: FetchCtx,
-    [fetchType, params, size = defaultQuerySize]: [
+    [fetchType, queryPayload, size = defaultQuerySize]: [
       'load' | 'loadMore',
       QueryPayload,
       number | undefined,
     ],
   ): Promise<boolean> {
-    const queryKey = getQueryKey(params);
+    const payload = serializableClone(queryPayload);
+    const queryKey = getQueryKey(payload);
 
     const queryState = store.state.queries[queryKey];
 
@@ -137,7 +139,7 @@ export function newTSDFListQueryStore<
             error: null,
             status: 'loading',
             wasLoaded: false,
-            payload: params,
+            payload,
             refetchOnMount: false,
             hasMore: false,
             items: [],
@@ -162,7 +164,7 @@ export function newTSDFListQueryStore<
             : fetchType === 'loadMore'
             ? 'fetch-query-loading-more'
             : 'refetching-query-start',
-          params,
+          payload,
         },
       },
     );
@@ -180,7 +182,7 @@ export function newTSDFListQueryStore<
     })();
 
     try {
-      const { items, hasMore } = await fetchListFn(params, querySize);
+      const { items, hasMore } = await fetchListFn(payload, querySize);
 
       if (fetchCtx.shouldAbort()) return false;
 
@@ -217,7 +219,7 @@ export function newTSDFListQueryStore<
           }
         },
         {
-          action: { type: 'fetch-query-success', params },
+          action: { type: 'fetch-query-success', payload },
         },
       );
 
@@ -245,7 +247,7 @@ export function newTSDFListQueryStore<
           query.error = error;
         },
         {
-          action: { type: 'fetch-query-error', params, error },
+          action: { type: 'fetch-query-error', payload, error },
         },
       );
 
@@ -331,7 +333,7 @@ export function newTSDFListQueryStore<
     });
   }
 
-  async function awaitListFetch(
+  async function awaitListQueryFetch(
     params: QueryPayload,
     size = defaultQuerySize,
   ): Promise<
@@ -375,7 +377,6 @@ export function newTSDFListQueryStore<
         };
   }
 
-  // FIX: add tests
   async function awaitItemFetch(itemId: string): Promise<
     | { data: null; error: NError }
     | {
@@ -509,7 +510,6 @@ export function newTSDFListQueryStore<
       omitPayload,
       returnIdleStatus,
       returnRefetchingStatus,
-      // FIXLATER: add tests
       loadSize,
       disableRefetchOnMount = globalDisableRefetchOnMount,
     }: {
@@ -1168,11 +1168,11 @@ export function newTSDFListQueryStore<
     deleteItemState,
     getItemState,
     loadMore,
-    awaitItemFetch,
     invalidateQuery,
     invalidateItem,
     scheduleItemFetch,
-    awaitListFetch,
+    awaitItemFetch,
+    awaitListQueryFetch,
     useMultipleListQueries,
     useListQuery,
     useItem,

@@ -93,7 +93,7 @@ describe('fetch lifecicle', () => {
   });
 });
 
-test.concurrent('start with initialized data', async () => {
+test.concurrent('start with initialized data', () => {
   const serverMock = mockServerResource<any>({
     initialData: null,
   });

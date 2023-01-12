@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 export function pick<T, K extends keyof T>(
   obj: T | undefined,
   keys: K[],

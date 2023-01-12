@@ -103,7 +103,9 @@ export type DefaultCollectionStore = TSDFCollectionStore<
   string
 >;
 
-export function createDefaultCollectionStore({
+export function createDefaultCollectionStore<
+  Payload extends { id: { id: string } } | string = string,
+>({
   initialServerData: serverInitialData = {
     '1': { title: 'todo', completed: false },
   },
@@ -126,6 +128,14 @@ export function createDefaultCollectionStore({
     randomTimeout,
     logFetchs: debug,
     fetchSelector(data, params) {
+      let payload = params.startsWith('{"id":"')
+        ? (JSON.parse(params) as { id: { id: string } })
+        : params;
+
+      if (isObject(payload)) {
+        payload = payload.id.id;
+      }
+
       const todo: any = data && data[params];
 
       if (!todo) {
@@ -136,8 +146,12 @@ export function createDefaultCollectionStore({
     },
   });
 
-  const collectionStore = newTSDFCollectionStore({
-    fetchFn: serverMock.fetch,
+  const collectionStore = newTSDFCollectionStore<Todo, StoreError, Payload>({
+    fetchFn: async (payload) => {
+      return serverMock.fetch(
+        typeof payload === 'object' ? JSON.stringify(payload) : String(payload),
+      );
+    },
     errorNormalizer: normalizeError,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
   });
@@ -156,7 +170,7 @@ export function createDefaultCollectionStore({
       };
     }
 
-    collectionStore.store.setState(initialState);
+    collectionStore.store.setState(initialState as any);
   }
 
   const startTime = Date.now();
@@ -182,7 +196,7 @@ export function createDefaultCollectionStore({
     serverMock.addOnUpdateServerData(({ prev, data }) => {
       for (const tableId of Object.keys(data)) {
         if (!deepEqual(prev[tableId], data[tableId])) {
-          collectionStore.invalidateItem(tableId, 'realtimeUpdate');
+          collectionStore.invalidateItem(tableId as Payload, 'realtimeUpdate');
         }
       }
     });

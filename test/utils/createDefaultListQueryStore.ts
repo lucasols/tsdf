@@ -5,7 +5,6 @@ import {
 } from '../../src/listQueryStore';
 import { getCacheId } from '../../src/utils/getCacheId';
 import { mockServerResource } from '../mocks/fetchMock';
-import { pick } from './objectUtils';
 import { normalizeError, StoreError } from './storeUtils';
 
 type Row = {

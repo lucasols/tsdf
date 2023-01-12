@@ -192,7 +192,6 @@ describe.concurrent('fetch query', () => {
     expect(serverMock.fetchsCount).toBe(1);
   });
 
-  // FIXLATER: add error tests to other stores
   test('refetch list with error', async () => {
     const {
       serverMock,
@@ -479,7 +478,7 @@ describe.concurrent('fetch query', () => {
     `);
   });
 
-  test('do not load more if the query not exists or hasMore === false', async () => {
+  test('do not load more if the query not exists or hasMore === false', () => {
     const { store: listQueryStore } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
@@ -547,7 +546,9 @@ test.concurrent('await fetch', async () => {
     name: 'User 1',
   });
 
-  expect(await listQueryStore.awaitListFetch({ tableId: 'users' })).toEqual({
+  expect(
+    await listQueryStore.awaitListQueryFetch({ tableId: 'users' }),
+  ).toEqual({
     items: [
       { id: 'users||1', data: { id: 1, name: 'Updated User 1' } },
       { id: 'users||2', data: { id: 2, name: 'User 2' } },
@@ -561,7 +562,9 @@ test.concurrent('await fetch', async () => {
 
   serverMock.setFetchError('error');
 
-  expect(await listQueryStore.awaitListFetch({ tableId: 'users' }, 2)).toEqual({
+  expect(
+    await listQueryStore.awaitListQueryFetch({ tableId: 'users' }, 2),
+  ).toEqual({
     items: [],
     error: { message: 'error' },
     hasMore: false,
@@ -571,7 +574,7 @@ test.concurrent('await fetch', async () => {
 });
 
 describe.concurrent('fetch item', () => {
-  test('fetch item', async () => {
+  test.concurrent('fetch item', async () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
     });
@@ -614,6 +617,35 @@ describe.concurrent('fetch item', () => {
     `);
 
     expect(serverMock.fetchsCount).toBe(1);
+  });
+
+  test.concurrent('await fetch item', async () => {
+    const { serverMock, store: listQueryStore } = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users'] },
+    });
+
+    serverMock.produceData((draft) => {
+      draft['users']![0]!.name = 'Updated User 1';
+    });
+
+    expect(listQueryStore.getItemState('users||1')).toMatchObject({
+      name: 'User 1',
+    });
+
+    expect(await listQueryStore.awaitItemFetch('users||1')).toEqual({
+      data: { id: 1, name: 'Updated User 1' },
+      error: null,
+    });
+
+    serverMock.setFetchError('error');
+
+    expect(await listQueryStore.awaitItemFetch('users||1')).toEqual({
+      data: null,
+      error: { message: 'error' },
+    });
+
+    expect(serverMock.fetchsCount).toEqual(2);
   });
 
   test.concurrent('test helpers inital snapshot', async () => {
@@ -923,8 +955,6 @@ describe.concurrent('fetch item', () => {
       expect(result).toBe('skipped');
     },
   );
-
-  test('load a query and in the middle of the fetch load an item that return a different data for the item', async () => {});
 });
 
 describe('update state functions', () => {

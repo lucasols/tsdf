@@ -1,5 +1,4 @@
 import { cleanup, render, renderHook } from '@testing-library/react';
-import { act } from 'react-dom/test-utils';
 import { afterAll, describe, expect, test } from 'vitest';
 import {
   createDefaultListQueryStore,

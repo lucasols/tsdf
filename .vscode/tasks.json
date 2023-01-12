@@ -10,13 +10,23 @@
       "problemMatcher": [],
       "presentation": {
         "clear": true
-      },
+      }
     },
     {
       "type": "npm",
       "script": "test",
       "label": "run tests",
       "problemMatcher": [],
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "type": "npm",
+      "script": "eslint",
+      "problemMatcher": ["$eslint-stylish"],
+      "label": "eslint",
+      "detail": "CI=true eslint --ext .jsx,.js,.ts,.tsx src/ test/",
       "presentation": {
         "clear": true
       }

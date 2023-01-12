@@ -266,7 +266,6 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   };
 }
 
-// FIX: create a proper type for this
 export type TSDFDocumentStore<
   State extends ValidStoreState,
   NError,

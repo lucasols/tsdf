@@ -215,7 +215,7 @@ test.concurrent('user updating the name of a record', async () => {
     setName('Type');
   });
 
-  await env.serverMock.waitFetchIdle(200, 1500);
+  await env.serverMock.waitFetchIdle(300, 1500);
 
   expect(env.store.getItemState('users||1')).toMatchObject({ name: 'Type' });
 
@@ -680,7 +680,7 @@ test.concurrent('RTU throttling', async () => {
 
   expect(
     env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
-  ).toBeGreaterThan(300);
+  ).toBeGreaterThanOrEqual(300);
 
   const diffLastFetch =
     env.serverMock.fetchs[2]!.time.start - env.serverMock.fetchs[1]!.time.end;

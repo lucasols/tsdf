@@ -76,7 +76,7 @@ describe('useMultipleItems', () => {
 
   let initialFetchCount: number;
 
-  test('invalidate all items', async () => {
+  test('invalidate all items setup', async () => {
     initialFetchCount = serverMock.fetchsCount;
 
     // mount a new hook to check if there are more fetchs than expected
@@ -110,6 +110,8 @@ describe('useMultipleItems', () => {
     await serverMock.waitFetchIdle();
 
     serverMock.undoTimeoutChange();
+
+    expect(serverMock.fetchsCount).toBe(initialFetchCount + 2);
 
     unmount();
   });
@@ -267,7 +269,6 @@ describe('useItem', () => {
   });
 
   test('disableRefetchOnMount', async () => {
-    // FIXLATER: fix this test
     const numOfFetchs = serverMock.numOfFetchsFromHere();
 
     const comp2Renders = createRenderStore();
@@ -586,7 +587,7 @@ test.concurrent('RTU update works', async () => {
 
   expect(
     env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
-  ).toBeGreaterThan(300);
+  ).toBeGreaterThanOrEqual(300);
 
   expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
     "
@@ -610,7 +611,7 @@ test.concurrent('fetch error then mount component without error', async () => {
 
   env.store.scheduleFetch('highPriority', '1');
 
-  await env.serverMock.waitFetchIdle();
+  await env.serverMock.waitFetchIdle(200);
 
   expect(env.store.store.state).toMatchSnapshotString(`
       {

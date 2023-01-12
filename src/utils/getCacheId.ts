@@ -7,7 +7,7 @@ export function getCacheId(input: any) {
     : JSON.stringify(input && isObject(input) ? orderedProps(input) : input);
 }
 
-function orderedProps(obj: any) {
+function orderedProps(obj: Record<string, unknown>) {
   // eslint-disable-next-line no-restricted-syntax
   return filterAndMap(Object.keys(obj).sort(), (k, ignore) => {
     const value = obj[k];
