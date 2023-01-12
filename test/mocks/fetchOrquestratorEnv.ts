@@ -173,7 +173,7 @@ export function createTestStore(
         addAction(event);
       }
     },
-    getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
   });
 
   /** default duration = 40 */

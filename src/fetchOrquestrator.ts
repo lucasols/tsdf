@@ -22,8 +22,7 @@ export type CreateFetchOrquestratorOptions<T> = {
   on?: (event: Events) => void;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
-  disableRealtimeDynamicThrottling?: boolean;
-  getDynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 };
 
 export function createFetchOrquestrator<T>({
@@ -31,8 +30,7 @@ export function createFetchOrquestrator<T>({
   on,
   mediumPriorityThrottleMs = 10,
   lowPriorityThrottleMs = 200,
-  disableRealtimeDynamicThrottling,
-  getDynamicRealtimeThrottleMs,
+  dynamicRealtimeThrottleMs,
 }: CreateFetchOrquestratorOptions<T>) {
   const fetchs: {
     inProgress: { startTime: number; onEnd: (() => void)[] } | null;
@@ -170,7 +168,7 @@ export function createFetchOrquestrator<T>({
   ): ScheduleFetchResults {
     const startTime = Date.now();
 
-    if (!disableRealtimeDynamicThrottling && fetchType === 'realtimeUpdate') {
+    if (dynamicRealtimeThrottleMs && fetchType === 'realtimeUpdate') {
       if (scheduleRTU(startTime, params)) {
         return 'rt-scheduled';
       }
@@ -234,13 +232,13 @@ export function createFetchOrquestrator<T>({
   }
 
   function addDelayedRTU(startTime: number, params: T): boolean {
-    if (!getDynamicRealtimeThrottleMs) return false;
+    if (!dynamicRealtimeThrottleMs) return false;
 
     const timeSinceLastFetch =
       startTime - (lastFetchStartTime + lastFetchDuration);
 
     const minimumRealtimeInterval =
-      getDynamicRealtimeThrottleMs(lastFetchDuration);
+      dynamicRealtimeThrottleMs(lastFetchDuration);
 
     if (timeSinceLastFetch >= minimumRealtimeInterval) return false;
 
@@ -250,7 +248,7 @@ export function createFetchOrquestrator<T>({
       timeoutId: window.setTimeout(() => {
         fetchs.realtimeScheduled = null;
         on?.('scheduled-rt-fetch-started');
-        startFetch(params, startTime);
+        startFetch(params, Date.now());
       }, delay),
     };
 
@@ -261,7 +259,7 @@ export function createFetchOrquestrator<T>({
     if (
       !lastFetchDuration ||
       !lastFetchStartTime ||
-      !getDynamicRealtimeThrottleMs
+      !dynamicRealtimeThrottleMs
     ) {
       return false;
     }

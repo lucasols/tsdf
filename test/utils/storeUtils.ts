@@ -164,7 +164,7 @@ export function createDefaultCollectionStore({
     getElapsedTime,
     onRender,
     renderResults,
-    shouldNotSkip(this:void, scheduleResult: any) {
+    shouldNotSkip(this: void, scheduleResult: any) {
       if (scheduleResult === 'skipped') {
         throw new Error('Should not skip');
       }
@@ -400,4 +400,17 @@ export function simplifyArraySnapshot(
     .join('\n');
 
   return `\n${result}\n`;
+}
+
+export function waitElapsedTime() {
+  const startTime = Date.now();
+
+  return (waitUntil: number) => {
+    return new Promise<void>((resolve) => {
+      const timeoutId = setTimeout(() => {
+        clearTimeout(timeoutId);
+        resolve();
+      }, waitUntil - (Date.now() - startTime));
+    });
+  };
 }

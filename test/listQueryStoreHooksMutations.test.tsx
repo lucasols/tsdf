@@ -7,7 +7,7 @@ import {
 import { randomInt } from './utils/math';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
-import { createRenderStore } from './utils/storeUtils';
+import { createRenderStore, waitElapsedTime } from './utils/storeUtils';
 
 const createTestEnv = createDefaultListQueryStore;
 
@@ -534,7 +534,7 @@ test.concurrent('delete mutation with RTU', async () => {
 
   deleteItem(env, 'users', 2, { optimisticUpdate: true, duration: 600 });
 
-  await env.serverMock.waitFetchIdle(400, 1500);
+  await env.serverMock.waitFetchIdle(0, 1500);
 
   expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
     "
@@ -546,10 +546,247 @@ test.concurrent('delete mutation with RTU', async () => {
   `);
 });
 
-test('creation mutation with RTU', async () => {});
+test.concurrent('creation mutation with RTU', async () => {
+  const env = createTestEnv({
+    initialServerData,
+    useLoadedSnapshot: { tables: ['users'] },
+    emulateRTU: true,
+  });
 
-test('simple update mutation with RTU', async () => {});
+  const renders = createRenderStore();
 
-test('RTU throttling', async () => {});
+  env.serverMock.setFetchDuration(400);
 
-test('mount component after a RTU', async () => {});
+  renderHook(() => {
+    const { items, status } = env.store.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+        itemSelector(data) {
+          return data.name;
+        },
+      },
+    );
+
+    renders.add({ status, items });
+  });
+
+  addItemWithIdGeneratedByClient(env, 'users', '8', '🆕');
+
+  await env.serverMock.waitFetchIdle(0, 1500);
+
+  expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
+    "
+    status: success -- items: [User 1, User 2, User 3, User 4, User 5]
+    status: refetching -- items: [User 1, User 2, User 3, User 4, User 5]
+    status: success -- items: [User 1, User 2, User 3, User 4, User 5, 🆕]
+    "
+  `);
+});
+
+test.concurrent('simple update mutation with RTU', async () => {
+  const env = createTestEnv({
+    initialServerData,
+    useLoadedSnapshot: { tables: ['users'] },
+    emulateRTU: true,
+  });
+
+  const renders = createRenderStore();
+
+  env.serverMock.setFetchDuration(400);
+
+  renderHook(() => {
+    const { items, status } = env.store.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+        itemSelector(data) {
+          return data.name;
+        },
+      },
+    );
+
+    renders.add({ status, items });
+  });
+
+  updateItemName(env, 'users', 5, '🆕');
+
+  await env.serverMock.waitFetchIdle(0, 1500);
+
+  expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
+    "
+    status: success -- items: [User 1, User 2, User 3, User 4, User 5]
+    status: refetching -- items: [User 1, User 2, User 3, User 4, User 5]
+    status: success -- items: [User 1, User 2, User 3, User 4, 🆕]
+    "
+  `);
+});
+
+test('RTU throttling', async () => {
+  const env = createTestEnv({
+    initialServerData,
+    useLoadedSnapshot: { tables: ['users'] },
+    emulateRTU: true,
+    dynamicRTUThrottleMs(lastDuration) {
+      if (lastDuration < 100) {
+        return 200;
+      }
+
+      return 300;
+    },
+  });
+
+  const renders = createRenderStore();
+
+  renderHook(() => {
+    const { items, status } = env.store.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+        itemSelector(data) {
+          return data.name;
+        },
+      },
+    );
+
+    renders.add({ status, items });
+  });
+
+  const waitUntil = waitElapsedTime();
+
+  env.serverMock.setFetchDuration(200);
+
+  updateItemName(env, 'users', 5, '1', { duration: 100 });
+  // mudation: 7ms => 107ms
+  // fetch: 110ms => 310ms
+
+  await waitUntil(350);
+
+  env.serverMock.setFetchDuration(30);
+
+  updateItemName(env, 'users', 5, '2', { duration: 100 });
+  // mutation: 360ms => 460ms
+  // if throttling where disabled: fetch: 470ms => 500ms
+
+  await waitUntil(510);
+  // throttled fetch: 620ms => 650ms
+
+  expect(
+    env.serverMock.fetchsCount,
+    'rtu of mutaion 2 should not be triggered',
+  ).toBe(1);
+
+  await waitUntil(670);
+
+  expect(
+    env.serverMock.fetchsCount,
+    'rtu of mutaion 2 should be triggered',
+  ).toBe(2);
+
+  updateItemName(env, 'users', 5, '3', { duration: 100 });
+  // mutation: 670ms => 770ms
+  // if throtthling where enabled with 300ms: fetch: 900ms => 930ms
+
+  await waitUntil(800);
+  expect(
+    env.serverMock.fetchsCount,
+    'rtu of mutaion 3 should not be triggered',
+  ).toBe(2);
+  // throttled fetch: 840ms => 870ms
+
+  await waitUntil(890);
+
+  expect(
+    env.serverMock.fetchsCount,
+    'rtu of mutaion 3 should be triggered',
+  ).toBe(3);
+
+  expect(renders.getSnapshot({ arrays: 'firstAndLast' }))
+    .toMatchSnapshotString(`
+    "
+    status: success -- items: [User 1, ...(3 between), User 5]
+    status: refetching -- items: [User 1, ...(3 between), User 5]
+    status: success -- items: [User 1, ...(3 between), 1]
+    status: refetching -- items: [User 1, ...(3 between), 1]
+    status: success -- items: [User 1, ...(3 between), 2]
+    status: refetching -- items: [User 1, ...(3 between), 2]
+    status: success -- items: [User 1, ...(3 between), 3]
+    "
+  `);
+});
+
+test.concurrent('mount component after a RTU', async () => {
+  const env = createTestEnv({
+    initialServerData,
+    useLoadedSnapshot: { tables: ['users'] },
+    emulateRTU: true,
+    dynamicRTUThrottleMs(lastDuration) {
+      if (lastDuration < 100) {
+        return 200;
+      }
+
+      return 300;
+    },
+  });
+
+  const renders = createRenderStore();
+
+  env.serverMock.produceData((draft) => {
+    draft['users']?.push({
+      id: 6,
+      name: 'User 6',
+    });
+  });
+
+  await sleep(100);
+
+  expect(env.store.store.state.queries).toMatchSnapshotString(`
+    {
+      "[{\\"tableId\\":\\"users\\"}]": {
+        "error": null,
+        "hasMore": false,
+        "items": [
+          "users||1",
+          "users||2",
+          "users||3",
+          "users||4",
+          "users||5",
+        ],
+        "payload": {
+          "tableId": "users",
+        },
+        "refetchOnMount": "realtimeUpdate",
+        "status": "success",
+        "wasLoaded": true,
+      },
+    }
+  `);
+
+  renderHook(() => {
+    const { items, status } = env.store.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+        itemSelector(data) {
+          return data.name;
+        },
+      },
+    );
+
+    renders.add({ status, items });
+  });
+
+  await env.serverMock.waitFetchIdle(0, 1500);
+
+  expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
+    "
+    status: success -- items: [User 1, User 2, User 3, User 4, User 5]
+    status: refetching -- items: [User 1, User 2, User 3, User 4, User 5]
+    status: success -- items: [User 1, User 2, User 3, User 4, User 5, User 6]
+    "
+  `);
+});

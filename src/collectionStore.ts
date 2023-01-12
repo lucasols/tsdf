@@ -166,7 +166,7 @@ export function newTSDFCollectionStore<
   const fetchOrquestrator = createCollectionFetchOrquestrator({
     fetchFn: fetch,
     lowPriorityThrottleMs,
-    getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
     mediumPriorityThrottleMs,
   });
 

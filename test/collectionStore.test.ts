@@ -263,7 +263,7 @@ test.concurrent(
   },
 );
 
-describe('update state functions', async () => {
+describe('update state functions', () => {
   const initialServerData = {
     '1': { ...defaultTodo, completed: true },
     '2': { ...defaultTodo, completed: true },

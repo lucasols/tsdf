@@ -279,7 +279,7 @@ export function newTSDFListQueryStore<
   const fetchQueryOrquestrator = createCollectionFetchOrquestrator({
     fetchFn: fetchQuery,
     lowPriorityThrottleMs,
-    getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
     mediumPriorityThrottleMs,
   });
 
@@ -780,7 +780,7 @@ export function newTSDFListQueryStore<
     createCollectionFetchOrquestrator({
       fetchFn: fetchItem,
       lowPriorityThrottleMs,
-      getDynamicRealtimeThrottleMs,
+      dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
       mediumPriorityThrottleMs,
     });
 

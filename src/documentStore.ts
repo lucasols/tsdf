@@ -108,7 +108,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   const fetchOrquestrator = createFetchOrquestrator<null>({
     fetchFn: fetch,
     lowPriorityThrottleMs,
-    getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
     mediumPriorityThrottleMs,
   });
 

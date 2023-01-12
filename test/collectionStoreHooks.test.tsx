@@ -210,7 +210,7 @@ describe('useMultipleItems isolated tests', () => {
   });
 });
 
-describe('useItem', async () => {
+describe('useItem', () => {
   afterAll(() => {
     cleanup();
   });

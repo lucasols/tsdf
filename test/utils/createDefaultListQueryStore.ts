@@ -35,6 +35,7 @@ export function createDefaultListQueryStore({
   useLoadedSnapshot,
   defaultQuerySize,
   debug,
+  dynamicRTUThrottleMs,
   debugRequests: debuFetchs,
   emulateRTU,
 }: {
@@ -45,6 +46,7 @@ export function createDefaultListQueryStore({
     queries?: ListQueryParams[];
   };
   defaultQuerySize?: number;
+  dynamicRTUThrottleMs?: (duration: number) => number;
   debug?: never;
   debugRequests?: never;
   emulateRTU?: boolean;
@@ -112,6 +114,7 @@ export function createDefaultListQueryStore({
     },
     errorNormalizer: normalizeError,
     defaultQuerySize,
+    getDynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     syncMutationsAndInvalidations: {
       syncItemAndQuery(itemId, query) {
         return query.tableId === itemId.split('||')[0];
