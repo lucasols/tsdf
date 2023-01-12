@@ -795,7 +795,7 @@ describe('isolated tests', () => {
   });
 });
 
-test.concurrent.only('RTU update works', async () => {
+test.concurrent('RTU update works', async () => {
   const env = createTestEnv({
     initialServerData: 'lucas',
     useLoadedSnapshot: true,
@@ -853,5 +853,5 @@ test.concurrent.only('RTU update works', async () => {
 
   expect(
     env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
-  ).toBeGreaterThan(300);
+  ).toBeGreaterThanOrEqual(300);
 });

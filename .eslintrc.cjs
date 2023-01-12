@@ -55,12 +55,12 @@ module.exports = {
       ERROR_IN_CI_ONLY,
       {
         selector:
-          'CallExpression[callee.object.name="test"][callee.property.name="only"]',
+          'CallExpression[callee.property.name="only"]',
         message: 'No test.only',
       },
       {
         selector:
-          'CallExpression[callee.object.name="test"][callee.property.name="todo"]',
+          'CallExpression[callee.property.name="todo"]',
         message: 'No test.todo',
       },
     ],

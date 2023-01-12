@@ -10,6 +10,7 @@ import matchers, {
 import { format } from 'pretty-format';
 import { expect } from 'vitest';
 import { filterAndMap } from '../../src/utils/filterAndMap';
+import { createOrVariations } from '../utils/createOrVariations';
 import { dedent } from '../utils/dedent';
 
 interface ToMatchTimeline<R = unknown> {
@@ -31,23 +32,7 @@ expect.extend(matchers);
 
 expect.extend({
   toMatchTimeline(received, expected) {
-    const expectedPossibleValues: string[] = (() => {
-      const result: string[] = [];
-
-      if (expected.includes('OR')) {
-        const [, orBlock = ''] = /---([\s\S]+)---/.exec(expected) || [];
-
-        const orGroups = orBlock.split('OR');
-
-        for (const orGroup of orGroups) {
-          result.push(expected.replace(/---([\s\S]+)---/, orGroup));
-        }
-
-        return result;
-      } else {
-        return [expected];
-      }
-    })();
+    const expectedPossibleValues: string[] = createOrVariations(expected);
 
     function checkIfPass(_received: any, _expected: any) {
       let normalizedExpected: string = dedent`${_expected}`;

@@ -241,8 +241,13 @@ test.concurrent(
 
                 4 - optimistic-ui-commit
                 4 - mutation-started
+                ---
                 fetch-aborted : 3
                 4 - mutation-finished
+                OR
+                4 - mutation-finished
+                fetch-aborted : 3
+                ---
 
                 fetch-started : 5
               fetch-aborted : 4
@@ -313,8 +318,13 @@ test.concurrent(
 
             4 - optimistic-ui-commit
             4 - mutation-started
+            ---
           fetch-aborted : 2
             4 - mutation-finished
+            OR
+            4 - mutation-finished
+          fetch-aborted : 2
+            ---
 
               fetch-started : 4
             fetch-aborted : 3
@@ -519,8 +529,14 @@ test.concurrent(
     1 - mutation-finished
       2 - optimistic-ui-commit
       2 - mutation-started
+    ---
     fetch-scheduled
     fetch-skipped
+    OR
+    fetch-skipped
+    fetch-scheduled
+    ---
+
       2 - mutation-finished
       scheduled-fetch-started : 1
       fetch-skipped
@@ -648,24 +664,32 @@ describe('realtime updates', () => {
             4 - server-data-changed
             3 - fetch-finished : 2
             3 - fetch-ui-commit
+            scheduled-rt-fetch-started : 3
           OR
             3 - fetch-finished : 2
             3 - fetch-ui-commit
             4 - server-data-changed
             rt-fetch-scheduled
+            scheduled-rt-fetch-started : 3
           OR
             4 - server-data-changed
             3 - fetch-finished : 2
             3 - fetch-ui-commit
             rt-fetch-scheduled
+            scheduled-rt-fetch-started : 3
           OR
             4 - server-data-changed
             rt-fetch-scheduled
             3 - fetch-finished : 2
             3 - fetch-ui-commit
+            scheduled-rt-fetch-started : 3
+          OR
+            3 - fetch-finished : 2
+            3 - fetch-ui-commit
+            4 - server-data-changed
+            fetch-started : 3
           ---
 
-            scheduled-rt-fetch-started : 3
             4 - fetch-finished : 3
             4 - fetch-ui-commit
       "

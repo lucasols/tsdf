@@ -16,7 +16,7 @@ import { serializableClone } from './utils/serializableClone';
 
 type QueryStatus = Status | 'loadingMore';
 
-type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
+export type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
   error: NError | null;
   status: QueryStatus;
   payload: QueryPayload;
@@ -26,7 +26,7 @@ type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
   items: string[];
 };
 
-type TSDFItemQuery<NError> = {
+export type TSDFItemQuery<NError> = {
   error: NError | null;
   status: Exclude<QueryStatus, 'loadingMore'>;
   wasLoaded: boolean;
@@ -1182,3 +1182,9 @@ export function newTSDFListQueryStore<
     startItemMutation,
   };
 }
+
+export type TSFDListQueryStore<
+  ItemState extends ValidStoreState,
+  NError,
+  QueryPayload extends ValidPayload,
+> = ReturnType<typeof newTSDFListQueryStore<ItemState, NError, QueryPayload>>;

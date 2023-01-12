@@ -347,7 +347,7 @@ describe('useQuery', () => {
 
     const { rerender } = render(<Comp />);
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.snapshot).toMatchSnapshotString(`
       "
       status: idle -- payload: undefined -- isLoading: false -- items: []
       "
@@ -357,7 +357,7 @@ describe('useQuery', () => {
 
     await serverMock.waitFetchIdle();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.snapshot).toMatchSnapshotString(`
       "
       status: idle -- payload: undefined -- isLoading: false -- items: []
       ---

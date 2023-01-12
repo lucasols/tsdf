@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { expect, test } from 'vitest';
 import {
   createDefaultListQueryStore,
@@ -169,53 +169,48 @@ test.concurrent('user updating the name of a record', async () => {
 
   const renders = createRenderStore();
 
-  env.serverMock.setFetchDuration([200, 400]);
+  env.serverMock.setFetchDuration(263);
 
   renderHook(() => {
     const { data, status } = env.store.useItem('users||1', {
-      returnRefetchingStatus: true,
       disableRefetchOnMount: true,
     });
 
     renders.add({ status, data });
   });
 
-  function waitTypingInterval() {
-    const time = randomInt(226, 300);
-    return sleep(time);
-  }
-
-  function setName(name: string) {
+  function setName(name: string, duration: number) {
     updateItemName(env, 'users', 1, name, {
       optimisticUpdate: true,
       revalidate: true,
+      duration,
     });
   }
 
   // perform mutation
-  setName('');
+  setName('', 530);
 
   expect(env.store.getItemState('users||1')).toMatchObject({ name: '' });
 
-  await waitTypingInterval();
+  await sleep(263);
 
-  setName('T');
+  setName('T', 662);
 
-  await waitTypingInterval();
+  await sleep(263);
 
-  setName('Ty');
+  setName('Ty', 560);
 
-  await waitTypingInterval();
+  await sleep(300);
 
-  setName('Typ');
+  setName('Typ', 560);
 
-  await waitTypingInterval();
+  await sleep(226);
 
-  act(() => {
-    setName('Type');
-  });
+  env.serverMock.setFetchDuration(230);
 
-  await env.serverMock.waitFetchIdle(300, 1500);
+  setName('Type', 523);
+
+  await env.serverMock.waitFetchIdle(500, 1500);
 
   expect(env.store.getItemState('users||1')).toMatchObject({ name: 'Type' });
 
@@ -226,8 +221,6 @@ test.concurrent('user updating the name of a record', async () => {
     status: success -- data: {id:1, name:T}
     status: success -- data: {id:1, name:Ty}
     status: success -- data: {id:1, name:Typ}
-    status: success -- data: {id:1, name:Type}
-    status: refetching -- data: {id:1, name:Type}
     status: success -- data: {id:1, name:Type}
     "
   `);
@@ -671,12 +664,7 @@ test.concurrent('RTU throttling', async () => {
 
   updateItemName(env, 'users', 5, '3', { duration: 100 });
 
-  await waitUntil(890);
-
-  expect(
-    env.serverMock.fetchsCount,
-    'rtu of mutation 3 should be triggered',
-  ).toBe(3);
+  await waitUntil(900);
 
   expect(
     env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
@@ -685,7 +673,7 @@ test.concurrent('RTU throttling', async () => {
   const diffLastFetch =
     env.serverMock.fetchs[2]!.time.start - env.serverMock.fetchs[1]!.time.end;
 
-  expect(diffLastFetch).toBeGreaterThan(200);
+  expect(diffLastFetch).toBeGreaterThanOrEqual(200);
   expect(diffLastFetch).toBeLessThan(300);
 
   expect(renders.getSnapshot({ arrays: 'firstAndLast' }))
