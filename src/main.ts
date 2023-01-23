@@ -20,3 +20,4 @@ export {
   TSFDUseListQueryReturn,
   TSFDUseItemReturn,
 } from './listQueryStore';
+export { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';

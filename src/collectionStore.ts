@@ -7,14 +7,14 @@ import {
   ScheduleFetchResults,
   FetchContext,
 } from './fetchOrquestrator';
-import { Status, ValidPayload, ValidStoreState } from './storeShared';
+import { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useDeepMemo, useOnMittEvent } from './utils/hooks';
 import { serializableClone } from './utils/serializableClone';
 
-type CollectionItemStatus = Status;
+type CollectionItemStatus = TSDFStatus;
 
 export type TSFDCollectionItem<
   ItemState extends ValidStoreState,

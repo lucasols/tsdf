@@ -7,14 +7,14 @@ import {
   ScheduleFetchResults,
   FetchContext as FetchCtx,
 } from './fetchOrquestrator';
-import { Status, ValidPayload, ValidStoreState } from './storeShared';
+import { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo, useOnMittEvent } from './utils/hooks';
 import { serializableClone } from './utils/serializableClone';
 
-type QueryStatus = Status | 'loadingMore';
+type QueryStatus = TSDFStatus | 'loadingMore';
 
 export type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
   error: NError | null;

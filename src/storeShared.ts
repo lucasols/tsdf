@@ -1,4 +1,4 @@
-export type Status = 'loading' | 'error' | 'refetching' | 'success';
+export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
 
 export type ValidPayload = number | string | Record<string, unknown>;
 

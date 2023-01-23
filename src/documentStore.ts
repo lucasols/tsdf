@@ -8,11 +8,11 @@ import {
   ScheduleFetchResults,
   FetchContext,
 } from './fetchOrquestrator';
-import { Status, ValidStoreState } from './storeShared';
+import { TSDFStatus, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { useOnMittEvent } from './utils/hooks';
 
-type DocumentStatus = Status | 'idle';
+type DocumentStatus = TSDFStatus | 'idle';
 
 export type TSDFDocumentStoreState<State extends ValidStoreState, NError> = {
   data: State | null;
