@@ -652,7 +652,7 @@ describe('useItem', () => {
       status: success -- payload: users||2 -- data: {id:2, name:Updated User 2}
       "
     `);
-    expect(result.current.usersResult?.data.name).toBe('Updated User 2');
+    expect(result.current.usersResult?.data?.name).toBe('Updated User 2');
     expect(products1.changesSnapshot).toMatchInlineSnapshot(`
       "
       status: success -- payload: products||1 -- data: {id:1, name:Product 1}
