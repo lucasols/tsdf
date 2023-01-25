@@ -26,7 +26,8 @@ export type ListQueryParams = {
 export type DefaultListQueryState = TSFDListQueryState<
   Row,
   StoreError,
-  ListQueryParams
+  ListQueryParams,
+  string
 >;
 
 export function createDefaultListQueryStore({
@@ -77,7 +78,8 @@ export function createDefaultListQueryStore({
   const listQueryStore = newTSDFListQueryStore<
     Row,
     StoreError,
-    ListQueryParams
+    ListQueryParams,
+    string
   >({
     fetchListFn: async ({ tableId, filters }, size) => {
       let result = await serverMock.fetch(tableId);
@@ -96,7 +98,7 @@ export function createDefaultListQueryStore({
 
       return {
         items: result.map((item) => ({
-          id: getItemId({ tableId, id: item.id }),
+          itemPayload: getItemId({ tableId, id: item.id }),
           data: item,
         })),
         hasMore,
@@ -169,6 +171,7 @@ export function createDefaultListQueryStore({
           error: null,
           refetchOnMount: false,
           wasLoaded: true,
+          payload: getItemId({ tableId, id: item.id }),
         };
       }
     }
@@ -204,6 +207,7 @@ export function createDefaultListQueryStore({
           error: null,
           refetchOnMount: false,
           wasLoaded: true,
+          payload: getItemId({ tableId, id: item.id }),
         };
       }
     }
@@ -225,6 +229,7 @@ export function createDefaultListQueryStore({
           refetchOnMount: false,
           wasLoaded: true,
           error: null,
+          payload: itemId,
         };
         state.items[itemId] = itemData;
       }

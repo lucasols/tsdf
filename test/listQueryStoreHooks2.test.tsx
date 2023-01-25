@@ -28,7 +28,12 @@ const CompWithItemLoaded = ({
   loadItem: string;
   renderStore: ReturnType<typeof createRenderStore>;
 }) => {
-  const { status, error, data, itemId } = store.useItem(loadItem, {
+  const {
+    status,
+    error,
+    data,
+    payload: itemId,
+  } = store.useItem(loadItem, {
     disableRefetchOnMount,
     returnRefetchingStatus: true,
   });

@@ -412,7 +412,7 @@ describe('useItem', () => {
     }) => {
       const queryResult = listQueryStore.useItem(payload);
 
-      renders.add(pick(queryResult, ['status', 'itemId', 'data']));
+      renders.add(pick(queryResult, ['status', 'payload', 'data']));
 
       return <div />;
     };
@@ -421,7 +421,7 @@ describe('useItem', () => {
 
     expect(renders.getSnapshot()).toMatchInlineSnapshot(`
       "
-      status: idle -- itemId: '' -- data: null
+      status: idle -- payload: null -- data: null
       "
     `);
 
@@ -435,10 +435,10 @@ describe('useItem', () => {
 
     expect(renders.getSnapshot()).toMatchInlineSnapshot(`
       "
-      status: idle -- itemId: '' -- data: null
+      status: idle -- payload: null -- data: null
       ---
-      status: loading -- itemId: users||1 -- data: null
-      status: success -- itemId: users||1 -- data: {id:1, name:User 1}
+      status: loading -- payload: users||1 -- data: null
+      status: success -- payload: users||1 -- data: {id:1, name:User 1}
       "
     `);
   });
@@ -510,7 +510,7 @@ describe('useItem', () => {
       });
 
       renders.add(
-        pick(selectionResult, ['status', 'itemId', 'isLoading', 'data']),
+        pick(selectionResult, ['status', 'payload', 'isLoading', 'data']),
       );
 
       return <div />;
@@ -520,7 +520,7 @@ describe('useItem', () => {
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- itemId: '' -- isLoading: false -- data: null
+      status: idle -- payload: null -- isLoading: false -- data: null
       "
     `);
 
@@ -530,10 +530,10 @@ describe('useItem', () => {
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- itemId: '' -- isLoading: false -- data: null
+      status: idle -- payload: null -- isLoading: false -- data: null
       ---
-      status: loading -- itemId: users||1 -- isLoading: true -- data: User 1
-      status: success -- itemId: users||1 -- isLoading: false -- data: User 1
+      status: loading -- payload: users||1 -- isLoading: true -- data: User 1
+      status: success -- payload: users||1 -- isLoading: false -- data: User 1
       "
     `);
   });
@@ -580,7 +580,7 @@ describe('useItem', () => {
         disableRefetchOnMount: true,
       });
 
-      renders.add(pick(selectionResult, ['status', 'itemId', 'data']));
+      renders.add(pick(selectionResult, ['status', 'payload', 'data']));
     });
 
     store.deleteItemState('users||2');
@@ -592,8 +592,8 @@ describe('useItem', () => {
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- itemId: users||2 -- data: {id:2, name:User 2}
-      status: deleted -- itemId: users||2 -- data: null
+      status: success -- payload: users||2 -- data: {id:2, name:User 2}
+      status: deleted -- payload: users||2 -- data: null
       "
     `);
 
@@ -603,11 +603,11 @@ describe('useItem', () => {
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- itemId: users||2 -- data: {id:2, name:User 2}
-      status: deleted -- itemId: users||2 -- data: null
+      status: success -- payload: users||2 -- data: {id:2, name:User 2}
+      status: deleted -- payload: users||2 -- data: null
       ---
-      status: loading -- itemId: users||2 -- data: null
-      status: error -- itemId: users||2 -- data: null
+      status: loading -- payload: users||2 -- data: null
+      status: error -- payload: users||2 -- data: null
       "
     `);
   });
@@ -630,8 +630,8 @@ describe('useItem', () => {
         },
       );
 
-      users2.add(pick(usersResult, ['status', 'itemId', 'data']));
-      products1.add(pick(productsResult, ['status', 'itemId', 'data']));
+      users2.add(pick(usersResult, ['status', 'payload', 'data']));
+      products1.add(pick(productsResult, ['status', 'payload', 'data']));
 
       return { usersResult, productsResult };
     });
@@ -647,15 +647,15 @@ describe('useItem', () => {
 
     expect(users2.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- itemId: users||2 -- data: {id:2, name:User 2}
-      status: refetching -- itemId: users||2 -- data: {id:2, name:User 2}
-      status: success -- itemId: users||2 -- data: {id:2, name:Updated User 2}
+      status: success -- payload: users||2 -- data: {id:2, name:User 2}
+      status: refetching -- payload: users||2 -- data: {id:2, name:User 2}
+      status: success -- payload: users||2 -- data: {id:2, name:Updated User 2}
       "
     `);
     expect(result.current.usersResult?.data.name).toBe('Updated User 2');
     expect(products1.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- itemId: products||1 -- data: {id:1, name:Product 1}
+      status: success -- payload: products||1 -- data: {id:1, name:Product 1}
       "
     `);
   });

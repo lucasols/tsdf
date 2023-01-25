@@ -550,11 +550,11 @@ test.concurrent('await fetch', async () => {
     await listQueryStore.awaitListQueryFetch({ tableId: 'users' }),
   ).toEqual({
     items: [
-      { id: 'users||1', data: { id: 1, name: 'Updated User 1' } },
-      { id: 'users||2', data: { id: 2, name: 'User 2' } },
-      { id: 'users||3', data: { id: 3, name: 'User 3' } },
-      { id: 'users||4', data: { id: 4, name: 'User 4' } },
-      { id: 'users||5', data: { id: 5, name: 'User 5' } },
+      { itemKey: 'users||1', data: { id: 1, name: 'Updated User 1' } },
+      { itemKey: 'users||2', data: { id: 2, name: 'User 2' } },
+      { itemKey: 'users||3', data: { id: 3, name: 'User 3' } },
+      { itemKey: 'users||4', data: { id: 4, name: 'User 4' } },
+      { itemKey: 'users||5', data: { id: 5, name: 'User 5' } },
     ],
     error: null,
     hasMore: false,
@@ -589,6 +589,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
       {
         "error": null,
+        "payload": "users||1",
         "refetchOnMount": false,
         "status": "loading",
         "wasLoaded": false,
@@ -604,6 +605,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
       {
         "error": null,
+        "payload": "users||1",
         "refetchOnMount": false,
         "status": "success",
         "wasLoaded": true,
@@ -701,6 +703,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "refetching",
           "wasLoaded": true,
@@ -719,6 +722,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "success",
           "wasLoaded": true,
@@ -755,6 +759,7 @@ describe.concurrent('fetch item', () => {
           "error": {
             "message": "error",
           },
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "error",
           "wasLoaded": true,
@@ -770,6 +775,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "refetching",
           "wasLoaded": true,
@@ -782,6 +788,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "success",
           "wasLoaded": true,
@@ -814,6 +821,7 @@ describe.concurrent('fetch item', () => {
           "error": {
             "message": "error",
           },
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "error",
           "wasLoaded": false,
@@ -830,6 +838,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "loading",
           "wasLoaded": false,
@@ -842,6 +851,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "success",
           "wasLoaded": true,
@@ -908,6 +918,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "refetching",
           "wasLoaded": true,
@@ -920,6 +931,7 @@ describe.concurrent('fetch item', () => {
       .toMatchSnapshotString(`
         {
           "error": null,
+          "payload": "users||1",
           "refetchOnMount": false,
           "status": "success",
           "wasLoaded": true,
@@ -1002,9 +1014,9 @@ describe('update state functions', () => {
       ),
     ).toMatchInlineSnapshot(`
       "
-      id: users||1, data: {name: new name, id: 1}
-      id: users||2, data: {name: new name, id: 1}
-      id: users||3, data: {id: 3, name: User 3}
+      payload: users||1, data: {name: new name, id: 1}
+      payload: users||2, data: {name: new name, id: 1}
+      payload: users||3, data: {id: 3, name: User 3}
       "
     `);
   });
@@ -1016,7 +1028,7 @@ describe('update state functions', () => {
     });
 
     store.updateItemState(
-      (data) => data.id > 2,
+      (_, state) => state.id > 2,
       (data) => {
         data.name = 'modified';
       },
@@ -1025,11 +1037,11 @@ describe('update state functions', () => {
     expect(simplifyArraySnapshot(store.getItemState(() => true)))
       .toMatchInlineSnapshot(`
       "
-      id: users||1, data: {id: 1, name: User 1}
-      id: users||2, data: {id: 2, name: User 2}
-      id: users||3, data: {id: 3, name: modified}
-      id: users||4, data: {id: 4, name: modified}
-      id: users||5, data: {id: 5, name: modified}
+      payload: users||1, data: {id: 1, name: User 1}
+      payload: users||2, data: {id: 2, name: User 2}
+      payload: users||3, data: {id: 3, name: modified}
+      payload: users||4, data: {id: 4, name: modified}
+      payload: users||5, data: {id: 5, name: modified}
       "
     `);
   });
@@ -1063,12 +1075,12 @@ describe('update state functions', () => {
     expect(simplifyArraySnapshot(store.getItemState(() => true)))
       .toMatchInlineSnapshot(`
       "
-      id: users||1, data: {id: 1, name: User 1}
-      id: users||2, data: {id: 2, name: User 2}
-      id: users||3, data: {id: 3, name: User 3}
-      id: users||4, data: {id: 4, name: User 4}
-      id: users||5, data: {id: 5, name: User 5}
-      id: users||20, data: {name: item 20, id: 20}
+      payload: users||1, data: {id: 1, name: User 1}
+      payload: users||2, data: {id: 2, name: User 2}
+      payload: users||3, data: {id: 3, name: User 3}
+      payload: users||4, data: {id: 4, name: User 4}
+      payload: users||5, data: {id: 5, name: User 5}
+      payload: users||20, data: {name: item 20, id: 20}
       "
     `);
   });
@@ -1095,6 +1107,7 @@ describe('update state functions', () => {
     expect(store.store.state.itemQueries['users||20']).toMatchInlineSnapshot(`
       {
         "error": null,
+        "payload": "users||20",
         "refetchOnMount": false,
         "status": "success",
         "wasLoaded": true,
@@ -1126,14 +1139,15 @@ describe('update state functions', () => {
       itemQueries: {
         'users||1': {
           error: null,
+          payload: 'users||1',
           refetchOnMount: false,
           status: 'loading',
           wasLoaded: false,
         },
-        'users||2': defaulItemQueryProps,
-        'users||3': defaulItemQueryProps,
-        'users||4': defaulItemQueryProps,
-        'users||5': defaulItemQueryProps,
+        'users||2': { ...defaulItemQueryProps, payload: 'users||2' },
+        'users||3': { ...defaulItemQueryProps, payload: 'users||3' },
+        'users||4': { ...defaulItemQueryProps, payload: 'users||4' },
+        'users||5': { ...defaulItemQueryProps, payload: 'users||5' },
       },
       items: {
         'users||1': null,

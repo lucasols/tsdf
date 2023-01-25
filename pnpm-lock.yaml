@@ -18,6 +18,7 @@ specifiers:
   happy-dom: ^8.1.4
   immer: ^9.0.17
   jsdom: ^21.0.0
+  klona: ^2.0.6
   mitt: ^3.0.0
   prettier: ^2.8.2
   pretty-format: ^29.3.1
@@ -33,6 +34,7 @@ specifiers:
 
 dependencies:
   immer: 9.0.17
+  klona: 2.0.6
   mitt: 3.0.0
   t-state: 7.5.1_biqbaboplfbrettd7655fr4n2y
 
@@ -2156,6 +2158,11 @@ packages:
   /jsonc-parser/3.2.0:
     resolution: {integrity: sha512-gfFQZrcTc8CnKXp6Y4/CBT3fTc0OVuDofpre4aEeEpSBPV5X5v4+Vmx+8snU7RLPrNHPKSgLxGo9YuQzz20o+w==}
     dev: true
+
+  /klona/2.0.6:
+    resolution: {integrity: sha512-dhG34DXATL5hSxJbIexCft8FChFXtmskoZYnoPWjXQuebWYCNkVeV3KkGegCK9CP1oswI/vQibS2GY7Em/sJJA==}
+    engines: {node: '>= 8'}
+    dev: false
 
   /levn/0.3.0:
     resolution: {integrity: sha512-0OO4y2iOHix2W6ujICbKIaEQXvFQHue65vUG3pb5EUomzPI90z9hsA1VsO/dbIIpC53J8gxM9Q4Oho0jrCM/yA==}

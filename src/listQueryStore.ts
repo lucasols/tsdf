@@ -12,7 +12,7 @@ import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo, useOnMittEvent } from './utils/hooks';
-import { serializableClone } from './utils/serializableClone';
+import { klona } from 'klona/json';
 
 type QueryStatus = TSDFStatus | 'loadingMore';
 
@@ -26,21 +26,23 @@ export type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
   items: string[];
 };
 
-export type TSDFItemQuery<NError> = {
+export type TSDFItemQuery<NError, ItemPayload> = {
   error: NError | null;
   status: Exclude<QueryStatus, 'loadingMore'>;
   wasLoaded: boolean;
   refetchOnMount: false | FetchType;
+  payload: ItemPayload;
 };
 
 export type TSFDListQueryState<
   ItemState extends ValidStoreState,
   NError,
   QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
 > = {
   items: Record<string, ItemState | null>;
   queries: Record<string, TSFDListQuery<NError, QueryPayload>>;
-  itemQueries: Record<string, TSDFItemQuery<NError> | null>;
+  itemQueries: Record<string, TSDFItemQuery<NError, ItemPayload> | null>;
 };
 
 export type TSFDUseListQueryReturn<Selected, ItemPayload, NError> = {
@@ -53,16 +55,19 @@ export type TSFDUseListQueryReturn<Selected, ItemPayload, NError> = {
   isLoading: boolean;
 };
 
-export type TSFDUseItemReturn<Selected, NError> = {
+export type TSFDUseItemReturn<Selected, NError, ItemPayload> = {
   data: Selected;
   status: QueryStatus | 'idle' | 'deleted';
-  itemId: string;
+  payload: ItemPayload | null;
   error: NError | null;
   isLoading: boolean;
 };
 
-export type FetchListFnReturn<ItemState extends ValidStoreState> = {
-  items: { id: string | number; data: ItemState }[];
+export type FetchListFnReturn<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = {
+  items: { itemPayload: ItemPayload; data: ItemState }[];
   hasMore: boolean;
 };
 
@@ -72,6 +77,7 @@ export function newTSDFListQueryStore<
   ItemState extends ValidStoreState,
   NError,
   QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
 >({
   debugName,
   fetchListFn,
@@ -89,21 +95,24 @@ export function newTSDFListQueryStore<
   fetchListFn: (
     payload: QueryPayload,
     size: number,
-  ) => Promise<FetchListFnReturn<ItemState>>;
-  fetchItemFn?: (itemId: string) => Promise<ItemState>;
+  ) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
+  fetchItemFn?: (itemId: ItemPayload) => Promise<ItemState>;
   errorNormalizer: (exception: unknown) => NError;
   defaultQuerySize?: number;
   disableRefetchOnWindowFocus?: boolean;
   syncMutationsAndInvalidations?: {
     syncQueries: (query1: QueryPayload, query2: QueryPayload) => boolean;
-    syncItemAndQuery: (itemId: string, query: QueryPayload) => boolean;
+    syncItemAndQuery: (
+      itemPayload: ItemPayload,
+      query: QueryPayload,
+    ) => boolean;
   };
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 }) {
-  type State = TSFDListQueryState<ItemState, NError, QueryPayload>;
+  type State = TSFDListQueryState<ItemState, NError, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<NError, QueryPayload>;
 
   const store = new Store<State>({
@@ -115,6 +124,10 @@ export function newTSDFListQueryStore<
     return getCacheId(params);
   }
 
+  function getItemKey(params: ItemPayload): string {
+    return getCacheId(params);
+  }
+
   async function fetchQuery(
     fetchCtx: FetchCtx,
     [fetchType, queryPayload, size = defaultQuerySize]: [
@@ -123,7 +136,7 @@ export function newTSDFListQueryStore<
       number | undefined,
     ],
   ): Promise<boolean> {
-    const payload = serializableClone(queryPayload);
+    const payload = klona(queryPayload);
     const queryKey = getQueryKey(payload);
 
     const queryState = store.state.queries[queryKey];
@@ -198,22 +211,25 @@ export function newTSDFListQueryStore<
 
           query.items = [];
 
-          for (const { data, id } of items) {
-            draft.items[id] = data;
-            query.items.push(String(id));
+          for (const { data, itemPayload } of items) {
+            const itemKey = getItemKey(itemPayload);
 
-            const itemQuery = draft.itemQueries[id];
+            draft.items[itemKey] = data;
+            query.items.push(String(itemKey));
+
+            const itemQuery = draft.itemQueries[itemKey];
 
             if (
               !itemQuery ||
               (itemQuery.status !== 'loading' &&
                 itemQuery.status !== 'refetching')
             ) {
-              draft.itemQueries[id] = {
+              draft.itemQueries[itemKey] = {
                 error: null,
                 refetchOnMount: false,
                 status: 'success',
                 wasLoaded: true,
+                payload: itemPayload,
               };
             }
           }
@@ -223,7 +239,7 @@ export function newTSDFListQueryStore<
         },
       );
 
-      for (const { id } of items) {
+      for (const { itemPayload: id } of items) {
         const itemFetchOrquestrator = fetchItemOrquestrator?.get(String(id));
 
         if (itemFetchOrquestrator) {
@@ -260,22 +276,29 @@ export function newTSDFListQueryStore<
   }
 
   function getItemState(
-    id: string[] | FilterItemFn,
-  ): { id: string; data: ItemState }[];
-  function getItemState(id: string): ItemState | null | undefined;
+    itemPayload: ItemPayload[] | FilterItemFn,
+  ): { payload: ItemPayload; data: ItemState }[];
+  function getItemState(itemPayload: ItemPayload): ItemState | null | undefined;
   function getItemState(
-    id: string | string[] | FilterItemFn,
-  ): ItemState | null | undefined | { id: string; data: ItemState }[] {
-    if (typeof id === 'string') {
-      return store.state.items[id];
+    itemPayload: ItemPayload | ItemPayload[] | FilterItemFn,
+  ):
+    | ItemState
+    | null
+    | undefined
+    | { payload: ItemPayload; data: ItemState }[] {
+    if (typeof itemPayload === 'function' || Array.isArray(itemPayload)) {
+      const itemsId = getItemsKeyArray(itemPayload);
+
+      return filterAndMap(itemsId, ({ itemKey }, ignore) => {
+        const item = store.state.items[itemKey];
+
+        const payload = store.state.itemQueries[itemKey]?.payload;
+
+        return !item || !payload ? ignore : { payload, data: item };
+      });
     }
 
-    const itemsId = getItemsIdArray(id);
-
-    return filterAndMap(itemsId, (itemId, ignore) => {
-      const item = store.state.items[itemId];
-      return !item ? ignore : { id: itemId, data: item };
-    });
+    return store.state.items[getItemKey(itemPayload)];
   }
 
   const fetchQueryOrquestrator = createCollectionFetchOrquestrator({
@@ -325,11 +348,11 @@ export function newTSDFListQueryStore<
 
   function getQueryItems<T>(
     query: Query,
-    itemDataSelector: (data: ItemState, id: string) => T,
+    itemDataSelector: (data: ItemState, itemKey: string) => T,
   ): T[] {
-    return filterAndMap(query.items, (itemId, ignore) => {
-      const data = store.state.items[itemId];
-      return data ? itemDataSelector(data, itemId) : ignore;
+    return filterAndMap(query.items, (itemKey, ignore) => {
+      const item = store.state.items[itemKey];
+      return item ? itemDataSelector(item, itemKey) : ignore;
     });
   }
 
@@ -339,7 +362,7 @@ export function newTSDFListQueryStore<
   ): Promise<
     | { items: []; error: NError; hasMore: boolean }
     | {
-        items: { data: ItemState; id: string }[];
+        items: { data: ItemState; itemKey: string }[];
         error: null;
         hasMore: boolean;
       }
@@ -371,39 +394,37 @@ export function newTSDFListQueryStore<
     return query.error
       ? { items: [], error: query.error, hasMore: query.hasMore }
       : {
-          items: getQueryItems(query, (data, id) => ({ data, id })),
+          items: getQueryItems(query, (data, itemKey) => ({ data, itemKey })),
           error: null,
           hasMore: query.hasMore,
         };
   }
 
-  async function awaitItemFetch(itemId: string): Promise<
-    | { data: null; error: NError }
-    | {
-        data: ItemState;
-        error: null;
-      }
-  > {
+  async function awaitItemFetch(
+    itemPayload: ItemPayload,
+  ): Promise<{ data: null; error: NError } | { data: ItemState; error: null }> {
     if (!fetchItemOrquestrator) throw new Error(noFetchFnError);
 
+    const itemKey = getItemKey(itemPayload);
+
     const wasAborted = await fetchItemOrquestrator
-      .get(itemId)
-      .awaitFetch(itemId);
+      .get(itemKey)
+      .awaitFetch(itemPayload);
 
     if (wasAborted) {
       return { data: null, error: errorNormalizer(new Error('Aborted')) };
     }
 
-    const itemData = store.state.items[itemId];
-    const itemQuery = store.state.itemQueries[itemId];
+    const item = store.state.items[itemKey];
+    const itemQuery = store.state.itemQueries[itemKey];
 
-    if (!itemQuery || !itemData) {
+    if (!itemQuery || !item) {
       return { data: null, error: errorNormalizer(new Error('Not found')) };
     }
 
     return itemQuery.error
       ? { data: null, error: itemQuery.error }
-      : { data: itemData, error: null };
+      : { data: item, error: null };
   }
 
   type FilterQueryFn = (
@@ -439,7 +460,7 @@ export function newTSDFListQueryStore<
 
   const storeEvents = mitt<{
     invalidateQuery: { priority: FetchType; queryKey: string };
-    invalidateItem: { priority: FetchType; itemId: string };
+    invalidateItem: { priority: FetchType; itemKey: string };
   }>();
 
   const queryInvalidationWasTriggered = new Set<string>();
@@ -469,10 +490,10 @@ export function newTSDFListQueryStore<
 
     if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
       invalidateItem(
-        (_, itemId) =>
+        (itemPayload) =>
           queriesKey.some(({ payload }) => {
             return syncMutationsAndInvalidations.syncItemAndQuery(
-              itemId,
+              itemPayload,
               payload,
             );
           }),
@@ -696,24 +717,27 @@ export function newTSDFListQueryStore<
 
   async function fetchItem(
     fetchCtx: FetchCtx,
-    itemId: string,
+    itemPayload: ItemPayload,
   ): Promise<boolean> {
     if (!fetchItemOrquestrator) {
       throw new Error(noFetchFnError);
     }
 
-    const isLoaded = !store.state.itemQueries[itemId]?.wasLoaded;
+    const itemKey = getCacheId(itemPayload);
+
+    const isLoaded = !store.state.itemQueries[itemKey]?.wasLoaded;
 
     store.produceState(
       (draft) => {
-        const itemQuery = draft.itemQueries[itemId];
+        const itemQuery = draft.itemQueries[itemKey];
 
         if (!itemQuery) {
-          draft.itemQueries[itemId] = {
+          draft.itemQueries[itemKey] = {
             status: 'loading',
             error: null,
             wasLoaded: false,
             refetchOnMount: false,
+            payload: klona(itemPayload),
           };
 
           return;
@@ -726,29 +750,29 @@ export function newTSDFListQueryStore<
       {
         action: {
           type: isLoaded ? 'fetch-item-start' : 'fetch-item-refetch-start',
-          itemId,
+          itemPayload,
         },
       },
     );
 
     try {
-      const item = await fetchItemFn(itemId);
+      const item = await fetchItemFn(itemPayload);
 
       if (fetchCtx.shouldAbort()) return false;
 
       store.produceState(
         (draft) => {
-          const itemQuery = draft.itemQueries[itemId];
+          const itemQuery = draft.itemQueries[itemKey];
 
           if (!itemQuery) return;
 
           itemQuery.status = 'success';
           itemQuery.wasLoaded = true;
 
-          draft.items[itemId] = item;
+          draft.items[itemKey] = item;
         },
         {
-          action: { type: 'fetch-item-success', itemId },
+          action: { type: 'fetch-item-success', itemPayload },
         },
       );
       return true;
@@ -759,7 +783,7 @@ export function newTSDFListQueryStore<
 
       store.produceState(
         (draft) => {
-          const itemQuery = draft.itemQueries[itemId];
+          const itemQuery = draft.itemQueries[itemKey];
 
           if (!itemQuery) return;
 
@@ -767,7 +791,7 @@ export function newTSDFListQueryStore<
           itemQuery.error = error;
         },
         {
-          action: { type: 'fetch-item-error', itemId },
+          action: { type: 'fetch-item-error', itemPayload },
         },
       );
 
@@ -786,56 +810,70 @@ export function newTSDFListQueryStore<
 
   function scheduleItemFetch(
     fetchType: FetchType,
-    itemId: string,
+    itemPayload: ItemPayload,
   ): ScheduleFetchResults;
   function scheduleItemFetch(
     fetchType: FetchType,
-    itemId: string[],
+    itemPayload: ItemPayload[],
   ): ScheduleFetchResults[];
   function scheduleItemFetch(
     fetchType: FetchType,
-    itemId: string | string[],
+    itemPayload: ItemPayload | ItemPayload[],
   ): ScheduleFetchResults | ScheduleFetchResults[] {
     if (!fetchItemOrquestrator) {
       throw new Error(noFetchFnError);
     }
 
-    const fetchMultiple = Array.isArray(itemId);
+    const fetchMultiple = Array.isArray(itemPayload);
 
-    const itemsId = fetchMultiple ? itemId : [itemId];
+    const itemsId = fetchMultiple ? itemPayload : [itemPayload];
 
-    const results = itemsId.map((id) => {
-      return fetchItemOrquestrator.get(id).scheduleFetch(fetchType, id);
+    const results = itemsId.map((payload) => {
+      const itemKey = getCacheId(payload);
+
+      return fetchItemOrquestrator
+        .get(itemKey)
+        .scheduleFetch(fetchType, payload);
     });
 
     return fetchMultiple ? results : results[0]!;
   }
 
-  type FilterItemFn = (item: ItemState, itemId: string) => boolean;
+  type FilterItemFn = (
+    ItemPayload: ItemPayload,
+    itemState: ItemState,
+  ) => boolean;
 
-  function getItemsIdArray(itemId: string | string[] | FilterItemFn): string[] {
-    if (Array.isArray(itemId)) {
-      return itemId;
+  function getItemsKeyArray(
+    itemsPayload: ItemPayload | ItemPayload[] | FilterItemFn,
+  ): { itemKey: string; payload: ItemPayload }[] {
+    if (Array.isArray(itemsPayload)) {
+      return itemsPayload.map((payload) => ({
+        itemKey: getItemKey(payload),
+        payload,
+      }));
     }
 
-    if (typeof itemId === 'function') {
+    if (typeof itemsPayload === 'function') {
       return filterAndMap(
         Object.entries(store.state.items),
-        ([id, item], ignore) => {
-          if (item === null) return ignore;
+        ([itemKey, item], ignore) => {
+          const payload = store.state.itemQueries[itemKey]?.payload;
 
-          return itemId(item, id) ? id : ignore;
+          if (item === null || !payload) return ignore;
+
+          return itemsPayload(payload, item) ? { itemKey, payload } : ignore;
         },
       );
     }
 
-    return [itemId];
+    return [{ payload: itemsPayload, itemKey: getItemKey(itemsPayload) }];
   }
 
   const itemInvalidationWasTriggered = new Set<string>();
 
   function invalidateItem(
-    itemId: string | string[] | FilterItemFn,
+    itemId: ItemPayload | ItemPayload[] | FilterItemFn,
     priority: FetchType = 'highPriority',
     ignoreInvalidationSync = false,
   ) {
@@ -843,29 +881,29 @@ export function newTSDFListQueryStore<
       throw new Error(noFetchFnError);
     }
 
-    const itemsId = getItemsIdArray(itemId);
+    const itemsKey = getItemsKeyArray(itemId);
 
-    for (const id of itemsId) {
+    for (const { itemKey } of itemsKey) {
       store.produceState(
         (draft) => {
-          const query = draft.itemQueries[id];
+          const query = draft.itemQueries[itemKey];
 
           if (!query) return;
 
           query.refetchOnMount = priority;
         },
-        { action: { type: 'invalidate-item', queryKey: id } },
+        { action: { type: 'invalidate-item', queryKey: itemKey } },
       );
 
-      itemInvalidationWasTriggered.delete(id);
-      storeEvents.emit('invalidateItem', { priority, itemId: id });
+      itemInvalidationWasTriggered.delete(itemKey);
+      storeEvents.emit('invalidateItem', { priority, itemKey });
     }
 
     if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
       invalidateQuery(
         (query) =>
-          itemsId.some((id) =>
-            syncMutationsAndInvalidations.syncItemAndQuery(id, query),
+          itemsKey.some(({ payload }) =>
+            syncMutationsAndInvalidations.syncItemAndQuery(payload, query),
           ),
         priority,
         true,
@@ -873,20 +911,25 @@ export function newTSDFListQueryStore<
     }
   }
 
-  function startItemMutation(itemId: string | string[] | FilterItemFn) {
+  function startItemMutation(
+    itemId: ItemPayload | ItemPayload[] | FilterItemFn,
+  ) {
     if (!fetchItemOrquestrator) throw new Error(noFetchFnError);
 
-    const itemsId = getItemsIdArray(itemId);
+    const itemsKey = getItemsKeyArray(itemId);
 
     const endMutations: (() => void)[] = [];
 
-    for (const id of itemsId) {
-      endMutations.push(fetchItemOrquestrator.get(id).startMutation());
+    for (const { itemKey, payload } of itemsKey) {
+      endMutations.push(fetchItemOrquestrator.get(itemKey).startMutation());
 
       if (syncMutationsAndInvalidations) {
         for (const [queryKey, query] of Object.entries(store.state.queries)) {
           if (
-            syncMutationsAndInvalidations.syncItemAndQuery(id, query.payload)
+            syncMutationsAndInvalidations.syncItemAndQuery(
+              payload,
+              query.payload,
+            )
           ) {
             endMutations.push(
               fetchQueryOrquestrator.get(queryKey).startMutation(),
@@ -908,7 +951,7 @@ export function newTSDFListQueryStore<
   }
 
   function useMultipleItems<SelectedItem = ItemState>(
-    itemIds: string[],
+    itemsPayload_: ItemPayload[],
     {
       selector = defaultItemDataSelector,
       returnIdleStatus,
@@ -924,22 +967,39 @@ export function newTSDFListQueryStore<
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const dataSelector = useCallback(selector, []);
 
-    const memoizedItemIds = useDeepMemo(() => itemIds, [itemIds]);
+    type PayloadWithKey = {
+      payload: ItemPayload;
+      itemKey: string;
+    };
+
+    const memoizedItemKeys = useDeepMemo(
+      () =>
+        itemsPayload_.map(
+          (itemPayload): PayloadWithKey => ({
+            payload: itemPayload,
+            itemKey: getItemKey(itemPayload),
+          }),
+        ),
+      [itemsPayload_],
+    );
 
     const resultSelector = useCallback(
       (state: State) => {
-        return memoizedItemIds.map(
-          (itemId): TSFDUseItemReturn<SelectedItem, NError> => {
-            const itemQuery = state.itemQueries[itemId];
-            const itemState = state.items[itemId];
+        return memoizedItemKeys.map(
+          ({
+            itemKey,
+            payload,
+          }): TSFDUseItemReturn<SelectedItem, NError, ItemPayload> => {
+            const itemQuery = state.itemQueries[itemKey];
+            const itemState = state.items[itemKey];
 
             if (itemQuery === null) {
               return {
                 status: 'deleted',
                 error: null,
                 isLoading: false,
-                itemId,
-                data: dataSelector(null, itemId),
+                payload,
+                data: dataSelector(null, itemKey),
               };
             }
 
@@ -948,8 +1008,8 @@ export function newTSDFListQueryStore<
                 status: returnIdleStatus ? 'idle' : 'loading',
                 error: null,
                 isLoading: returnIdleStatus ? false : true,
-                itemId,
-                data: dataSelector(null, itemId),
+                payload,
+                data: dataSelector(null, itemKey),
               };
             }
 
@@ -963,13 +1023,18 @@ export function newTSDFListQueryStore<
               status,
               error: itemQuery.error,
               isLoading: status === 'loading',
-              data: dataSelector(itemState ?? null, itemId),
-              itemId,
+              data: dataSelector(itemState ?? null, itemKey),
+              payload,
             };
           },
         );
       },
-      [dataSelector, memoizedItemIds, returnIdleStatus, returnRefetchingStatus],
+      [
+        dataSelector,
+        memoizedItemKeys,
+        returnIdleStatus,
+        returnRefetchingStatus,
+      ],
     );
 
     const storeState = store.useSelector(resultSelector, {
@@ -978,21 +1043,21 @@ export function newTSDFListQueryStore<
     });
 
     useOnMittEvent(storeEvents, 'invalidateItem', (event) => {
-      for (const itemId of memoizedItemIds) {
-        if (itemId !== event.itemId) continue;
+      for (const { payload, itemKey } of memoizedItemKeys) {
+        if (itemKey !== event.itemKey) continue;
 
-        if (!itemInvalidationWasTriggered.has(itemId)) {
-          scheduleItemFetch(event.priority, itemId);
-          itemInvalidationWasTriggered.add(itemId);
+        if (!itemInvalidationWasTriggered.has(itemKey)) {
+          scheduleItemFetch(event.priority, payload);
+          itemInvalidationWasTriggered.add(itemKey);
         }
       }
     });
 
     useEffect(() => {
-      for (const itemId of memoizedItemIds) {
-        if (itemId) {
+      for (const { payload, itemKey } of memoizedItemKeys) {
+        if (itemKey) {
           if (disableRefetchOnMount) {
-            const itemState = store.state.itemQueries[itemId];
+            const itemState = store.state.itemQueries[itemKey];
 
             const shouldFetch =
               !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
@@ -1000,22 +1065,22 @@ export function newTSDFListQueryStore<
             if (shouldFetch) {
               scheduleItemFetch(
                 itemState?.refetchOnMount || 'lowPriority',
-                itemId,
+                payload,
               );
               return;
             }
           } else {
-            scheduleItemFetch('lowPriority', itemId);
+            scheduleItemFetch('lowPriority', payload);
           }
         }
       }
-    }, [disableRefetchOnMount, memoizedItemIds]);
+    }, [disableRefetchOnMount, memoizedItemKeys]);
 
     return storeState;
   }
 
   function useItem<SelectedItem = ItemState>(
-    itemId: string | false | null | undefined,
+    itemPayload: ItemPayload | false | null | undefined,
     options: {
       selector?: (data: ItemState | null, id: string) => SelectedItem;
       disableRefetchOnMount?: boolean;
@@ -1028,10 +1093,12 @@ export function newTSDFListQueryStore<
 
     const query = useMemo(
       () =>
-        itemId === false || itemId === null || itemId === undefined
+        itemPayload === false ||
+        itemPayload === null ||
+        itemPayload === undefined
           ? []
-          : [itemId],
-      [itemId],
+          : [itemPayload],
+      [itemPayload],
     );
 
     const queryResult = useMultipleItems<SelectedItem>(query, options);
@@ -1043,32 +1110,32 @@ export function newTSDFListQueryStore<
     );
 
     const result = useMemo(
-      (): TSFDUseItemReturn<SelectedItem, NError> =>
+      (): TSFDUseItemReturn<SelectedItem, NError, ItemPayload> =>
         queryResult[0] ?? {
           error: null,
           isLoading: false,
           status: 'idle',
-          data: memoizedSelector(null, itemId || ''),
-          itemId: itemId || '',
+          data: memoizedSelector(null, ''),
+          payload: itemPayload || null,
         },
-      [itemId, memoizedSelector, queryResult],
+      [itemPayload, memoizedSelector, queryResult],
     );
 
     const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
       ensureIsLoaded,
-      !!itemId,
+      !!itemPayload,
       () => {
-        if (itemId) {
-          scheduleItemFetch('highPriority', itemId);
+        if (itemPayload) {
+          scheduleItemFetch('highPriority', itemPayload);
         }
       },
     );
 
     useSubscribeToStore(store, ({ observe }) => {
-      if (!ensureIsLoaded || !itemId) return;
+      if (!ensureIsLoaded || !itemPayload) return;
 
       observe
-        .ifSelector((state) => state.itemQueries[itemId]?.status)
+        .ifSelector((state) => state.itemQueries[itemPayload]?.status)
         .change.then(({ current }) => {
           if (current === 'success' || current === 'error') {
             emitIsLoadedEvt('isLoaded', true);
@@ -1080,27 +1147,30 @@ export function newTSDFListQueryStore<
   }
 
   function updateItemState(
-    itemIds: string | string[] | FilterItemFn,
-    produceNewData: (draftData: ItemState, itemId: string) => void | ItemState,
+    itemIds: ItemPayload | ItemPayload[] | FilterItemFn,
+    produceNewData: (
+      draftData: ItemState,
+      itemPayload: ItemPayload,
+    ) => void | ItemState,
     ifNothingWasUpdated?: () => void,
   ): boolean {
-    const itemKeys = getItemsIdArray(itemIds);
+    const itemKeys = getItemsKeyArray(itemIds);
 
     let someItemWasUpdated = false as boolean;
 
     store.batch(
       () => {
         store.produceState((draftState) => {
-          for (const itemId of itemKeys) {
-            const item = draftState.items[itemId];
+          for (const { itemKey, payload } of itemKeys) {
+            const item = draftState.items[itemKey];
 
             if (!item) continue;
 
             someItemWasUpdated = true;
-            const newData = produceNewData(item, itemId);
+            const newData = produceNewData(item, payload);
 
             if (newData) {
-              draftState.items[itemId] = newData;
+              draftState.items[itemKey] = newData;
             }
           }
         });
@@ -1115,27 +1185,30 @@ export function newTSDFListQueryStore<
     return someItemWasUpdated;
   }
 
-  function addItemToState(itemId: string, data: ItemState) {
+  function addItemToState(itemPayload: ItemPayload, data: ItemState) {
+    const itemKey = getItemKey(itemPayload);
+
     store.produceState(
       (draftState) => {
-        draftState.items[itemId] = data;
-        draftState.itemQueries[itemId] = {
+        draftState.items[itemKey] = data;
+        draftState.itemQueries[itemKey] = {
           status: 'success',
           wasLoaded: true,
           refetchOnMount: false,
           error: null,
+          payload: klona(itemPayload),
         };
       },
-      { action: { type: 'create-item-state', itemId } },
+      { action: { type: 'create-item-state', itemPayload } },
     );
   }
 
-  function deleteItemState(itemId: string | string[] | FilterItemFn) {
-    const itemsId = getItemsIdArray(itemId);
+  function deleteItemState(itemId: ItemPayload | ItemPayload[] | FilterItemFn) {
+    const itemsId = getItemsKeyArray(itemId);
 
     store.produceState(
       (draftState) => {
-        for (const itemKey of itemsId) {
+        for (const { itemKey } of itemsId) {
           draftState.items[itemKey] = null;
           draftState.itemQueries[itemKey] = null;
 
@@ -1175,6 +1248,7 @@ export function newTSDFListQueryStore<
     awaitListQueryFetch,
     useMultipleListQueries,
     useListQuery,
+    getItemKey,
     useItem,
     useMultipleItems,
     addItemToState,
@@ -1187,4 +1261,7 @@ export type TSFDListQueryStore<
   ItemState extends ValidStoreState,
   NError,
   QueryPayload extends ValidPayload,
-> = ReturnType<typeof newTSDFListQueryStore<ItemState, NError, QueryPayload>>;
+  ItemPayload extends ValidPayload,
+> = ReturnType<
+  typeof newTSDFListQueryStore<ItemState, NError, QueryPayload, ItemPayload>
+>;

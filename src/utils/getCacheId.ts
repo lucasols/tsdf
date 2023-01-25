@@ -1,9 +1,9 @@
 import { filterAndMap } from './filterAndMap';
 import { isObject } from './isObject';
 
-export function getCacheId(input: any) {
-  return typeof input === 'string'
-    ? input
+export function getCacheId(input: any): string {
+  return typeof input === 'string' || typeof input === 'number'
+    ? String(input)
     : JSON.stringify(input && isObject(input) ? orderedProps(input) : input);
 }
 

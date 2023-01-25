@@ -12,7 +12,7 @@ import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useDeepMemo, useOnMittEvent } from './utils/hooks';
-import { serializableClone } from './utils/serializableClone';
+import { klona } from 'klona/json';
 
 type CollectionItemStatus = TSDFStatus;
 
@@ -88,7 +88,7 @@ export function newTSDFCollectionStore<
     itemPayload: ItemPayload,
   ): Promise<boolean> {
     const itemId = getItemKey(itemPayload);
-    const payload = serializableClone(itemPayload);
+    const payload = klona(itemPayload);
 
     const itemState = store.state[itemId];
 
@@ -513,7 +513,7 @@ export function newTSDFCollectionStore<
           wasLoaded: true,
           refetchOnMount: false,
           error: null,
-          payload: serializableClone(fetchParams),
+          payload: klona(fetchParams),
         };
       },
       { action: { type: 'create-item-state', payload: fetchParams } },
