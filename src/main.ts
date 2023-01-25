@@ -18,7 +18,7 @@ export {
   TSDFItemQuery,
   TSFDListQuery,
   TSFDUseListQueryReturn,
-  TSFDUseItemReturn,
+  TSFDUseListItemReturn,
   FetchListFnReturn,
 } from './listQueryStore';
 export { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';

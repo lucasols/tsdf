@@ -55,7 +55,7 @@ export type TSFDUseListQueryReturn<Selected, ItemPayload, NError> = {
   isLoading: boolean;
 };
 
-export type TSFDUseItemReturn<Selected, NError, ItemPayload> = {
+export type TSFDUseListItemReturn<Selected, NError, ItemPayload> = {
   data: Selected;
   status: QueryStatus | 'idle' | 'deleted';
   payload: ItemPayload | null;
@@ -950,7 +950,7 @@ export function newTSDFListQueryStore<
     return data as unknown as T;
   }
 
-  function useMultipleItems<SelectedItem = ItemState>(
+  function useMultipleItems<SelectedItem = ItemState | null>(
     itemsPayload_: ItemPayload[],
     {
       selector = defaultItemDataSelector,
@@ -989,7 +989,7 @@ export function newTSDFListQueryStore<
           ({
             itemKey,
             payload,
-          }): TSFDUseItemReturn<SelectedItem, NError, ItemPayload> => {
+          }): TSFDUseListItemReturn<SelectedItem, NError, ItemPayload> => {
             const itemQuery = state.itemQueries[itemKey];
             const itemState = state.items[itemKey];
 
@@ -1079,7 +1079,7 @@ export function newTSDFListQueryStore<
     return storeState;
   }
 
-  function useItem<SelectedItem = ItemState>(
+  function useItem<SelectedItem = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
     options: {
       selector?: (data: ItemState | null, id: string) => SelectedItem;
@@ -1110,7 +1110,7 @@ export function newTSDFListQueryStore<
     );
 
     const result = useMemo(
-      (): TSFDUseItemReturn<SelectedItem, NError, ItemPayload> =>
+      (): TSFDUseListItemReturn<SelectedItem, NError, ItemPayload> =>
         queryResult[0] ?? {
           error: null,
           isLoading: false,
