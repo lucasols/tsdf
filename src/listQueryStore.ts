@@ -61,7 +61,7 @@ export type TSFDUseItemReturn<Selected, NError> = {
   isLoading: boolean;
 };
 
-type FetchListFnReturn<ItemState extends ValidStoreState> = {
+export type FetchListFnReturn<ItemState extends ValidStoreState> = {
   items: { id: string | number; data: ItemState }[];
   hasMore: boolean;
 };

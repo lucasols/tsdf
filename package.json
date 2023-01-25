@@ -1,6 +1,6 @@
 {
   "name": "tsdf",
-  "version": "8.0.0-beta.3",
+  "version": "8.0.0-beta.4",
   "description": "A data fetching solution based on t-state",
   "license": "MIT",
   "author": "Lucas Santos",
@@ -31,7 +31,7 @@
     "tsc:watch": "tsc -p tsconfig.prod.json --watch",
     "test:run": "vitest run",
     "build": "pnpm test:run && pnpm lint && pnpm build:no-test",
-    "build:no-test": "tsup --minify --dts",
+    "build:no-test": "tsup --dts",
     "npm-publish": "./scripts/check-if-is-sync.sh && pnpm build && npm publish"
   },
   "devDependencies": {
