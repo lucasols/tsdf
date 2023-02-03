@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-types */
-import produce from 'immer';
+import { produce } from 'immer';
 import { randomInt } from '../utils/math';
 import { sleep } from '../utils/sleep';
 import { simplifyArraySnapshot } from '../utils/storeUtils';

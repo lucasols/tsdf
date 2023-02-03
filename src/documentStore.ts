@@ -1,4 +1,4 @@
-import produce from 'immer';
+import { produce } from 'immer';
 import mitt from 'mitt';
 import { useCallback, useEffect } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
