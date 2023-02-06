@@ -855,3 +855,36 @@ test.concurrent('RTU update works', async () => {
     env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
   ).toBeGreaterThanOrEqual(300);
 });
+
+test.concurrent('initial data is invalidated on first load', async () => {
+  const env = createTestEnv({
+    initialServerData: 'lucas',
+    useLoadedSnapshot: true,
+    disableInitialDataInvalidation: false,
+  });
+
+  env.serverMock.produceData((draft) => {
+    draft.hello = 'update';
+  });
+
+  const renders = createRenderStore();
+
+  renderHook(() => {
+    const { data, status } = env.store.useDocument({
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({ status, data });
+  });
+
+  await env.serverMock.waitFetchIdle(0, 1500);
+
+  expect(renders.snapshot).toMatchSnapshotString(`
+    "
+    status: success -- data: {hello:world}
+    status: refetching -- data: {hello:world}
+    status: success -- data: {hello:update}
+    "
+  `);
+});

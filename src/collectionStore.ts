@@ -44,6 +44,14 @@ export type TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> = {
   isLoading: boolean;
 };
 
+export type CollectionInitialStateItem<
+  ItemPayload extends ValidPayload,
+  ItemState extends ValidStoreState,
+> = {
+  payload: ItemPayload;
+  data: ItemState;
+};
+
 export function newTSDFCollectionStore<
   ItemState extends ValidStoreState,
   NError,
@@ -54,7 +62,9 @@ export function newTSDFCollectionStore<
   disableRefetchOnWindowFocus,
   lowPriorityThrottleMs,
   errorNormalizer,
+  disableInitialDataInvalidation,
   mediumPriorityThrottleMs,
+  initialStateItems,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   dynamicRealtimeThrottleMs,
   getCollectionItemKey: filterCollectionItemObjKey,
@@ -65,6 +75,8 @@ export function newTSDFCollectionStore<
   errorNormalizer: (exception: unknown) => NError;
   disableRefetchOnWindowFocus?: boolean;
   disableRefetchOnMount?: boolean;
+  initialStateItems?: CollectionInitialStateItem<ItemPayload, ItemState>[];
+  disableInitialDataInvalidation?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -72,9 +84,26 @@ export function newTSDFCollectionStore<
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload, NError>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, NError>;
 
+  const initialState = {} as CollectionState;
+
+  if (initialStateItems) {
+    for (const item of initialStateItems) {
+      const itemKey = getItemKey(item.payload);
+
+      initialState[itemKey] = {
+        data: item.data,
+        error: null,
+        status: 'success',
+        payload: item.payload,
+        refetchOnMount: disableInitialDataInvalidation ? false : 'lowPriority',
+        wasLoaded: true,
+      };
+    }
+  }
+
   const store = new Store<CollectionState>({
     debugName,
-    state: {},
+    state: initialState,
   });
 
   function getItemKey(params: ItemPayload): string {

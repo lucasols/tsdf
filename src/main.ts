@@ -8,6 +8,7 @@ export {
   newTSDFCollectionStore,
   TSDFCollectionStore,
   TSFDCollectionState,
+  CollectionInitialStateItem,
   TSFDCollectionItem,
   TSFDUseCollectionItemReturn,
 } from './collectionStore';
@@ -17,6 +18,7 @@ export {
   TSFDListQueryState,
   TSDFItemQuery,
   TSFDListQuery,
+  ListQueryStoreInitialData,
   TSFDUseListQueryReturn,
   TSFDUseListItemReturn,
   FetchListFnReturn,

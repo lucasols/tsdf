@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { deepEqual, Store } from 't-state';
 import {
+  CollectionInitialStateItem,
   newTSDFCollectionStore,
   TSDFCollectionStore,
   TSFDCollectionState,
@@ -39,10 +40,12 @@ export function createDefaultDocumentStore({
   useLoadedSnapshot,
   emulateRTU,
   dynamicRTUThrottleMs,
+  disableInitialDataInvalidation = true,
   debug,
 }: {
   initialServerData?: string;
   useLoadedSnapshot?: boolean;
+  disableInitialDataInvalidation?: boolean;
   debug?: never;
   emulateRTU?: boolean;
   dynamicRTUThrottleMs?: (duration: number) => number;
@@ -57,6 +60,7 @@ export function createDefaultDocumentStore({
     initialData: useLoadedSnapshot ? { hello: 'world' } : undefined,
     errorNormalizer: normalizeError,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
+    disableInitialDataInvalidation,
   });
 
   const startTime = Date.now();
@@ -112,6 +116,7 @@ export function createDefaultCollectionStore<
   useLoadedSnapshot,
   randomTimeout,
   emulateRTU,
+  disableInitialDataInvalidation = true,
   dynamicRTUThrottleMs,
   debug,
 }: {
@@ -121,6 +126,7 @@ export function createDefaultCollectionStore<
   emulateRTU?: boolean;
   /** default: 30-100 */
   randomTimeout?: true;
+  disableInitialDataInvalidation?: boolean;
   debug?: never;
 } = {}) {
   const serverMock = mockServerResource<ServerData, Todo>({
@@ -146,6 +152,23 @@ export function createDefaultCollectionStore<
     },
   });
 
+  let initialStateItems:
+    | undefined
+    | CollectionInitialStateItem<Payload, Todo>[] = undefined;
+
+  if (useLoadedSnapshot) {
+    initialStateItems = [];
+
+    for (const [id, todo] of Object.entries(serverInitialData)) {
+      if (!todo) continue;
+
+      initialStateItems.push({
+        data: todo,
+        payload: id as Payload,
+      });
+    }
+  }
+
   const collectionStore = newTSDFCollectionStore<Todo, StoreError, Payload>({
     fetchFn: async (payload) => {
       return serverMock.fetch(
@@ -154,24 +177,9 @@ export function createDefaultCollectionStore<
     },
     errorNormalizer: normalizeError,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
+    disableInitialDataInvalidation,
+    initialStateItems,
   });
-
-  if (useLoadedSnapshot) {
-    const initialState: DefaultCollectionState = {};
-
-    for (const [id, todo] of Object.entries(serverInitialData)) {
-      initialState[id] = {
-        data: todo,
-        status: 'success',
-        error: null,
-        payload: id,
-        refetchOnMount: false,
-        wasLoaded: true,
-      };
-    }
-
-    collectionStore.store.setState(initialState as any);
-  }
 
   const startTime = Date.now();
 

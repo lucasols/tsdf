@@ -71,6 +71,19 @@ export type FetchListFnReturn<
   hasMore: boolean;
 };
 
+export type ListQueryStoreInitialData<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = {
+  items: { payload: ItemPayload; data: ItemState }[];
+  queries: {
+    payload: QueryPayload;
+    items: ItemPayload[];
+    hasMore: boolean;
+  }[];
+};
+
 const noFetchFnError = 'No fetchItemFn was provided';
 
 export function newTSDFListQueryStore<
@@ -84,9 +97,11 @@ export function newTSDFListQueryStore<
   fetchItemFn,
   errorNormalizer,
   defaultQuerySize = 50,
+  initialData,
   disableRefetchOnWindowFocus,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   lowPriorityThrottleMs,
+  disableInitialDataInvalidation,
   mediumPriorityThrottleMs,
   dynamicRealtimeThrottleMs,
   syncMutationsAndInvalidations,
@@ -99,6 +114,8 @@ export function newTSDFListQueryStore<
   fetchItemFn?: (itemId: ItemPayload) => Promise<ItemState>;
   errorNormalizer: (exception: unknown) => NError;
   defaultQuerySize?: number;
+  initialData?: ListQueryStoreInitialData<ItemState, QueryPayload, ItemPayload>;
+  disableInitialDataInvalidation?: boolean;
   disableRefetchOnWindowFocus?: boolean;
   syncMutationsAndInvalidations?: {
     syncQueries: (query1: QueryPayload, query2: QueryPayload) => boolean;
@@ -115,9 +132,40 @@ export function newTSDFListQueryStore<
   type State = TSFDListQueryState<ItemState, NError, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<NError, QueryPayload>;
 
+  const initialState: State = { items: {}, queries: {}, itemQueries: {} };
+
+  if (initialData) {
+    for (const { payload, data } of initialData.items) {
+      const itemKey = getItemKey(payload);
+
+      initialState.items[itemKey] = data;
+      initialState.itemQueries[itemKey] = {
+        error: null,
+        status: 'success',
+        refetchOnMount: disableInitialDataInvalidation ? false : 'lowPriority',
+        wasLoaded: true,
+        payload,
+      };
+    }
+
+    for (const { payload, items, hasMore } of initialData.queries) {
+      const queryKey = getQueryKey(payload);
+
+      initialState.queries[queryKey] = {
+        error: null,
+        status: 'success',
+        refetchOnMount: disableInitialDataInvalidation ? false : 'lowPriority',
+        wasLoaded: true,
+        payload,
+        items: items.map(getItemKey),
+        hasMore,
+      };
+    }
+  }
+
   const store = new Store<State>({
     debugName,
-    state: { items: {}, queries: {}, itemQueries: {} },
+    state: initialState,
   });
 
   function getQueryKey(params: QueryPayload): string {

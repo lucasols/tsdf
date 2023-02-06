@@ -37,11 +37,13 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   lowPriorityThrottleMs,
   mediumPriorityThrottleMs,
   dynamicRealtimeThrottleMs,
+  disableInitialDataInvalidation,
   errorNormalizer,
 }: {
   debugName?: string;
   fetchFn: () => Promise<State>;
   initialData?: State;
+  disableInitialDataInvalidation?: boolean;
   errorNormalizer: (exception: unknown) => NError;
   disableRefetchOnWindowFocus?: boolean;
   disableRefetchOnMount?: boolean;
@@ -57,7 +59,10 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
       data: initialData ?? null,
       error: null,
       status: initialData ? 'success' : 'idle',
-      refetchOnMount: false,
+      refetchOnMount:
+        !!initialData && !disableInitialDataInvalidation
+          ? 'lowPriority'
+          : false,
     },
   });
 

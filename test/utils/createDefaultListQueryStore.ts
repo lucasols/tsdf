@@ -1,5 +1,6 @@
 import { deepEqual } from 't-state';
 import {
+  ListQueryStoreInitialData,
   newTSDFListQueryStore,
   TSFDListQueryState,
 } from '../../src/listQueryStore';
@@ -36,6 +37,7 @@ export function createDefaultListQueryStore({
   defaultQuerySize,
   debug,
   dynamicRTUThrottleMs,
+  disableInitialDataInvalidation = true,
   debugRequests: debuFetchs,
   emulateRTU,
 }: {
@@ -49,6 +51,7 @@ export function createDefaultListQueryStore({
   dynamicRTUThrottleMs?: (duration: number) => number;
   debug?: never;
   debugRequests?: never;
+  disableInitialDataInvalidation?: boolean;
   emulateRTU?: boolean;
 } = {}) {
   const serverMock = mockServerResource<Tables, Row[] | Row>({
@@ -73,6 +76,92 @@ export function createDefaultListQueryStore({
 
   function getItemId({ tableId, id }: { tableId: string; id: number }) {
     return `${tableId}||${id}`;
+  }
+
+  let initialData:
+    | undefined
+    | ListQueryStoreInitialData<Row, ListQueryParams, string> = undefined;
+
+  if (useLoadedSnapshot) {
+    const tablesToSnapshot = useLoadedSnapshot.tables ?? [];
+
+    if (useLoadedSnapshot.tables) {
+      const allIdsExist = tablesToSnapshot.every((tableId) =>
+        initialServerData.hasOwnProperty(tableId),
+      );
+
+      if (!allIdsExist) {
+        throw new Error(
+          `loadTablesSnapshot: Some tableId doesn't exist in initialServerData`,
+        );
+      }
+    }
+
+    initialData = { queries: [], items: [] };
+
+    for (const [tableId, items] of Object.entries(initialServerData)) {
+      if (!tablesToSnapshot.includes(tableId)) {
+        continue;
+      }
+
+      initialData.queries.push({
+        payload: { tableId },
+        hasMore: false,
+        items: items.map((item) => getItemId({ tableId, id: item.id })),
+      });
+
+      for (const item of items) {
+        initialData.items.push({
+          payload: getItemId({ tableId, id: item.id }),
+          data: item,
+        });
+      }
+    }
+
+    for (const query of useLoadedSnapshot.queries ?? []) {
+      const { tableId } = query;
+
+      const items =
+        initialServerData[query.tableId]?.filter((item) => {
+          if (query.filters?.idIsGreaterThan) {
+            return item.id > query.filters.idIsGreaterThan;
+          }
+
+          return true;
+        }) ?? [];
+
+      initialData.queries.push({
+        payload: query,
+        hasMore: false,
+        items: items.map((item) => getItemId({ tableId, id: item.id })),
+      });
+
+      for (const item of items) {
+        initialData.items.push({
+          payload: getItemId({ tableId, id: item.id }),
+          data: item,
+        });
+      }
+    }
+
+    if (useLoadedSnapshot.items) {
+      for (const itemId of useLoadedSnapshot.items) {
+        const itemData = initialServerData[itemId.split('||')[0]!]?.find(
+          (item) => item.id === Number(itemId.split('||')[1]),
+        );
+
+        if (!itemData) {
+          throw new Error(
+            `loadItemsSnapshot: Item doesn't exist in initialServerData`,
+          );
+        }
+
+        initialData.items.push({
+          payload: itemId,
+          data: itemData,
+        });
+      }
+    }
   }
 
   const listQueryStore = newTSDFListQueryStore<
@@ -115,6 +204,8 @@ export function createDefaultListQueryStore({
     },
     errorNormalizer: normalizeError,
     defaultQuerySize,
+    initialData,
+    disableInitialDataInvalidation,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     syncMutationsAndInvalidations: {
       syncItemAndQuery(itemId, query) {
@@ -125,118 +216,6 @@ export function createDefaultListQueryStore({
       },
     },
   });
-
-  if (useLoadedSnapshot) {
-    const tablesToSnapshot = useLoadedSnapshot.tables ?? [];
-
-    if (useLoadedSnapshot.tables) {
-      const allIdsExist = tablesToSnapshot.every((tableId) =>
-        initialServerData.hasOwnProperty(tableId),
-      );
-
-      if (!allIdsExist) {
-        throw new Error(
-          `loadTablesSnapshot: Some tableId doesn't exist in initialServerData`,
-        );
-      }
-    }
-
-    const state: DefaultListQueryState = {
-      items: {},
-      queries: {},
-      itemQueries: {},
-    };
-
-    for (const [tableId, items] of Object.entries(initialServerData)) {
-      const queryId = `[{"tableId":"${tableId}"}]`;
-
-      if (!tablesToSnapshot.includes(tableId)) {
-        continue;
-      }
-
-      state.queries[queryId] = {
-        status: 'success',
-        items: items.map((item) => getItemId({ tableId, id: item.id })),
-        hasMore: false,
-        payload: { tableId },
-        wasLoaded: true,
-        refetchOnMount: false,
-        error: null,
-      };
-
-      for (const item of items) {
-        state.items[getItemId({ tableId, id: item.id })] = item;
-        state.itemQueries[getItemId({ tableId, id: item.id })] = {
-          status: 'success',
-          error: null,
-          refetchOnMount: false,
-          wasLoaded: true,
-          payload: getItemId({ tableId, id: item.id }),
-        };
-      }
-    }
-
-    for (const query of useLoadedSnapshot.queries ?? []) {
-      const queryId = getCacheId(query);
-
-      const { tableId } = query;
-
-      const items =
-        initialServerData[query.tableId]?.filter((item) => {
-          if (query.filters?.idIsGreaterThan) {
-            return item.id > query.filters.idIsGreaterThan;
-          }
-
-          return true;
-        }) ?? [];
-
-      state.queries[queryId] = {
-        status: 'success',
-        items: items.map((item) => getItemId({ tableId, id: item.id })),
-        hasMore: false,
-        payload: query,
-        wasLoaded: true,
-        refetchOnMount: false,
-        error: null,
-      };
-
-      for (const item of items) {
-        state.items[getItemId({ tableId, id: item.id })] = item;
-        state.itemQueries[getItemId({ tableId, id: item.id })] = {
-          status: 'success',
-          error: null,
-          refetchOnMount: false,
-          wasLoaded: true,
-          payload: getItemId({ tableId, id: item.id }),
-        };
-      }
-    }
-
-    if (useLoadedSnapshot.items) {
-      for (const itemId of useLoadedSnapshot.items) {
-        const itemData = initialServerData[itemId.split('||')[0]!]?.find(
-          (item) => item.id === Number(itemId.split('||')[1]),
-        );
-
-        if (!itemData) {
-          throw new Error(
-            `loadItemsSnapshot: Item doesn't exist in initialServerData`,
-          );
-        }
-
-        state.itemQueries[itemId] = {
-          status: 'success',
-          refetchOnMount: false,
-          wasLoaded: true,
-          error: null,
-          payload: itemId,
-        };
-        state.items[itemId] = itemData;
-      }
-    }
-
-    listQueryStore.store.setState(state);
-  }
 
   if (debug as any) {
     listQueryStore.store.subscribe(({ current }) => {

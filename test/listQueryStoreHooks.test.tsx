@@ -13,6 +13,8 @@ import {
   shouldNotSkip,
 } from './utils/storeUtils';
 
+export const createTestEnv = createDefaultListQueryStore;
+
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
   products: range(1, 50).map((id) => ({ id, name: `Product ${id}` })),
@@ -660,3 +662,78 @@ describe('useItem', () => {
     `);
   });
 });
+
+test.concurrent(
+  'initial data is invalidated on first load in item query',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+      disableInitialDataInvalidation: false,
+    });
+
+    env.serverMock.produceData((draft) => {
+      draft.users![0]!.name = 'Updated User 1';
+    });
+
+    const renders = createRenderStore();
+
+    renderHook(() => {
+      const { data, status } = env.store.useItem('users||1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({ status, data });
+    });
+
+    await env.serverMock.waitFetchIdle(0, 1500);
+
+    expect(renders.snapshot).toMatchSnapshotString(`
+    "
+    status: success -- data: {id:1, name:User 1}
+    status: refetching -- data: {id:1, name:User 1}
+    status: success -- data: {id:1, name:Updated User 1}
+    "
+  `);
+  },
+);
+
+test.concurrent(
+  'initial data is invalidated on first load in list query',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+      disableInitialDataInvalidation: false,
+    });
+
+    env.serverMock.produceData((draft) => {
+      draft.users![0]!.name = '🆕';
+    });
+
+    const renders = createRenderStore();
+
+    renderHook(() => {
+      const { items, status } = env.store.useListQuery(
+        { tableId: 'users' },
+        {
+          returnRefetchingStatus: true,
+          disableRefetchOnMount: true,
+        },
+      );
+
+      renders.add({ status, items });
+    });
+
+    await env.serverMock.waitFetchIdle(0, 1500);
+
+    expect(renders.snapshot).toMatchSnapshotString(`
+    "
+    status: success -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
+    status: refetching -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
+    status: success -- items: [{id:users||1, data:{id:1, name:🆕}}, ...(4 more)]
+    "
+  `);
+  },
+);

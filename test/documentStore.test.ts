@@ -102,6 +102,7 @@ test.concurrent('start with initialized data', () => {
     fetchFn: serverMock.fetchWitoutSelector,
     initialData: { hello: 'initial data' },
     errorNormalizer: normalizeError,
+    disableInitialDataInvalidation: true,
   });
 
   expect(documentStore.store.state).toEqual<DocumentStoreState>({

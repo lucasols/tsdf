@@ -649,3 +649,36 @@ test.concurrent('fetch error then mount component without error', async () => {
       "
     `);
 });
+
+test.concurrent('initial data is invalidated on first load', async () => {
+  const env = createTestEnv({
+    initialServerData: { '1': defaultTodo, '2': defaultTodo },
+    useLoadedSnapshot: true,
+    disableInitialDataInvalidation: false,
+  });
+
+  env.serverMock.produceData((draft) => {
+    draft['1']!.title = 'Update';
+  });
+
+  const renders = createRenderStore();
+
+  renderHook(() => {
+    const { data, status } = env.store.useItem('1', {
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
+
+    renders.add({ status, data });
+  });
+
+  await env.serverMock.waitFetchIdle(0, 1500);
+
+  expect(renders.snapshot).toMatchSnapshotString(`
+    "
+    status: success -- data: {title:todo, completed:false}
+    status: refetching -- data: {title:todo, completed:false}
+    status: success -- data: {title:Update, completed:false}
+    "
+  `);
+});
