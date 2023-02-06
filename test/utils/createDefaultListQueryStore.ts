@@ -4,7 +4,6 @@ import {
   newTSDFListQueryStore,
   TSFDListQueryState,
 } from '../../src/listQueryStore';
-import { getCacheId } from '../../src/utils/getCacheId';
 import { mockServerResource } from '../mocks/fetchMock';
 import { normalizeError, StoreError } from './storeUtils';
 
