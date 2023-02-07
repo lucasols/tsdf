@@ -1,7 +1,7 @@
 import { produce } from 'immer';
 import mitt from 'mitt';
 import { useCallback, useEffect } from 'react';
-import { deepEqual, Store, useSubscribeToStore } from 't-state';
+import { Store, useSubscribeToStore } from 't-state';
 import {
   createFetchOrquestrator,
   FetchType,
@@ -11,6 +11,7 @@ import {
 import { TSDFStatus, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { useOnMittEvent } from './utils/hooks';
+import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
 
 type DocumentStatus = TSDFStatus | 'idle';
 
@@ -74,7 +75,6 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
         refetchOnMount: false,
       },
       {
-        equalityCheck: deepEqual,
         action:
           store.state.status === 'success'
             ? 'fetch-start-refetching'
@@ -89,10 +89,10 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 
       store.setPartialState(
         {
-          data,
+          data: reusePrevIfEqual({ prev: store.state.data, current: data }),
           status: 'success',
         },
-        { action: 'fetch-success', equalityCheck: deepEqual },
+        { action: 'fetch-success' },
       );
 
       return true;

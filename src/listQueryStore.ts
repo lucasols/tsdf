@@ -13,6 +13,7 @@ import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo, useOnMittEvent } from './utils/hooks';
 import { klona } from 'klona/json';
+import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
 
 type QueryStatus = TSDFStatus | 'loadingMore';
 
@@ -262,7 +263,10 @@ export function newTSDFListQueryStore<
           for (const { data, itemPayload } of items) {
             const itemKey = getItemKey(itemPayload);
 
-            draft.items[itemKey] = data;
+            draft.items[itemKey] = reusePrevIfEqual<ItemState>({
+              current: data,
+              prev: draft.items[itemKey] ?? undefined,
+            });
             query.items.push(String(itemKey));
 
             const itemQuery = draft.itemQueries[itemKey];
@@ -283,7 +287,6 @@ export function newTSDFListQueryStore<
           }
         },
         {
-          equalityCheck: deepEqual,
           action: { type: 'fetch-query-success', payload },
         },
       );
@@ -797,7 +800,6 @@ export function newTSDFListQueryStore<
         itemQuery.refetchOnMount = false;
       },
       {
-        equalityCheck: deepEqual,
         action: {
           type: isLoaded ? 'fetch-item-start' : 'fetch-item-refetch-start',
           itemPayload,
@@ -819,10 +821,12 @@ export function newTSDFListQueryStore<
           itemQuery.status = 'success';
           itemQuery.wasLoaded = true;
 
-          draft.items[itemKey] = item;
+          draft.items[itemKey] = reusePrevIfEqual<ItemState>({
+            current: item,
+            prev: draft.items[itemKey] ?? undefined,
+          });
         },
         {
-          equalityCheck: deepEqual,
           action: { type: 'fetch-item-success', itemPayload },
         },
       );

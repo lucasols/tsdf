@@ -13,6 +13,7 @@ import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useDeepMemo, useOnMittEvent } from './utils/hooks';
 import { klona } from 'klona/json';
+import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
 
 type CollectionItemStatus = TSDFStatus;
 
@@ -165,14 +166,11 @@ export function newTSDFCollectionStore<
 
           if (!item) return;
 
-          item.data = data;
+          item.data = reusePrevIfEqual({ current: data, prev: item.data });
           item.status = 'success';
           item.wasLoaded = true;
         },
-        {
-          action: { type: 'fetch-success', payload },
-          equalityCheck: deepEqual,
-        },
+        { action: { type: 'fetch-success', payload } },
       );
 
       return true;
