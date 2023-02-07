@@ -1,7 +1,7 @@
 import { produce } from 'immer';
 import mitt from 'mitt';
 import { useCallback, useEffect } from 'react';
-import { Store, useSubscribeToStore } from 't-state';
+import { deepEqual, Store, useSubscribeToStore } from 't-state';
 import {
   createFetchOrquestrator,
   FetchType,
@@ -74,6 +74,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
         refetchOnMount: false,
       },
       {
+        equalityCheck: deepEqual,
         action:
           store.state.status === 'success'
             ? 'fetch-start-refetching'
@@ -91,7 +92,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
           data,
           status: 'success',
         },
-        { action: 'fetch-success' },
+        { action: 'fetch-success', equalityCheck: deepEqual },
       );
 
       return true;

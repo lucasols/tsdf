@@ -283,6 +283,7 @@ export function newTSDFListQueryStore<
           }
         },
         {
+          equalityCheck: deepEqual,
           action: { type: 'fetch-query-success', payload },
         },
       );
@@ -796,6 +797,7 @@ export function newTSDFListQueryStore<
         itemQuery.refetchOnMount = false;
       },
       {
+        equalityCheck: deepEqual,
         action: {
           type: isLoaded ? 'fetch-item-start' : 'fetch-item-refetch-start',
           itemPayload,
@@ -820,6 +822,7 @@ export function newTSDFListQueryStore<
           draft.items[itemKey] = item;
         },
         {
+          equalityCheck: deepEqual,
           action: { type: 'fetch-item-success', itemPayload },
         },
       );

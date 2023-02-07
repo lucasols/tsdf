@@ -169,7 +169,10 @@ export function newTSDFCollectionStore<
           item.status = 'success';
           item.wasLoaded = true;
         },
-        { action: { type: 'fetch-success', payload } },
+        {
+          action: { type: 'fetch-success', payload },
+          equalityCheck: deepEqual,
+        },
       );
 
       return true;
