@@ -1170,3 +1170,91 @@ describe('update state functions', () => {
     });
   });
 });
+
+describe('an item invalidation with lower priority should not override one with higher priority', () => {
+  const itemId = 'users||1';
+  const testEnvOptions = {
+    initialServerData,
+    useLoadedSnapshot: { tables: ['users'] },
+  };
+
+  test.concurrent('not override high priority update', () => {
+    const env = createTestEnv(testEnvOptions);
+
+    env.store.invalidateItem(itemId, 'highPriority');
+
+    env.store.invalidateItem(itemId, 'lowPriority');
+
+    expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
+      'highPriority',
+    );
+  });
+
+  test.concurrent('not override rtu update', () => {
+    const env = createTestEnv(testEnvOptions);
+
+    env.store.invalidateItem(itemId, 'realtimeUpdate');
+
+    env.store.invalidateItem(itemId, 'lowPriority');
+
+    expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
+      'realtimeUpdate',
+    );
+  });
+
+  test.concurrent('not override highPriority with rtu update', () => {
+    const env = createTestEnv(testEnvOptions);
+
+    env.store.invalidateItem(itemId, 'highPriority');
+
+    env.store.invalidateItem(itemId, 'realtimeUpdate');
+
+    expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
+      'highPriority',
+    );
+  });
+});
+
+describe('a query invalidation with lower priority should not override one with higher priority', () => {
+  const queryPayload = { tableId: 'users' };
+  const testEnvOptions = {
+    initialServerData,
+    useLoadedSnapshot: { tables: ['users'] },
+  };
+
+  test.concurrent('not override high priority update', () => {
+    const env = createTestEnv(testEnvOptions);
+
+    env.store.invalidateQuery(queryPayload, 'highPriority');
+
+    env.store.invalidateQuery(queryPayload, 'lowPriority');
+
+    expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
+      'highPriority',
+    );
+  });
+
+  test.concurrent('not override rtu update', () => {
+    const env = createTestEnv(testEnvOptions);
+
+    env.store.invalidateQuery(queryPayload, 'realtimeUpdate');
+
+    env.store.invalidateQuery(queryPayload, 'lowPriority');
+
+    expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
+      'realtimeUpdate',
+    );
+  });
+
+  test.concurrent('not override highPriority with rtu update', () => {
+    const env = createTestEnv(testEnvOptions);
+
+    env.store.invalidateQuery(queryPayload, 'highPriority');
+
+    env.store.invalidateQuery(queryPayload, 'realtimeUpdate');
+
+    expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
+      'highPriority',
+    );
+  });
+});

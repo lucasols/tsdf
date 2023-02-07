@@ -8,7 +8,7 @@ import {
   ScheduleFetchResults,
   FetchContext,
 } from './fetchOrquestrator';
-import { TSDFStatus, ValidStoreState } from './storeShared';
+import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { useOnMittEvent } from './utils/hooks';
 import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
@@ -145,6 +145,13 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   let invalidationWasTriggered = false;
 
   function invalidateData(priority: FetchType = 'highPriority') {
+    const currentInvalidationPriority = store.state.refetchOnMount
+      ? fetchTypePriority[store.state.refetchOnMount]
+      : -1;
+    const newInvalidationPriority = fetchTypePriority[priority];
+
+    if (currentInvalidationPriority >= newInvalidationPriority) return;
+
     store.setKey('refetchOnMount', priority, { action: 'invalidate-data' });
     invalidationWasTriggered = false;
     storeEvents.emit('invalidateData', priority);

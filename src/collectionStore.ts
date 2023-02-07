@@ -7,7 +7,12 @@ import {
   ScheduleFetchResults,
   FetchContext,
 } from './fetchOrquestrator';
-import { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
+import {
+  fetchTypePriority,
+  TSDFStatus,
+  ValidPayload,
+  ValidStoreState,
+} from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
@@ -284,13 +289,24 @@ export function newTSDFCollectionStore<
     const itemsKey = getItemsKeyArray(itemPayload);
 
     for (const itemKey of itemsKey) {
+      const item = store.state[itemKey];
+
+      if (!item) continue;
+
+      const currentInvalidationPriority = item.refetchOnMount
+        ? fetchTypePriority[item.refetchOnMount]
+        : -1;
+      const newInvalidationPriority = fetchTypePriority[priority];
+
+      if (currentInvalidationPriority >= newInvalidationPriority) return;
+
       store.produceState(
         (draft) => {
-          const item = draft[itemKey];
+          const draftItem = draft[itemKey];
 
-          if (!item) return;
+          if (!draftItem) return;
 
-          item.refetchOnMount = priority;
+          draftItem.refetchOnMount = priority;
         },
         { action: { type: 'invalidate-data', itemKey } },
       );

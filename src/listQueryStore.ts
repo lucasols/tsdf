@@ -7,7 +7,12 @@ import {
   ScheduleFetchResults,
   FetchContext as FetchCtx,
 } from './fetchOrquestrator';
-import { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
+import {
+  fetchTypePriority,
+  TSDFStatus,
+  ValidPayload,
+  ValidStoreState,
+} from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
@@ -525,6 +530,17 @@ export function newTSDFListQueryStore<
     const queriesKey = getQueriesKeyArray(queryPayload);
 
     for (const { key } of queriesKey) {
+      const queryState = store.state.queries[key];
+
+      if (!queryState) continue;
+
+      const currentInvalidationPriority = queryState.refetchOnMount
+        ? fetchTypePriority[queryState.refetchOnMount]
+        : -1;
+      const newInvalidationPriority = fetchTypePriority[priority];
+
+      if (currentInvalidationPriority >= newInvalidationPriority) return;
+
       store.produceState(
         (draft) => {
           const query = draft.queries[key];
@@ -939,6 +955,17 @@ export function newTSDFListQueryStore<
     const itemsKey = getItemsKeyArray(itemId);
 
     for (const { itemKey } of itemsKey) {
+      const item = store.state.itemQueries[itemKey];
+
+      if (!item) continue;
+
+      const currentInvalidationPriority = item.refetchOnMount
+        ? fetchTypePriority[item.refetchOnMount]
+        : -1;
+      const newInvalidationPriority = fetchTypePriority[priority];
+
+      if (currentInvalidationPriority >= newInvalidationPriority) return;
+
       store.produceState(
         (draft) => {
           const query = draft.itemQueries[itemKey];

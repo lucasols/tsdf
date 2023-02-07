@@ -521,3 +521,43 @@ test('mutation a obj passed as payload does not breaks the store', () => {
     }
   `);
 });
+
+describe('an invalidation with lower priority should not override one with higher priority', () => {
+  test.concurrent('not override high priority update', () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+    });
+
+    env.store.invalidateItem('1', 'highPriority');
+
+    env.store.invalidateItem('1', 'lowPriority');
+
+    expect(env.store.getItemState('1')?.refetchOnMount).toEqual('highPriority');
+  });
+
+  test.concurrent('not override rtu update', () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+    });
+
+    env.store.invalidateItem('1', 'realtimeUpdate');
+
+    env.store.invalidateItem('1', 'lowPriority');
+
+    expect(env.store.getItemState('1')?.refetchOnMount).toEqual(
+      'realtimeUpdate',
+    );
+  });
+
+  test.concurrent('not override highPriority with rtu update', () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+    });
+
+    env.store.invalidateItem('1', 'highPriority');
+
+    env.store.invalidateItem('1', 'realtimeUpdate');
+
+    expect(env.store.getItemState('1')?.refetchOnMount).toEqual('highPriority');
+  });
+});

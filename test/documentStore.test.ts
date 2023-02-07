@@ -13,6 +13,8 @@ import {
 
 type DocumentStoreState = TSDFDocumentStoreState<any, StoreError>;
 
+const createTestEnv = createDefaultDocumentStore;
+
 describe('fetch lifecicle', () => {
   const { serverMock, store: documentStore } = createDefaultDocumentStore();
 
@@ -180,5 +182,43 @@ test.concurrent('await fetch', async () => {
     error: {
       message: 'error',
     },
+  });
+});
+
+describe('an invalidation with lower priority should not override one with higher priority', () => {
+  test.concurrent('not override high priority update', () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+    });
+
+    env.store.invalidateData('highPriority');
+
+    env.store.invalidateData('lowPriority');
+
+    expect(env.store.store.state.refetchOnMount).toEqual('highPriority');
+  });
+
+  test.concurrent('not override rtu update', () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+    });
+
+    env.store.invalidateData('realtimeUpdate');
+
+    env.store.invalidateData('lowPriority');
+
+    expect(env.store.store.state.refetchOnMount).toEqual('realtimeUpdate');
+  });
+
+  test.concurrent('not override highPriority with rtu update', () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+    });
+
+    env.store.invalidateData('highPriority');
+
+    env.store.invalidateData('realtimeUpdate');
+
+    expect(env.store.store.state.refetchOnMount).toEqual('highPriority');
   });
 });
