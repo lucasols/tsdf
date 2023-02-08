@@ -446,21 +446,19 @@ export function newTSDFCollectionStore<
     useEffect(() => {
       for (const { itemKey: itemId, payload } of queriesWithId) {
         if (itemId) {
-          if (disableRefetchOnMount) {
-            const itemState = getItemState(payload);
+          const itemState = getItemState(payload);
+          const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
+          if (disableRefetchOnMount) {
             const shouldFetch =
               !itemState?.wasLoaded || itemState.refetchOnMount;
 
             if (shouldFetch) {
-              scheduleFetch(
-                itemState?.refetchOnMount || 'lowPriority',
-                payload,
-              );
+              scheduleFetch(fetchType, payload);
               return;
             }
           } else {
-            scheduleFetch('lowPriority', payload);
+            scheduleFetch(fetchType, payload);
           }
         }
       }

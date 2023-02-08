@@ -212,15 +212,17 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     useEffect(() => {
       if (disabled) return;
 
+      const fetchType = store.state.refetchOnMount || 'lowPriority';
+
       if (disableRefetchOnMount) {
         const shouldFetch =
           store.state.refetchOnMount || store.state.status === 'idle';
 
         if (shouldFetch) {
-          scheduleFetch(store.state.refetchOnMount || 'lowPriority');
+          scheduleFetch(fetchType);
         }
       } else {
-        scheduleFetch('lowPriority');
+        scheduleFetch(fetchType);
       }
     }, [disableRefetchOnMount, disabled]);
 

@@ -696,22 +696,19 @@ export function newTSDFListQueryStore<
     useEffect(() => {
       for (const { key: itemId, payload: fetchParams } of queriesWithId) {
         if (itemId) {
-          if (disableRefetchOnMount) {
-            const itemState = getQueryState(fetchParams);
+          const itemState = getQueryState(fetchParams);
+          const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
+          if (disableRefetchOnMount) {
             const shouldFetch =
               !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
             if (shouldFetch) {
-              scheduleListQueryFetch(
-                itemState?.refetchOnMount || 'lowPriority',
-                fetchParams,
-                loadSizeConst,
-              );
+              scheduleListQueryFetch(fetchType, fetchParams, loadSizeConst);
               return;
             }
           } else {
-            scheduleListQueryFetch('lowPriority', fetchParams, loadSizeConst);
+            scheduleListQueryFetch(fetchType, fetchParams, loadSizeConst);
           }
         }
       }
@@ -1138,21 +1135,19 @@ export function newTSDFListQueryStore<
     useEffect(() => {
       for (const { payload, itemKey } of memoizedItemKeys) {
         if (itemKey) {
-          if (disableRefetchOnMount) {
-            const itemState = store.state.itemQueries[itemKey];
+          const itemState = store.state.itemQueries[itemKey];
+          const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
+          if (disableRefetchOnMount) {
             const shouldFetch =
               !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
             if (shouldFetch) {
-              scheduleItemFetch(
-                itemState?.refetchOnMount || 'lowPriority',
-                payload,
-              );
+              scheduleItemFetch(fetchType, payload);
               return;
             }
           } else {
-            scheduleItemFetch('lowPriority', payload);
+            scheduleItemFetch(fetchType, payload);
           }
         }
       }
