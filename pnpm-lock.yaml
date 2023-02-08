@@ -24,7 +24,7 @@ specifiers:
   pretty-format: ^29.3.1
   react: ^18.2.0
   react-dom: ^18.2.0
-  t-state: ^7.5.1
+  t-state: ^8.0.0
   tiny-glob: ^0.2.9
   tsm: ^2.3.0
   tsup: ^6.5.0
@@ -36,7 +36,7 @@ dependencies:
   immer: 9.0.17
   klona: 2.0.6
   mitt: 3.0.0
-  t-state: 7.5.1_biqbaboplfbrettd7655fr4n2y
+  t-state: 8.0.0_biqbaboplfbrettd7655fr4n2y
 
 devDependencies:
   '@lucasols/eslint-plugin-extended-lint': 0.1.1_eslint@8.31.0
@@ -2323,6 +2323,12 @@ packages:
     hasBin: true
     dev: true
 
+  /nanoid/4.0.1:
+    resolution: {integrity: sha512-udKGtCCUafD3nQtJg9wBhRP3KMbPglUsgV5JVsXhvyBs/oefqb4sqMEhKBBgqZncYowu58p1prsZQBYvAj/Gww==}
+    engines: {node: ^14 || ^16 || >=18}
+    hasBin: true
+    dev: false
+
   /natural-compare-lite/1.4.0:
     resolution: {integrity: sha512-Tj+HTDSJJKaZnfiuw+iaF9skdPpTo2GtEly5JHnWV/hfv2Qj/9RKsGISQtLh2ox3l5EAGw487hnBee0sIJ6v2g==}
     dev: true
@@ -2861,8 +2867,8 @@ packages:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
     dev: true
 
-  /t-state/7.5.1_biqbaboplfbrettd7655fr4n2y:
-    resolution: {integrity: sha512-NLOOuWcBiWLkMJmXtTGU0qdpf9u6uckhiFrCUCIrEWL6iweoNu4oBz32IkCQSirVLeCXiqWb84Soml5/XqSmRQ==}
+  /t-state/8.0.0_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-wGgDh8NEjCE+tARYH1+5kli+cTuqjyPfuUeXYuSRXgxOKQ7460UA8meWGnsEEmocZ3+WvvB96n0waok9CbGQJQ==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       react: ^18.0.0
@@ -2870,6 +2876,7 @@ packages:
     dependencies:
       dequal: 2.0.3
       immer: 9.0.17
+      nanoid: 4.0.1
       react: 18.2.0
       react-dom: 18.2.0_react@18.2.0
       use-sync-external-store: 1.2.0_react@18.2.0
