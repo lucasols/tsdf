@@ -1258,3 +1258,71 @@ describe('a query invalidation with lower priority should not override one with 
     );
   });
 });
+
+test('invalidate everything does not cause a problem', () => {
+  const env = createTestEnv({
+    initialServerData,
+    useLoadedSnapshot: { tables: ['users'] },
+  });
+
+  env.store.invalidateItem(() => true);
+  env.store.invalidateQuery(() => true);
+
+  expect(env.store.store.state).toEqual({
+    itemQueries: {
+      'users||1': {
+        error: null,
+        payload: 'users||1',
+        refetchOnMount: 'highPriority',
+        status: 'success',
+        wasLoaded: true,
+      },
+      'users||2': {
+        error: null,
+        payload: 'users||2',
+        refetchOnMount: 'highPriority',
+        status: 'success',
+        wasLoaded: true,
+      },
+      'users||3': {
+        error: null,
+        payload: 'users||3',
+        refetchOnMount: 'highPriority',
+        status: 'success',
+        wasLoaded: true,
+      },
+      'users||4': {
+        error: null,
+        payload: 'users||4',
+        refetchOnMount: 'highPriority',
+        status: 'success',
+        wasLoaded: true,
+      },
+      'users||5': {
+        error: null,
+        payload: 'users||5',
+        refetchOnMount: 'highPriority',
+        status: 'success',
+        wasLoaded: true,
+      },
+    },
+    items: {
+      'users||1': { id: 1, name: 'User 1' },
+      'users||2': { id: 2, name: 'User 2' },
+      'users||3': { id: 3, name: 'User 3' },
+      'users||4': { id: 4, name: 'User 4' },
+      'users||5': { id: 5, name: 'User 5' },
+    },
+    queries: {
+      [`[{"tableId":"users"}]`]: {
+        error: null,
+        hasMore: false,
+        items: ['users||1', 'users||2', 'users||3', 'users||4', 'users||5'],
+        payload: { tableId: 'users' },
+        refetchOnMount: 'highPriority',
+        status: 'success',
+        wasLoaded: true,
+      },
+    },
+  });
+});
