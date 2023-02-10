@@ -332,6 +332,26 @@ export function newTSDFListQueryStore<
     return store.state.queries[getQueryKey(params)];
   }
 
+  function getQueriesState(params: QueryPayload[] | FilterQueryFn): Query[] {
+    const queryKeys = getQueriesKeyArray(params);
+
+    return filterAndMap(queryKeys, ({ key }) => {
+      const query = store.state.queries[key];
+
+      return query || false;
+    });
+  }
+
+  function getQueriesRelatedToItem(itemPayload: ItemPayload): Query[] {
+    const itemKey = getItemKey(itemPayload);
+
+    return getQueriesState((queryPayload) => {
+      const queryState = store.state.queries[getQueryKey(queryPayload)];
+
+      return !!queryState?.items.includes(itemKey);
+    });
+  }
+
   function getItemState(
     itemPayload: ItemPayload[] | FilterItemFn,
   ): { payload: ItemPayload; data: ItemState }[];
@@ -1374,6 +1394,8 @@ export function newTSDFListQueryStore<
     addItemToState,
     updateItemState,
     startItemMutation,
+    getQueriesState,
+    getQueriesRelatedToItem,
   };
 }
 
