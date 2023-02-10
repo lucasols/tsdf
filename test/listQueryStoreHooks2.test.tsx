@@ -486,3 +486,55 @@ test('receive a RTU', async () => {
     "
   `);
 });
+
+test('useItem loadFromStateOnly', async () => {
+  const env = createTestEnv({
+    initialServerData,
+    disableFetchItemFn: true,
+    useLoadedSnapshot: { tables: ['users', 'products'] },
+  });
+
+  const renders = createRenderStore();
+
+  renderHook(() => {
+    const { data, status, isLoading } = env.store.useItem('users||1', {
+      loadFromStateOnly: true,
+    });
+
+    renders.add({ status, data, isLoading });
+  });
+
+  await sleep(200);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    status: success -- data: {id:1, name:User 1} -- isLoading: false
+    "
+  `);
+});
+
+test('useItem loadFromStateOnly with not found item', async () => {
+  const env = createTestEnv({
+    initialServerData,
+    disableFetchItemFn: true,
+    useLoadedSnapshot: { tables: ['users', 'products'] },
+  });
+
+  const renders = createRenderStore();
+
+  renderHook(() => {
+    const { data, status, error, isLoading } = env.store.useItem('users||100', {
+      loadFromStateOnly: true,
+    });
+
+    renders.add({ status, data, error, isLoading });
+  });
+
+  await sleep(200);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    status: loading -- data: null -- error: null -- isLoading: true
+    "
+  `);
+});

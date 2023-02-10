@@ -35,6 +35,7 @@ export function createDefaultListQueryStore({
   useLoadedSnapshot,
   defaultQuerySize,
   debug,
+  disableFetchItemFn,
   dynamicRTUThrottleMs,
   disableInitialDataInvalidation = true,
   debugRequests: debuFetchs,
@@ -46,6 +47,7 @@ export function createDefaultListQueryStore({
     items?: string[];
     queries?: ListQueryParams[];
   };
+  disableFetchItemFn?: boolean;
   defaultQuerySize?: number;
   dynamicRTUThrottleMs?: (duration: number) => number;
   debug?: never;
@@ -192,15 +194,17 @@ export function createDefaultListQueryStore({
         hasMore,
       };
     },
-    fetchItemFn: async (itemId) => {
-      const result = await serverMock.fetch(itemId);
+    fetchItemFn: disableFetchItemFn
+      ? undefined
+      : async (itemId) => {
+          const result = await serverMock.fetch(itemId);
 
-      if (Array.isArray(result)) {
-        throw new Error('Invalid server response');
-      }
+          if (Array.isArray(result)) {
+            throw new Error('Invalid server response');
+          }
 
-      return result;
-    },
+          return result;
+        },
     errorNormalizer: normalizeError,
     defaultQuerySize,
     initialData,

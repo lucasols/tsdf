@@ -1056,11 +1056,13 @@ export function newTSDFListQueryStore<
       returnIdleStatus,
       returnRefetchingStatus,
       disableRefetchOnMount,
+      loadFromStateOnly,
     }: {
       selector?: (data: ItemState | null, id: string) => SelectedItem;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
+      loadFromStateOnly?: boolean;
     } = {},
   ) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1142,6 +1144,8 @@ export function newTSDFListQueryStore<
     });
 
     useOnMittEvent(storeEvents, 'invalidateItem', (event) => {
+      if (loadFromStateOnly) return;
+
       for (const { payload, itemKey } of memoizedItemKeys) {
         if (itemKey !== event.itemKey) continue;
 
@@ -1153,6 +1157,8 @@ export function newTSDFListQueryStore<
     });
 
     useEffect(() => {
+      if (loadFromStateOnly) return;
+
       for (const { payload, itemKey } of memoizedItemKeys) {
         if (itemKey) {
           const itemState = store.state.itemQueries[itemKey];
@@ -1171,7 +1177,7 @@ export function newTSDFListQueryStore<
           }
         }
       }
-    }, [disableRefetchOnMount, memoizedItemKeys]);
+    }, [disableRefetchOnMount, loadFromStateOnly, memoizedItemKeys]);
 
     return storeState;
   }
@@ -1184,6 +1190,7 @@ export function newTSDFListQueryStore<
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
       ensureIsLoaded?: boolean;
+      loadFromStateOnly?: boolean;
     } = {},
   ) {
     const { ensureIsLoaded } = options;
@@ -1366,7 +1373,10 @@ export function newTSDFListQueryStore<
   if (!disableRefetchOnWindowFocus) {
     function handleFocus() {
       invalidateQuery(() => true, 'lowPriority');
-      invalidateItem(() => true, 'lowPriority');
+
+      if (fetchItemFn) {
+        invalidateItem(() => true, 'lowPriority');
+      }
     }
 
     window.addEventListener('focus', handleFocus);
