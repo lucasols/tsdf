@@ -1013,14 +1013,14 @@ export function newTSDFListQueryStore<
   function startItemMutation(
     itemId: ItemPayload | ItemPayload[] | FilterItemFn,
   ) {
-    if (!fetchItemOrquestrator) throw new Error(noFetchFnError);
-
     const itemsKey = getItemsKeyArray(itemId);
 
     const endMutations: (() => void)[] = [];
 
     for (const { itemKey, payload } of itemsKey) {
-      endMutations.push(fetchItemOrquestrator.get(itemKey).startMutation());
+      endMutations.push(
+        fetchItemOrquestrator?.get(itemKey).startMutation() || (() => {}),
+      );
 
       if (syncMutationsAndInvalidations) {
         for (const [queryKey, query] of Object.entries(store.state.queries)) {
