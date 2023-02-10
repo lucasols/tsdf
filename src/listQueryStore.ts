@@ -85,7 +85,7 @@ export type ListQueryStoreInitialData<
   items: { payload: ItemPayload; data: ItemState }[];
   queries: {
     payload: QueryPayload;
-    items: ItemPayload[];
+    items: string[];
     hasMore: boolean;
   }[];
 };
@@ -163,7 +163,7 @@ export function newTSDFListQueryStore<
         refetchOnMount: disableInitialDataInvalidation ? false : 'lowPriority',
         wasLoaded: true,
         payload,
-        items: items.map(getItemKey),
+        items,
         hasMore,
       };
     }
