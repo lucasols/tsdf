@@ -1229,7 +1229,11 @@ export function newTSDFListQueryStore<
       draftData: ItemState,
       itemPayload: ItemPayload,
     ) => void | ItemState,
-    ifNothingWasUpdated?: () => void,
+    {
+      ifNothingWasUpdated,
+    }: {
+      ifNothingWasUpdated?: () => void;
+    } = {},
   ): boolean {
     const itemKeys = getItemsKeyArray(itemIds);
 
@@ -1262,7 +1266,18 @@ export function newTSDFListQueryStore<
     return someItemWasUpdated;
   }
 
-  function addItemToState(itemPayload: ItemPayload, data: ItemState) {
+  function addItemToState(
+    itemPayload: ItemPayload,
+    data: ItemState,
+    {
+      addItemToQueries,
+    }: {
+      addItemToQueries?: {
+        queries: QueryPayload[] | FilterQueryFn | QueryPayload;
+        appendTo: 'start' | 'end' | ((itemsPayload: ItemPayload[]) => number);
+      };
+    } = {},
+  ) {
     const itemKey = getItemKey(itemPayload);
 
     store.produceState(
@@ -1275,6 +1290,34 @@ export function newTSDFListQueryStore<
           error: null,
           payload: klona(itemPayload),
         };
+
+        if (addItemToQueries) {
+          const queries = getQueriesKeyArray(addItemToQueries.queries);
+
+          for (const { key } of queries) {
+            if (draftState.queries[key]) {
+              const queryState = draftState.queries[key];
+
+              if (!queryState) continue;
+
+              if (addItemToQueries.appendTo === 'start') {
+                queryState.items.unshift(itemKey);
+              } else if (addItemToQueries.appendTo === 'end') {
+                queryState.items.push(itemKey);
+              } else {
+                const index = addItemToQueries.appendTo(
+                  filterAndMap(
+                    queryState.items,
+                    (itemKey2, ignore) =>
+                      draftState.itemQueries[itemKey2]?.payload || ignore,
+                  ),
+                );
+
+                queryState.items.splice(index, 0, itemKey);
+              }
+            }
+          }
+        }
       },
       { action: { type: 'create-item-state', itemPayload } },
     );
