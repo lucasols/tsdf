@@ -19,6 +19,7 @@ import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo, useOnMittEvent } from './utils/hooks';
 import { klona } from 'klona/json';
 import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
+import { findAndMap } from './utils/findAndMap';
 
 type QueryStatus = TSDFStatus | 'loadingMore';
 
@@ -425,11 +426,12 @@ export function newTSDFListQueryStore<
 
   function getQueryItems<T>(
     query: Query,
-    itemDataSelector: (data: ItemState, itemKey: string) => T,
+    itemDataSelector: (data: ItemState, itemPayload: ItemPayload) => T,
   ): T[] {
     return filterAndMap(query.items, (itemKey, ignore) => {
       const item = store.state.items[itemKey];
-      return item ? itemDataSelector(item, itemKey) : ignore;
+      const itemPayload = store.state.itemQueries[itemKey]?.payload;
+      return item && itemPayload ? itemDataSelector(item, itemPayload) : ignore;
     });
   }
 
@@ -439,7 +441,7 @@ export function newTSDFListQueryStore<
   ): Promise<
     | { items: []; error: NError; hasMore: boolean }
     | {
-        items: { data: ItemState; itemKey: string }[];
+        items: { data: ItemState; itemPayload: ItemPayload }[];
         error: null;
         hasMore: boolean;
       }
@@ -471,7 +473,10 @@ export function newTSDFListQueryStore<
     return query.error
       ? { items: [], error: query.error, hasMore: query.hasMore }
       : {
-          items: getQueryItems(query, (data, itemKey) => ({ data, itemKey })),
+          items: getQueryItems(query, (data, itemPayload) => ({
+            data,
+            itemPayload,
+          })),
           error: null,
           hasMore: query.hasMore,
         };
@@ -606,7 +611,7 @@ export function newTSDFListQueryStore<
     }
   }
 
-  function defaultItemSelector<T>(data: ItemState, id: string): T {
+  function defaultItemSelector<T>(data: ItemState, id: ItemPayload): T {
     return { id, data } as T;
   }
 
@@ -622,7 +627,7 @@ export function newTSDFListQueryStore<
       loadSize,
       disableRefetchOnMount = globalDisableRefetchOnMount,
     }: {
-      itemSelector?: (data: ItemState, id: string) => SelectedItem;
+      itemSelector?: (data: ItemState, id: ItemPayload) => SelectedItem;
       omitPayload?: boolean;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
@@ -740,7 +745,7 @@ export function newTSDFListQueryStore<
   function useListQuery<SelectedItem = { id: string; data: ItemState }>(
     payload: QueryPayload | false | null | undefined,
     options: {
-      itemSelector?: (data: ItemState, id: string) => SelectedItem;
+      itemSelector?: (data: ItemState, id: ItemPayload) => SelectedItem;
       omitPayload?: boolean;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
@@ -1058,7 +1063,10 @@ export function newTSDFListQueryStore<
       disableRefetchOnMount,
       loadFromStateOnly,
     }: {
-      selector?: (data: ItemState | null, id: string) => SelectedItem;
+      selector?: (
+        data: ItemState | null,
+        id: ItemPayload | null,
+      ) => SelectedItem;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
@@ -1100,7 +1108,7 @@ export function newTSDFListQueryStore<
                 error: null,
                 isLoading: false,
                 payload,
-                data: dataSelector(null, itemKey),
+                data: dataSelector(null, null),
               };
             }
 
@@ -1110,7 +1118,7 @@ export function newTSDFListQueryStore<
                 error: null,
                 isLoading: returnIdleStatus ? false : true,
                 payload,
-                data: dataSelector(null, itemKey),
+                data: dataSelector(null, null),
               };
             }
 
@@ -1124,7 +1132,7 @@ export function newTSDFListQueryStore<
               status,
               error: itemQuery.error,
               isLoading: status === 'loading',
-              data: dataSelector(itemState ?? null, itemKey),
+              data: dataSelector(itemState ?? null, itemQuery.payload),
               payload,
             };
           },
@@ -1185,7 +1193,10 @@ export function newTSDFListQueryStore<
   function useItem<SelectedItem = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
     options: {
-      selector?: (data: ItemState | null, id: string) => SelectedItem;
+      selector?: (
+        data: ItemState | null,
+        id: ItemPayload | null,
+      ) => SelectedItem;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
@@ -1219,7 +1230,7 @@ export function newTSDFListQueryStore<
           error: null,
           isLoading: false,
           status: 'idle',
-          data: memoizedSelector(null, ''),
+          data: memoizedSelector(null, null),
           payload: itemPayload || null,
         },
       [itemPayload, memoizedSelector, queryResult],
@@ -1248,6 +1259,38 @@ export function newTSDFListQueryStore<
     });
 
     return useModifyResult(result);
+  }
+
+  function useFindItem<SelectedItem = ItemState | null>(
+    findItem: (item: ItemState, itemPayload: ItemPayload) => boolean,
+    {
+      selector = defaultItemDataSelector,
+    }: {
+      selector?: (data: ItemState, id: ItemPayload) => SelectedItem;
+    } = {},
+  ) {
+    return store.useSelector((state) => {
+      const selectedItem = findAndMap(
+        Object.entries(state.items),
+        ([itemKey, item]) => {
+          if (!item) return false;
+
+          const itemQuery = state.itemQueries[itemKey];
+
+          if (!itemQuery) return false;
+
+          if (findItem(item, itemQuery.payload)) {
+            return { item, itemQuery };
+          }
+
+          return false;
+        },
+      );
+
+      if (!selectedItem) return null;
+
+      return selector(selectedItem.item, selectedItem.itemQuery.payload);
+    });
   }
 
   function updateItemState(
@@ -1406,6 +1449,7 @@ export function newTSDFListQueryStore<
     startItemMutation,
     getQueriesState,
     getQueriesRelatedToItem,
+    useFindItem,
   };
 }
 
