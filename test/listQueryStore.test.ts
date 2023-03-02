@@ -550,11 +550,11 @@ test.concurrent('await fetch', async () => {
     await listQueryStore.awaitListQueryFetch({ tableId: 'users' }),
   ).toEqual({
     items: [
-      { itemKey: 'users||1', data: { id: 1, name: 'Updated User 1' } },
-      { itemKey: 'users||2', data: { id: 2, name: 'User 2' } },
-      { itemKey: 'users||3', data: { id: 3, name: 'User 3' } },
-      { itemKey: 'users||4', data: { id: 4, name: 'User 4' } },
-      { itemKey: 'users||5', data: { id: 5, name: 'User 5' } },
+      { itemPayload: 'users||1', data: { id: 1, name: 'Updated User 1' } },
+      { itemPayload: 'users||2', data: { id: 2, name: 'User 2' } },
+      { itemPayload: 'users||3', data: { id: 3, name: 'User 3' } },
+      { itemPayload: 'users||4', data: { id: 4, name: 'User 4' } },
+      { itemPayload: 'users||5', data: { id: 5, name: 'User 5' } },
     ],
     error: null,
     hasMore: false,
