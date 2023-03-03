@@ -60,6 +60,7 @@ export type TSFDUseListQueryReturn<Selected, ItemPayload, NError> = {
   queryKey: string;
   hasMore: boolean;
   isLoading: boolean;
+  isLoadingMore: boolean;
 };
 
 export type TSFDUseListItemReturn<Selected, NError, ItemPayload> = {
@@ -672,6 +673,7 @@ export function newTSDFListQueryStore<
                 hasMore: false,
                 payload: omitPayload ? undefined : payload,
                 isLoading: returnIdleStatus ? false : true,
+                isLoadingMore: false,
               };
             }
 
@@ -689,6 +691,7 @@ export function newTSDFListQueryStore<
               hasMore: query.hasMore,
               isLoading: status === 'loading',
               payload: omitPayload ? undefined : query.payload,
+              isLoadingMore: status === 'loadingMore',
             };
           },
         );
@@ -778,6 +781,7 @@ export function newTSDFListQueryStore<
           status: 'idle',
           queryKey: '',
           items: [],
+          isLoadingMore: false,
         },
       [queryResult],
     );
