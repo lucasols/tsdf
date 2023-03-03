@@ -71,11 +71,19 @@ export type TSFDUseListItemReturn<Selected, NError, ItemPayload> = {
   isLoading: boolean;
 };
 
+export type FetchListFnReturnItem<
+  ItemPayload extends ValidPayload,
+  ItemState extends ValidStoreState,
+> = {
+  itemPayload: ItemPayload;
+  data: ItemState;
+};
+
 export type FetchListFnReturn<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {
-  items: { itemPayload: ItemPayload; data: ItemState }[];
+  items: FetchListFnReturnItem<ItemPayload, ItemState>[];
   hasMore: boolean;
 };
 

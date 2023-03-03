@@ -22,5 +22,6 @@ export {
   TSFDUseListQueryReturn,
   TSFDUseListItemReturn,
   FetchListFnReturn,
+  FetchListFnReturnItem,
 } from './listQueryStore';
 export { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
