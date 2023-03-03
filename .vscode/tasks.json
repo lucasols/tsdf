@@ -30,6 +30,20 @@
       "presentation": {
         "clear": true
       }
+    },
+    {
+      "label": "bump version and deploy",
+      "type": "shell",
+      "command": "pnpm version ${input:version} && pnpm run npm-publish",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "version",
+      "type": "pickString",
+      "description": "Select version type",
+      "options": ["minor", "patch", "major"]
     }
   ]
 }
