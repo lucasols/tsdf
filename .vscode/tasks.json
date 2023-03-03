@@ -23,6 +23,15 @@
     },
     {
       "type": "npm",
+      "script": "test:changed",
+      "label": "run changed tests",
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "type": "npm",
       "script": "eslint",
       "problemMatcher": ["$eslint-stylish"],
       "label": "eslint",

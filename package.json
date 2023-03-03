@@ -24,6 +24,7 @@
   },
   "scripts": {
     "test": "vitest --ui --mode development",
+    "test:changed": "vitest --changed --ui --mode development",
     "lint": "pnpm tsc && pnpm eslint && pnpm format",
     "eslint": "CI=true eslint --color --ext .jsx,.js,.ts,.tsx src/ test/",
     "format": "prettier --write src/**/*.ts",

@@ -532,6 +532,80 @@ describe.concurrent('fetch query', () => {
   );
 });
 
+test.concurrent('ignore multiple load more made in sequence', async () => {
+  const { store: listQueryStore, serverMock } = createTestEnv({
+    initialServerData,
+    defaultQuerySize: 5,
+  });
+
+  const query = { tableId: 'products' as const };
+
+  listQueryStore.scheduleListQueryFetch('highPriority', query, 5);
+
+  await serverMock.waitFetchIdle();
+
+  expect(listQueryStore.getQueryState(query)?.items).toMatchInlineSnapshot(`
+    [
+      "products||1",
+      "products||2",
+      "products||3",
+      "products||4",
+      "products||5",
+    ]
+  `);
+
+  expect(listQueryStore.loadMore(query)).toBe('started');
+  expect(listQueryStore.loadMore(query)).toBe('skipped');
+  expect(listQueryStore.loadMore(query)).toBe('skipped');
+
+  await sleep(10);
+
+  expect(listQueryStore.loadMore(query)).toBe('skipped');
+  expect(listQueryStore.loadMore(query)).toBe('skipped');
+
+  await serverMock.waitFetchIdle();
+
+  expect(listQueryStore.getQueryState(query)?.items).toMatchSnapshotString(`
+    [
+      "products||1",
+      "products||2",
+      "products||3",
+      "products||4",
+      "products||5",
+      "products||6",
+      "products||7",
+      "products||8",
+      "products||9",
+      "products||10",
+    ]
+  `);
+
+  expect(listQueryStore.loadMore(query)).toBe('started');
+  expect(listQueryStore.loadMore(query)).toBe('skipped');
+
+  await serverMock.waitFetchIdle();
+
+  expect(listQueryStore.getQueryState(query)?.items).toMatchSnapshotString(`
+    [
+      "products||1",
+      "products||2",
+      "products||3",
+      "products||4",
+      "products||5",
+      "products||6",
+      "products||7",
+      "products||8",
+      "products||9",
+      "products||10",
+      "products||11",
+      "products||12",
+      "products||13",
+      "products||14",
+      "products||15",
+    ]
+  `);
+});
+
 test.concurrent('await fetch', async () => {
   const { serverMock, store: listQueryStore } = createTestEnv({
     initialServerData,

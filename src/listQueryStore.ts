@@ -419,6 +419,8 @@ export function newTSDFListQueryStore<
 
     if (!queryState || !queryState.hasMore) return 'skipped';
 
+    if (queryState.status !== 'success') return 'skipped';
+
     return fetchQueryOrquestrator
       .get(getQueryKey(params))
       .scheduleFetch('highPriority', ['loadMore', params, size]);
