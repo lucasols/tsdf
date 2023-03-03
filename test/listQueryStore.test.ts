@@ -397,7 +397,7 @@ describe.concurrent('fetch query', () => {
     expect(serverMock.fetchsCount).toBe(1);
 
     // load more
-    listQueryStore.loadMore(query, 5);
+    listQueryStore.loadMore(query);
 
     expect(listQueryStore.getQueryState(query)).toMatchSnapshotString(`
       {

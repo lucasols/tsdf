@@ -414,7 +414,7 @@ export function newTSDFListQueryStore<
     return multiplePayloads ? results : results[0]!;
   }
 
-  function loadMore(params: QueryPayload, size: number): ScheduleFetchResults {
+  function loadMore(params: QueryPayload, size?: number): ScheduleFetchResults {
     const queryState = getQueryState(params);
 
     if (!queryState || !queryState.hasMore) return 'skipped';
