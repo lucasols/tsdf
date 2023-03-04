@@ -342,17 +342,21 @@ export function newTSDFListQueryStore<
     return store.state.queries[getQueryKey(params)];
   }
 
-  function getQueriesState(params: QueryPayload[] | FilterQueryFn): Query[] {
+  function getQueriesState(
+    params: QueryPayload[] | FilterQueryFn,
+  ): { query: Query; key: string }[] {
     const queryKeys = getQueriesKeyArray(params);
 
     return filterAndMap(queryKeys, ({ key }) => {
       const query = store.state.queries[key];
 
-      return query || false;
+      return query ? { query, key } : false;
     });
   }
 
-  function getQueriesRelatedToItem(itemPayload: ItemPayload): Query[] {
+  function getQueriesRelatedToItem(
+    itemPayload: ItemPayload,
+  ): { query: Query; key: string }[] {
     const itemKey = getItemKey(itemPayload);
 
     return getQueriesState((queryPayload) => {
@@ -437,12 +441,18 @@ export function newTSDFListQueryStore<
 
   function getQueryItems<T>(
     query: Query,
-    itemDataSelector: (data: ItemState, itemPayload: ItemPayload) => T,
+    itemDataSelector: (
+      data: ItemState,
+      itemPayload: ItemPayload,
+      itemKey: string,
+    ) => T,
   ): T[] {
     return filterAndMap(query.items, (itemKey, ignore) => {
       const item = store.state.items[itemKey];
       const itemPayload = store.state.itemQueries[itemKey]?.payload;
-      return item && itemPayload ? itemDataSelector(item, itemPayload) : ignore;
+      return item && itemPayload
+        ? itemDataSelector(item, itemPayload, itemKey)
+        : ignore;
     });
   }
 
@@ -622,13 +632,13 @@ export function newTSDFListQueryStore<
     }
   }
 
-  function defaultItemSelector<T>(data: ItemState, id: ItemPayload): T {
-    return { id, data } as T;
+  function defaultItemSelector<T>(data: ItemState): T {
+    return data as unknown as T;
   }
 
-  function useMultipleListQueries<
-    SelectedItem = { id: string; data: ItemState },
-  >(
+  type DefaultSelectedItem = ItemState;
+
+  function useMultipleListQueries<SelectedItem = DefaultSelectedItem>(
     queries: readonly QueryPayload[],
     {
       itemSelector = defaultItemSelector,
@@ -638,7 +648,11 @@ export function newTSDFListQueryStore<
       loadSize,
       disableRefetchOnMount = globalDisableRefetchOnMount,
     }: {
-      itemSelector?: (data: ItemState, id: ItemPayload) => SelectedItem;
+      itemSelector?: (
+        data: ItemState,
+        id: ItemPayload,
+        itemKey: string,
+      ) => SelectedItem;
       omitPayload?: boolean;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
@@ -755,10 +769,14 @@ export function newTSDFListQueryStore<
     return storeState;
   }
 
-  function useListQuery<SelectedItem = { id: string; data: ItemState }>(
+  function useListQuery<SelectedItem = DefaultSelectedItem>(
     payload: QueryPayload | false | null | undefined,
     options: {
-      itemSelector?: (data: ItemState, id: ItemPayload) => SelectedItem;
+      itemSelector?: (
+        data: ItemState,
+        id: ItemPayload,
+        itemKey: string,
+      ) => SelectedItem;
       omitPayload?: boolean;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;

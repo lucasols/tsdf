@@ -42,7 +42,12 @@ describe('useMultipleItemsQuery sequential tests', () => {
   const { result } = renderHook(() => {
     const queryResult = listQueryStore.useMultipleListQueries(
       [getFetchQueryForTable('users'), getFetchQueryForTable('products')],
-      { returnRefetchingStatus: true },
+      {
+        returnRefetchingStatus: true,
+        itemSelector(data, _, itemKey) {
+          return { id: itemKey, data };
+        },
+      },
     );
 
     const [users, products] = queryResult;
@@ -240,7 +245,11 @@ describe('useQuery', () => {
 
     const { rerender } = renderHook(
       ({ payload }) => {
-        const queryResult = listQueryStore.useListQuery(payload);
+        const queryResult = listQueryStore.useListQuery(payload, {
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
+        });
 
         renders.add(pick(queryResult, ['status', 'payload', 'items']));
 
@@ -380,7 +389,12 @@ describe('useQuery', () => {
     renderHook(() => {
       const data = listQueryStore.useListQuery(
         { tableId: 'users' },
-        { disableRefetchOnMount: true },
+        {
+          disableRefetchOnMount: true,
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
+        },
       );
 
       compRenders.add({ status: data.status, items: data.items });
@@ -720,6 +734,9 @@ test.concurrent(
         {
           returnRefetchingStatus: true,
           disableRefetchOnMount: true,
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
         },
       );
 

@@ -315,7 +315,12 @@ describe('syncMutationAndInvalidation', () => {
     renderHook(() => {
       const { status, error, items } = store.useListQuery(
         { tableId: 'products' },
-        { disableRefetchOnMount: true },
+        {
+          disableRefetchOnMount: true,
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
+        },
       );
 
       comp3Renders.add({ status, error, items });
