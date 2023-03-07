@@ -1287,6 +1287,87 @@ describe('update state functions', () => {
     });
   });
 
+  test('addItemToState with existing items and addItemToQueries', () => {
+    const { store } = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users'] },
+    });
+
+    expect(store.getItemState('users||1')).not.toBeUndefined();
+
+    store.addItemToState(
+      'users||1',
+      {
+        name: 'item users||20',
+        id: 20,
+      },
+      {
+        addItemToQueries: {
+          queries: { tableId: 'users' },
+          appendTo: 'start',
+        },
+      },
+    );
+
+    expect(store.store.state).toEqual({
+      itemQueries: {
+        'users||1': {
+          error: null,
+          payload: 'users||1',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        },
+        'users||2': {
+          error: null,
+          payload: 'users||2',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        },
+        'users||3': {
+          error: null,
+          payload: 'users||3',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        },
+        'users||4': {
+          error: null,
+          payload: 'users||4',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        },
+        'users||5': {
+          error: null,
+          payload: 'users||5',
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        },
+      },
+      items: {
+        'users||1': { id: 20, name: 'item users||20' },
+        'users||2': { id: 2, name: 'User 2' },
+        'users||3': { id: 3, name: 'User 3' },
+        'users||4': { id: 4, name: 'User 4' },
+        'users||5': { id: 5, name: 'User 5' },
+      },
+      queries: {
+        [`[{"tableId":"users"}]`]: {
+          error: null,
+          hasMore: false,
+          items: ['users||1', 'users||2', 'users||3', 'users||4', 'users||5'],
+          payload: { tableId: 'users' },
+          refetchOnMount: false,
+          status: 'success',
+          wasLoaded: true,
+        },
+      },
+    });
+  });
+
   test('delete item state', () => {
     const { store } = createTestEnv({
       initialServerData,
