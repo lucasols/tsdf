@@ -546,6 +546,7 @@ export function newTSDFCollectionStore<
     };
   }
 
+  /** adds a item to state, if the item already exist replace it with the new one */
   function addItemToState(fetchParams: ItemPayload, data: ItemState) {
     const itemKey = getItemKey(fetchParams);
 

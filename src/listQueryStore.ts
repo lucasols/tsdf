@@ -1368,6 +1368,7 @@ export function newTSDFListQueryStore<
     return someItemWasUpdated;
   }
 
+  /** adds a item to state, if the item already exist replace it with the new one */
   function addItemToState(
     itemPayload: ItemPayload,
     data: ItemState,
@@ -1401,6 +1402,8 @@ export function newTSDFListQueryStore<
               const queryState = draftState.queries[key];
 
               if (!queryState) continue;
+
+              if (queryState.items.includes(itemKey)) continue;
 
               if (addItemToQueries.appendTo === 'start') {
                 queryState.items.unshift(itemKey);
