@@ -684,3 +684,72 @@ test.concurrent(
     expect(env.serverMock.fetchsCount).toBe(3);
   },
 );
+
+test.concurrent(
+  'emulate realidateOnWindowFocus behaviour for list queries 2',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['products', 'users'] },
+      emulateRTU: true,
+      disableInitialDataInvalidation: false,
+    });
+
+    function emulateWindowFocus() {
+      env.store.invalidateQuery(() => true, 'lowPriority');
+      env.store.invalidateItem(() => true, 'lowPriority');
+    }
+
+    function getState(table = 'products') {
+      return pick(
+        env.store.getQueryState({
+          tableId: table,
+        }),
+        ['refetchOnMount', 'status', 'wasLoaded'],
+        { refetchOnMount: 'rom', wasLoaded: 'wl' },
+      );
+    }
+
+    expect(getState()).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    renderHook(() => {
+      env.store.useListQuery({ tableId: 'products' });
+    });
+
+    await env.serverMock.waitFetchIdle(); // initial invalidation
+
+    await sleep(1000);
+
+    expect(getState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should not be skippe
+
+    expect(getState()).toEqual({ rom: false, status: 'refetching', wl: true });
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(getState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should be skipped by the throttle
+
+    // as the query is active we should not change the revalidateOnMount state
+    expect(getState()).toEqual({ rom: false, status: 'success', wl: true });
+    expect(getState('users')).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    await sleep(1000);
+
+    emulateWindowFocus(); // this should not be skipped
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(env.serverMock.fetchsCount).toBe(3);
+  },
+);
