@@ -65,7 +65,6 @@ export function newTSDFCollectionStore<
 >({
   debugName,
   fetchFn,
-  disableRefetchOnWindowFocus,
   lowPriorityThrottleMs,
   errorNormalizer,
   disableInitialDataInvalidation,
@@ -79,7 +78,6 @@ export function newTSDFCollectionStore<
   fetchFn: (params: ItemPayload) => Promise<ItemState>;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | any[];
   errorNormalizer: (exception: unknown) => NError;
-  disableRefetchOnWindowFocus?: boolean;
   disableRefetchOnMount?: boolean;
   initialStateItems?: CollectionInitialStateItem<ItemPayload, ItemState>[];
   disableInitialDataInvalidation?: boolean;
@@ -619,15 +617,6 @@ export function newTSDFCollectionStore<
     );
 
     return someItemWasUpdated;
-  }
-
-  if (!disableRefetchOnWindowFocus) {
-    function handleFocus() {
-      invalidateItem(() => true, 'lowPriority');
-    }
-
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('visibilitychange', handleFocus);
   }
 
   return {

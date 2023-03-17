@@ -33,7 +33,6 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   debugName,
   fetchFn,
   initialData,
-  disableRefetchOnWindowFocus,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   lowPriorityThrottleMs,
   mediumPriorityThrottleMs,
@@ -46,7 +45,6 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   initialData?: State;
   disableInitialDataInvalidation?: boolean;
   errorNormalizer: (exception: unknown) => NError;
-  disableRefetchOnWindowFocus?: boolean;
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
@@ -259,15 +257,6 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
       },
       { action: 'update-state' },
     );
-  }
-
-  if (!disableRefetchOnWindowFocus) {
-    function handleFocus() {
-      invalidateData('lowPriority');
-    }
-
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('visibilitychange', handleFocus);
   }
 
   return {

@@ -114,7 +114,6 @@ export function newTSDFListQueryStore<
   errorNormalizer,
   defaultQuerySize = 50,
   initialData,
-  disableRefetchOnWindowFocus,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   lowPriorityThrottleMs,
   disableInitialDataInvalidation,
@@ -132,7 +131,6 @@ export function newTSDFListQueryStore<
   defaultQuerySize?: number;
   initialData?: ListQueryStoreInitialData<ItemState, QueryPayload, ItemPayload>;
   disableInitialDataInvalidation?: boolean;
-  disableRefetchOnWindowFocus?: boolean;
   syncMutationsAndInvalidations?: {
     syncQueries: (query1: QueryPayload, query2: QueryPayload) => boolean;
     syncItemAndQuery: (
@@ -1446,19 +1444,6 @@ export function newTSDFListQueryStore<
       },
       { action: { type: 'delete-item-state', itemId } },
     );
-  }
-
-  if (!disableRefetchOnWindowFocus) {
-    function handleFocus() {
-      invalidateQuery(() => true, 'lowPriority');
-
-      if (fetchItemFn) {
-        invalidateItem(() => true, 'lowPriority');
-      }
-    }
-
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('visibilitychange', handleFocus);
   }
 
   return {
