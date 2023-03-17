@@ -1,6 +1,6 @@
 {
   "name": "tsdf",
-  "version": "11.0.0",
+  "version": "11.1.0",
   "description": "A data fetching solution based on t-state",
   "license": "MIT",
   "author": "Lucas Santos",
@@ -61,7 +61,7 @@
     "tsup": "^6.5.0",
     "typescript": "^4.9.4",
     "vite": "^4.0.4",
-    "vitest": "^0.27.1"
+    "vitest": "^0.29.3"
   },
   "dependencies": {
     "immer": "^9.0.17",

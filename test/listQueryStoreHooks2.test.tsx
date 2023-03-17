@@ -5,6 +5,7 @@ import {
   ListQueryParams,
   Tables,
 } from './utils/createDefaultListQueryStore';
+import { pick } from './utils/objectUtils';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
 import { createRenderStore, shouldNotSkip } from './utils/storeUtils';
@@ -543,3 +544,143 @@ test('useItem loadFromStateOnly with not found item', async () => {
     "
   `);
 });
+
+test.concurrent(
+  'emulate realidateOnWindowFocus behaviour for list queries',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+      emulateRTU: true,
+      disableInitialDataInvalidation: false,
+    });
+
+    function emulateWindowFocus() {
+      env.store.invalidateQuery(() => true, 'lowPriority');
+      env.store.invalidateItem(() => true, 'lowPriority');
+    }
+
+    function getState(table = 'users') {
+      return pick(
+        env.store.getQueryState({
+          tableId: table,
+        }),
+        ['refetchOnMount', 'status', 'wasLoaded'],
+        { refetchOnMount: 'rom', wasLoaded: 'wl' },
+      );
+    }
+
+    expect(getState()).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    renderHook(() => {
+      env.store.useListQuery({ tableId: 'users' });
+    });
+
+    await env.serverMock.waitFetchIdle(); // initial invalidation
+
+    await sleep(1000);
+
+    expect(getState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should not be skippe
+
+    expect(getState()).toEqual({ rom: false, status: 'refetching', wl: true });
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(getState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should be skipped by the throttle
+
+    // as the query is active we should not change the revalidateOnMount state
+    expect(getState()).toEqual({ rom: false, status: 'success', wl: true });
+    expect(getState('products')).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    await sleep(1000);
+
+    emulateWindowFocus(); // this should not be skipped
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(env.serverMock.fetchsCount).toBe(3);
+  },
+);
+
+test.concurrent(
+  'emulate realidateOnWindowFocus behaviour for item queries',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+      emulateRTU: true,
+      disableInitialDataInvalidation: false,
+    });
+
+    function emulateWindowFocus() {
+      env.store.invalidateQuery(() => true, 'lowPriority');
+      env.store.invalidateItem(() => true, 'lowPriority');
+    }
+
+    function getItemState(itemId = 'users||1') {
+      return pick(
+        env.store.store.state.itemQueries[itemId] ?? undefined,
+        ['refetchOnMount', 'status', 'wasLoaded'],
+        { refetchOnMount: 'rom', wasLoaded: 'wl' },
+      );
+    }
+
+    expect(getItemState()).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    renderHook(() => {
+      env.store.useItem('users||1');
+    });
+
+    await env.serverMock.waitFetchIdle(); // initial invalidation
+
+    await sleep(1000);
+
+    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should not be skippe
+
+    expect(getItemState()).toEqual({
+      rom: false,
+      status: 'refetching',
+      wl: true,
+    });
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should be skipped by the throttle
+
+    // as the query is active we should not change the revalidateOnMount state
+    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
+    expect(getItemState('users||2')).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    await sleep(1000);
+
+    emulateWindowFocus(); // this should not be skipped
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(env.serverMock.fetchsCount).toBe(3);
+  },
+);

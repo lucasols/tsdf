@@ -735,6 +735,14 @@ export function newTSDFListQueryStore<
         if (key !== event.queryKey) continue;
 
         if (!queryInvalidationWasTriggered.has(key)) {
+          store.produceState((draft) => {
+            const query = draft.queries[key];
+
+            if (!query?.refetchOnMount) return;
+
+            query.refetchOnMount = false;
+          });
+
           scheduleListQueryFetch(event.priority, payload);
           queryInvalidationWasTriggered.add(key);
         }
@@ -1188,6 +1196,14 @@ export function newTSDFListQueryStore<
         if (itemKey !== event.itemKey) continue;
 
         if (!itemInvalidationWasTriggered.has(itemKey)) {
+          store.produceState((draft) => {
+            const query = draft.itemQueries[itemKey];
+
+            if (!query?.refetchOnMount) return;
+
+            query.refetchOnMount = false;
+          });
+
           scheduleItemFetch(event.priority, payload);
           itemInvalidationWasTriggered.add(itemKey);
         }

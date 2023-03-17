@@ -682,3 +682,73 @@ test.concurrent('initial data is invalidated on first load', async () => {
     "
   `);
 });
+
+test.concurrent(
+  'emulate realidateOnWindowFocus behaviour for item queries',
+  async () => {
+    const env = createTestEnv({
+      initialServerData: { '1': defaultTodo, '2': defaultTodo },
+      useLoadedSnapshot: true,
+      emulateRTU: true,
+      disableInitialDataInvalidation: false,
+    });
+
+    function emulateWindowFocus() {
+      env.store.invalidateItem(() => true, 'lowPriority');
+    }
+
+    function getItemState(itemId = '1') {
+      return pick(
+        env.store.getItemState(itemId) ?? undefined,
+        ['refetchOnMount', 'status', 'wasLoaded'],
+        { refetchOnMount: 'rom', wasLoaded: 'wl' },
+      );
+    }
+
+    expect(getItemState()).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    renderHook(() => {
+      env.store.useItem('1');
+    });
+
+    await env.serverMock.waitFetchIdle(); // initial invalidation
+
+    await sleep(1000);
+
+    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should not be skippe
+
+    expect(getItemState()).toEqual({
+      rom: false,
+      status: 'refetching',
+      wl: true,
+    });
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
+
+    emulateWindowFocus(); // this should be skipped by the throttle
+
+    // as the query is active we should not change the revalidateOnMount state
+    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
+    expect(getItemState('2')).toEqual({
+      rom: 'lowPriority',
+      status: 'success',
+      wl: true,
+    });
+
+    await sleep(1000);
+
+    emulateWindowFocus(); // this should not be skipped
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(env.serverMock.fetchsCount).toBe(3);
+  },
+);

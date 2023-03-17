@@ -202,6 +202,8 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 
     useOnMittEvent(storeEvents, 'invalidateData', (priority) => {
       if (!invalidationWasTriggered) {
+        store.setKey('refetchOnMount', false);
+
         scheduleFetch(priority);
         invalidationWasTriggered = true;
       }

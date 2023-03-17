@@ -435,6 +435,14 @@ export function newTSDFCollectionStore<
         if (itemKey !== event.itemKey) continue;
 
         if (!invalidationWasTriggered.has(itemKey)) {
+          store.produceState((draft) => {
+            const draftItem = draft[itemKey];
+
+            if (!draftItem) return;
+
+            draftItem.refetchOnMount = false;
+          });
+
           scheduleFetch(event.priority, payload);
           invalidationWasTriggered.add(itemKey);
         }
