@@ -296,7 +296,7 @@ export function newTSDFCollectionStore<
         : -1;
       const newInvalidationPriority = fetchTypePriority[priority];
 
-      if (currentInvalidationPriority >= newInvalidationPriority) return;
+      if (currentInvalidationPriority >= newInvalidationPriority) continue;
 
       store.produceState(
         (draft) => {

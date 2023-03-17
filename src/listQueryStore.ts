@@ -583,7 +583,7 @@ export function newTSDFListQueryStore<
         : -1;
       const newInvalidationPriority = fetchTypePriority[priority];
 
-      if (currentInvalidationPriority >= newInvalidationPriority) return;
+      if (currentInvalidationPriority >= newInvalidationPriority) continue;
 
       store.produceState(
         (draft) => {
@@ -1024,7 +1024,7 @@ export function newTSDFListQueryStore<
         : -1;
       const newInvalidationPriority = fetchTypePriority[priority];
 
-      if (currentInvalidationPriority >= newInvalidationPriority) return;
+      if (currentInvalidationPriority >= newInvalidationPriority) continue;
 
       store.produceState(
         (draft) => {
