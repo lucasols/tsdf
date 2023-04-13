@@ -547,36 +547,38 @@ test.concurrent(
   },
 );
 
-test.concurrent('very slow mutation with revalidation then mutation', async () => {
-  const store = createTestStore(0);
+test.concurrent(
+  'very slow mutation with revalidation then mutation',
+  async () => {
+    const store = createTestStore(0);
 
-  await waitTimeline([
-    [
-      0,
-      () =>
-        action(store, 1, {
-          withOptimisticUpdate: true,
-          withRevalidation: true,
-          revalidationDuration: 400,
-        }),
-    ],
-    [
-      100,
-      () =>
-        action(store, 2, {
-          withOptimisticUpdate: true,
-          withRevalidation: true,
-        }),
-    ],
-  ]);
+    await waitTimeline([
+      [
+        0,
+        () =>
+          action(store, 1, {
+            withOptimisticUpdate: true,
+            withRevalidation: true,
+            revalidationDuration: 400,
+          }),
+      ],
+      [
+        100,
+        () =>
+          action(store, 2, {
+            withOptimisticUpdate: true,
+            withRevalidation: true,
+          }),
+      ],
+    ]);
 
-  await store.waitForNoPendingRequests();
+    await store.waitForNoPendingRequests();
 
-  await sleep(400);
+    await sleep(400);
 
-  expect(store.ui.changesHistory).toEqual([0, 1, 2]);
-  expect(store.numOfFetchs).toBe(2);
-  expect(store.actions).toMatchTimeline(`
+    expect(store.ui.changesHistory).toEqual([0, 1, 2]);
+    expect(store.numOfFetchs).toBe(2);
+    expect(store.actions).toMatchTimeline(`
     "
     1 - optimistic-ui-commit
     1 - mutation-started
@@ -592,7 +594,8 @@ test.concurrent('very slow mutation with revalidation then mutation', async () =
     fetch-aborted : 1
     "
   `);
-});
+  },
+);
 
 test.concurrent('fetch error', async () => {
   const store = createTestStore(0);
@@ -695,6 +698,62 @@ describe('realtime updates', () => {
       "
     `);
   });
+
+  test.concurrent(
+    'dynamically throttle multiple realtime updates at same time with delay inferior to debounce 2',
+    async () => {
+      const store = createTestStore(0, {
+        dynamicRealtimeThrottleMs(lastFetch) {
+          return lastFetch < 100 ? 10 : 200;
+        },
+      });
+
+      await waitTimeline([
+        [0, () => store.emulateExternalRTU(1)],
+        [
+          50,
+          () => {
+            store.emulateExternalRTU(2, 100);
+          },
+        ],
+        [
+          50 + 30,
+          () => {
+            store.emulateExternalRTU(3, 40, 4);
+          },
+        ],
+      ]);
+
+      await sleep(400);
+
+      expect(store.actions).toMatchTimeline(`
+        "
+        1 - server-data-changed
+        fetch-started : 1
+        1 - fetch-finished : 1
+        1 - fetch-ui-commit
+
+          2 - server-data-changed
+          rt-fetch-scheduled
+          scheduled-rt-fetch-started : 2
+              3 - server-data-changed
+            rt-fetch-scheduled
+            rt-fetch-scheduled
+            rt-fetch-scheduled
+            rt-fetch-scheduled
+              3 - fetch-finished : 2
+              3 - fetch-ui-commit
+            scheduled-rt-fetch-started : 3
+              3 - fetch-finished : 3
+              3 - fetch-ui-commit
+        "
+      `);
+
+      expect(store.ui.changesHistory).toEqual([0, 1, 3]);
+
+      expect(store.numOfFetchs).toStrictEqual(3);
+    },
+  );
 
   test.concurrent('simple mutation that triggers a RTU', async () => {
     const store = createTestStore(0);
