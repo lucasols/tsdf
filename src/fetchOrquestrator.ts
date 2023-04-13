@@ -33,7 +33,11 @@ export function createFetchOrquestrator<T>({
   dynamicRealtimeThrottleMs,
 }: CreateFetchOrquestratorOptions<T>) {
   const fetchs: {
-    inProgress_: { startTime: number; onEnd: (() => void)[] } | null;
+    inProgress_: {
+      startTime: number;
+      onEnd: (() => void)[];
+      rtuOnEnd: (() => void) | null;
+    } | null;
     scheduled_: { params: T } | null;
     realtimeScheduled_: { timeoutId: number } | null;
   } = {
@@ -107,7 +111,7 @@ export function createFetchOrquestrator<T>({
     lastFetchIdStarted = id;
 
     lastFetchWasAborted = false;
-    fetchs.inProgress_ = { startTime, onEnd: [] };
+    fetchs.inProgress_ = { startTime, onEnd: [], rtuOnEnd: null };
     const prevFetchStartTime = lastFetchStartTime;
     lastFetchStartTime = startTime;
 
@@ -147,11 +151,16 @@ export function createFetchOrquestrator<T>({
     }
 
     const onEnd = currentFetchs.inProgress_.onEnd;
+    const rtuOnEnd = currentFetchs.inProgress_.rtuOnEnd;
 
     currentFetchs.inProgress_ = null;
 
     if (onEnd.length > 0) {
       onEnd.forEach((cb) => cb());
+    }
+
+    if (rtuOnEnd) {
+      rtuOnEnd();
     }
 
     flushScheduledFetch();
@@ -266,9 +275,9 @@ export function createFetchOrquestrator<T>({
     }
 
     if (fetchs.inProgress_) {
-      fetchs.inProgress_.onEnd.push(() => {
+      fetchs.inProgress_.rtuOnEnd = () => {
         addDelayedRTU(Date.now(), params);
-      });
+      };
 
       return true;
     } else if (mutationIsInProgress) {
@@ -315,7 +324,9 @@ export function createFetchOrquestrator<T>({
     startMutation,
     get hasPendingFetch() {
       return (
-        !!fetchs.inProgress_ || !!fetchs.scheduled_ || !!fetchs.realtimeScheduled_
+        !!fetchs.inProgress_ ||
+        !!fetchs.scheduled_ ||
+        !!fetchs.realtimeScheduled_
       );
     },
     get fetchIsInProgress() {

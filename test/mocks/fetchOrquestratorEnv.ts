@@ -89,9 +89,11 @@ export function createTestStore(
   serverInitialData: Data,
   {
     uiInitialData = 0,
+    dynamicRealtimeThrottleMs = getDynamicRealtimeThrottleMs,
   }: {
     serverInitialData?: Data;
     uiInitialData?: Data;
+    dynamicRealtimeThrottleMs?: (lastFetch: number) => number;
   } = {},
 ) {
   const actionsHistory: {
@@ -173,7 +175,7 @@ export function createTestStore(
         addAction(event);
       }
     },
-    dynamicRealtimeThrottleMs: getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs,
   });
 
   /** default duration = 40 */
@@ -197,12 +199,12 @@ export function createTestStore(
     }
   }
 
-  async function emulateExternalRTU(newServerValue: number, duration = 40) {
+  async function emulateExternalRTU(newServerValue: number, fetchDuration = 40) {
     server.setData(newServerValue);
 
     await sleep(5);
 
-    fetch('realtimeUpdate', duration);
+    fetch('realtimeUpdate', fetchDuration);
   }
 
   return {
