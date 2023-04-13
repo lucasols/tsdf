@@ -199,12 +199,18 @@ export function createTestStore(
     }
   }
 
-  async function emulateExternalRTU(newServerValue: number, fetchDuration = 40) {
+  async function emulateExternalRTU(
+    newServerValue: number,
+    fetchDuration = 40,
+    triggerFetchs = 1,
+  ) {
     server.setData(newServerValue);
 
     await sleep(5);
 
-    fetch('realtimeUpdate', fetchDuration);
+    for (let i = 0; i < triggerFetchs; i++) {
+      fetch('realtimeUpdate', fetchDuration);
+    }
   }
 
   return {

@@ -699,43 +699,7 @@ describe('realtime updates', () => {
     `);
   });
 
-  test.concurrent.only(
-    'dynamically throttle multiple realtime updates at same time with delay inferior to debounce',
-    async () => {
-      const store = createTestStore(0, {
-        dynamicRealtimeThrottleMs(lastFetch) {
-          return lastFetch < 100 ? 10 : 200;
-        },
-      });
-
-      const almostSlowDuration = 99;
-
-      await waitTimeline([
-        [0, () => store.emulateExternalRTU(1, almostSlowDuration)],
-        [
-          almostSlowDuration + 2,
-          () => {
-            store.fetch('realtimeUpdate');
-          },
-        ],
-        [
-          almostSlowDuration + 20,
-          () => {
-            store.fetch('realtimeUpdate');
-            store.fetch('realtimeUpdate');
-          },
-        ],
-      ]);
-
-      await sleep(400);
-
-      expect(store.ui.changesHistory).toEqual([0, 1]);
-
-      expect(store.numOfFetchs).toStrictEqual(3);
-    },
-  );
-
-  test.concurrent.only(
+  test.concurrent(
     'dynamically throttle multiple realtime updates at same time with delay inferior to debounce 2',
     async () => {
       const store = createTestStore(0, {
@@ -744,27 +708,46 @@ describe('realtime updates', () => {
         },
       });
 
-      const almostSlowDuration = 99;
-
       await waitTimeline([
-        [0, () => store.emulateExternalRTU(1, almostSlowDuration)],
+        [0, () => store.emulateExternalRTU(1)],
         [
-          almostSlowDuration + 2,
+          50,
           () => {
-            store.emulateExternalRTU(2);
+            store.emulateExternalRTU(2, 100);
           },
         ],
         [
-          almostSlowDuration + 30,
+          50 + 30,
           () => {
-            store.emulateExternalRTU(3);
-            store.fetch('realtimeUpdate');
-            store.fetch('realtimeUpdate');
+            store.emulateExternalRTU(3, 40, 4);
           },
         ],
       ]);
 
       await sleep(400);
+
+      expect(store.actions).toMatchTimeline(`
+        "
+        1 - server-data-changed
+        fetch-started : 1
+        1 - fetch-finished : 1
+        1 - fetch-ui-commit
+
+          2 - server-data-changed
+          rt-fetch-scheduled
+          scheduled-rt-fetch-started : 2
+              3 - server-data-changed
+            rt-fetch-scheduled
+            rt-fetch-scheduled
+            rt-fetch-scheduled
+            rt-fetch-scheduled
+              3 - fetch-finished : 2
+              3 - fetch-ui-commit
+            scheduled-rt-fetch-started : 3
+              3 - fetch-finished : 3
+              3 - fetch-ui-commit
+        "
+      `);
 
       expect(store.ui.changesHistory).toEqual([0, 1, 3]);
 
