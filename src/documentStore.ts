@@ -250,6 +250,8 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   function updateState(
     produceNewData: (draftData: State) => State | void | undefined,
   ) {
+    if (!store.state.data) return false;
+
     store.setKey(
       'data',
       (current) => {
@@ -259,6 +261,8 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
       },
       { action: 'update-state' },
     );
+
+    return true;
   }
 
   return {
