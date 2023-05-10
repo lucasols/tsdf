@@ -126,6 +126,11 @@ export function createFetchOrquestrator<T>({
       return abort;
     }
 
+    if (fetchs.realtimeScheduled_) {
+      clearTimeout(fetchs.realtimeScheduled_.timeoutId);
+      fetchs.realtimeScheduled_ = null;
+    }
+
     const success = await fetchFn(
       {
         shouldAbort,
@@ -145,8 +150,12 @@ export function createFetchOrquestrator<T>({
       lastFetchDuration = Date.now() - startTime;
     }
 
-    if (currentFetchs.realtimeScheduled_) {
-      clearTimeout(currentFetchs.realtimeScheduled_.timeoutId);
+    const rtScheduled = fetchs.realtimeScheduled_ as {
+      timeoutId: number;
+    } | null;
+
+    if (rtScheduled) {
+      clearTimeout(rtScheduled.timeoutId);
       fetchs.realtimeScheduled_ = null;
     }
 

@@ -970,4 +970,42 @@ describe('realtime updates', () => {
       "
     `);
   });
+
+  test.concurrent(
+    'schedule rtu updates then schedulle a fetch right before the rtu starts',
+    async () => {
+      const store = createTestStore(0, {
+        dynamicRealtimeThrottleMs() {
+          return 300;
+        },
+      });
+
+      await waitTimeline(
+        [
+          [0, () => store.fetch('lowPriority', 20)],
+          [110, () => store.emulateExternalRTU(1)],
+          [110 + 190, () => store.fetch('lowPriority', 20)],
+        ],
+        800,
+      );
+
+      expect(store.server.history).toEqual([0, 1]);
+      expect(store.ui.changesHistory).toEqual([0, 1]);
+
+      expect(store.numOfFetchs).toEqual(2);
+
+      expect(store.actions).toMatchTimeline(`
+      "
+      fetch-started : 1
+      fetch-finished : 1
+      fetch-ui-commit
+      1 - server-data-changed
+      rt-fetch-scheduled
+      fetch-started : 2
+      1 - fetch-finished : 2
+      1 - fetch-ui-commit
+      "
+    `);
+    },
+  );
 });
