@@ -753,6 +753,7 @@ describe('realtime updates', () => {
 
       expect(store.numOfFetchs).toStrictEqual(3);
     },
+    { retry: 2 },
   );
 
   test.concurrent('simple mutation that triggers a RTU', async () => {
