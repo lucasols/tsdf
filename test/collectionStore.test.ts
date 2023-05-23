@@ -561,3 +561,16 @@ describe('an invalidation with lower priority should not override one with highe
     expect(env.store.getItemState('1')?.refetchOnMount).toEqual('highPriority');
   });
 });
+
+test.concurrent('bug reproduction: await fetch with error', async () => {
+  const env = createTestEnv();
+
+  env.serverMock.setFetchError('error');
+
+  expect(await env.store.awaitFetch('1')).toEqual({
+    data: null,
+    error: {
+      message: 'error',
+    },
+  });
+});
