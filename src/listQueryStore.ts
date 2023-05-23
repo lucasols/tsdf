@@ -481,6 +481,14 @@ export function newTSDFListQueryStore<
 
     const query = store.state.queries[queryKey];
 
+    if (query?.error) {
+      return {
+        items: [],
+        error: query.error,
+        hasMore: query.hasMore,
+      };
+    }
+
     if (!query) {
       return {
         items: [],
@@ -489,16 +497,14 @@ export function newTSDFListQueryStore<
       };
     }
 
-    return query.error
-      ? { items: [], error: query.error, hasMore: query.hasMore }
-      : {
-          items: getQueryItems(query, (data, itemPayload) => ({
-            data,
-            itemPayload,
-          })),
-          error: null,
-          hasMore: query.hasMore,
-        };
+    return {
+      items: getQueryItems(query, (data, itemPayload) => ({
+        data,
+        itemPayload,
+      })),
+      error: null,
+      hasMore: query.hasMore,
+    };
   }
 
   async function awaitItemFetch(
@@ -519,13 +525,15 @@ export function newTSDFListQueryStore<
     const item = store.state.items[itemKey];
     const itemQuery = store.state.itemQueries[itemKey];
 
+    if (itemQuery?.error) {
+      return { data: null, error: itemQuery.error };
+    }
+
     if (!itemQuery || !item) {
       return { data: null, error: errorNormalizer(new Error('Not found')) };
     }
 
-    return itemQuery.error
-      ? { data: null, error: itemQuery.error }
-      : { data: item, error: null };
+    return { data: item, error: null };
   }
 
   type FilterQueryFn = (

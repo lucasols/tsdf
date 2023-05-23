@@ -249,13 +249,15 @@ export function newTSDFCollectionStore<
 
     const item = store.state[itemId];
 
+    if (item?.error) {
+      return { data: null, error: item.error };
+    }
+
     if (!item?.data) {
       return { data: null, error: errorNormalizer(new Error('Not found')) };
     }
 
-    return item.error
-      ? { data: null, error: item.error }
-      : { data: item.data, error: null };
+    return { data: item.data, error: null };
   }
 
   function getItemsKeyArray(

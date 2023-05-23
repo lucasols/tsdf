@@ -129,13 +129,15 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
       return { data: null, error: errorNormalizer(new Error('Aborted')) };
     }
 
-    if (!store.state.data) {
-      return { data: null, error: errorNormalizer(new Error('No data')) };
+    if (store.state.error) {
+      return { data: null, error: store.state.error };
     }
 
-    return store.state.error
-      ? { data: null, error: store.state.error }
-      : { data: store.state.data, error: null };
+    if (!store.state.data) {
+      return { data: null, error: errorNormalizer(new Error('Not found')) };
+    }
+
+    return { data: store.state.data, error: null };
   }
 
   const storeEvents = mitt<{ invalidateData: FetchType }>();
