@@ -9,8 +9,8 @@ import {
   createValueStore,
   shouldNotSkip,
 } from './utils/storeUtils';
-import mitt from 'mitt';
 import { useEffect, useState } from 'react';
+import { evtmitter } from 'evtmitter';
 
 const createTestEnv = createDefaultCollectionStore;
 
@@ -765,7 +765,7 @@ test.concurrent('emulate load resource during its mutation', async () => {
 
   const renders = createRenderStore();
 
-  const events = mitt<{ openPage: undefined }>();
+  const events = evtmitter<{ openPage: undefined }>();
 
   async function createItem() {
     const end = env.store.startMutation('3');

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
-import { useConst, useOnChange } from './utils/hooks';
 import { evtmitter } from 'evtmitter';
 import { useOnEvtmitterEvent } from 'evtmitter/react';
+import { useMemo, useState } from 'react';
+import { useConst, useOnChange } from './utils/hooks';
 
 export function useEnsureIsLoaded(
   ensureIsLoaded: boolean | undefined,
