@@ -755,7 +755,7 @@ test.concurrent(
   },
 );
 
-test.concurrent.only('emulate load resource during its mutation', async () => {
+test.concurrent('emulate load resource during its mutation', async () => {
   const env = createTestEnv({
     initialServerData: { '1': defaultTodo, '2': defaultTodo },
     useLoadedSnapshot: true,
