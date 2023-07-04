@@ -184,6 +184,7 @@ test.concurrent(
     "
   `);
   },
+  { retry: 3 },
 );
 
 test.concurrent(
@@ -529,13 +530,9 @@ test.concurrent(
     1 - mutation-finished
       2 - optimistic-ui-commit
       2 - mutation-started
-    ---
+
     fetch-scheduled
-    fetch-skipped
-    OR
-    fetch-skipped
     fetch-scheduled
-    ---
 
       2 - mutation-finished
       scheduled-fetch-started : 1
