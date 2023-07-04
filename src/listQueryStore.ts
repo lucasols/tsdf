@@ -1,25 +1,26 @@
-import mitt from 'mitt';
+import { evtmitter } from 'evtmitter';
+import { useOnEvtmitterEvent } from 'evtmitter/react';
+import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
-import { deepEqual, Store, useSubscribeToStore } from 't-state';
+import { Store, deepEqual, useSubscribeToStore } from 't-state';
 import { createCollectionFetchOrquestrator } from './collectionFetchOrquestrator';
 import {
+  FetchContext as FetchCtx,
   FetchType,
   ScheduleFetchResults,
-  FetchContext as FetchCtx,
 } from './fetchOrquestrator';
 import {
-  fetchTypePriority,
   TSDFStatus,
   ValidPayload,
   ValidStoreState,
+  fetchTypePriority,
 } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
-import { getCacheId } from './utils/getCacheId';
-import { useConst, useDeepMemo, useOnMittEvent } from './utils/hooks';
-import { klona } from 'klona/json';
-import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
 import { findAndMap } from './utils/findAndMap';
+import { getCacheId } from './utils/getCacheId';
+import { useConst, useDeepMemo } from './utils/hooks';
+import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 
 type QueryStatus = TSDFStatus | 'loadingMore';
 
@@ -567,7 +568,7 @@ export function newTSDFListQueryStore<
     }
   }
 
-  const storeEvents = mitt<{
+  const storeEvents = evtmitter<{
     invalidateQuery: { priority: FetchType; queryKey: string };
     invalidateItem: { priority: FetchType; itemKey: string };
   }>();
@@ -738,7 +739,7 @@ export function newTSDFListQueryStore<
       useExternalDeps: true,
     });
 
-    useOnMittEvent(storeEvents, 'invalidateQuery', (event) => {
+    useOnEvtmitterEvent(storeEvents, 'invalidateQuery', (event) => {
       for (const { key, payload } of queriesWithId) {
         if (key !== event.queryKey) continue;
 
@@ -1197,7 +1198,7 @@ export function newTSDFListQueryStore<
       useExternalDeps: true,
     });
 
-    useOnMittEvent(storeEvents, 'invalidateItem', (event) => {
+    useOnEvtmitterEvent(storeEvents, 'invalidateItem', (event) => {
       if (loadFromStateOnly) return;
 
       for (const { payload, itemKey } of memoizedItemKeys) {

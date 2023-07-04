@@ -1,4 +1,3 @@
-import { Emitter } from 'mitt';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { deepEqual, shallowEqual } from 't-state';
 
@@ -37,25 +36,6 @@ export function useLatestValue<T>(value: T) {
   });
 
   return ref.current;
-}
-
-export function useOnMittEvent<
-  T extends Record<string, any>,
-  E extends keyof T,
->(mitt: Emitter<T>, event: E, callback: (payload: T[E]) => void) {
-  const latestCallback = useLatestValue(callback);
-
-  useLayoutEffect(() => {
-    const cb = (payload: T[E]) => {
-      latestCallback.insideEffect(payload);
-    };
-
-    mitt.on(event, cb);
-
-    return () => {
-      mitt.off(event, cb);
-    };
-  }, [mitt, event, latestCallback]);
 }
 
 function usePrevious<T>(value: T, initial?: T): T | undefined {

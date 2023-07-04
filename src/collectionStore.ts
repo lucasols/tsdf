@@ -1,24 +1,25 @@
-import mitt from 'mitt';
+import { evtmitter } from 'evtmitter';
+import { useOnEvtmitterEvent } from 'evtmitter/react';
+import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
-import { deepEqual, Store, useSubscribeToStore } from 't-state';
+import { Store, deepEqual, useSubscribeToStore } from 't-state';
 import { createCollectionFetchOrquestrator } from './collectionFetchOrquestrator';
 import {
+  FetchContext,
   FetchType,
   ScheduleFetchResults,
-  FetchContext,
 } from './fetchOrquestrator';
 import {
-  fetchTypePriority,
   TSDFStatus,
   ValidPayload,
   ValidStoreState,
+  fetchTypePriority,
 } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
-import { useDeepMemo, useOnMittEvent } from './utils/hooks';
-import { klona } from 'klona/json';
-import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
+import { useDeepMemo } from './utils/hooks';
+import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 
 type CollectionItemStatus = TSDFStatus;
 
@@ -276,7 +277,7 @@ export function newTSDFCollectionStore<
     }
   }
 
-  const storeEvents = mitt<{
+  const storeEvents = evtmitter<{
     invalidateData: { priority: FetchType; itemKey: string };
   }>();
 
@@ -432,7 +433,7 @@ export function newTSDFCollectionStore<
       useExternalDeps: true,
     });
 
-    useOnMittEvent(storeEvents, 'invalidateData', (event) => {
+    useOnEvtmitterEvent(storeEvents, 'invalidateData', (event) => {
       for (const { itemKey, payload } of queriesWithId) {
         if (itemKey !== event.itemKey) continue;
 

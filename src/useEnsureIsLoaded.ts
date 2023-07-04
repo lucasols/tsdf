@@ -1,13 +1,14 @@
-import mitt from 'mitt';
 import { useMemo, useState } from 'react';
-import { useConst, useOnChange, useOnMittEvent } from './utils/hooks';
+import { useConst, useOnChange } from './utils/hooks';
+import { evtmitter } from 'evtmitter';
+import { useOnEvtmitterEvent } from 'evtmitter/react';
 
 export function useEnsureIsLoaded(
   ensureIsLoaded: boolean | undefined,
   enabled: boolean,
   forceFetch: () => void,
 ) {
-  const isLoadedEvtEmitter = useConst(() => mitt<{ isLoaded: boolean }>());
+  const isLoadedEvtEmitter = useConst(() => evtmitter<{ isLoaded: boolean }>());
 
   const [isForceLoading, setIsForceLoading] = useState(true);
 
@@ -21,7 +22,7 @@ export function useEnsureIsLoaded(
     { callOnMount: true },
   );
 
-  useOnMittEvent(isLoadedEvtEmitter, 'isLoaded', (isLoaded) => {
+  useOnEvtmitterEvent(isLoadedEvtEmitter, 'isLoaded', (isLoaded) => {
     if (ensureIsLoaded && enabled && isLoaded) {
       setIsForceLoading(false);
     }

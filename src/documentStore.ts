@@ -1,5 +1,4 @@
 import { produce } from 'immer';
-import mitt from 'mitt';
 import { useCallback, useEffect } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import {
@@ -10,8 +9,9 @@ import {
 } from './fetchOrquestrator';
 import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
-import { useOnMittEvent } from './utils/hooks';
-import { reusePrevIfEqual } from './utils/reuseRefIfEqual';
+import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
+import { evtmitter } from 'evtmitter';
+import { useOnEvtmitterEvent } from 'evtmitter/react';
 
 type DocumentStatus = TSDFStatus | 'idle';
 
@@ -140,7 +140,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     return { data: store.state.data, error: null };
   }
 
-  const storeEvents = mitt<{ invalidateData: FetchType }>();
+  const storeEvents = evtmitter<{ invalidateData: FetchType }>();
 
   let invalidationWasTriggered = false;
 
@@ -202,7 +202,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
       useExternalDeps: true,
     });
 
-    useOnMittEvent(storeEvents, 'invalidateData', (priority) => {
+    useOnEvtmitterEvent(storeEvents, 'invalidateData', (priority) => {
       if (!invalidationWasTriggered) {
         store.setKey('refetchOnMount', false);
 
