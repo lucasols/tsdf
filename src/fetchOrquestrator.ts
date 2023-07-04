@@ -183,17 +183,19 @@ export function createFetchOrquestrator<T>({
   ): ScheduleFetchResults {
     const startTime = Date.now();
 
-    if (dynamicRealtimeThrottleMs && fetchType === 'realtimeUpdate') {
+    const fetchTypeToUse = !lastFetchStartTime ? 'highPriority' : fetchType;
+
+    if (dynamicRealtimeThrottleMs && fetchTypeToUse === 'realtimeUpdate') {
       if (scheduleRTU(startTime, params)) {
         return 'rt-scheduled';
       }
     }
 
-    if (shouldSkipFetch(fetchType, startTime)) {
+    if (shouldSkipFetch(fetchTypeToUse, startTime)) {
       return 'skipped';
     }
 
-    if (shouldScheduleFetch(fetchType, params)) {
+    if (shouldScheduleFetch(fetchTypeToUse, params)) {
       return 'scheduled';
     }
 

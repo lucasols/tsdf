@@ -483,6 +483,7 @@ export function newTSDFCollectionStore<
       returnRefetchingStatus?: boolean;
       disableRefetchOnMount?: boolean;
       ensureIsLoaded?: boolean;
+      returnIdleStatus?: boolean;
     } = {},
   ) {
     const { selector, ensureIsLoaded } = options;
@@ -536,9 +537,11 @@ export function newTSDFCollectionStore<
     return useModifyResult(result);
   }
 
+  type EndMutation = () => void;
+
   function startMutation(
     fetchParams: ItemPayload | ItemPayload[] | FilterItemsFn,
-  ) {
+  ): EndMutation {
     const itemKeys = getItemsKeyArray(fetchParams);
 
     const endMutations: (() => boolean)[] = [];

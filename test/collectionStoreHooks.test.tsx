@@ -9,6 +9,8 @@ import {
   createValueStore,
   shouldNotSkip,
 } from './utils/storeUtils';
+import mitt from 'mitt';
+import { useEffect, useState } from 'react';
 
 const createTestEnv = createDefaultCollectionStore;
 
@@ -752,3 +754,59 @@ test.concurrent(
     expect(env.serverMock.fetchsCount).toBe(3);
   },
 );
+
+test.concurrent.only('emulate load resource during its mutation', async () => {
+  const env = createTestEnv({
+    initialServerData: { '1': defaultTodo, '2': defaultTodo },
+    useLoadedSnapshot: true,
+    emulateRTU: true,
+    disableInitialDataInvalidation: false,
+  });
+
+  const renders = createRenderStore();
+
+  const events = mitt<{ openPage: undefined }>();
+
+  async function createItem() {
+    const end = env.store.startMutation('3');
+
+    events.emit('openPage');
+
+    await env.serverMock.emulateMutation((draft) => {
+      draft['3'] = defaultTodo;
+    });
+
+    end();
+  }
+
+  const Page = () => {
+    const { data, status, error } = env.store.useItem('3');
+
+    renders.add({ status, data, error });
+
+    return null;
+  };
+
+  const App = () => {
+    const [openPage, setOpenPage] = useState(false);
+
+    useEffect(() => {
+      events.on('openPage', () => setOpenPage(true));
+    }, []);
+
+    return <div>{openPage && <Page />}</div>;
+  };
+
+  render(<App />);
+
+  createItem();
+
+  await sleep(1000);
+
+  expect(renders.snapshot).toMatchSnapshotString(`
+    "
+    status: loading -- data: null -- error: null
+    status: success -- data: {title:todo, completed:false} -- error: null
+    "
+  `);
+});
