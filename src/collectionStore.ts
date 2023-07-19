@@ -633,12 +633,18 @@ export function newTSDFCollectionStore<
     return someItemWasUpdated;
   }
 
+  function reset() {
+    fetchOrquestrator.reset();
+    store.setState({});
+  }
+
   return {
     store,
     scheduleFetch,
     awaitFetch,
     useMultipleItems,
     useItem,
+    reset,
     getItemKey,
     getItemState,
     startMutation,

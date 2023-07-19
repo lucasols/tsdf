@@ -17,7 +17,12 @@ export function createCollectionFetchOrquestrator<T>(
     return fetchOrquestrators.get(key)!;
   }
 
+  function reset() {
+    fetchOrquestrators.clear();
+  }
+
   return {
     get: getFetchOrquestrator,
+    reset,
   };
 }

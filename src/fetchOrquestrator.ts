@@ -329,7 +329,21 @@ export function createFetchOrquestrator<T>({
     return lastFetchWasAborted;
   }
 
+  function reset() {
+    fetchs.inProgress_ = null;
+    fetchs.scheduled_ = null;
+    fetchs.realtimeScheduled_ = null;
+    lastFetchStartTime = 0;
+    lastFetchDuration = 0;
+    lastFetchIdStarted = 0;
+    lastMutationIdStarted = 0;
+    mutationIsInProgress = false;
+    lastFetchWasAborted = false;
+    abortFetchsBeforeOrEqual = 0;
+  }
+
   return {
+    reset,
     scheduleFetch,
     awaitFetch,
     startMutation,

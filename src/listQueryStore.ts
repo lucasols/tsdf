@@ -1471,8 +1471,19 @@ export function newTSDFListQueryStore<
     );
   }
 
+  function reset() {
+    fetchItemOrquestrator?.reset();
+    fetchQueryOrquestrator.reset();
+    store.setState({
+      items: {},
+      queries: {},
+      itemQueries: {},
+    });
+  }
+
   return {
     store,
+    reset,
     scheduleListQueryFetch,
     getQueryState,
     getQueryKey,

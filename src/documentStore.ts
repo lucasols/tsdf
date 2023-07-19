@@ -267,8 +267,19 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     return true;
   }
 
+  function reset() {
+    fetchOrquestrator.reset();
+    store.setState({
+      data: null,
+      error: null,
+      status: 'idle',
+      refetchOnMount: 'lowPriority',
+    });
+  }
+
   return {
     store,
+    reset,
     awaitFetch,
     scheduleFetch,
     invalidateData,
