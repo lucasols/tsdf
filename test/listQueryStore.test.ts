@@ -731,7 +731,10 @@ describe.concurrent('fetch item', () => {
   });
 
   test.concurrent('test helpers inital snapshot', async () => {
-    const loaded = createTestEnv({ initialServerData });
+    const loaded = createTestEnv({
+      initialServerData,
+      disableInitialDataInvalidation: true,
+    });
 
     loaded.store.scheduleItemFetch('lowPriority', 'users||1');
 
@@ -740,6 +743,7 @@ describe.concurrent('fetch item', () => {
     const withStateSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { items: ['users||1'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(withStateSnapshot.store.store.state).toEqual(
@@ -748,7 +752,10 @@ describe.concurrent('fetch item', () => {
   });
 
   test.concurrent('test helpers inital snapshot 2', async () => {
-    const loaded = createTestEnv({ initialServerData });
+    const loaded = createTestEnv({
+      initialServerData,
+      disableInitialDataInvalidation: true,
+    });
 
     loaded.store.scheduleItemFetch('lowPriority', 'users||1');
     loaded.store.scheduleListQueryFetch('lowPriority', {
@@ -760,6 +767,7 @@ describe.concurrent('fetch item', () => {
     const withStateSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'], items: ['users||1'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(withStateSnapshot.store.store.state).toEqual(
@@ -771,6 +779,7 @@ describe.concurrent('fetch item', () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { items: ['users||1'] },
+      disableInitialDataInvalidation: true,
     });
 
     serverMock.produceData((draft) => {
@@ -887,6 +896,7 @@ describe.concurrent('fetch item', () => {
   test('load item with error', async () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
     });
 
     serverMock.setFetchError('error');
@@ -952,6 +962,7 @@ describe.concurrent('fetch item', () => {
     async () => {
       const { serverMock, store: listQueryStore } = createTestEnv({
         initialServerData,
+        disableInitialDataInvalidation: true,
       });
 
       listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
@@ -990,6 +1001,7 @@ describe.concurrent('fetch item', () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     listQueryStore.scheduleItemFetch('highPriority', 'users||1');
@@ -1031,6 +1043,7 @@ describe.concurrent('fetch item', () => {
     async () => {
       const { store: listQueryStore } = createTestEnv({
         initialServerData,
+        disableInitialDataInvalidation: true,
       });
 
       listQueryStore.scheduleListQueryFetch('highPriority', {

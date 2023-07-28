@@ -13,15 +13,8 @@ import { filterAndMap } from '../../src/utils/filterAndMap';
 import { createOrVariations } from '../utils/createOrVariations';
 import { dedent } from '../utils/dedent';
 
-interface ToMatchTimeline<R = unknown> {
-  toMatchTimeline(timeline: string): R;
-  toMatchSnapshotString(snapshot: string): R;
-}
-
 declare global {
   namespace Vi {
-    interface Assertion extends ToMatchTimeline {}
-
     interface JestAssertion<T = any>
       extends jest.Matchers<void, T>,
         TestingLibraryMatchers<T, void> {}
