@@ -464,7 +464,7 @@ export function newTSDFCollectionStore<
 
             if (shouldFetch) {
               scheduleFetch(fetchType, payload);
-              return;
+              continue;
             }
           } else {
             scheduleFetch(fetchType, payload);

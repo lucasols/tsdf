@@ -772,7 +772,7 @@ export function newTSDFListQueryStore<
 
             if (shouldFetch) {
               scheduleListQueryFetch(fetchType, fetchParams, loadSizeConst);
-              return;
+              continue;
             }
           } else {
             scheduleListQueryFetch(fetchType, fetchParams, loadSizeConst);

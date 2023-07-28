@@ -21,6 +21,7 @@ describe('test helpers', () => {
     const { store: collectionStore } = createTestEnv({
       initialServerData: { '1': defaultTodo, '2': defaultTodo },
       useLoadedSnapshot: true,
+      disableInitialDataInvalidation: true,
     });
 
     expect(collectionStore.store.state).toEqual({
@@ -401,6 +402,7 @@ describe('update state functions', () => {
       const { store } = createTestEnv({
         initialServerData,
         useLoadedSnapshot: true,
+        disableInitialDataInvalidation: true,
       });
 
       let storeUpdates = 0;

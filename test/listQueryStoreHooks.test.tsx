@@ -34,6 +34,7 @@ function getFetchQueryForTable(tableId: string): FetchQueryParams {
 describe('useMultipleItemsQuery sequential tests', () => {
   const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
     initialServerData,
+    disableInitialDataInvalidation: false,
   });
 
   const usersRender = createRenderStore();
@@ -189,6 +190,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
       useLoadedSnapshot: { tables: ['users', 'products'] },
+      disableInitialDataInvalidation: true,
     });
 
     const payload = createValueStore([
@@ -226,6 +228,45 @@ describe('useMultipleItemsQuery isolated tests', () => {
       status: success -- payload: {tableId:products} -- items: [Product 1, ...(49 more)]
       status: loading -- payload: {tableId:not-found} -- items: []
       status: error -- payload: {tableId:not-found} -- items: []
+      "
+    `);
+  });
+
+  test('with disableRefetchOnMount', async () => {
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
+      initialServerData,
+    });
+
+    const payload = createValueStore([
+      getFetchQueryForTable('users'),
+      getFetchQueryForTable('products'),
+    ]);
+
+    const usersRenders = createRenderStore();
+    const productsRenders = createRenderStore();
+
+    renderHook(() => {
+      const [users, products] = listQueryStore.useMultipleListQueries(
+        payload.useValue(),
+        { itemSelector: (data) => data.name, disableRefetchOnMount: true },
+      );
+
+      usersRenders.add(pick(users, ['status', 'payload', 'items']));
+      productsRenders.add(pick(products, ['status', 'payload', 'items']));
+    });
+
+    await serverMock.waitFetchIdle();
+
+    expect(usersRenders.getSnapshot()).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: {tableId:users} -- items: []
+      status: success -- payload: {tableId:users} -- items: [User 1, ...(4 more)]
+      "
+    `);
+    expect(productsRenders.getSnapshot()).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: {tableId:products} -- items: []
+      status: success -- payload: {tableId:products} -- items: [Product 1, ...(49 more)]
       "
     `);
   });
@@ -381,6 +422,7 @@ describe('useQuery', () => {
   test('disableRefetchOnMount', async () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: { tables: ['users'] },
     });
 
@@ -558,6 +600,7 @@ describe('useItem', () => {
     const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     const compRenders = createRenderStore();
@@ -586,6 +629,7 @@ describe('useItem', () => {
     const { serverMock, store } = createDefaultListQueryStore({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     const renders = createRenderStore();

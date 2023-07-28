@@ -24,6 +24,7 @@ describe('useMultipleItems', () => {
   const { serverMock, store: collectionStore } = createDefaultCollectionStore({
     randomTimeout: true,
     initialServerData: { '1': defaultTodo, '2': defaultTodo },
+    disableInitialDataInvalidation: false,
   });
   const renders1 = createRenderStore();
   const renders2 = createRenderStore();
@@ -211,6 +212,47 @@ describe('useMultipleItems isolated tests', () => {
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
       status: success -- payload: 2 -- data: {title:todo, completed:false}
+      status: refetching -- payload: 2 -- data: {title:todo, completed:false}
+      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      "
+    `);
+  });
+
+  test('with disableRefetchOnMount', async () => {
+    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
+      {
+        initialServerData: serverInitialData,
+        disableInitialDataInvalidation: false,
+      },
+    );
+
+    const renders1 = createRenderStore();
+    const renders2 = createRenderStore();
+
+    renderHook(() => {
+      const [item1, item2] = collectionStore.useMultipleItems(['1', '2'], {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders1.add(pick(item1, ['status', 'payload', 'data']));
+      renders2.add(pick(item2, ['status', 'payload', 'data']));
+    });
+
+    await serverMock.waitFetchIdle();
+
+    expect(renders1.renderCount()).toBeGreaterThan(0);
+
+    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: 1 -- data: null
+      status: success -- payload: 1 -- data: {title:todo, completed:false}
+      "
+    `);
+    expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: 2 -- data: null
+      status: success -- payload: 2 -- data: {title:todo, completed:false}
       "
     `);
   });
@@ -384,6 +426,7 @@ describe('useItem isolated tests', () => {
     const { serverMock, store } = createDefaultCollectionStore({
       initialServerData: serverInitialData,
       useLoadedSnapshot: true,
+      disableInitialDataInvalidation: true,
     });
 
     const renders = createRenderStore();
@@ -530,6 +573,7 @@ test.concurrent('RTU update works', async () => {
     initialServerData: { '1': defaultTodo, '2': defaultTodo },
     useLoadedSnapshot: true,
     emulateRTU: true,
+    disableInitialDataInvalidation: true,
     dynamicRTUThrottleMs() {
       return 300;
     },

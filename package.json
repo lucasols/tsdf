@@ -36,7 +36,7 @@
     "npm-publish": "./scripts/check-if-is-sync.sh && pnpm build && npm publish"
   },
   "devDependencies": {
-    "@lucasols/eslint-plugin-extended-lint": "^0.1.1",
+    "@lucasols/eslint-plugin-extended-lint": "^0.10.0",
     "@testing-library/jest-dom": "^5.16.5",
     "@testing-library/react": "^13.4.0",
     "@types/node": "^18.11.18",
@@ -65,9 +65,9 @@
   },
   "dependencies": {
     "evtmitter": "^0.3.1",
-    "immer": "^9.0.17",
+    "immer": "^10.0.2",
     "klona": "^2.0.6",
-    "t-state": "^8.3.0"
+    "t-state": "^8.8.0"
   },
   "peerDependencies": {
     "react": "^18.0.0",

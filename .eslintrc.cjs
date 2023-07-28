@@ -54,13 +54,11 @@ module.exports = {
     'no-restricted-syntax': [
       ERROR_IN_CI_ONLY,
       {
-        selector:
-          'CallExpression[callee.property.name="only"]',
+        selector: 'CallExpression[callee.property.name="only"]',
         message: 'No test.only',
       },
       {
-        selector:
-          'CallExpression[callee.property.name="todo"]',
+        selector: 'CallExpression[callee.property.name="todo"]',
         message: 'No test.todo',
       },
     ],
@@ -109,6 +107,10 @@ module.exports = {
     /* vitest */
     'vitest/expect-expect': ERROR_IN_CI_ONLY,
     'vitest/no-identical-title': ERROR_IN_CI,
+
+    /* extended-lint */
+    '@lucasols/extended-lint/no-unused-type-props-in-args': ERROR_IN_CI,
+    '@lucasols/extended-lint/no-commented-out-code': ERROR_IN_CI,
   },
   extends: [
     'eslint:recommended',

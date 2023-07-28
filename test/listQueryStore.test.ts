@@ -21,6 +21,7 @@ describe.concurrent('test helpers', () => {
   test('snapshot is equal to loaded state', async () => {
     const loaded = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
     });
 
     loaded.forceListUpdate(usersQueryParams);
@@ -30,6 +31,7 @@ describe.concurrent('test helpers', () => {
     const withUserSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(loaded.store.store.state).toEqual(
@@ -43,6 +45,7 @@ describe.concurrent('test helpers', () => {
     const withSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users', 'products'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(loaded.store.store.state).toEqual(withSnapshot.store.store.state);
@@ -51,6 +54,7 @@ describe.concurrent('test helpers', () => {
   test('snapshot with filter is equal to loaded state', async () => {
     const loaded = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
     });
 
     loaded.forceListUpdate({
@@ -62,6 +66,7 @@ describe.concurrent('test helpers', () => {
 
     const withUserSnapshot = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: {
         queries: [{ tableId: 'users', filters: { idIsGreaterThan: 2 } }],
       },
@@ -699,6 +704,7 @@ describe.concurrent('fetch item', () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     serverMock.produceData((draft) => {
@@ -1195,6 +1201,7 @@ describe('update state functions', () => {
     const { store } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(store.getItemState('users||20')).toBeUndefined();
@@ -1290,6 +1297,7 @@ describe('update state functions', () => {
   test('addItemToState with existing items and addItemToQueries', () => {
     const { store } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: { tables: ['users'] },
     });
 
@@ -1371,6 +1379,7 @@ describe('update state functions', () => {
   test('delete item state', () => {
     const { store } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: { tables: ['users'] },
     });
 
