@@ -91,7 +91,6 @@ export function createTestStore(
     uiInitialData = 0,
     dynamicRealtimeThrottleMs = getDynamicRealtimeThrottleMs,
   }: {
-    serverInitialData?: Data;
     uiInitialData?: Data;
     dynamicRealtimeThrottleMs?: (lastFetch: number) => number;
   } = {},
