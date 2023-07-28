@@ -25,10 +25,6 @@ module.exports = {
 
   rules: {
     'no-warning-comments': [ERROR_IN_CI, { terms: ['FIX:'] }],
-    '@lucasols/extended-lint/no-warning-comments': [
-      ERROR_IN_CI_ONLY,
-      { terms: ['FIX-LATER:', 'FIXLATER:'] },
-    ],
     'no-constant-binary-expression': ERROR_IN_CI,
     'object-shorthand': ERROR_IN_CI,
     'no-useless-rename': ERROR_IN_CI,
