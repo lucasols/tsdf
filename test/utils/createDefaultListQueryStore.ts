@@ -37,7 +37,7 @@ export function createDefaultListQueryStore({
   debug,
   disableFetchItemFn,
   dynamicRTUThrottleMs,
-  disableInitialDataInvalidation = true,
+  disableInitialDataInvalidation = false,
   debugRequests: debuFetchs,
   emulateRTU,
 }: {

@@ -526,6 +526,7 @@ describe('action types', () => {
   test('action with optmistic update and revalidation', async () => {
     const { serverMock, store: documentStore } = createDefaultDocumentStore({
       useLoadedSnapshot: true,
+      disableInitialDataInvalidation: true,
     });
 
     const renders: any[] = [];
@@ -611,6 +612,7 @@ describe('action types', () => {
   test('action with revalition and without optimistic update', async () => {
     const { serverMock, store: documentStore } = createDefaultDocumentStore({
       useLoadedSnapshot: true,
+      disableInitialDataInvalidation: true,
     });
 
     const renders: any[] = [];
@@ -657,6 +659,7 @@ describe('action types', () => {
 test('rollback on error', async () => {
   const { serverMock, store: documentStore } = createDefaultDocumentStore({
     useLoadedSnapshot: true,
+    disableInitialDataInvalidation: true,
   });
 
   const renders: any[] = [];

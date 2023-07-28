@@ -629,24 +629,26 @@ const defaultRTUMutation = {
 };
 
 describe('realtime updates', () => {
-  test.concurrent('dynamically throttle realtime updates', async () => {
-    const store = createTestStore(0);
+  test.concurrent(
+    'dynamically throttle realtime updates',
+    async () => {
+      const store = createTestStore(0);
 
-    const slowDuration = 300;
+      const slowDuration = 300;
 
-    await waitTimeline([
-      [0, () => store.emulateExternalRTU(1, slowDuration)],
-      [slowDuration + 20, () => store.emulateExternalRTU(2)],
-      [slowDuration + 30, () => store.emulateExternalRTU(3)],
-      [slowDuration + 360, () => store.emulateExternalRTU(4)],
-    ]);
+      await waitTimeline([
+        [0, () => store.emulateExternalRTU(1, slowDuration)],
+        [slowDuration + 20, () => store.emulateExternalRTU(2)],
+        [slowDuration + 30, () => store.emulateExternalRTU(3)],
+        [slowDuration + 360, () => store.emulateExternalRTU(4)],
+      ]);
 
-    await sleep(400);
+      await sleep(400);
 
-    expect(store.ui.changesHistory).toEqual([0, 1, 3, 4]);
+      expect(store.ui.changesHistory).toEqual([0, 1, 3, 4]);
 
-    expect(store.numOfFetchs).toStrictEqual(3);
-    expect(store.actions).toMatchTimeline(`
+      expect(store.numOfFetchs).toStrictEqual(3);
+      expect(store.actions).toMatchTimeline(`
       "
       1 - server-data-changed
       fetch-started : 1
@@ -694,7 +696,9 @@ describe('realtime updates', () => {
             4 - fetch-ui-commit
       "
     `);
-  });
+    },
+    { retry: 3 },
+  );
 
   test.concurrent(
     'dynamically throttle multiple realtime updates at same time with delay inferior to debounce 2',

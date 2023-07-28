@@ -40,7 +40,7 @@ export function createDefaultDocumentStore({
   useLoadedSnapshot,
   emulateRTU,
   dynamicRTUThrottleMs,
-  disableInitialDataInvalidation = true,
+  disableInitialDataInvalidation = false,
   debug,
 }: {
   initialServerData?: string;
@@ -116,7 +116,7 @@ export function createDefaultCollectionStore<
   useLoadedSnapshot,
   randomTimeout,
   emulateRTU,
-  disableInitialDataInvalidation = true,
+  disableInitialDataInvalidation = false,
   dynamicRTUThrottleMs,
   debug,
 }: {

@@ -21,6 +21,7 @@ describe.concurrent('test helpers', () => {
   test('snapshot is equal to loaded state', async () => {
     const loaded = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
     });
 
     loaded.forceListUpdate(usersQueryParams);
@@ -30,6 +31,7 @@ describe.concurrent('test helpers', () => {
     const withUserSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(loaded.store.store.state).toEqual(
@@ -43,6 +45,7 @@ describe.concurrent('test helpers', () => {
     const withSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users', 'products'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(loaded.store.store.state).toEqual(withSnapshot.store.store.state);
@@ -51,6 +54,7 @@ describe.concurrent('test helpers', () => {
   test('snapshot with filter is equal to loaded state', async () => {
     const loaded = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
     });
 
     loaded.forceListUpdate({
@@ -62,6 +66,7 @@ describe.concurrent('test helpers', () => {
 
     const withUserSnapshot = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: {
         queries: [{ tableId: 'users', filters: { idIsGreaterThan: 2 } }],
       },
@@ -699,6 +704,7 @@ describe.concurrent('fetch item', () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     serverMock.produceData((draft) => {
@@ -725,7 +731,10 @@ describe.concurrent('fetch item', () => {
   });
 
   test.concurrent('test helpers inital snapshot', async () => {
-    const loaded = createTestEnv({ initialServerData });
+    const loaded = createTestEnv({
+      initialServerData,
+      disableInitialDataInvalidation: true,
+    });
 
     loaded.store.scheduleItemFetch('lowPriority', 'users||1');
 
@@ -734,6 +743,7 @@ describe.concurrent('fetch item', () => {
     const withStateSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { items: ['users||1'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(withStateSnapshot.store.store.state).toEqual(
@@ -742,7 +752,10 @@ describe.concurrent('fetch item', () => {
   });
 
   test.concurrent('test helpers inital snapshot 2', async () => {
-    const loaded = createTestEnv({ initialServerData });
+    const loaded = createTestEnv({
+      initialServerData,
+      disableInitialDataInvalidation: true,
+    });
 
     loaded.store.scheduleItemFetch('lowPriority', 'users||1');
     loaded.store.scheduleListQueryFetch('lowPriority', {
@@ -754,6 +767,7 @@ describe.concurrent('fetch item', () => {
     const withStateSnapshot = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'], items: ['users||1'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(withStateSnapshot.store.store.state).toEqual(
@@ -765,6 +779,7 @@ describe.concurrent('fetch item', () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { items: ['users||1'] },
+      disableInitialDataInvalidation: true,
     });
 
     serverMock.produceData((draft) => {
@@ -881,6 +896,7 @@ describe.concurrent('fetch item', () => {
   test('load item with error', async () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
     });
 
     serverMock.setFetchError('error');
@@ -946,6 +962,7 @@ describe.concurrent('fetch item', () => {
     async () => {
       const { serverMock, store: listQueryStore } = createTestEnv({
         initialServerData,
+        disableInitialDataInvalidation: true,
       });
 
       listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
@@ -984,6 +1001,7 @@ describe.concurrent('fetch item', () => {
     const { serverMock, store: listQueryStore } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     listQueryStore.scheduleItemFetch('highPriority', 'users||1');
@@ -1025,6 +1043,7 @@ describe.concurrent('fetch item', () => {
     async () => {
       const { store: listQueryStore } = createTestEnv({
         initialServerData,
+        disableInitialDataInvalidation: true,
       });
 
       listQueryStore.scheduleListQueryFetch('highPriority', {
@@ -1195,6 +1214,7 @@ describe('update state functions', () => {
     const { store } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
+      disableInitialDataInvalidation: true,
     });
 
     expect(store.getItemState('users||20')).toBeUndefined();
@@ -1290,6 +1310,7 @@ describe('update state functions', () => {
   test('addItemToState with existing items and addItemToQueries', () => {
     const { store } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: { tables: ['users'] },
     });
 
@@ -1371,6 +1392,7 @@ describe('update state functions', () => {
   test('delete item state', () => {
     const { store } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: { tables: ['users'] },
     });
 

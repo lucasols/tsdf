@@ -114,6 +114,7 @@ test('refetch an query and after a few ms refetch an item', async () => {
   const { store, serverMock } = createTestEnv({
     initialServerData,
     useLoadedSnapshot: { tables: ['users'] },
+    disableInitialDataInvalidation: true,
   });
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
@@ -190,6 +191,7 @@ test('load a query and a few ms after load a item with different data', async ()
   const { store, serverMock } = createTestEnv({
     initialServerData,
     useLoadedSnapshot: { tables: ['users'] },
+    disableInitialDataInvalidation: true,
   });
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
@@ -245,6 +247,7 @@ test('load a item and a few ms after load a query with different data', async ()
   const { store, serverMock } = createTestEnv({
     initialServerData,
     useLoadedSnapshot: { tables: ['users'] },
+    disableInitialDataInvalidation: true,
   });
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
@@ -300,6 +303,7 @@ describe('syncMutationAndInvalidation', () => {
   test('invalidate related queries after item invalidation', async () => {
     const { store, serverMock } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: { tables: ['users', 'products'] },
     });
 
@@ -357,6 +361,7 @@ describe('syncMutationAndInvalidation', () => {
   test('invalidate related item and query after query invalidation', async () => {
     const { store, serverMock } = createTestEnv({
       initialServerData,
+      disableInitialDataInvalidation: true,
       useLoadedSnapshot: {
         tables: ['users', 'products'],
         queries: [{ tableId: 'users', filters: { idIsGreaterThan: 3 } }],
@@ -445,6 +450,7 @@ test('receive a RTU', async () => {
     initialServerData,
     useLoadedSnapshot: { tables: ['users', 'products'] },
     emulateRTU: true,
+    disableInitialDataInvalidation: true,
   });
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
