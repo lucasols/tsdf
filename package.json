@@ -33,7 +33,7 @@
     "test:run": "vitest run",
     "build": "pnpm test:run && pnpm lint && pnpm build:no-test",
     "build:no-test": "tsup --dts",
-    "npm-publish": "./scripts/check-if-is-sync.sh && pnpm build"
+    "pre-publish": "./scripts/check-if-is-sync.sh && pnpm build"
   },
   "devDependencies": {
     "@lucasols/eslint-plugin-extended-lint": "^0.10.0",
