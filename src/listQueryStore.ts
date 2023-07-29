@@ -21,6 +21,7 @@ import { findAndMap } from './utils/findAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo } from './utils/hooks';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
+import { sortBy } from './utils/sortBy';
 
 type QueryStatus = TSDFStatus | 'loadingMore';
 
@@ -152,6 +153,14 @@ export function newTSDFListQueryStore<
     /** @default 'end' */
     appendNewTo?: 'start' | 'end';
     invalidateQueries?: boolean;
+    sort?: {
+      sortBy: (
+        item: ItemState,
+        itemPayload: ItemPayload,
+      ) => string | number | (string | number)[];
+      /** @default 'asc' */
+      order?: 'asc' | 'desc' | ('asc' | 'desc')[];
+    };
   }[];
 }) {
   type State = TSFDListQueryState<ItemState, NError, QueryPayload, ItemPayload>;
@@ -1400,7 +1409,7 @@ export function newTSDFListQueryStore<
         });
 
         if (someItemWasUpdated) {
-          applyOptimistiFilters(itemKeys.map((i) => i.itemKey));
+          applyOptimisticListUpdates(itemKeys.map((i) => i.itemKey));
         }
 
         if (ifNothingWasUpdated && !someItemWasUpdated) {
@@ -1413,7 +1422,7 @@ export function newTSDFListQueryStore<
     return someItemWasUpdated;
   }
 
-  function applyOptimistiFilters(itemKeys: string[]) {
+  function applyOptimisticListUpdates(itemKeys: string[]) {
     if (!optimisticFilters) return;
 
     const queriesToInvalidate: QueryPayload[] = [];
@@ -1429,11 +1438,12 @@ export function newTSDFListQueryStore<
           filterItem,
           appendNewTo = 'end',
           invalidateQueries,
+          sort,
         } of optimisticFilters) {
           const relatedFilterQueries = getQueriesKeyArray(queries);
 
-          for (const { key, payload } of relatedFilterQueries) {
-            const queryState = draftState.queries[key];
+          for (const { key: queryKey, payload } of relatedFilterQueries) {
+            const queryState = draftState.queries[queryKey];
 
             if (filterItem) {
               const itemShouldBeIncluded = filterItem(item);
@@ -1442,7 +1452,7 @@ export function newTSDFListQueryStore<
 
               if (itemShouldBeIncluded) {
                 if (!queryState) {
-                  draftState.queries[key] = {
+                  draftState.queries[queryKey] = {
                     status: 'success',
                     items: [itemKey],
                     error: null,
@@ -1476,6 +1486,29 @@ export function newTSDFListQueryStore<
                   queryState.items.splice(itemIndex, 1);
                 }
               }
+            }
+
+            if (sort) {
+              if (!queryState) continue;
+
+              const queryHasItem = queryState.items.includes(itemKey);
+
+              if (!queryHasItem) continue;
+
+              queryState.items = sortBy(
+                queryState.items,
+                (itemId) => {
+                  const itemState = store.state.items[itemId];
+                  const itemPayload = store.state.itemQueries[itemId]?.payload;
+
+                  if (!itemState || !itemPayload) return Infinity;
+
+                  return sort.sortBy(itemState, itemPayload);
+                },
+                {
+                  order: sort.order,
+                },
+              );
             }
           }
         }
@@ -1545,7 +1578,7 @@ export function newTSDFListQueryStore<
         { action: { type: 'create-item-state', itemPayload } },
       );
 
-      applyOptimistiFilters([itemKey]);
+      applyOptimisticListUpdates([itemKey]);
     });
   }
 

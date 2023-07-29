@@ -46,7 +46,7 @@ export function createDefaultListQueryStore({
   disableInitialDataInvalidation = false,
   debugRequests: debuFetchs,
   emulateRTU,
-  optimisticFilters,
+  optimisticListUpdates,
   disableSyncInvalidation,
 }: {
   initialServerData?: Tables;
@@ -64,15 +64,9 @@ export function createDefaultListQueryStore({
   emulateRTU?: boolean;
   disableSyncInvalidation?: boolean;
 
-  optimisticFilters?: {
-    queries:
-      | ListQueryParams
-      | ListQueryParams[]
-      | ((query: ListQueryParams) => boolean);
-    filterItem: (item: Row) => boolean | null;
-    appendNewTo?: 'start' | 'end';
-    invalidateQueries?: true;
-  }[];
+  optimisticListUpdates?: Parameters<
+    typeof newTSDFListQueryStore<Row, any, ListQueryParams, string>
+  >[0]['optimisticListUpdates'];
 } = {}) {
   const serverMock = mockServerResource<Tables, Row[] | Row>({
     initialData: initialServerData,
@@ -205,7 +199,7 @@ export function createDefaultListQueryStore({
     ListQueryParams,
     string
   >({
-    optimisticListUpdates: optimisticFilters,
+    optimisticListUpdates,
     fetchListFn: async ({ tableId, filters }, size) => {
       let result = await serverMock.fetch(tableId);
       let hasMore = false;

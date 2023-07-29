@@ -85,7 +85,7 @@ expect.extend({
       expected,
     };
   },
-  toMatchSnapshotString(received, expected) {
+  toMatchInlineSnapshotString(received, expected) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     const normalizedExpected = dedent(expected);
     const normalizedReceived = format(received, {

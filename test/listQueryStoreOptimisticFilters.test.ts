@@ -9,7 +9,7 @@ const initialServerData = {
   users: range(1, 10).map((id, i) => ({
     id,
     name: `User ${id}`,
-    age: i % 2 === 0 ? 20 + 1 : 30 + 1,
+    age: i % 2 === 0 ? 20 + i : 30 + i,
     type: i % 2 === 0 ? ('admin' as const) : ('user' as const),
   })),
 };
@@ -27,7 +27,7 @@ test.concurrent('filter items optimistically to queries', () => {
     },
     disableInitialDataInvalidation: true,
 
-    optimisticFilters: [
+    optimisticListUpdates: [
       {
         queries: { tableId: 'users', filters: { type: 'admin' } },
         filterItem: (item) => item.type === 'admin',
@@ -53,7 +53,7 @@ test.concurrent('filter items optimistically to queries', () => {
   });
 
   expect(jsonFormatter(env.store.getQueriesState(() => true)))
-    .toMatchSnapshotString(`
+    .toMatchInlineSnapshotString(`
       "[
         {
           query: {
@@ -99,7 +99,7 @@ test.concurrent('filter items optimistically to queries', () => {
   });
 
   expect(jsonFormatter(env.store.getQueriesState(() => true)))
-    .toMatchSnapshotString(`
+    .toMatchInlineSnapshotString(`
       "[
         {
           query: {
@@ -150,7 +150,7 @@ test.concurrent('optimistically create a query if it not exist', () => {
     },
     disableInitialDataInvalidation: true,
 
-    optimisticFilters: [
+    optimisticListUpdates: [
       {
         queries: { tableId: 'users', filters: { type: 'admin' } },
         filterItem: (item) => item.type === 'admin',
@@ -166,7 +166,7 @@ test.concurrent('optimistically create a query if it not exist', () => {
   });
 
   expect(jsonFormatter(env.store.getQueriesState(() => true)))
-    .toMatchSnapshotString(`
+    .toMatchInlineSnapshotString(`
       "[
         {
           query: {
@@ -196,4 +196,103 @@ test.concurrent('optimistically create a query if it not exist', () => {
     `);
 });
 
-test.concurrent('optimistically sort items', async () => {});
+test.concurrent.only('optimistically sort items', () => {
+  const env = createTestEnv({
+    initialServerData,
+    disableSyncInvalidation: true,
+    useLoadedSnapshot: {
+      queries: [{ tableId: 'users', filters: { type: 'user' } }],
+    },
+    disableInitialDataInvalidation: true,
+
+    optimisticListUpdates: [
+      {
+        queries: (query) => query.filters?.type === 'user',
+        filterItem: (item) => item.type === 'user',
+      },
+      {
+        queries: () => true,
+        sort: {
+          sortBy: (item) => item.age!,
+          order: 'desc',
+        },
+      },
+    ],
+  });
+
+  env.store.addItemToState('users||20', {
+    id: 20,
+    name: 'User 20',
+    age: 19,
+    type: 'user',
+  });
+
+  expect(getSortSnapshot(env)).toMatchInlineSnapshot(`
+    "[
+      {
+        query: {
+          error: null,
+          status: 'success',
+          refetchOnMount: false,
+          wasLoaded: true,
+          payload: { tableId: 'users', filters: { type: 'user' } },
+          items:       [
+            { id: 10, name: 'User 10', age: 39, type: 'user' },
+            { id: 8, name: 'User 8', age: 37, type: 'user' },
+            { id: 6, name: 'User 6', age: 35, type: 'user' },
+            { id: 4, name: 'User 4', age: 33, type: 'user' },
+            { id: 2, name: 'User 2', age: 31, type: 'user' },
+            { id: 20, name: 'User 20', age: 19, type: 'user' },
+          ],
+          hasMore: false,
+        },
+        key: '[{\\"filters\\":{\\"type\\":\\"user\\"}},{\\"tableId\\":\\"users\\"}]',
+      },
+    ]"
+  `);
+
+  env.store.updateItemState('users||20', (item) => {
+    item.age = 34;
+  });
+
+  expect(getSortSnapshot(env)).toMatchInlineSnapshot(`
+    "[
+      {
+        query: {
+          error: null,
+          status: 'success',
+          refetchOnMount: false,
+          wasLoaded: true,
+          payload: { tableId: 'users', filters: { type: 'user' } },
+          items:       [
+            { id: 10, name: 'User 10', age: 39, type: 'user' },
+            { id: 8, name: 'User 8', age: 37, type: 'user' },
+            { id: 6, name: 'User 6', age: 35, type: 'user' },
+            { id: 20, name: 'User 20', age: 34, type: 'user' },
+            { id: 4, name: 'User 4', age: 33, type: 'user' },
+            { id: 2, name: 'User 2', age: 31, type: 'user' },
+          ],
+          hasMore: false,
+        },
+        key: '[{\\"filters\\":{\\"type\\":\\"user\\"}},{\\"tableId\\":\\"users\\"}]',
+      },
+    ]"
+  `);
+});
+
+function getSortSnapshot(env: ReturnType<typeof createTestEnv>): string {
+  return jsonFormatter(
+    env.store
+      .getQueriesState(() => true)
+      .map((q) => ({
+        ...q,
+        query: {
+          ...q.query,
+          items: q.query.items.map((id) => {
+            const item = env.store.getItemState(id);
+            return item!;
+          }),
+        },
+      })),
+  );
+}

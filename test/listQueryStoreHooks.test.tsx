@@ -399,7 +399,7 @@ describe('useQuery', () => {
 
     const { rerender } = render(<Comp />);
 
-    expect(renders.snapshot).toMatchSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
       "
       status: idle -- payload: undefined -- isLoading: false -- items: []
       "
@@ -409,7 +409,7 @@ describe('useQuery', () => {
 
     await serverMock.waitFetchIdle();
 
-    expect(renders.snapshot).toMatchSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
       "
       status: idle -- payload: undefined -- isLoading: false -- items: []
       ---
@@ -747,7 +747,7 @@ test.concurrent(
 
     await env.serverMock.waitFetchIdle(0, 1500);
 
-    expect(renders.snapshot).toMatchSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     status: success -- data: {id:1, name:User 1}
     status: refetching -- data: {id:1, name:User 1}
@@ -789,7 +789,7 @@ test.concurrent(
 
     await env.serverMock.waitFetchIdle(0, 1500);
 
-    expect(renders.snapshot).toMatchSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     status: success -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
     status: refetching -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
