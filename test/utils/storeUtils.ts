@@ -57,7 +57,7 @@ export function createDefaultDocumentStore({
 
   const store = newTSDFDocumentStore({
     fetchFn: serverMock.fetchWitoutSelector,
-    initialData: useLoadedSnapshot ? { hello: 'world' } : undefined,
+    getInitialData: () => (useLoadedSnapshot ? { hello: 'world' } : undefined),
     errorNormalizer: normalizeError,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     disableInitialDataInvalidation,
@@ -178,7 +178,7 @@ export function createDefaultCollectionStore<
     errorNormalizer: normalizeError,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     disableInitialDataInvalidation,
-    initialStateItems,
+    getInitialData: () => initialStateItems,
   });
 
   const startTime = Date.now();
@@ -459,10 +459,13 @@ export function waitElapsedTime() {
 
   return (waitUntil: number) => {
     return new Promise<void>((resolve) => {
-      const timeoutId = setTimeout(() => {
-        clearTimeout(timeoutId);
-        resolve();
-      }, waitUntil - (Date.now() - startTime));
+      const timeoutId = setTimeout(
+        () => {
+          clearTimeout(timeoutId);
+          resolve();
+        },
+        waitUntil - (Date.now() - startTime),
+      );
     });
   };
 }

@@ -32,7 +32,7 @@ export type TSDFUseDocumentReturn<Selected, NError> = {
 export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   debugName,
   fetchFn,
-  initialData,
+  getInitialData,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   lowPriorityThrottleMs,
   mediumPriorityThrottleMs,
@@ -42,7 +42,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 }: {
   debugName?: string;
   fetchFn: () => Promise<State>;
-  initialData?: State;
+  getInitialData?: () => State | undefined;
   disableInitialDataInvalidation?: boolean;
   errorNormalizer: (exception: unknown) => NError;
   disableRefetchOnMount?: boolean;
@@ -54,14 +54,18 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 
   const store = new Store<DocState>({
     debugName,
-    state: {
-      data: initialData ?? null,
-      error: null,
-      status: initialData ? 'success' : 'idle',
-      refetchOnMount:
-        !!initialData && !disableInitialDataInvalidation
-          ? 'lowPriority'
-          : false,
+    state: () => {
+      const initialData = getInitialData?.();
+
+      return {
+        data: initialData ?? null,
+        error: null,
+        status: initialData ? 'success' : 'idle',
+        refetchOnMount:
+          !!initialData && !disableInitialDataInvalidation
+            ? 'lowPriority'
+            : false,
+      };
     },
   });
 

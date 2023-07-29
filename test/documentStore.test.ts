@@ -102,7 +102,7 @@ test.concurrent('start with initialized data', () => {
 
   const documentStore = newTSDFDocumentStore({
     fetchFn: serverMock.fetchWitoutSelector,
-    initialData: { hello: 'initial data' },
+    getInitialData: () => ({ hello: 'initial data' }),
     errorNormalizer: normalizeError,
     disableInitialDataInvalidation: true,
   });
@@ -126,7 +126,7 @@ test.concurrent(
 
     const documentStore = newTSDFDocumentStore({
       fetchFn: serverMock.fetchWitoutSelector,
-      initialData: { hello: 'world' },
+      getInitialData: () => ({ hello: 'world' }),
       errorNormalizer: normalizeError,
     });
 

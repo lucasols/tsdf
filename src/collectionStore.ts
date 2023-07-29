@@ -70,7 +70,7 @@ export function newTSDFCollectionStore<
   errorNormalizer,
   disableInitialDataInvalidation,
   mediumPriorityThrottleMs,
-  initialStateItems,
+  getInitialData,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   dynamicRealtimeThrottleMs,
   getCollectionItemKey: filterCollectionItemObjKey,
@@ -80,7 +80,9 @@ export function newTSDFCollectionStore<
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | any[];
   errorNormalizer: (exception: unknown) => NError;
   disableRefetchOnMount?: boolean;
-  initialStateItems?: CollectionInitialStateItem<ItemPayload, ItemState>[];
+  getInitialData?: () =>
+    | CollectionInitialStateItem<ItemPayload, ItemState>[]
+    | undefined;
   disableInitialDataInvalidation?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
@@ -89,26 +91,32 @@ export function newTSDFCollectionStore<
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload, NError>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, NError>;
 
-  const initialState = {} as CollectionState;
-
-  if (initialStateItems) {
-    for (const item of initialStateItems) {
-      const itemKey = getItemKey(item.payload);
-
-      initialState[itemKey] = {
-        data: item.data,
-        error: null,
-        status: 'success',
-        payload: item.payload,
-        refetchOnMount: disableInitialDataInvalidation ? false : 'lowPriority',
-        wasLoaded: true,
-      };
-    }
-  }
-
   const store = new Store<CollectionState>({
     debugName,
-    state: initialState,
+    state: () => {
+      const initialState = {} as CollectionState;
+
+      const initialStateItems = getInitialData?.();
+
+      if (initialStateItems) {
+        for (const item of initialStateItems) {
+          const itemKey = getItemKey(item.payload);
+
+          initialState[itemKey] = {
+            data: item.data,
+            error: null,
+            status: 'success',
+            payload: item.payload,
+            refetchOnMount: disableInitialDataInvalidation
+              ? false
+              : 'lowPriority',
+            wasLoaded: true,
+          };
+        }
+      }
+
+      return initialState;
+    },
   });
 
   function getItemKey(params: ItemPayload): string {
