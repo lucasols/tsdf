@@ -196,7 +196,7 @@ test.concurrent('optimistically create a query if it not exist', () => {
     `);
 });
 
-test.concurrent.only('optimistically sort items', () => {
+test.concurrent('optimistically sort items', () => {
   const env = createTestEnv({
     initialServerData,
     disableSyncInvalidation: true,
@@ -227,7 +227,7 @@ test.concurrent.only('optimistically sort items', () => {
     type: 'user',
   });
 
-  expect(getSortSnapshot(env)).toMatchInlineSnapshot(`
+  expect(getSortSnapshot(env)).toMatchInlineSnapshotString(`
     "[
       {
         query: {
@@ -255,7 +255,7 @@ test.concurrent.only('optimistically sort items', () => {
     item.age = 34;
   });
 
-  expect(getSortSnapshot(env)).toMatchInlineSnapshot(`
+  expect(getSortSnapshot(env)).toMatchInlineSnapshotString(`
     "[
       {
         query: {
