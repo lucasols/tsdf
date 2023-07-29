@@ -4,7 +4,7 @@ import type { Assertion, AsymmetricMatchersContaining } from 'vitest';
 
 interface CustomMatchers<R = unknown> {
   toMatchTimeline(timeline: string): R;
-  toMatchSnapshotString(snapshot: string): R;
+  toMatchInlineSnapshotString(snapshot: string): R;
 }
 
 declare module 'vitest' {

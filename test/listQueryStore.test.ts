@@ -106,7 +106,7 @@ describe.concurrent('fetch query', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "hasMore": false,
@@ -143,7 +143,7 @@ describe.concurrent('fetch query', () => {
     listQueryStore.scheduleListQueryFetch('highPriority', usersQueryParams);
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "hasMore": false,
@@ -167,7 +167,7 @@ describe.concurrent('fetch query', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "hasMore": false,
@@ -186,7 +186,7 @@ describe.concurrent('fetch query', () => {
           "wasLoaded": true,
         }
       `);
-    expect(listQueryStore.getItemState('users||1')).toMatchSnapshotString(`
+    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "Updated User 1",
@@ -214,7 +214,7 @@ describe.concurrent('fetch query', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": {
             "message": "error",
@@ -242,7 +242,7 @@ describe.concurrent('fetch query', () => {
     forceListUpdate(usersQueryParams);
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "hasMore": false,
@@ -265,7 +265,7 @@ describe.concurrent('fetch query', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "hasMore": false,
@@ -302,7 +302,7 @@ describe.concurrent('fetch query', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": {
             "message": "error",
@@ -324,7 +324,7 @@ describe.concurrent('fetch query', () => {
     forceListUpdate(usersQueryParams);
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "hasMore": false,
@@ -341,7 +341,7 @@ describe.concurrent('fetch query', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "hasMore": false,
@@ -378,7 +378,7 @@ describe.concurrent('fetch query', () => {
 
     await serverMock.waitFetchIdle();
 
-    expect(listQueryStore.getQueryState(query)).toMatchSnapshotString(`
+    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
       {
         "error": null,
         "hasMore": true,
@@ -404,7 +404,7 @@ describe.concurrent('fetch query', () => {
     // load more
     listQueryStore.loadMore(query);
 
-    expect(listQueryStore.getQueryState(query)).toMatchSnapshotString(`
+    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
       {
         "error": null,
         "hasMore": true,
@@ -426,7 +426,7 @@ describe.concurrent('fetch query', () => {
 
     await serverMock.waitFetchIdle();
 
-    expect(listQueryStore.getQueryState(query)).toMatchSnapshotString(`
+    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
       {
         "error": null,
         "hasMore": true,
@@ -457,7 +457,7 @@ describe.concurrent('fetch query', () => {
 
     await serverMock.waitFetchIdle();
 
-    expect(listQueryStore.getQueryState(query)).toMatchSnapshotString(`
+    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
       {
         "error": null,
         "hasMore": true,
@@ -570,7 +570,7 @@ test.concurrent('ignore multiple load more made in sequence', async () => {
 
   await serverMock.waitFetchIdle();
 
-  expect(listQueryStore.getQueryState(query)?.items).toMatchSnapshotString(`
+  expect(listQueryStore.getQueryState(query)?.items).toMatchInlineSnapshotString(`
     [
       "products||1",
       "products||2",
@@ -590,7 +590,7 @@ test.concurrent('ignore multiple load more made in sequence', async () => {
 
   await serverMock.waitFetchIdle();
 
-  expect(listQueryStore.getQueryState(query)?.items).toMatchSnapshotString(`
+  expect(listQueryStore.getQueryState(query)?.items).toMatchInlineSnapshotString(`
     [
       "products||1",
       "products||2",
@@ -660,12 +660,12 @@ describe.concurrent('fetch item', () => {
 
     expect(
       listQueryStore.store.state.itemQueries['users||1'],
-    ).toMatchSnapshotString('undefined');
+    ).toMatchInlineSnapshotString('undefined');
 
     listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
       {
         "error": null,
         "payload": "users||1",
@@ -674,14 +674,14 @@ describe.concurrent('fetch item', () => {
         "wasLoaded": false,
       }
     `);
-    expect(listQueryStore.getItemState('users||1')).toMatchSnapshotString(
+    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(
       'undefined',
     );
 
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
       {
         "error": null,
         "payload": "users||1",
@@ -690,7 +690,7 @@ describe.concurrent('fetch item', () => {
         "wasLoaded": true,
       }
     `);
-    expect(listQueryStore.getItemState('users||1')).toMatchSnapshotString(`
+    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "User 1",
@@ -789,7 +789,7 @@ describe.concurrent('fetch item', () => {
     listQueryStore.scheduleItemFetch('highPriority', 'users||1');
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -798,7 +798,7 @@ describe.concurrent('fetch item', () => {
           "wasLoaded": true,
         }
       `);
-    expect(listQueryStore.getItemState('users||1')).toMatchSnapshotString(`
+    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "User 1",
@@ -808,7 +808,7 @@ describe.concurrent('fetch item', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -818,7 +818,7 @@ describe.concurrent('fetch item', () => {
         }
       `);
 
-    expect(listQueryStore.store.state.items).toMatchSnapshotString(`
+    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`
       {
         "users||1": {
           "id": 1,
@@ -843,7 +843,7 @@ describe.concurrent('fetch item', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": {
             "message": "error",
@@ -861,7 +861,7 @@ describe.concurrent('fetch item', () => {
     listQueryStore.scheduleItemFetch('highPriority', 'users||1');
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -874,7 +874,7 @@ describe.concurrent('fetch item', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -883,7 +883,7 @@ describe.concurrent('fetch item', () => {
           "wasLoaded": true,
         }
       `);
-    expect(listQueryStore.store.state.items).toMatchSnapshotString(`
+    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`
       {
         "users||1": {
           "id": 1,
@@ -906,7 +906,7 @@ describe.concurrent('fetch item', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": {
             "message": "error",
@@ -917,7 +917,7 @@ describe.concurrent('fetch item', () => {
           "wasLoaded": false,
         }
       `);
-    expect(listQueryStore.store.state.items).toMatchSnapshotString(`{}`);
+    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`{}`);
 
     // refetch with success
     serverMock.setFetchError(null);
@@ -925,7 +925,7 @@ describe.concurrent('fetch item', () => {
     listQueryStore.scheduleItemFetch('highPriority', 'users||1');
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -938,7 +938,7 @@ describe.concurrent('fetch item', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -947,7 +947,7 @@ describe.concurrent('fetch item', () => {
           "wasLoaded": true,
         }
       `);
-    expect(listQueryStore.store.state.items).toMatchSnapshotString(`
+    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`
       {
         "users||1": {
           "id": 1,
@@ -1007,7 +1007,7 @@ describe.concurrent('fetch item', () => {
     listQueryStore.scheduleItemFetch('highPriority', 'users||1');
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -1020,7 +1020,7 @@ describe.concurrent('fetch item', () => {
     await serverMock.waitFetchIdle();
 
     expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchSnapshotString(`
+      .toMatchInlineSnapshotString(`
         {
           "error": null,
           "payload": "users||1",
@@ -1030,7 +1030,7 @@ describe.concurrent('fetch item', () => {
         }
       `);
 
-    expect(listQueryStore.store.state.items['users||1']).toMatchSnapshotString(`
+    expect(listQueryStore.store.state.items['users||1']).toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "User 1",

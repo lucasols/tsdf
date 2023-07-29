@@ -10,8 +10,9 @@ import { normalizeError, StoreError } from './storeUtils';
 type Row = {
   id: number;
   name: string;
-  type?: string;
+  type?: 'admin' | 'user';
   archived?: boolean;
+  age?: number;
 };
 
 export type Tables = {
@@ -20,7 +21,12 @@ export type Tables = {
 
 export type ListQueryParams = {
   tableId: string;
-  filters?: { idIsGreaterThan?: number };
+  filters?: {
+    idIsGreaterThan?: number;
+    type?: 'admin' | 'user';
+    archived?: boolean;
+    ageRange?: [number, number];
+  };
 };
 
 export type DefaultListQueryState = TSFDListQueryState<
@@ -40,6 +46,8 @@ export function createDefaultListQueryStore({
   disableInitialDataInvalidation = false,
   debugRequests: debuFetchs,
   emulateRTU,
+  optimisticListUpdates,
+  disableSyncInvalidation,
 }: {
   initialServerData?: Tables;
   useLoadedSnapshot?: {
@@ -54,6 +62,11 @@ export function createDefaultListQueryStore({
   debugRequests?: never;
   disableInitialDataInvalidation?: boolean;
   emulateRTU?: boolean;
+  disableSyncInvalidation?: boolean;
+
+  optimisticListUpdates?: Parameters<
+    typeof newTSDFListQueryStore<Row, any, ListQueryParams, string>
+  >[0]['optimisticListUpdates'];
 } = {}) {
   const serverMock = mockServerResource<Tables, Row[] | Row>({
     initialData: initialServerData,
@@ -128,6 +141,21 @@ export function createDefaultListQueryStore({
             return item.id > query.filters.idIsGreaterThan;
           }
 
+          if (query.filters?.type) {
+            return item.type === query.filters.type;
+          }
+
+          if (query.filters?.archived) {
+            return item.archived === query.filters.archived;
+          }
+
+          if (query.filters?.ageRange) {
+            return (
+              item.age! >= query.filters.ageRange[0]! &&
+              item.age! <= query.filters.ageRange[1]!
+            );
+          }
+
           return true;
         }) ?? [];
 
@@ -171,6 +199,7 @@ export function createDefaultListQueryStore({
     ListQueryParams,
     string
   >({
+    optimisticListUpdates,
     fetchListFn: async ({ tableId, filters }, size) => {
       let result = await serverMock.fetch(tableId);
       let hasMore = false;
@@ -184,6 +213,22 @@ export function createDefaultListQueryStore({
 
       if (filters?.idIsGreaterThan) {
         result = result.filter((item) => item.id > filters.idIsGreaterThan!);
+      }
+
+      if (filters?.type) {
+        result = result.filter((item) => item.type === filters.type!);
+      }
+
+      if (filters?.archived) {
+        result = result.filter((item) => item.archived === filters.archived!);
+      }
+
+      if (filters?.ageRange) {
+        result = result.filter(
+          (item) =>
+            item.age! >= filters.ageRange![0]! &&
+            item.age! <= filters.ageRange![1]!,
+        );
       }
 
       return {
@@ -207,17 +252,19 @@ export function createDefaultListQueryStore({
         },
     errorNormalizer: normalizeError,
     defaultQuerySize,
-    initialData,
+    getInitialData: () => initialData,
     disableInitialDataInvalidation,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
-    syncMutationsAndInvalidations: {
-      syncItemAndQuery(itemId, query) {
-        return query.tableId === itemId.split('||')[0];
-      },
-      syncQueries(query1, query2) {
-        return query1.tableId === query2.tableId;
-      },
-    },
+    syncMutationsAndInvalidations: disableSyncInvalidation
+      ? undefined
+      : {
+          syncItemAndQuery(itemId, query) {
+            return query.tableId === itemId.split('||')[0];
+          },
+          syncQueries(query1, query2) {
+            return query1.tableId === query2.tableId;
+          },
+        },
   });
 
   if (debug as any) {

@@ -587,7 +587,7 @@ test.concurrent('RTU update works', async () => {
 
   await sleep(100);
 
-  expect(env.store.store.state).toMatchSnapshotString(`
+  expect(env.store.store.state).toMatchInlineSnapshotString(`
     {
       "1": {
         "data": {
@@ -635,7 +635,7 @@ test.concurrent('RTU update works', async () => {
     env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
   ).toBeGreaterThanOrEqual(300);
 
-  expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
+  expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
     "
     status: success -- data: {title:todo, completed:false}
     status: refetching -- data: {title:todo, completed:false}
@@ -659,7 +659,7 @@ test.concurrent('fetch error then mount component without error', async () => {
 
   await env.serverMock.waitFetchIdle(200);
 
-  expect(env.store.store.state).toMatchSnapshotString(`
+  expect(env.store.store.state).toMatchInlineSnapshotString(`
       {
         "1": {
           "data": null,
@@ -687,7 +687,7 @@ test.concurrent('fetch error then mount component without error', async () => {
 
   await env.serverMock.waitFetchIdle();
 
-  expect(renders.snapshot).toMatchSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshotString(`
       "
       status: error -- data: null
       status: loading -- data: null
@@ -720,7 +720,7 @@ test.concurrent('initial data is invalidated on first load', async () => {
 
   await env.serverMock.waitFetchIdle(0, 1500);
 
-  expect(renders.snapshot).toMatchSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     status: success -- data: {title:todo, completed:false}
     status: refetching -- data: {title:todo, completed:false}
@@ -847,7 +847,7 @@ test.concurrent('emulate load resource during its mutation', async () => {
 
   await sleep(1000);
 
-  expect(renders.snapshot).toMatchSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     status: loading -- data: null -- error: null
     status: success -- data: {title:todo, completed:false} -- error: null

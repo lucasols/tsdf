@@ -816,7 +816,7 @@ test.concurrent('RTU update works', async () => {
 
   await sleep(100);
 
-  expect(env.store.store.state).toMatchSnapshotString(`
+  expect(env.store.store.state).toMatchInlineSnapshotString(`
     {
       "data": {
         "hello": "world",
@@ -844,7 +844,7 @@ test.concurrent('RTU update works', async () => {
 
   await env.serverMock.waitFetchIdle(0, 1500);
 
-  expect(renders.getSnapshot({ arrays: 'all' })).toMatchSnapshotString(`
+  expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
     "
     status: success -- data: {hello:world}
     status: refetching -- data: {hello:world}
@@ -883,7 +883,7 @@ test.concurrent('initial data is invalidated on first load', async () => {
 
   await env.serverMock.waitFetchIdle(0, 1500);
 
-  expect(renders.snapshot).toMatchSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     status: success -- data: {hello:world}
     status: refetching -- data: {hello:world}
