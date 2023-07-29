@@ -74,6 +74,7 @@ export function newTSDFCollectionStore<
   disableRefetchOnMount: globalDisableRefetchOnMount,
   dynamicRealtimeThrottleMs,
   getCollectionItemKey: filterCollectionItemObjKey,
+  onInvalidate,
 }: {
   debugName?: string;
   fetchFn: (params: ItemPayload) => Promise<ItemState>;
@@ -87,6 +88,11 @@ export function newTSDFCollectionStore<
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  onInvalidate?: (props: {
+    itemState: ItemState;
+    payload: ItemPayload;
+    priority: FetchType;
+  }) => void;
 }) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload, NError>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, NError>;
@@ -322,6 +328,14 @@ export function newTSDFCollectionStore<
 
       invalidationWasTriggered.delete(itemKey);
       storeEvents.emit('invalidateData', { priority, itemKey });
+
+      if (item.data) {
+        onInvalidate?.({
+          priority,
+          payload: item.payload,
+          itemState: item.data,
+        });
+      }
     }
   }
 
