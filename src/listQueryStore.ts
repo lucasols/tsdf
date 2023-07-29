@@ -122,7 +122,9 @@ export function newTSDFListQueryStore<
   mediumPriorityThrottleMs,
   dynamicRealtimeThrottleMs,
   syncMutationsAndInvalidations,
-  optimisticListUpdates: optimisticFilters,
+  optimisticListUpdates,
+  onInvalidateItem,
+  onInvalidateQuery,
 }: {
   debugName?: string;
   fetchListFn: (
@@ -162,6 +164,12 @@ export function newTSDFListQueryStore<
       order?: 'asc' | 'desc' | ('asc' | 'desc')[];
     };
   }[];
+  onInvalidateQuery?: (query: QueryPayload, priority: FetchType) => void;
+  onInvalidateItem?: (props: {
+    itemState: ItemState;
+    payload: ItemPayload;
+    priority: FetchType;
+  }) => void;
 }) {
   type State = TSFDListQueryState<ItemState, NError, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<NError, QueryPayload>;
@@ -609,7 +617,7 @@ export function newTSDFListQueryStore<
   ) {
     const queriesKey = getQueriesKeyArray(queryPayload);
 
-    for (const { key } of queriesKey) {
+    for (const { key, payload } of queriesKey) {
       const queryState = store.state.queries[key];
 
       if (!queryState) continue;
@@ -634,6 +642,8 @@ export function newTSDFListQueryStore<
 
       queryInvalidationWasTriggered.delete(key);
       storeEvents.emit('invalidateQuery', { priority, queryKey: key });
+
+      onInvalidateQuery?.(payload, priority);
     }
 
     if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
@@ -1050,7 +1060,7 @@ export function newTSDFListQueryStore<
 
     const itemsKey = getItemsKeyArray(itemId);
 
-    for (const { itemKey } of itemsKey) {
+    for (const { itemKey, payload } of itemsKey) {
       const item = store.state.itemQueries[itemKey];
 
       if (!item) continue;
@@ -1075,6 +1085,18 @@ export function newTSDFListQueryStore<
 
       itemInvalidationWasTriggered.delete(itemKey);
       storeEvents.emit('invalidateItem', { priority, itemKey });
+
+      if (onInvalidateItem) {
+        const itemState = store.state.items[itemKey];
+
+        if (itemState) {
+          onInvalidateItem({
+            priority,
+            itemState,
+            payload,
+          });
+        }
+      }
     }
 
     if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
@@ -1423,7 +1445,7 @@ export function newTSDFListQueryStore<
   }
 
   function applyOptimisticListUpdates(itemKeys: string[]) {
-    if (!optimisticFilters) return;
+    if (!optimisticListUpdates) return;
 
     const queriesToInvalidate: QueryPayload[] = [];
 
@@ -1439,7 +1461,7 @@ export function newTSDFListQueryStore<
           appendNewTo = 'end',
           invalidateQueries,
           sort,
-        } of optimisticFilters) {
+        } of optimisticListUpdates) {
           const relatedFilterQueries = getQueriesKeyArray(queries);
 
           for (const { key: queryKey, payload } of relatedFilterQueries) {

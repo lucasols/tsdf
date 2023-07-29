@@ -39,6 +39,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   dynamicRealtimeThrottleMs,
   disableInitialDataInvalidation,
   errorNormalizer,
+  onInvalidate,
 }: {
   debugName?: string;
   fetchFn: () => Promise<State>;
@@ -49,6 +50,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  onInvalidate?: (priority: FetchType) => void;
 }) {
   type DocState = TSDFDocumentStoreState<State, NError>;
 
@@ -159,6 +161,8 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     store.setKey('refetchOnMount', priority, { action: 'invalidate-data' });
     invalidationWasTriggered = false;
     storeEvents.emit('invalidateData', priority);
+
+    onInvalidate?.(priority);
   }
 
   function useDocument<Selected = State | null>({

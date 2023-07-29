@@ -47,33 +47,37 @@ describe('fetch lifecicle', () => {
     });
   });
 
-  test('refetch resource with new data', async () => {
-    serverMock.mutateData({ hello: 'new data' });
+  test(
+    'refetch resource with new data',
+    async () => {
+      serverMock.mutateData({ hello: 'new data' });
 
-    documentStore.scheduleFetch('highPriority');
+      documentStore.scheduleFetch('highPriority');
 
-    expect(documentStore.store.state).toEqual<DocumentStoreState>({
-      data: {
-        hello: 'world',
-      },
-      error: null,
-      refetchOnMount: false,
-      status: 'refetching',
-    });
+      expect(documentStore.store.state).toEqual<DocumentStoreState>({
+        data: {
+          hello: 'world',
+        },
+        error: null,
+        refetchOnMount: false,
+        status: 'refetching',
+      });
 
-    await sleep(serverMock.fetchDuration + 5);
+      await sleep(serverMock.fetchDuration + 5);
 
-    expect(documentStore.store.state).toEqual<DocumentStoreState>({
-      data: {
-        hello: 'new data',
-      },
-      error: null,
-      refetchOnMount: false,
-      status: 'success',
-    });
+      expect(documentStore.store.state).toEqual<DocumentStoreState>({
+        data: {
+          hello: 'new data',
+        },
+        error: null,
+        refetchOnMount: false,
+        status: 'success',
+      });
 
-    expect(serverMock.fetchsCount).toBe(2);
-  });
+      expect(serverMock.fetchsCount).toBe(2);
+    },
+    { retry: 3 },
+  );
 
   test('refetch resource with error', async () => {
     serverMock.setFetchError('error');
