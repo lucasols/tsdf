@@ -43,7 +43,7 @@
     {
       "label": "bump version and deploy",
       "type": "shell",
-      "command": "pnpm run npm-publish && pnpm version ${input:version} && pnpm publish",
+      "command": "pnpm run pre-publish && pnpm version ${input:version} && pnpm publish",
       "problemMatcher": []
     }
   ],
