@@ -59,6 +59,15 @@ export type CollectionInitialStateItem<
   data: ItemState;
 };
 
+export type OnCollectionItemInvalidate<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = (props: {
+  itemState: ItemState;
+  payload: ItemPayload;
+  priority: FetchType;
+}) => void;
+
 export function newTSDFCollectionStore<
   ItemState extends ValidStoreState,
   NError,
@@ -88,11 +97,7 @@ export function newTSDFCollectionStore<
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-  onInvalidate?: (props: {
-    itemState: ItemState;
-    payload: ItemPayload;
-    priority: FetchType;
-  }) => void;
+  onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
 }) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload, NError>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, NError>;

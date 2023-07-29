@@ -104,6 +104,20 @@ export type ListQueryStoreInitialData<
 
 const noFetchFnError = 'No fetchItemFn was provided';
 
+export type OnListQueryInvalidate<QueryPayload extends ValidPayload> = (
+  query: QueryPayload,
+  priority: FetchType,
+) => void;
+
+export type OnListQueryItemInvalidate<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = (props: {
+  itemState: ItemState;
+  payload: ItemPayload;
+  priority: FetchType;
+}) => void;
+
 export function newTSDFListQueryStore<
   ItemState extends ValidStoreState,
   NError,
@@ -164,12 +178,8 @@ export function newTSDFListQueryStore<
       order?: 'asc' | 'desc' | ('asc' | 'desc')[];
     };
   }[];
-  onInvalidateQuery?: (query: QueryPayload, priority: FetchType) => void;
-  onInvalidateItem?: (props: {
-    itemState: ItemState;
-    payload: ItemPayload;
-    priority: FetchType;
-  }) => void;
+  onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
+  onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
 }) {
   type State = TSFDListQueryState<ItemState, NError, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<NError, QueryPayload>;

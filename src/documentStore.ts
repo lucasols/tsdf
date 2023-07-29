@@ -29,6 +29,8 @@ export type TSDFUseDocumentReturn<Selected, NError> = {
   isLoading: boolean;
 };
 
+export type OnDocumentInvalidate = (priority: FetchType) => void;
+
 export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   debugName,
   fetchFn,
@@ -50,7 +52,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-  onInvalidate?: (priority: FetchType) => void;
+  onInvalidate?: OnDocumentInvalidate;
 }) {
   type DocState = TSDFDocumentStoreState<State, NError>;
 

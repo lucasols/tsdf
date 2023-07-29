@@ -3,6 +3,7 @@ export {
   TSDFDocumentStore,
   TSDFDocumentStoreState,
   TSDFUseDocumentReturn,
+  OnDocumentInvalidate,
 } from './documentStore';
 export {
   newTSDFCollectionStore,
@@ -11,6 +12,7 @@ export {
   CollectionInitialStateItem,
   TSFDCollectionItem,
   TSFDUseCollectionItemReturn,
+  OnCollectionItemInvalidate,
 } from './collectionStore';
 export {
   newTSDFListQueryStore,
@@ -22,6 +24,8 @@ export {
   TSFDUseListQueryReturn,
   TSFDUseListItemReturn,
   FetchListFnReturn,
+  OnListQueryInvalidate,
+  OnListQueryItemInvalidate,
   FetchListFnReturnItem,
 } from './listQueryStore';
 export { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
