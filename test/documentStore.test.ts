@@ -63,7 +63,7 @@ describe('fetch lifecicle', () => {
         status: 'refetching',
       });
 
-      await sleep(serverMock.fetchDuration + 5);
+      await sleep(serverMock.fetchDuration + 25);
 
       expect(documentStore.store.state).toEqual<DocumentStoreState>({
         data: {
