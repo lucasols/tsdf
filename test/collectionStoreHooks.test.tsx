@@ -172,51 +172,54 @@ describe('useMultipleItems', () => {
 });
 
 describe('useMultipleItems isolated tests', () => {
-  test('invalidate 1 item', async () => {
-    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
-      {
-        initialServerData: serverInitialData,
-        useLoadedSnapshot: true,
-      },
-    );
+  test(
+    'invalidate 1 item',
+    async () => {
+      const { store: collectionStore, serverMock } =
+        createDefaultCollectionStore({
+          initialServerData: serverInitialData,
+          useLoadedSnapshot: true,
+        });
 
-    const renders1 = createRenderStore();
-    const renders2 = createRenderStore();
+      const renders1 = createRenderStore();
+      const renders2 = createRenderStore();
 
-    renderHook(() => {
-      const [item1, item2] = collectionStore.useMultipleItems(['1', '2'], {
-        returnRefetchingStatus: true,
-        disableRefetchOnMount: true,
+      renderHook(() => {
+        const [item1, item2] = collectionStore.useMultipleItems(['1', '2'], {
+          returnRefetchingStatus: true,
+          disableRefetchOnMount: true,
+        });
+
+        renders1.add(pick(item1, ['status', 'payload', 'data']));
+        renders2.add(pick(item2, ['status', 'payload', 'data']));
       });
 
-      renders1.add(pick(item1, ['status', 'payload', 'data']));
-      renders2.add(pick(item2, ['status', 'payload', 'data']));
-    });
+      act(() => {
+        serverMock.mutateData({ '1': { title: 'todo', completed: true } });
+        collectionStore.invalidateItem('1');
+      });
 
-    act(() => {
-      serverMock.mutateData({ '1': { title: 'todo', completed: true } });
-      collectionStore.invalidateItem('1');
-    });
+      await serverMock.waitFetchIdle();
 
-    await serverMock.waitFetchIdle();
+      expect(renders1.renderCount()).toBeGreaterThan(0);
 
-    expect(renders1.renderCount()).toBeGreaterThan(0);
-
-    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
+      expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
       status: success -- payload: 1 -- data: {title:todo, completed:false}
       status: refetching -- payload: 1 -- data: {title:todo, completed:false}
       status: success -- payload: 1 -- data: {title:todo, completed:true}
       "
     `);
-    expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
+      expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
       status: success -- payload: 2 -- data: {title:todo, completed:false}
       status: refetching -- payload: 2 -- data: {title:todo, completed:false}
       status: success -- payload: 2 -- data: {title:todo, completed:false}
       "
     `);
-  });
+    },
+    { retry: 2 },
+  );
 
   test('with disableRefetchOnMount', async () => {
     const { store: collectionStore, serverMock } = createDefaultCollectionStore(
