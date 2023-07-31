@@ -24,7 +24,7 @@ specifiers:
   pretty-format: ^29.6.2
   react: ^18.2.0
   react-dom: ^18.2.0
-  t-state: ^8.8.0
+  t-state: ^8.9.0
   tiny-glob: ^0.2.9
   tsm: ^2.3.0
   tsup: ^7.1.0
@@ -36,7 +36,7 @@ dependencies:
   evtmitter: 0.3.3_biqbaboplfbrettd7655fr4n2y
   immer: 10.0.2
   klona: 2.0.6
-  t-state: 8.8.0_biqbaboplfbrettd7655fr4n2y
+  t-state: 8.9.0_biqbaboplfbrettd7655fr4n2y
 
 devDependencies:
   '@lucasols/eslint-plugin-extended-lint': 0.10.0_7haavtekmro7ptbnqmctjaodju
@@ -2973,8 +2973,8 @@ packages:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
     dev: true
 
-  /t-state/8.8.0_biqbaboplfbrettd7655fr4n2y:
-    resolution: {integrity: sha512-cGb48wulJyYbx+s5udm16qi/E47WaMtL4egteBlWyIqNsr8Tj/h4hiuDrFLqcVw0HM+XOD2ynVnvZqh969brpQ==}
+  /t-state/8.9.0_biqbaboplfbrettd7655fr4n2y:
+    resolution: {integrity: sha512-1VQxCt4LL7ItK98Y5WoYZMPGwMfI6vHKmauWmW/lD+tAfbuQajxw0VLI30jrpx5htWPvxkmwaZeV+TUxDFFAKw==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       react: ^18.0.0
