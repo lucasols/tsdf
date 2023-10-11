@@ -11,7 +11,7 @@ export function useListItemIsLoading({
   loadItemFallback,
   itemId,
 }: {
-  itemId: string;
+  itemId: string | null | false;
   isRefetching: boolean;
   isLoading: boolean;
   isNotFound: boolean;
@@ -30,6 +30,7 @@ export function useListItemIsLoading({
     !isRefetching &&
     !willBeRefetched &&
     !ignoreSetWillBeRefetched.current &&
+    itemId &&
     !itemWasRefetched.has(itemId)
   ) {
     setWillBeRefetched(true);
@@ -40,7 +41,8 @@ export function useListItemIsLoading({
 
   useEffect(() => {
     if (isRefetching) {
-      itemWasRefetched.add(itemId);
+      if (itemId) itemWasRefetched.add(itemId);
+
       resetWillBeRefechedTimeout.clear();
       callFallbackLoadItemTimeout.clear();
       setWillBeRefetched(false);
