@@ -18,5 +18,5 @@
     "forceConsistentCasingInFileNames": true,
     "strictPropertyInitialization": true
   },
-  "include": ["src/*", "test/**/*", "types/**/*"]
+  "include": ["src/**/*", "test/**/*", "types/**/*"]
 }
