@@ -140,7 +140,7 @@ test('reset loading if resource is never refetched', async () => {
   `);
 });
 
-test.concurrent('load a new item in the component', async () => {
+test.concurrent('load a new item in the component', () => {
   const storeState = new Store({
     state: {
       isLoading: false,
