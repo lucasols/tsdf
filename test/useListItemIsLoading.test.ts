@@ -119,7 +119,7 @@ test('reset loading if resource is never refetched', async () => {
 
   const rendersResult = createRenderStore();
 
-  renderHook(async () => {
+  renderHook(() => {
     const itemResourceState = storeState.useState();
 
     const isLoadingItem = useListItemIsLoading(itemResourceState);
@@ -140,7 +140,7 @@ test('reset loading if resource is never refetched', async () => {
   `);
 });
 
-test.concurrent('load a new item in the component', () => {
+test.concurrent('load a new item in the component', async () => {
   const storeState = new Store({
     state: {
       isLoading: false,
