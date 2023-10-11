@@ -4,24 +4,11 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-empty-interface */
 /* eslint-disable @typescript-eslint/no-namespace */
-import matchers, {
-  TestingLibraryMatchers,
-} from '@testing-library/jest-dom/matchers';
 import { format } from 'pretty-format';
 import { expect } from 'vitest';
 import { filterAndMap } from '../../src/utils/filterAndMap';
 import { createOrVariations } from '../utils/createOrVariations';
 import { dedent } from '../utils/dedent';
-
-declare global {
-  namespace Vi {
-    interface JestAssertion<T = any>
-      extends jest.Matchers<void, T>,
-        TestingLibraryMatchers<T, void> {}
-  }
-}
-
-expect.extend(matchers);
 
 expect.extend({
   toMatchTimeline(received, expected) {

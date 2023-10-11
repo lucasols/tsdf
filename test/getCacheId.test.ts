@@ -9,5 +9,5 @@ test('getCacheId ignore undefined obj values', () => {
       c: 3,
       und: undefined,
     }),
-  ).toMatchInlineSnapshot('"[{\\"a\\":1},{\\"c\\":3}]"');
+  ).toMatchInlineSnapshot('"[{"a":1},{"c":3}]"');
 });
