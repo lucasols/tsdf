@@ -50,7 +50,7 @@ export function createFetchOrquestrator<T>({
   let mutationIsInProgress = false;
   let lastFetchStartTime = 0;
   let lastFetchDuration = 0;
-  let onMutationEnd: (() => void)[] = [];
+  let onMutationEnd: (() => void) | null = null;
   let lastFetchWasAborted = false;
   let abortFetchsBeforeOrEqual = 0;
 
@@ -86,9 +86,9 @@ export function createFetchOrquestrator<T>({
     if (id === lastMutationIdStarted) {
       mutationIsInProgress = false;
 
-      if (onMutationEnd.length > 0) {
-        onMutationEnd.forEach((cb) => cb());
-        onMutationEnd = [];
+      if (onMutationEnd) {
+        onMutationEnd();
+        onMutationEnd = null;
       }
 
       flushScheduledFetch();
@@ -292,14 +292,14 @@ export function createFetchOrquestrator<T>({
 
       return true;
     } else if (mutationIsInProgress) {
-      onMutationEnd.push(() => {
+      onMutationEnd = () => {
         const added = addDelayedRTU(Date.now(), params);
 
         if (!added) {
           on?.('scheduled-rt-fetch-started');
           scheduleFetch('highPriority', params);
         }
-      });
+      };
 
       return true;
     } else {

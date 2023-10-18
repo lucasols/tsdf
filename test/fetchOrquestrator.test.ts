@@ -1009,4 +1009,52 @@ describe('realtime updates', () => {
     `);
     },
   );
+
+  test.concurrent(
+    'mutation that triggers multiple rtu updates',
+    async () => {
+      const store = createTestStore(0, {
+        dynamicRealtimeThrottleMs() {
+          return 300;
+        },
+      });
+
+      await waitTimeline(
+        [
+          [0, () => store.fetch('lowPriority', 20)],
+          [110, () => action(store, 1, { duration: 400 })],
+          [110 + 200, () => store.fetch('realtimeUpdate')],
+          [110 + 200, () => store.fetch('realtimeUpdate')],
+          [110 + 200, () => store.fetch('realtimeUpdate')],
+          [110 + 200, () => store.fetch('realtimeUpdate')],
+          [110 + 200, () => store.fetch('realtimeUpdate')],
+          [110 + 200, () => store.fetch('realtimeUpdate')],
+        ],
+        900,
+      );
+
+      expect(store.actions).toMatchTimeline(`
+        "
+        fetch-started : 1
+        fetch-finished : 1
+        fetch-ui-commit
+        1 - mutation-started
+        rt-fetch-scheduled
+        rt-fetch-scheduled
+        rt-fetch-scheduled
+        rt-fetch-scheduled
+        rt-fetch-scheduled
+        rt-fetch-scheduled
+        1 - mutation-finished
+        scheduled-rt-fetch-started : 2
+        1 - fetch-finished : 2
+        1 - fetch-ui-commit
+        "
+      `);
+
+      expect(store.ui.changesHistory).toEqual([0, 1]);
+
+      expect(store.numOfFetchs).toEqual(2);
+    },
+  );
 });
