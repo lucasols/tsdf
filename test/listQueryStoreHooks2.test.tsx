@@ -16,7 +16,7 @@ const initialServerData: Tables = {
   orders: range(1, 50).map((id) => ({ id, name: `Order ${id}` })),
 };
 
-export const createTestEnv = createDefaultListQueryStore;
+const createTestEnv = createDefaultListQueryStore;
 
 const CompWithItemLoaded = ({
   disableRefetchOnMount = true,

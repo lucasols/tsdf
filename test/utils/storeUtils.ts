@@ -309,6 +309,18 @@ export function createRenderStore() {
         }
       }
 
+      if (render._mark) {
+        let mark = `\n>>> ${String(render._mark)}`;
+
+        const nextRender = rendersToUse[i + 1];
+
+        if (nextRender && !nextRender._mark && !nextRender._lastSnapshotMark) {
+          mark = `${mark}\n`;
+        }
+
+        return mark;
+      }
+
       let line = '';
 
       for (const [key, _value] of Object.entries(render)) {
@@ -349,6 +361,10 @@ export function createRenderStore() {
     }).join('\n')}\n`;
   }
 
+  function addMark(label: string) {
+    add({ _mark: label });
+  }
+
   return {
     add,
     reset,
@@ -364,6 +380,7 @@ export function createRenderStore() {
     get rendersTime() {
       return rendersTime;
     },
+    addMark,
   };
 }
 
