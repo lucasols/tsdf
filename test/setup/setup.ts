@@ -77,6 +77,7 @@ expect.extend({
     const normalizedExpected = dedent(expected);
     const normalizedReceived = format(received, {
       printBasicPrototype: false,
+      escapeString: false,
     });
 
     return {

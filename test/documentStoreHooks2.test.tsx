@@ -1,9 +1,11 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { renderHook } from '@testing-library/react';
 import { expect, test } from 'vitest';
 import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
-import { createDefaultDocumentStore } from './utils/storeUtils';
+import {
+  createDefaultDocumentStore,
+  createRenderStore,
+} from './utils/storeUtils';
 
 const createTestEnv = createDefaultDocumentStore;
 
@@ -61,3 +63,74 @@ test.concurrent('emulate realidateOnWindowFocus behaviour', async () => {
 
   expect(env.serverMock.fetchsCount).toBe(3);
 });
+
+test.concurrent(
+  'disable should keep the selected data and not be affected by invalidation',
+  async () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+    });
+
+    const renders = createRenderStore();
+
+    const { rerender } = renderHook(
+      ({ disabled }: { disabled: boolean }) => {
+        const result = env.store.useDocument({
+          isOffScreen: disabled,
+          returnRefetchingStatus: true,
+          disableRefetchOnMount: true,
+        });
+
+        renders.add(result);
+      },
+      { initialProps: { disabled: false } },
+    );
+
+    await sleep(100);
+
+    renders.addMark('first update (✅)');
+    env.serverMock.mutateData({ hello: '✅' });
+
+    await sleep(200);
+
+    renders.addMark('set disabled');
+    rerender({ disabled: true });
+
+    await sleep(100);
+
+    renders.addMark('ignored update (❌)');
+    env.serverMock.mutateData({ hello: '❌' });
+
+    await sleep(200);
+
+    renders.addMark('enabled again');
+    rerender({ disabled: false });
+
+    await sleep(200);
+
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
+      "
+      data: {hello:world} -- error: null -- status: success -- isLoading: false
+
+      >>> first update (✅)
+
+      data: {hello:world} -- error: null -- status: refetching -- isLoading: false
+      data: {hello:✅} -- error: null -- status: success -- isLoading: false
+
+      >>> set disabled
+
+      data: {hello:✅} -- error: null -- status: success -- isLoading: false
+
+      >>> ignored update (❌)
+
+      >>> enabled again
+
+      data: {hello:✅} -- error: null -- status: success -- isLoading: false
+      data: {hello:✅} -- error: null -- status: refetching -- isLoading: false
+      data: {hello:❌} -- error: null -- status: success -- isLoading: false
+      "
+    `);
+  },
+);

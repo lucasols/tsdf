@@ -727,7 +727,7 @@ test.concurrent('mount component after a RTU', async () => {
 
   expect(env.store.store.state.queries).toMatchInlineSnapshotString(`
     {
-      "[{\\"tableId\\":\\"users\\"}]": {
+      "[{"tableId":"users"}]": {
         "error": null,
         "hasMore": false,
         "items": [

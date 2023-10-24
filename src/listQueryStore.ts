@@ -701,6 +701,7 @@ export function newTSDFListQueryStore<
       returnRefetchingStatus,
       loadSize,
       disableRefetchOnMount = globalDisableRefetchOnMount,
+      isOffScreen,
     }: {
       itemSelector?: (
         data: ItemState,
@@ -712,6 +713,7 @@ export function newTSDFListQueryStore<
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
       loadSize?: number;
+      isOffScreen?: boolean;
     } = {},
   ) {
     type QueryWithId = {
@@ -787,6 +789,8 @@ export function newTSDFListQueryStore<
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateQuery', (event) => {
+      if (isOffScreen) return;
+
       for (const { key, payload } of queriesWithId) {
         if (key !== event.queryKey) continue;
 
@@ -808,6 +812,8 @@ export function newTSDFListQueryStore<
     const loadSizeConst = useConst(() => loadSize);
 
     useEffect(() => {
+      if (isOffScreen) return;
+
       for (const { key: itemId, payload: fetchParams } of queriesWithId) {
         if (itemId) {
           const itemState = getQueryState(fetchParams);
@@ -826,7 +832,7 @@ export function newTSDFListQueryStore<
           }
         }
       }
-    }, [disableRefetchOnMount, loadSizeConst, queriesWithId]);
+    }, [disableRefetchOnMount, isOffScreen, loadSizeConst, queriesWithId]);
 
     return storeState;
   }
@@ -845,6 +851,7 @@ export function newTSDFListQueryStore<
       returnRefetchingStatus?: boolean;
       ensureIsLoaded?: boolean;
       loadSize?: number;
+      isOffScreen?: boolean;
     } = {},
   ) {
     const { ensureIsLoaded } = options;
@@ -1168,6 +1175,7 @@ export function newTSDFListQueryStore<
       returnRefetchingStatus,
       disableRefetchOnMount,
       loadFromStateOnly,
+      isOffScreen,
     }: {
       selector?: (
         data: ItemState | null,
@@ -1177,6 +1185,7 @@ export function newTSDFListQueryStore<
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
       loadFromStateOnly?: boolean;
+      isOffScreen?: boolean;
     } = {},
   ) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1258,7 +1267,7 @@ export function newTSDFListQueryStore<
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateItem', (event) => {
-      if (loadFromStateOnly) return;
+      if (loadFromStateOnly || isOffScreen) return;
 
       for (const { payload, itemKey } of memoizedItemKeys) {
         if (itemKey !== event.itemKey) continue;
@@ -1279,7 +1288,7 @@ export function newTSDFListQueryStore<
     });
 
     useEffect(() => {
-      if (loadFromStateOnly) return;
+      if (loadFromStateOnly || isOffScreen) return;
 
       for (const { payload, itemKey } of memoizedItemKeys) {
         if (itemKey) {
@@ -1299,7 +1308,12 @@ export function newTSDFListQueryStore<
           }
         }
       }
-    }, [disableRefetchOnMount, loadFromStateOnly, memoizedItemKeys]);
+    }, [
+      disableRefetchOnMount,
+      isOffScreen,
+      loadFromStateOnly,
+      memoizedItemKeys,
+    ]);
 
     return storeState;
   }
@@ -1316,6 +1330,7 @@ export function newTSDFListQueryStore<
       returnRefetchingStatus?: boolean;
       ensureIsLoaded?: boolean;
       loadFromStateOnly?: boolean;
+      isOffScreen?: boolean;
     } = {},
   ) {
     const { ensureIsLoaded } = options;

@@ -372,12 +372,14 @@ export function newTSDFCollectionStore<
       returnIdleStatus,
       returnRefetchingStatus,
       disableRefetchOnMount = globalDisableRefetchOnMount,
+      isOffScreen,
     }: {
       selector?: (data: ItemState | null) => Selected;
       omitPayload?: boolean;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
+      isOffScreen?: boolean;
     } = {},
   ) {
     type QueryWithId = {
@@ -461,6 +463,8 @@ export function newTSDFCollectionStore<
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateData', (event) => {
+      if (isOffScreen) return;
+
       for (const { itemKey, payload } of queriesWithId) {
         if (itemKey !== event.itemKey) continue;
 
@@ -480,6 +484,8 @@ export function newTSDFCollectionStore<
     });
 
     useEffect(() => {
+      if (isOffScreen) return;
+
       for (const { itemKey: itemId, payload } of queriesWithId) {
         if (itemId) {
           const itemState = getItemState(payload);
@@ -498,7 +504,7 @@ export function newTSDFCollectionStore<
           }
         }
       }
-    }, [disableRefetchOnMount, queriesWithId]);
+    }, [disableRefetchOnMount, isOffScreen, queriesWithId]);
 
     return storeState;
   }
@@ -512,6 +518,7 @@ export function newTSDFCollectionStore<
       disableRefetchOnMount?: boolean;
       ensureIsLoaded?: boolean;
       returnIdleStatus?: boolean;
+      isOffScreen?: boolean;
     } = {},
   ) {
     const { selector, ensureIsLoaded } = options;

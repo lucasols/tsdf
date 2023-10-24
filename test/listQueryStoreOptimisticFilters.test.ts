@@ -65,7 +65,7 @@ test.concurrent('filter items optimistically to queries', () => {
             items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9' ],
             hasMore: false,
           },
-          key: '[{\\"filters\\":{\\"type\\":\\"admin\\"}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"type":"admin"}},{"tableId":"users"}]',
         },
         {
           query: {
@@ -77,7 +77,7 @@ test.concurrent('filter items optimistically to queries', () => {
             items: [ 'users||20', 'users||2', 'users||4', 'users||6', 'users||8', 'users||10' ],
             hasMore: false,
           },
-          key: '[{\\"filters\\":{\\"type\\":\\"user\\"}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
         },
         {
           query: {
@@ -89,7 +89,7 @@ test.concurrent('filter items optimistically to queries', () => {
             items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9', 'users||20' ],
             hasMore: false,
           },
-          key: '[{\\"filters\\":{\\"ageRange\\":[20,30]}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"ageRange":[20,30]}},{"tableId":"users"}]',
         },
       ]"
     `);
@@ -111,7 +111,7 @@ test.concurrent('filter items optimistically to queries', () => {
             items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9' ],
             hasMore: false,
           },
-          key: '[{\\"filters\\":{\\"type\\":\\"admin\\"}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"type":"admin"}},{"tableId":"users"}]',
         },
         {
           query: {
@@ -123,7 +123,7 @@ test.concurrent('filter items optimistically to queries', () => {
             items: [ 'users||20', 'users||2', 'users||4', 'users||6', 'users||8', 'users||10' ],
             hasMore: false,
           },
-          key: '[{\\"filters\\":{\\"type\\":\\"user\\"}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
         },
         {
           query: {
@@ -135,7 +135,7 @@ test.concurrent('filter items optimistically to queries', () => {
             items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9' ],
             hasMore: false,
           },
-          key: '[{\\"filters\\":{\\"ageRange\\":[20,30]}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"ageRange":[20,30]}},{"tableId":"users"}]',
         },
       ]"
     `);
@@ -178,7 +178,7 @@ test.concurrent('optimistically create a query if it not exist', () => {
             items: [ 'users||2', 'users||4', 'users||6', 'users||8', 'users||10' ],
             hasMore: false,
           },
-          key: '[{\\"filters\\":{\\"type\\":\\"user\\"}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
         },
         {
           query: {
@@ -190,7 +190,7 @@ test.concurrent('optimistically create a query if it not exist', () => {
             refetchOnMount: 'lowPriority',
             wasLoaded: true,
           },
-          key: '[{\\"filters\\":{\\"type\\":\\"admin\\"}},{\\"tableId\\":\\"users\\"}]',
+          key: '[{"filters":{"type":"admin"}},{"tableId":"users"}]',
         },
       ]"
     `);
@@ -246,7 +246,7 @@ test.concurrent('optimistically sort items', () => {
           ],
           hasMore: false,
         },
-        key: '[{\\"filters\\":{\\"type\\":\\"user\\"}},{\\"tableId\\":\\"users\\"}]',
+        key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
       },
     ]"
   `);
@@ -274,7 +274,7 @@ test.concurrent('optimistically sort items', () => {
           ],
           hasMore: false,
         },
-        key: '[{\\"filters\\":{\\"type\\":\\"user\\"}},{\\"tableId\\":\\"users\\"}]',
+        key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
       },
     ]"
   `);

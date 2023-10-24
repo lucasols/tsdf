@@ -169,7 +169,8 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 
   function useDocument<Selected = State | null>({
     selector,
-    disabled,
+    isOffScreen,
+    disabled = isOffScreen,
     returnRefetchingStatus,
     disableRefetchOnMount = globalDisableRefetchOnMount,
     returnIdleStatus = !!disabled,
@@ -177,6 +178,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
   }: {
     selector?: (data: State | null) => Selected;
     disabled?: boolean;
+    isOffScreen?: boolean;
     disableRefetchOnMount?: boolean;
     returnIdleStatus?: boolean;
     ensureIsLoaded?: boolean;
@@ -213,6 +215,8 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateData', (priority) => {
+      if (disabled) return;
+
       if (!invalidationWasTriggered) {
         store.setKey('refetchOnMount', false);
 
