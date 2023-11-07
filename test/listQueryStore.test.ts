@@ -1287,7 +1287,7 @@ describe('update state functions', () => {
         'users||5': { id: 5, name: 'User 5' },
       },
       queries: {
-        [`[{"tableId":"users"}]`]: {
+        [`{"tableId":"users"}`]: {
           error: null,
           hasMore: false,
           items: [
@@ -1376,7 +1376,7 @@ describe('update state functions', () => {
         'users||5': { id: 5, name: 'User 5' },
       },
       queries: {
-        [`[{"tableId":"users"}]`]: {
+        [`{"tableId":"users"}`]: {
           error: null,
           hasMore: false,
           items: ['users||1', 'users||2', 'users||3', 'users||4', 'users||5'],
@@ -1432,7 +1432,7 @@ describe('update state functions', () => {
         'users||5': { id: 5, name: 'User 5' },
       },
       queries: {
-        '[{"tableId":"users"}]': {
+        '{"tableId":"users"}': {
           error: null,
           hasMore: false,
           items: ['users||2', 'users||3', 'users||4', 'users||5'],
@@ -1589,7 +1589,7 @@ test('invalidate everything does not cause a problem', () => {
       'users||5': { id: 5, name: 'User 5' },
     },
     queries: {
-      [`[{"tableId":"users"}]`]: {
+      [`{"tableId":"users"}`]: {
         error: null,
         hasMore: false,
         items: ['users||1', 'users||2', 'users||3', 'users||4', 'users||5'],

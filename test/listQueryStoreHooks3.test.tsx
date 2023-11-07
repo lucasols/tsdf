@@ -148,24 +148,24 @@ test.concurrent(
 
     expect(renders.snapshot).toMatchInlineSnapshotString(`
       "
-      queryKey: [{"tableId":"users"}] -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
 
       >>> first update (✅)
 
-      queryKey: [{"tableId":"users"}] -- status: refetching -- items: [{id:1, name:User 1}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
-      queryKey: [{"tableId":"users"}] -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      queryKey: {"tableId":"users"} -- status: refetching -- items: [{id:1, name:User 1}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
 
       >>> set disabled
 
-      queryKey: [{"tableId":"users"}] -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
 
       >>> ignored update (❌)
 
       >>> enabled again
 
-      queryKey: [{"tableId":"users"}] -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
-      queryKey: [{"tableId":"users"}] -- status: refetching -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
-      queryKey: [{"tableId":"users"}] -- status: success -- items: [{id:1, name:❌}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      queryKey: {"tableId":"users"} -- status: refetching -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:❌}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
       "
     `);
   },
