@@ -118,6 +118,7 @@ export function createDefaultCollectionStore<
   emulateRTU,
   disableInitialDataInvalidation = false,
   dynamicRTUThrottleMs,
+  lowPriorityThrottleMs,
   debug,
 }: {
   initialServerData?: ServerData;
@@ -126,6 +127,7 @@ export function createDefaultCollectionStore<
   emulateRTU?: boolean;
   /** default: 30-100 */
   randomTimeout?: true;
+  lowPriorityThrottleMs?: number;
   disableInitialDataInvalidation?: boolean;
   debug?: never;
 } = {}) {
@@ -176,6 +178,7 @@ export function createDefaultCollectionStore<
       );
     },
     errorNormalizer: normalizeError,
+    lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     disableInitialDataInvalidation,
     getInitialData: () => initialStateItems,
@@ -248,9 +251,21 @@ export function createRenderStore({
     startTime = Date.now();
   }
 
-  function add(render: Record<string, unknown>) {
-    renders.push(render);
-    rendersTime.push(Date.now() - startTime);
+  function add(
+    render: Record<string, unknown> | readonly Record<string, unknown>[],
+  ) {
+    if (!isObject(render)) {
+      for (const [i, r] of render.entries()) {
+        renders.push({
+          i: i + 1,
+          ...r,
+        });
+        rendersTime.push(Date.now() - startTime);
+      }
+    } else {
+      renders.push(render);
+      rendersTime.push(Date.now() - startTime);
+    }
 
     onNextRender();
 
@@ -295,6 +310,11 @@ export function createRenderStore({
       rendersToUse = [];
 
       for (let { item, prev } of arrayWithPrevAndIndex(renders)) {
+        if (item._lastSnapshotMark || item._mark) {
+          rendersToUse.push(item);
+          continue;
+        }
+
         if (filterKeys) {
           prev = prev && pick(prev, filterKeys);
           item = pick(item, filterKeys);

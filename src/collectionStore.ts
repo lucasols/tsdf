@@ -18,7 +18,7 @@ import {
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
-import { useDeepMemo } from './utils/hooks';
+import { useConst, useDeepMemo } from './utils/hooks';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 
 type CollectionItemStatus = TSDFStatus;
@@ -523,23 +523,36 @@ export function newTSDFCollectionStore<
       }
     });
 
+    const ignoreQueriesInRefetchOnMount = useConst(() => new Set<string>());
+
     useEffect(() => {
+      const removedQueries = new Set(ignoreQueriesInRefetchOnMount);
+
       for (const {
         itemKey: itemId,
         payload,
         isOffScreen,
         disableRefetchOnMount,
       } of queriesWithId) {
-        if (isOffScreen) continue;
+        removedQueries.delete(itemId);
+
+        if (isOffScreen) {
+          continue;
+        }
 
         if (itemId) {
           const itemState = getItemState(payload);
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
-          if (disableRefetchOnMount) {
-            const shouldFetch =
-              !itemState?.wasLoaded || itemState.refetchOnMount;
+          const shouldFetch = !itemState?.wasLoaded || itemState.refetchOnMount;
 
+          if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(itemId)) {
+            continue;
+          }
+
+          ignoreQueriesInRefetchOnMount.add(itemId);
+
+          if (disableRefetchOnMount) {
             if (shouldFetch) {
               scheduleFetch(fetchType, payload);
               continue;
@@ -549,7 +562,11 @@ export function newTSDFCollectionStore<
           }
         }
       }
-    }, [queriesWithId]);
+
+      for (const itemId of removedQueries) {
+        ignoreQueriesInRefetchOnMount.delete(itemId);
+      }
+    }, [ignoreQueriesInRefetchOnMount, queriesWithId]);
 
     return storeState;
   }
