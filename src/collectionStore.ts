@@ -523,10 +523,10 @@ export function newTSDFCollectionStore<
       }
     });
 
-    const ignoreQueriesInRefetchOnMount = useConst(() => new Set<string>());
+    const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
     useEffect(() => {
-      const removedQueries = new Set(ignoreQueriesInRefetchOnMount);
+      const removedQueries = new Set(ignoreItemsInRefetchOnMount);
 
       for (const {
         itemKey: itemId,
@@ -536,9 +536,7 @@ export function newTSDFCollectionStore<
       } of queriesWithId) {
         removedQueries.delete(itemId);
 
-        if (isOffScreen) {
-          continue;
-        }
+        if (isOffScreen) continue;
 
         if (itemId) {
           const itemState = getItemState(payload);
@@ -546,11 +544,11 @@ export function newTSDFCollectionStore<
 
           const shouldFetch = !itemState?.wasLoaded || itemState.refetchOnMount;
 
-          if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(itemId)) {
+          if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemId)) {
             continue;
           }
 
-          ignoreQueriesInRefetchOnMount.add(itemId);
+          ignoreItemsInRefetchOnMount.add(itemId);
 
           if (disableRefetchOnMount) {
             if (shouldFetch) {
@@ -564,9 +562,9 @@ export function newTSDFCollectionStore<
       }
 
       for (const itemId of removedQueries) {
-        ignoreQueriesInRefetchOnMount.delete(itemId);
+        ignoreItemsInRefetchOnMount.delete(itemId);
       }
-    }, [ignoreQueriesInRefetchOnMount, queriesWithId]);
+    }, [ignoreItemsInRefetchOnMount, queriesWithId]);
 
     return storeState;
   }

@@ -19,7 +19,7 @@ import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
 import { findAndMap } from './utils/findAndMap';
 import { getCacheId } from './utils/getCacheId';
-import { useDeepMemo } from './utils/hooks';
+import { useConst, useDeepMemo } from './utils/hooks';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { sortBy } from './utils/sortBy';
 import { NonPartial } from './utils/types';
@@ -861,7 +861,11 @@ export function newTSDFListQueryStore<
       }
     });
 
+    const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
+
     useEffect(() => {
+      const removedItems = new Set(ignoreItemsInRefetchOnMount);
+
       for (const {
         key: itemId,
         payload: fetchParams,
@@ -869,16 +873,24 @@ export function newTSDFListQueryStore<
         loadSize,
         disableRefetchOnMount,
       } of queriesWithId) {
+        removedItems.delete(itemId);
+
         if (isOffScreen) continue;
 
         if (itemId) {
           const itemState = getQueryState(fetchParams);
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
-          if (disableRefetchOnMount) {
-            const shouldFetch =
-              !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
+          const shouldFetch =
+            !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
+          if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemId)) {
+            continue;
+          }
+
+          ignoreItemsInRefetchOnMount.add(itemId);
+
+          if (disableRefetchOnMount) {
             if (shouldFetch) {
               scheduleListQueryFetch(fetchType, fetchParams, loadSize);
               continue;
@@ -888,7 +900,11 @@ export function newTSDFListQueryStore<
           }
         }
       }
-    }, [queriesWithId]);
+
+      for (const itemKey of removedItems) {
+        ignoreItemsInRefetchOnMount.delete(itemKey);
+      }
+    }, [ignoreItemsInRefetchOnMount, queriesWithId]);
 
     return storeState;
   }
@@ -1392,8 +1408,12 @@ export function newTSDFListQueryStore<
       }
     });
 
+    const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
+
     useEffect(() => {
       if (loadFromStateOnly) return;
+
+      const removedItems = new Set(ignoreItemsInRefetchOnMount);
 
       for (const {
         payload,
@@ -1401,16 +1421,24 @@ export function newTSDFListQueryStore<
         isOffScreen,
         disableRefetchOnMount,
       } of memoizedItemKeys) {
+        removedItems.delete(itemKey);
+
         if (isOffScreen) continue;
 
         if (itemKey) {
           const itemState = store.state.itemQueries[itemKey];
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
-          if (disableRefetchOnMount) {
-            const shouldFetch =
-              !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
+          const shouldFetch =
+            !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
+          if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
+            continue;
+          }
+
+          ignoreItemsInRefetchOnMount.add(itemKey);
+
+          if (disableRefetchOnMount) {
             if (shouldFetch) {
               scheduleItemFetch(fetchType, payload);
               return;
@@ -1420,7 +1448,11 @@ export function newTSDFListQueryStore<
           }
         }
       }
-    }, [loadFromStateOnly, memoizedItemKeys]);
+
+      for (const itemKey of removedItems) {
+        ignoreItemsInRefetchOnMount.delete(itemKey);
+      }
+    }, [ignoreItemsInRefetchOnMount, loadFromStateOnly, memoizedItemKeys]);
 
     return storeState;
   }
