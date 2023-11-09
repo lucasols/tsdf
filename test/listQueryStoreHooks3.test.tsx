@@ -569,7 +569,7 @@ test.concurrent(
   },
 );
 
-test.concurrent.only(
+test.concurrent(
   'Selected value should update when selectorUsesExternalDeps is true',
   async () => {
     const env = createTestEnv({
@@ -636,7 +636,7 @@ test.concurrent.only(
 
     expect(env.serverMock.fetchsCount).toBe(2);
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
       "
       useItem: {status:success, data:1/ok, payload:users||1} -- useListQuery: {status:success, items:[1/ok, 2/ok, 3/ok, 4/ok, 5/ok], payload:{tableId:users}}
 
