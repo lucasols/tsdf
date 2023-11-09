@@ -42,9 +42,13 @@ describe('useMultipleItemsQuery sequential tests', () => {
 
   const { result } = renderHook(() => {
     const queryResult = listQueryStore.useMultipleListQueries(
-      [getFetchQueryForTable('users'), getFetchQueryForTable('products')],
+      [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+        (item) => ({
+          payload: item,
+          returnRefetchingStatus: true,
+        }),
+      ),
       {
-        returnRefetchingStatus: true,
         itemSelector(data, _, itemKey) {
           return { id: itemKey, data };
         },
@@ -118,7 +122,12 @@ describe('useMultipleItemsQuery sequential tests', () => {
       // mount a new hook to check if there are more fetchs than expected
       const { unmount } = renderHook(() => {
         const selectionResult = listQueryStore.useMultipleListQueries(
-          [getFetchQueryForTable('users'), getFetchQueryForTable('products')],
+          [
+            getFetchQueryForTable('users'),
+            getFetchQueryForTable('products'),
+          ].map((item) => ({
+            payload: item,
+          })),
           {
             itemSelector(data) {
               return data.name;
@@ -203,7 +212,9 @@ describe('useMultipleItemsQuery isolated tests', () => {
 
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
-        payload.useValue(),
+        payload.useValue().map((item) => ({
+          payload: item,
+        })),
         { itemSelector: (data) => data.name },
       );
 
@@ -247,8 +258,11 @@ describe('useMultipleItemsQuery isolated tests', () => {
 
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
-        payload.useValue(),
-        { itemSelector: (data) => data.name, disableRefetchOnMount: true },
+        payload.useValue().map((item) => ({
+          payload: item,
+          disableRefetchOnMount: true,
+        })),
+        { itemSelector: (data) => data.name },
       );
 
       usersRenders.add(pick(users, ['status', 'payload', 'items']));
@@ -269,6 +283,52 @@ describe('useMultipleItemsQuery isolated tests', () => {
       status: success -- payload: {tableId:products} -- items: [Product 1, ...(49 more)]
       "
     `);
+  });
+
+  test('with queryMetadata', async () => {
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
+      initialServerData,
+    });
+
+    const payload = createValueStore([
+      getFetchQueryForTable('users'),
+      getFetchQueryForTable('products'),
+    ]);
+
+    const usersRenders = createRenderStore();
+    const productsRenders = createRenderStore();
+
+    renderHook(() => {
+      const [users, products] = listQueryStore.useMultipleListQueries(
+        payload.useValue().map((item) => ({
+          payload: item,
+          queryMetadata: { test: item },
+        })),
+        { itemSelector: (data) => data.name },
+      );
+
+      usersRenders.add(
+        pick(users, ['status', 'payload', 'items', 'queryMetadata']),
+      );
+      productsRenders.add(
+        pick(products, ['status', 'payload', 'items', 'queryMetadata']),
+      );
+    });
+
+    await serverMock.waitFetchIdle();
+
+    expect(usersRenders.getSnapshot()).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: {tableId:users} -- items: [] -- queryMetadata: {test:{tableId:users}}
+      status: success -- payload: {tableId:users} -- items: [User 1, ...(4 more)] -- queryMetadata: {test:{tableId:users}}
+      "
+    `);
+    expect(productsRenders.getSnapshot()).toMatchInlineSnapshot(`
+        "
+        status: loading -- payload: {tableId:products} -- items: [] -- queryMetadata: {test:{tableId:products}}
+        status: success -- payload: {tableId:products} -- items: [Product 1, ...(49 more)] -- queryMetadata: {test:{tableId:products}}
+        "
+      `);
   });
 });
 
@@ -683,11 +743,11 @@ describe('useItem', () => {
 
     const { result } = renderHook(() => {
       const [usersResult, productsResult] = listQueryStore.useMultipleItems(
-        ['users||2', 'products||1'],
-        {
+        ['users||2', 'products||1'].map((payload) => ({
+          payload,
           returnRefetchingStatus: true,
           disableRefetchOnMount: true,
-        },
+        })),
       );
 
       users2.add(pick(usersResult, ['status', 'payload', 'data']));
@@ -716,6 +776,48 @@ describe('useItem', () => {
     expect(products1.changesSnapshot).toMatchInlineSnapshot(`
       "
       status: success -- payload: products||1 -- data: {id:1, name:Product 1}
+      "
+    `);
+  });
+
+  test('useMultipleItems with queryMetadata', async () => {
+    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
+      initialServerData,
+      disableInitialDataInvalidation: false,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+    });
+
+    const users2 = createRenderStore();
+    const products1 = createRenderStore();
+
+    renderHook(() => {
+      const [usersResult, productsResult] = listQueryStore.useMultipleItems(
+        ['users||2', 'products||1'].map((payload) => ({
+          payload,
+          queryMetadata: { test: payload },
+        })),
+      );
+
+      users2.add(
+        pick(usersResult, ['status', 'payload', 'data', 'queryMetadata']),
+      );
+      products1.add(
+        pick(productsResult, ['status', 'payload', 'data', 'queryMetadata']),
+      );
+
+      return { usersResult, productsResult };
+    });
+
+    await serverMock.waitFetchIdle();
+
+    expect(users2.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: users||2 -- data: {id:2, name:User 2} -- queryMetadata: {test:users||2}
+      "
+    `);
+    expect(products1.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      status: success -- payload: products||1 -- data: {id:1, name:Product 1} -- queryMetadata: {test:products||1}
       "
     `);
   });

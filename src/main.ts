@@ -13,6 +13,7 @@ export {
   TSFDCollectionItem,
   TSFDUseCollectionItemReturn,
   OnCollectionItemInvalidate,
+  CollectionUseMultipleItemsQuery,
 } from './collectionStore';
 export {
   newTSDFListQueryStore,
@@ -27,6 +28,8 @@ export {
   OnListQueryInvalidate,
   OnListQueryItemInvalidate,
   FetchListFnReturnItem,
+  ListQueryUseMultipleItemsQuery,
+  ListQueryUseMultipleListQueriesQuery,
 } from './listQueryStore';
 export { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
 export { useListItemIsLoading } from './useListItemIsLoading';

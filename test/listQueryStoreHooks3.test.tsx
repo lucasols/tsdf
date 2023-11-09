@@ -26,7 +26,9 @@ test.concurrent(
       disableInitialDataInvalidation: true,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderStore({
+      rejectKeys: ['queryMetadata'],
+    });
 
     const { rerender } = renderHook(
       ({ isOffScreen }: { isOffScreen: boolean }) => {
@@ -102,7 +104,9 @@ test.concurrent(
       disableInitialDataInvalidation: true,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderStore({
+      rejectKeys: ['queryMetadata'],
+    });
 
     const { rerender } = renderHook(
       ({ isOffScreen }: { isOffScreen: boolean }) => {
