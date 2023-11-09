@@ -42,13 +42,19 @@ export type TSFDCollectionState<
   NError,
 > = Record<string, TSFDCollectionItem<ItemState, ItemPayload, NError> | null>;
 
-export type TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> = {
+export type TSFDUseCollectionItemReturn<
+  Selected,
+  ItemPayload,
+  NError,
+  QueryMetadata extends undefined | Record<string, unknown> = undefined,
+> = {
   data: Selected;
   status: CollectionItemStatus | 'idle' | 'deleted';
   payload: ItemPayload | undefined;
   error: NError | null;
   itemStateKey: string;
   isLoading: boolean;
+  queryMetadata: QueryMetadata;
 };
 
 export type CollectionInitialStateItem<
@@ -364,41 +370,64 @@ export function newTSDFCollectionStore<
     return store.state[getItemKey(params)];
   }
 
-  function useMultipleItems<Selected = ItemState | null>(
-    queries: readonly ItemPayload[],
-    {
-      selector,
-      omitPayload,
-      returnIdleStatus,
-      returnRefetchingStatus,
-      disableRefetchOnMount = globalDisableRefetchOnMount,
-      isOffScreen,
-    }: {
-      selector?: (data: ItemState | null) => Selected;
+  function useMultipleItems<
+    Selected = ItemState | null,
+    QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  >(
+    queries: {
+      payload: ItemPayload;
+      queryMetadata?: QueryMetadata;
       omitPayload?: boolean;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
       isOffScreen?: boolean;
+    }[],
+    {
+      selector,
+      selectorUseExternalDeps,
+    }: {
+      selector?: (data: ItemState | null) => Selected;
+      selectorUseExternalDeps?: boolean;
     } = {},
   ) {
     type QueryWithId = {
       itemKey: string;
       payload: ItemPayload;
+      disableRefetchOnMount: boolean | undefined;
+      returnIdleStatus: boolean | undefined;
+      returnRefetchingStatus: boolean | undefined;
+      omitPayload: boolean | undefined;
+      isOffScreen: boolean | undefined;
+      queryMetadata: QueryMetadata | undefined;
     };
 
     const queriesWithId = useDeepMemo((): QueryWithId[] => {
-      return queries.map((payload) => {
-        return { itemKey: getItemKey(payload), payload };
+      return queries.map((queryProps) => {
+        return {
+          itemKey: getItemKey(queryProps.payload),
+          payload: queryProps.payload,
+          disableRefetchOnMount:
+            queryProps.disableRefetchOnMount ?? globalDisableRefetchOnMount,
+          returnIdleStatus: queryProps.returnIdleStatus,
+          returnRefetchingStatus: queryProps.returnRefetchingStatus,
+          omitPayload: queryProps.omitPayload,
+          isOffScreen: queryProps.isOffScreen,
+          queryMetadata: queryProps.queryMetadata,
+        };
       });
     }, [queries]);
 
-    const dataSelector = useCallback((itemState: ItemState | null) => {
-      if (selector) return selector(itemState);
+    const dataSelector = useCallback(
+      (itemState: ItemState | null) => {
+        if (selector) return selector(itemState);
 
-      return itemState as Selected;
+        return itemState as Selected;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      },
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+      [selectorUseExternalDeps ? selector : undefined],
+    );
 
     const resultSelector = useCallback(
       (state: CollectionState) => {
@@ -406,7 +435,16 @@ export function newTSDFCollectionStore<
           ({
             itemKey,
             payload,
-          }): TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> => {
+            omitPayload,
+            returnIdleStatus,
+            returnRefetchingStatus,
+            queryMetadata,
+          }): TSFDUseCollectionItemReturn<
+            Selected,
+            ItemPayload,
+            NError,
+            QueryMetadata
+          > => {
             const item = state[itemKey];
 
             if (item === null) {
@@ -417,6 +455,7 @@ export function newTSDFCollectionStore<
                 error: null,
                 payload: omitPayload ? undefined : payload,
                 isLoading: false,
+                queryMetadata: queryMetadata as QueryMetadata,
               };
             }
 
@@ -428,6 +467,7 @@ export function newTSDFCollectionStore<
                 error: null,
                 payload: omitPayload ? undefined : payload,
                 isLoading: returnIdleStatus ? false : true,
+                queryMetadata: queryMetadata as QueryMetadata,
               };
             }
 
@@ -444,17 +484,12 @@ export function newTSDFCollectionStore<
               error: item.error,
               isLoading: status === 'loading',
               payload: omitPayload ? undefined : item.payload,
+              queryMetadata: queryMetadata as QueryMetadata,
             };
           },
         );
       },
-      [
-        dataSelector,
-        omitPayload,
-        queriesWithId,
-        returnIdleStatus,
-        returnRefetchingStatus,
-      ],
+      [dataSelector, queriesWithId],
     );
 
     const storeState = store.useSelector(resultSelector, {
@@ -463,9 +498,9 @@ export function newTSDFCollectionStore<
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateData', (event) => {
-      if (isOffScreen) return;
+      for (const { itemKey, payload, isOffScreen } of queriesWithId) {
+        if (isOffScreen) continue;
 
-      for (const { itemKey, payload } of queriesWithId) {
         if (itemKey !== event.itemKey) continue;
 
         if (!invalidationWasTriggered.has(itemKey)) {
@@ -484,9 +519,14 @@ export function newTSDFCollectionStore<
     });
 
     useEffect(() => {
-      if (isOffScreen) return;
+      for (const {
+        itemKey: itemId,
+        payload,
+        isOffScreen,
+        disableRefetchOnMount,
+      } of queriesWithId) {
+        if (isOffScreen) continue;
 
-      for (const { itemKey: itemId, payload } of queriesWithId) {
         if (itemId) {
           const itemState = getItemState(payload);
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
@@ -504,7 +544,7 @@ export function newTSDFCollectionStore<
           }
         }
       }
-    }, [disableRefetchOnMount, isOffScreen, queriesWithId]);
+    }, [queriesWithId]);
 
     return storeState;
   }
@@ -513,6 +553,7 @@ export function newTSDFCollectionStore<
     payload: ItemPayload | undefined | false | null,
     options: {
       selector?: (data: ItemState | null) => Selected;
+      selectorUseExternalDeps?: boolean;
       omitPayload?: boolean;
       returnRefetchingStatus?: boolean;
       disableRefetchOnMount?: boolean;
@@ -521,17 +562,36 @@ export function newTSDFCollectionStore<
       isOffScreen?: boolean;
     } = {},
   ) {
-    const { selector, ensureIsLoaded } = options;
+    const { selector, ensureIsLoaded, selectorUseExternalDeps } = options;
 
     const query = useMemo(
       () =>
         payload === false || payload === null || payload === undefined
           ? []
-          : [payload],
-      [payload],
+          : [
+              {
+                payload,
+                omitPayload: options.omitPayload,
+                returnRefetchingStatus: options.returnRefetchingStatus,
+                disableRefetchOnMount: options.disableRefetchOnMount,
+                returnIdleStatus: options.returnIdleStatus,
+                isOffScreen: options.isOffScreen,
+              },
+            ],
+      [
+        options.disableRefetchOnMount,
+        options.isOffScreen,
+        options.omitPayload,
+        options.returnIdleStatus,
+        options.returnRefetchingStatus,
+        payload,
+      ],
     );
 
-    const item = useMultipleItems(query, options);
+    const item = useMultipleItems(query, {
+      selector,
+      selectorUseExternalDeps,
+    });
 
     const result = useMemo(
       (): TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> =>
@@ -542,6 +602,7 @@ export function newTSDFCollectionStore<
           status: 'idle',
           itemStateKey: '',
           isLoading: false,
+          queryMetadata: undefined,
         },
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [item],

@@ -37,8 +37,10 @@ describe('useMultipleItems', () => {
 
   renderHook(() => {
     const selectionResult = collectionStore.useMultipleItems(
-      state.useKey('itemsToUse'),
-      { returnRefetchingStatus: true },
+      state.useKey('itemsToUse').map((item) => ({
+        payload: item,
+        returnRefetchingStatus: true,
+      })),
     );
 
     const [item1, item2] = selectionResult;
@@ -85,7 +87,9 @@ describe('useMultipleItems', () => {
     // mount a new hook to check if there are more fetchs than expected
     const { unmount } = renderHook(() => {
       const selectionResult = collectionStore.useMultipleItems(
-        state.useKey('itemsToUse'),
+        state.useKey('itemsToUse').map((item) => ({
+          payload: item,
+        })),
         {
           selector(data) {
             return data?.title;
@@ -185,10 +189,13 @@ describe('useMultipleItems isolated tests', () => {
       const renders2 = createRenderStore();
 
       renderHook(() => {
-        const [item1, item2] = collectionStore.useMultipleItems(['1', '2'], {
-          returnRefetchingStatus: true,
-          disableRefetchOnMount: true,
-        });
+        const [item1, item2] = collectionStore.useMultipleItems(
+          ['1', '2'].map((item) => ({
+            payload: item,
+            returnRefetchingStatus: true,
+            disableRefetchOnMount: true,
+          })),
+        );
 
         renders1.add(pick(item1, ['status', 'payload', 'data']));
         renders2.add(pick(item2, ['status', 'payload', 'data']));
@@ -233,10 +240,13 @@ describe('useMultipleItems isolated tests', () => {
     const renders2 = createRenderStore();
 
     renderHook(() => {
-      const [item1, item2] = collectionStore.useMultipleItems(['1', '2'], {
-        returnRefetchingStatus: true,
-        disableRefetchOnMount: true,
-      });
+      const [item1, item2] = collectionStore.useMultipleItems(
+        ['1', '2'].map((item) => ({
+          payload: item,
+          returnRefetchingStatus: true,
+          disableRefetchOnMount: true,
+        })),
+      );
 
       renders1.add(pick(item1, ['status', 'payload', 'data']));
       renders2.add(pick(item2, ['status', 'payload', 'data']));
@@ -258,6 +268,47 @@ describe('useMultipleItems isolated tests', () => {
       status: success -- payload: 2 -- data: {title:todo, completed:false}
       "
     `);
+  });
+
+  test('with queryMetadata', async () => {
+    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
+      {
+        initialServerData: serverInitialData,
+        disableInitialDataInvalidation: false,
+      },
+    );
+
+    const renders1 = createRenderStore();
+    const renders2 = createRenderStore();
+
+    renderHook(() => {
+      const [item1, item2] = collectionStore.useMultipleItems(
+        ['1', '2'].map((item) => ({
+          payload: item,
+          queryMetadata: { md: `md-${item}` },
+        })),
+      );
+
+      renders1.add(pick(item1, ['status', 'payload', 'data', 'queryMetadata']));
+      renders2.add(pick(item2, ['status', 'payload', 'data', 'queryMetadata']));
+    });
+
+    await serverMock.waitFetchIdle();
+
+    expect(renders1.renderCount()).toBeGreaterThan(0);
+
+    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      status: loading -- payload: 1 -- data: null -- queryMetadata: {md:md-1}
+      status: success -- payload: 1 -- data: {title:todo, completed:false} -- queryMetadata: {md:md-1}
+      "
+    `);
+    expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
+        "
+        status: loading -- payload: 2 -- data: null -- queryMetadata: {md:md-2}
+        status: success -- payload: 2 -- data: {title:todo, completed:false} -- queryMetadata: {md:md-2}
+        "
+      `);
   });
 });
 

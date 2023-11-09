@@ -146,3 +146,15 @@ test('getCacheId handles nested arrays', () => {
     `"{"a":[1,2,3,[2,1,3]]}"`,
   );
 });
+
+test('a subset of a value can be checked via includes', () => {
+  const subSetObj = { z: 0, a: 1, b: 2 };
+
+  expect(
+    getCacheId({
+      a: 1,
+      b: 2,
+      c: subSetObj,
+    }).includes(getCacheId(subSetObj)),
+  ).toBeTruthy();
+});
