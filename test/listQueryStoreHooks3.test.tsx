@@ -7,6 +7,8 @@ import {
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
 import { createRenderStore } from './utils/storeUtils';
+import { useCallback } from 'react';
+import { pick } from './utils/objectUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -564,5 +566,92 @@ test.concurrent(
     i: 3 -- status: success -- items: [{id:1, name:changed}, ...(49 more)] -- payload: {tableId:products}
     "
   `);
+  },
+);
+
+test.concurrent.only(
+  'Selected value should update when selectorUsesExternalDeps is true',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users'] },
+    });
+
+    const renders = createRenderStore();
+
+    const { rerender } = renderHook(
+      ({
+        externalDep,
+        selectorUsesExternalDeps,
+      }: {
+        externalDep: string;
+        selectorUsesExternalDeps: boolean;
+      }) => {
+        const selector = useCallback(
+          (data: Tables[string][number] | null) => {
+            return `${data?.id}/${externalDep}`;
+          },
+          [externalDep],
+        );
+
+        const result = env.store.useItem('users||1', {
+          selector,
+          selectorUsesExternalDeps,
+        });
+
+        const queryResult = env.store.useListQuery(
+          { tableId: 'users' },
+          {
+            itemSelector: selector,
+            selectorUsesExternalDeps,
+          },
+        );
+
+        renders.add({
+          useItem: pick(result, ['status', 'data', 'payload']),
+          useListQuery: pick(queryResult, ['status', 'items', 'payload']),
+        });
+      },
+      { initialProps: { externalDep: 'ok', selectorUsesExternalDeps: false } },
+    );
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(env.serverMock.fetchsCount).toBe(2);
+
+    renders.addMark('change external dep (selectorUsesExternalDeps: false)');
+    rerender({ externalDep: 'changed', selectorUsesExternalDeps: false });
+
+    await sleep(200);
+
+    renders.addMark('change external dep');
+    rerender({ externalDep: 'changed', selectorUsesExternalDeps: true });
+
+    await sleep(200);
+
+    expect(env.serverMock.fetchsCount).toBe(2);
+
+    renders.addMark('change external dep again');
+    rerender({ externalDep: 'changed again', selectorUsesExternalDeps: true });
+
+    expect(env.serverMock.fetchsCount).toBe(2);
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      useItem: {status:success, data:1/ok, payload:users||1} -- useListQuery: {status:success, items:[1/ok, 2/ok, 3/ok, 4/ok, 5/ok], payload:{tableId:users}}
+
+      >>> change external dep (selectorUsesExternalDeps: false)
+
+      useItem: {status:success, data:1/ok, payload:users||1} -- useListQuery: {status:success, items:[1/ok, 2/ok, 3/ok, 4/ok, 5/ok], payload:{tableId:users}}
+
+      >>> change external dep
+
+      useItem: {status:success, data:1/changed, payload:users||1} -- useListQuery: {status:success, items:[1/changed, 2/changed, 3/changed, 4/changed, 5/changed], payload:{tableId:users}}
+
+      >>> change external dep again
+
+      useItem: {status:success, data:1/changed again, payload:users||1} -- useListQuery: {status:success, items:[1/changed again, 2/changed again, 3/changed again, 4/changed again, 5/changed again], payload:{tableId:users}}
+      "
+    `);
   },
 );

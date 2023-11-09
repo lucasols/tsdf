@@ -390,10 +390,10 @@ export function newTSDFCollectionStore<
     items: CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     {
       selector,
-      selectorUseExternalDeps,
+      selectorUsesExternalDeps,
     }: {
       selector?: (data: ItemState | null) => Selected;
-      selectorUseExternalDeps?: boolean;
+      selectorUsesExternalDeps?: boolean;
     } = {},
   ) {
     type QueryWithId = {
@@ -431,7 +431,7 @@ export function newTSDFCollectionStore<
         // eslint-disable-next-line react-hooks/exhaustive-deps
       },
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      selectorUseExternalDeps ? [selector] : [],
+      [selectorUsesExternalDeps ? selector : 0],
     );
 
     const resultSelector = useCallback(
@@ -574,7 +574,7 @@ export function newTSDFCollectionStore<
     {
       omitPayload,
       selector,
-      selectorUseExternalDeps,
+      selectorUsesExternalDeps,
       ensureIsLoaded,
       returnRefetchingStatus,
       disableRefetchOnMount,
@@ -582,7 +582,7 @@ export function newTSDFCollectionStore<
       isOffScreen,
     }: {
       selector?: (data: ItemState | null) => Selected;
-      selectorUseExternalDeps?: boolean;
+      selectorUsesExternalDeps?: boolean;
       omitPayload?: boolean;
       returnRefetchingStatus?: boolean;
       disableRefetchOnMount?: boolean;
@@ -617,7 +617,7 @@ export function newTSDFCollectionStore<
 
     const item = useMultipleItems(query, {
       selector,
-      selectorUseExternalDeps,
+      selectorUsesExternalDeps,
     });
 
     const result = useMemo(

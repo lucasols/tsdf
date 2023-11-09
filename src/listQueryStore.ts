@@ -741,14 +741,14 @@ export function newTSDFListQueryStore<
     >[],
     {
       itemSelector = defaultItemSelector,
-      selectorUseExternalDeps,
+      selectorUsesExternalDeps,
     }: {
       itemSelector?: (
         data: ItemState,
         id: ItemPayload,
         itemKey: string,
       ) => SelectedItem;
-      selectorUseExternalDeps?: boolean;
+      selectorUsesExternalDeps?: boolean;
     } = {},
   ) {
     type QueryWithId = {
@@ -775,10 +775,9 @@ export function newTSDFListQueryStore<
     }, [queries]);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const dataSelector = useCallback(
-      itemSelector,
-      selectorUseExternalDeps ? [itemSelector] : [],
-    );
+    const dataSelector = useCallback(itemSelector, [
+      selectorUsesExternalDeps ? itemSelector : 0,
+    ]);
 
     const resultSelector = useCallback(
       (state: State) => {
@@ -920,7 +919,7 @@ export function newTSDFListQueryStore<
       loadSize,
       omitPayload,
       ensureIsLoaded,
-      selectorUseExternalDeps,
+      selectorUsesExternalDeps,
     }: {
       itemSelector?: (
         data: ItemState,
@@ -934,7 +933,7 @@ export function newTSDFListQueryStore<
       ensureIsLoaded?: boolean;
       loadSize?: number;
       isOffScreen?: boolean;
-      selectorUseExternalDeps?: boolean;
+      selectorUsesExternalDeps?: boolean;
     } = {},
   ) {
     const query = useMemo(
@@ -965,7 +964,7 @@ export function newTSDFListQueryStore<
 
     const queryResult = useMultipleListQueries(query, {
       itemSelector,
-      selectorUseExternalDeps,
+      selectorUsesExternalDeps,
     });
 
     const result = useMemo(
@@ -1289,10 +1288,9 @@ export function newTSDFListQueryStore<
     } = {},
   ) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const dataSelector = useCallback(
-      selector,
-      selectorUsesExternalDeps ? [selector] : [],
-    );
+    const dataSelector = useCallback(selector, [
+      selectorUsesExternalDeps ? selector : 0,
+    ]);
 
     type PayloadWithKey = {
       payload: ItemPayload;
@@ -1459,7 +1457,16 @@ export function newTSDFListQueryStore<
 
   function useItem<SelectedItem = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
-    options: {
+    {
+      selector,
+      selectorUsesExternalDeps,
+      disableRefetchOnMount,
+      returnIdleStatus,
+      returnRefetchingStatus,
+      ensureIsLoaded,
+      loadFromStateOnly,
+      isOffScreen,
+    }: {
       selector?: (
         data: ItemState | null,
         id: ItemPayload | null,
@@ -1473,8 +1480,6 @@ export function newTSDFListQueryStore<
       isOffScreen?: boolean;
     } = {},
   ) {
-    const { ensureIsLoaded } = options;
-
     const query = useMemo(
       (): ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[] =>
         itemPayload === false ||
@@ -1484,30 +1489,30 @@ export function newTSDFListQueryStore<
           : [
               {
                 payload: itemPayload,
-                disableRefetchOnMount: options.disableRefetchOnMount,
-                isOffScreen: options.isOffScreen,
-                returnIdleStatus: options.returnIdleStatus,
-                returnRefetchingStatus: options.returnRefetchingStatus,
+                disableRefetchOnMount,
+                isOffScreen,
+                returnIdleStatus,
+                returnRefetchingStatus,
               },
             ],
       [
         itemPayload,
-        options.disableRefetchOnMount,
-        options.isOffScreen,
-        options.returnIdleStatus,
-        options.returnRefetchingStatus,
+        disableRefetchOnMount,
+        isOffScreen,
+        returnIdleStatus,
+        returnRefetchingStatus,
       ],
     );
 
     const queryResult = useMultipleItems<SelectedItem>(query, {
-      selector: options.selector,
-      selectorUsesExternalDeps: options.selectorUsesExternalDeps,
-      loadFromStateOnly: options.loadFromStateOnly,
+      selector,
+      selectorUsesExternalDeps,
+      loadFromStateOnly,
     });
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const memoizedSelector = useCallback(
-      options.selector ?? defaultItemDataSelector,
+      selector ?? defaultItemDataSelector,
       [],
     );
 

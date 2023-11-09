@@ -87,7 +87,7 @@ export function createDefaultDocumentStore({
   return { serverMock, store, getElapsedTime };
 }
 
-type Todo = {
+export type Todo = {
   title: string;
   completed: boolean;
   description?: string;
