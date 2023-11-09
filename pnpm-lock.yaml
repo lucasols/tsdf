@@ -15,8 +15,8 @@ dependencies:
     specifier: ^2.0.6
     version: 2.0.6
   t-state:
-    specifier: ^8.10.0
-    version: 8.10.0(react-dom@18.2.0)(react@18.2.0)
+    specifier: ^8.10.1
+    version: 8.10.1(react-dom@18.2.0)(react@18.2.0)
 
 devDependencies:
   '@lucasols/eslint-plugin-extended-lint':
@@ -2769,8 +2769,8 @@ packages:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
     dev: true
 
-  /t-state@8.10.0(react-dom@18.2.0)(react@18.2.0):
-    resolution: {integrity: sha512-oabhyEJtuQUtcYBwnmM5CDBbJ8pkI+hPD4OZjDoccDR6JA8OeKadPw23m2Q73A0OL/mR0NhgkBPNGneBYiU/UA==}
+  /t-state@8.10.1(react-dom@18.2.0)(react@18.2.0):
+    resolution: {integrity: sha512-8zD1EoFsuU4C7pTl7GfNF5PjG8dogOMvNZwTNUgFIrZlPXb7giwagzSH4BWXBmWoWL+VDP0YGH5HI2jR4yMfcw==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       react: ^18.0.0
