@@ -47,6 +47,7 @@ export function createDefaultListQueryStore({
   debugRequests: debuFetchs,
   emulateRTU,
   optimisticListUpdates,
+  lowPriorityThrottleMs,
   disableSyncInvalidation,
 }: {
   initialServerData?: Tables;
@@ -63,6 +64,7 @@ export function createDefaultListQueryStore({
   disableInitialDataInvalidation?: boolean;
   emulateRTU?: boolean;
   disableSyncInvalidation?: boolean;
+  lowPriorityThrottleMs?: number;
 
   optimisticListUpdates?: Parameters<
     typeof newTSDFListQueryStore<Row, any, ListQueryParams, string>
@@ -254,6 +256,7 @@ export function createDefaultListQueryStore({
     defaultQuerySize,
     getInitialData: () => initialData,
     disableInitialDataInvalidation,
+    lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     syncMutationsAndInvalidations: disableSyncInvalidation
       ? undefined

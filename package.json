@@ -67,7 +67,7 @@
     "evtmitter": "^0.3.3",
     "immer": "^10.0.3",
     "klona": "^2.0.6",
-    "t-state": "^8.10.0"
+    "t-state": "^8.10.1"
   },
   "peerDependencies": {
     "react": "^18.0.0",

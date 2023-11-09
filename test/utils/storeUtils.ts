@@ -13,7 +13,7 @@ import { isObject } from '../../src/utils/isObject';
 import { clampMin } from '../../src/utils/math';
 import { mockServerResource } from '../mocks/fetchMock';
 import { arrayWithPrevAndIndex } from './arrayUtils';
-import { pick } from './objectUtils';
+import { omit, pick } from './objectUtils';
 
 export type StoreError = {
   message: string;
@@ -87,7 +87,7 @@ export function createDefaultDocumentStore({
   return { serverMock, store, getElapsedTime };
 }
 
-type Todo = {
+export type Todo = {
   title: string;
   completed: boolean;
   description?: string;
@@ -118,6 +118,7 @@ export function createDefaultCollectionStore<
   emulateRTU,
   disableInitialDataInvalidation = false,
   dynamicRTUThrottleMs,
+  lowPriorityThrottleMs,
   debug,
 }: {
   initialServerData?: ServerData;
@@ -126,6 +127,7 @@ export function createDefaultCollectionStore<
   emulateRTU?: boolean;
   /** default: 30-100 */
   randomTimeout?: true;
+  lowPriorityThrottleMs?: number;
   disableInitialDataInvalidation?: boolean;
   debug?: never;
 } = {}) {
@@ -176,6 +178,7 @@ export function createDefaultCollectionStore<
       );
     },
     errorNormalizer: normalizeError,
+    lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
     disableInitialDataInvalidation,
     getInitialData: () => initialStateItems,
@@ -230,7 +233,13 @@ export function shouldNotSkip(scheduleResult: any) {
   }
 }
 
-export function createRenderStore() {
+export function createRenderStore({
+  filterKeys: defaultFilterKeys,
+  rejectKeys: defaultRejectKeys,
+}: {
+  filterKeys?: string[];
+  rejectKeys?: string[];
+} = {}) {
   let renders: Record<string, unknown>[] = [];
   let rendersTime: number[] = [];
   let startTime = Date.now();
@@ -242,9 +251,21 @@ export function createRenderStore() {
     startTime = Date.now();
   }
 
-  function add(render: Record<string, unknown>) {
-    renders.push(render);
-    rendersTime.push(Date.now() - startTime);
+  function add(
+    render: Record<string, unknown> | readonly Record<string, unknown>[],
+  ) {
+    if (!isObject(render)) {
+      for (const [i, r] of render.entries()) {
+        renders.push({
+          i: i + 1,
+          ...r,
+        });
+        rendersTime.push(Date.now() - startTime);
+      }
+    } else {
+      renders.push(render);
+      rendersTime.push(Date.now() - startTime);
+    }
 
     onNextRender();
 
@@ -273,23 +294,35 @@ export function createRenderStore() {
   function getSnapshot({
     arrays = { firstNItems: 1 },
     changesOnly = true,
-    filterKeys,
+    filterKeys = defaultFilterKeys,
+    rejectKeys = defaultRejectKeys,
     includeLastSnapshotEndMark = true,
   }: {
     arrays?: 'all' | 'firstAndLast' | 'lenght' | { firstNItems: number };
     changesOnly?: boolean;
     filterKeys?: string[];
+    rejectKeys?: string[];
     includeLastSnapshotEndMark?: boolean;
   } = {}) {
     let rendersToUse = renders;
 
-    if (changesOnly || filterKeys) {
+    if (changesOnly || filterKeys || rejectKeys) {
       rendersToUse = [];
 
       for (let { item, prev } of arrayWithPrevAndIndex(renders)) {
+        if (item._lastSnapshotMark || item._mark) {
+          rendersToUse.push(item);
+          continue;
+        }
+
         if (filterKeys) {
           prev = prev && pick(prev, filterKeys);
           item = pick(item, filterKeys);
+        }
+
+        if (rejectKeys) {
+          prev = prev && omit(prev, rejectKeys);
+          item = omit(item, rejectKeys);
         }
 
         if (!deepEqual(prev, item)) {

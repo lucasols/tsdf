@@ -22,6 +22,7 @@ import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo } from './utils/hooks';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { sortBy } from './utils/sortBy';
+import { NonPartial } from './utils/types';
 
 type QueryStatus = TSDFStatus | 'loadingMore';
 
@@ -54,7 +55,12 @@ export type TSFDListQueryState<
   itemQueries: Record<string, TSDFItemQuery<NError, ItemPayload> | null>;
 };
 
-export type TSFDUseListQueryReturn<Selected, ItemPayload, NError> = {
+export type TSFDUseListQueryReturn<
+  Selected,
+  ItemPayload,
+  NError,
+  QueryMetadata extends undefined | Record<string, unknown> = undefined,
+> = {
   items: Selected[];
   status: QueryStatus | 'idle';
   payload: ItemPayload | undefined;
@@ -63,14 +69,21 @@ export type TSFDUseListQueryReturn<Selected, ItemPayload, NError> = {
   hasMore: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
+  queryMetadata: QueryMetadata;
 };
 
-export type TSFDUseListItemReturn<Selected, NError, ItemPayload> = {
+export type TSFDUseListItemReturn<
+  Selected,
+  NError,
+  ItemPayload,
+  QueryMetadata extends undefined | Record<string, unknown> = undefined,
+> = {
   data: Selected;
   status: QueryStatus | 'idle' | 'deleted';
   payload: ItemPayload | null;
   error: NError | null;
   isLoading: boolean;
+  queryMetadata: QueryMetadata;
 };
 
 export type FetchListFnReturnItem<
@@ -117,6 +130,32 @@ export type OnListQueryItemInvalidate<
   payload: ItemPayload;
   priority: FetchType;
 }) => void;
+
+export type ListQueryUseMultipleItemsQuery<
+  ItemPayload extends ValidPayload,
+  QueryMetadata extends undefined | Record<string, unknown>,
+> = {
+  payload: ItemPayload;
+  queryMetadata?: QueryMetadata;
+  disableRefetchOnMount?: boolean;
+  returnIdleStatus?: boolean;
+  returnRefetchingStatus?: boolean;
+  isOffScreen?: boolean;
+};
+
+export type ListQueryUseMultipleListQueriesQuery<
+  QueryPayload extends ValidPayload,
+  QueryMetadata extends undefined | Record<string, unknown>,
+> = {
+  payload: QueryPayload;
+  queryMetadata?: QueryMetadata;
+  omitPayload?: boolean;
+  disableRefetchOnMount?: boolean;
+  returnIdleStatus?: boolean;
+  returnRefetchingStatus?: boolean;
+  isOffScreen?: boolean;
+  loadSize?: number;
+};
 
 export function newTSDFListQueryStore<
   ItemState extends ValidStoreState,
@@ -692,46 +731,53 @@ export function newTSDFListQueryStore<
 
   type DefaultSelectedItem = ItemState;
 
-  function useMultipleListQueries<SelectedItem = DefaultSelectedItem>(
-    queries: readonly QueryPayload[],
+  function useMultipleListQueries<
+    SelectedItem = DefaultSelectedItem,
+    QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  >(
+    queries: ListQueryUseMultipleListQueriesQuery<
+      QueryPayload,
+      QueryMetadata
+    >[],
     {
       itemSelector = defaultItemSelector,
-      omitPayload,
-      returnIdleStatus,
-      returnRefetchingStatus,
-      loadSize,
-      disableRefetchOnMount = globalDisableRefetchOnMount,
-      isOffScreen,
+      selectorUsesExternalDeps,
     }: {
       itemSelector?: (
         data: ItemState,
         id: ItemPayload,
         itemKey: string,
       ) => SelectedItem;
-      omitPayload?: boolean;
-      disableRefetchOnMount?: boolean;
-      returnIdleStatus?: boolean;
-      returnRefetchingStatus?: boolean;
-      loadSize?: number;
-      isOffScreen?: boolean;
+      selectorUsesExternalDeps?: boolean;
     } = {},
   ) {
     type QueryWithId = {
       key: string;
-      payload: QueryPayload;
-    };
+    } & NonPartial<
+      ListQueryUseMultipleListQueriesQuery<QueryPayload, QueryMetadata>
+    >;
 
     const queriesWithId = useDeepMemo(() => {
-      return queries.map((payload): QueryWithId => {
+      return queries.map((item): QueryWithId => {
         return {
-          key: getQueryKey(payload),
-          payload,
+          key: getQueryKey(item.payload),
+          payload: item.payload,
+          disableRefetchOnMount:
+            item.disableRefetchOnMount ?? globalDisableRefetchOnMount,
+          returnIdleStatus: item.returnIdleStatus,
+          returnRefetchingStatus: item.returnRefetchingStatus,
+          queryMetadata: item.queryMetadata,
+          isOffScreen: item.isOffScreen,
+          omitPayload: item.omitPayload,
+          loadSize: item.loadSize,
         };
       });
     }, [queries]);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const dataSelector = useCallback(itemSelector, []);
+    const dataSelector = useCallback(itemSelector, [
+      selectorUsesExternalDeps ? itemSelector : 0,
+    ]);
 
     const resultSelector = useCallback(
       (state: State) => {
@@ -739,7 +785,16 @@ export function newTSDFListQueryStore<
           ({
             key: queryKey,
             payload,
-          }): TSFDUseListQueryReturn<SelectedItem, QueryPayload, NError> => {
+            returnIdleStatus,
+            returnRefetchingStatus,
+            omitPayload,
+            queryMetadata,
+          }): TSFDUseListQueryReturn<
+            SelectedItem,
+            QueryPayload,
+            NError,
+            QueryMetadata
+          > => {
             const query = state.queries[queryKey];
 
             if (!query) {
@@ -752,6 +807,7 @@ export function newTSDFListQueryStore<
                 payload: omitPayload ? undefined : payload,
                 isLoading: returnIdleStatus ? false : true,
                 isLoadingMore: false,
+                queryMetadata: queryMetadata as QueryMetadata,
               };
             }
 
@@ -770,17 +826,12 @@ export function newTSDFListQueryStore<
               isLoading: status === 'loading',
               payload: omitPayload ? undefined : query.payload,
               isLoadingMore: status === 'loadingMore',
+              queryMetadata: queryMetadata as QueryMetadata,
             };
           },
         );
       },
-      [
-        dataSelector,
-        omitPayload,
-        queriesWithId,
-        returnIdleStatus,
-        returnRefetchingStatus,
-      ],
+      [dataSelector, queriesWithId],
     );
 
     const storeState = store.useSelector(resultSelector, {
@@ -789,9 +840,9 @@ export function newTSDFListQueryStore<
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateQuery', (event) => {
-      if (isOffScreen) return;
+      for (const { key, payload, isOffScreen } of queriesWithId) {
+        if (isOffScreen) continue;
 
-      for (const { key, payload } of queriesWithId) {
         if (key !== event.queryKey) continue;
 
         if (!queryInvalidationWasTriggered.has(key)) {
@@ -809,37 +860,67 @@ export function newTSDFListQueryStore<
       }
     });
 
-    const loadSizeConst = useConst(() => loadSize);
+    const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
     useEffect(() => {
-      if (isOffScreen) return;
+      const removedItems = new Set(ignoreItemsInRefetchOnMount);
 
-      for (const { key: itemId, payload: fetchParams } of queriesWithId) {
+      for (const {
+        key: itemId,
+        payload: fetchParams,
+        isOffScreen,
+        loadSize,
+        disableRefetchOnMount,
+      } of queriesWithId) {
+        removedItems.delete(itemId);
+
+        if (isOffScreen) continue;
+
         if (itemId) {
           const itemState = getQueryState(fetchParams);
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
-          if (disableRefetchOnMount) {
-            const shouldFetch =
-              !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
+          const shouldFetch =
+            !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
+          if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemId)) {
+            continue;
+          }
+
+          ignoreItemsInRefetchOnMount.add(itemId);
+
+          if (disableRefetchOnMount) {
             if (shouldFetch) {
-              scheduleListQueryFetch(fetchType, fetchParams, loadSizeConst);
+              scheduleListQueryFetch(fetchType, fetchParams, loadSize);
               continue;
             }
           } else {
-            scheduleListQueryFetch(fetchType, fetchParams, loadSizeConst);
+            scheduleListQueryFetch(fetchType, fetchParams, loadSize);
           }
         }
       }
-    }, [disableRefetchOnMount, isOffScreen, loadSizeConst, queriesWithId]);
+
+      for (const itemKey of removedItems) {
+        ignoreItemsInRefetchOnMount.delete(itemKey);
+      }
+    }, [ignoreItemsInRefetchOnMount, queriesWithId]);
 
     return storeState;
   }
 
   function useListQuery<SelectedItem = DefaultSelectedItem>(
     payload: QueryPayload | false | null | undefined,
-    options: {
+    {
+      isOffScreen,
+      itemSelector,
+      disableRefetchOnMount,
+      returnIdleStatus,
+      returnRefetchingStatus,
+      loadSize,
+      omitPayload,
+      ensureIsLoaded,
+      selectorUsesExternalDeps,
+    }: {
       itemSelector?: (
         data: ItemState,
         id: ItemPayload,
@@ -852,19 +933,39 @@ export function newTSDFListQueryStore<
       ensureIsLoaded?: boolean;
       loadSize?: number;
       isOffScreen?: boolean;
+      selectorUsesExternalDeps?: boolean;
     } = {},
   ) {
-    const { ensureIsLoaded } = options;
-
     const query = useMemo(
-      () =>
+      (): ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[] =>
         payload === false || payload === null || payload === undefined
           ? []
-          : [payload],
-      [payload],
+          : [
+              {
+                payload,
+                disableRefetchOnMount,
+                returnIdleStatus,
+                returnRefetchingStatus,
+                omitPayload,
+                isOffScreen,
+                loadSize,
+              },
+            ],
+      [
+        disableRefetchOnMount,
+        isOffScreen,
+        loadSize,
+        omitPayload,
+        payload,
+        returnIdleStatus,
+        returnRefetchingStatus,
+      ],
     );
 
-    const queryResult = useMultipleListQueries(query, options);
+    const queryResult = useMultipleListQueries(query, {
+      itemSelector,
+      selectorUsesExternalDeps,
+    });
 
     const result = useMemo(
       (): TSFDUseListQueryReturn<SelectedItem, QueryPayload, NError> =>
@@ -877,6 +978,7 @@ export function newTSDFListQueryStore<
           queryKey: '',
           items: [],
           isLoadingMore: false,
+          queryMetadata: undefined,
         },
       [queryResult],
     );
@@ -1167,44 +1269,53 @@ export function newTSDFListQueryStore<
     return data as unknown as T;
   }
 
-  function useMultipleItems<SelectedItem = ItemState | null>(
-    itemsPayload_: ItemPayload[],
+  function useMultipleItems<
+    SelectedItem = ItemState | null,
+    QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  >(
+    items: ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     {
       selector = defaultItemDataSelector,
-      returnIdleStatus,
-      returnRefetchingStatus,
-      disableRefetchOnMount,
       loadFromStateOnly,
-      isOffScreen,
+      selectorUsesExternalDeps,
     }: {
+      loadFromStateOnly?: boolean;
       selector?: (
         data: ItemState | null,
         id: ItemPayload | null,
       ) => SelectedItem;
-      disableRefetchOnMount?: boolean;
-      returnIdleStatus?: boolean;
-      returnRefetchingStatus?: boolean;
-      loadFromStateOnly?: boolean;
-      isOffScreen?: boolean;
+      selectorUsesExternalDeps?: boolean;
     } = {},
   ) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    const dataSelector = useCallback(selector, []);
+    const dataSelector = useCallback(selector, [
+      selectorUsesExternalDeps ? selector : 0,
+    ]);
 
     type PayloadWithKey = {
       payload: ItemPayload;
       itemKey: string;
+      disableRefetchOnMount: boolean | undefined;
+      returnIdleStatus: boolean | undefined;
+      returnRefetchingStatus: boolean | undefined;
+      isOffScreen: boolean | undefined;
+      queryMetadata: QueryMetadata | undefined;
     };
 
     const memoizedItemKeys = useDeepMemo(
       () =>
-        itemsPayload_.map(
+        items.map(
           (itemPayload): PayloadWithKey => ({
-            payload: itemPayload,
-            itemKey: getItemKey(itemPayload),
+            itemKey: getItemKey(itemPayload.payload),
+            payload: itemPayload.payload,
+            disableRefetchOnMount: itemPayload.disableRefetchOnMount,
+            returnIdleStatus: itemPayload.returnIdleStatus,
+            returnRefetchingStatus: itemPayload.returnRefetchingStatus,
+            isOffScreen: itemPayload.isOffScreen,
+            queryMetadata: itemPayload.queryMetadata,
           }),
         ),
-      [itemsPayload_],
+      [items],
     );
 
     const resultSelector = useCallback(
@@ -1213,7 +1324,15 @@ export function newTSDFListQueryStore<
           ({
             itemKey,
             payload,
-          }): TSFDUseListItemReturn<SelectedItem, NError, ItemPayload> => {
+            queryMetadata,
+            returnRefetchingStatus,
+            returnIdleStatus,
+          }): TSFDUseListItemReturn<
+            SelectedItem,
+            NError,
+            ItemPayload,
+            QueryMetadata
+          > => {
             const itemQuery = state.itemQueries[itemKey];
             const itemState = state.items[itemKey];
 
@@ -1224,6 +1343,7 @@ export function newTSDFListQueryStore<
                 isLoading: false,
                 payload,
                 data: dataSelector(null, null),
+                queryMetadata: queryMetadata as QueryMetadata,
               };
             }
 
@@ -1234,6 +1354,7 @@ export function newTSDFListQueryStore<
                 isLoading: returnIdleStatus ? false : true,
                 payload,
                 data: dataSelector(null, null),
+                queryMetadata: queryMetadata as QueryMetadata,
               };
             }
 
@@ -1249,16 +1370,12 @@ export function newTSDFListQueryStore<
               isLoading: status === 'loading',
               data: dataSelector(itemState ?? null, itemQuery.payload),
               payload,
+              queryMetadata: queryMetadata as QueryMetadata,
             };
           },
         );
       },
-      [
-        dataSelector,
-        memoizedItemKeys,
-        returnIdleStatus,
-        returnRefetchingStatus,
-      ],
+      [dataSelector, memoizedItemKeys],
     );
 
     const storeState = store.useSelector(resultSelector, {
@@ -1267,9 +1384,11 @@ export function newTSDFListQueryStore<
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateItem', (event) => {
-      if (loadFromStateOnly || isOffScreen) return;
+      if (loadFromStateOnly) return;
 
-      for (const { payload, itemKey } of memoizedItemKeys) {
+      for (const { payload, itemKey, isOffScreen } of memoizedItemKeys) {
+        if (isOffScreen) continue;
+
         if (itemKey !== event.itemKey) continue;
 
         if (!itemInvalidationWasTriggered.has(itemKey)) {
@@ -1287,18 +1406,37 @@ export function newTSDFListQueryStore<
       }
     });
 
-    useEffect(() => {
-      if (loadFromStateOnly || isOffScreen) return;
+    const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
-      for (const { payload, itemKey } of memoizedItemKeys) {
+    useEffect(() => {
+      if (loadFromStateOnly) return;
+
+      const removedItems = new Set(ignoreItemsInRefetchOnMount);
+
+      for (const {
+        payload,
+        itemKey,
+        isOffScreen,
+        disableRefetchOnMount,
+      } of memoizedItemKeys) {
+        removedItems.delete(itemKey);
+
+        if (isOffScreen) continue;
+
         if (itemKey) {
           const itemState = store.state.itemQueries[itemKey];
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
-          if (disableRefetchOnMount) {
-            const shouldFetch =
-              !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
+          const shouldFetch =
+            !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
 
+          if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
+            continue;
+          }
+
+          ignoreItemsInRefetchOnMount.add(itemKey);
+
+          if (disableRefetchOnMount) {
             if (shouldFetch) {
               scheduleItemFetch(fetchType, payload);
               return;
@@ -1308,23 +1446,32 @@ export function newTSDFListQueryStore<
           }
         }
       }
-    }, [
-      disableRefetchOnMount,
-      isOffScreen,
-      loadFromStateOnly,
-      memoizedItemKeys,
-    ]);
+
+      for (const itemKey of removedItems) {
+        ignoreItemsInRefetchOnMount.delete(itemKey);
+      }
+    }, [ignoreItemsInRefetchOnMount, loadFromStateOnly, memoizedItemKeys]);
 
     return storeState;
   }
 
   function useItem<SelectedItem = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
-    options: {
+    {
+      selector,
+      selectorUsesExternalDeps,
+      disableRefetchOnMount,
+      returnIdleStatus,
+      returnRefetchingStatus,
+      ensureIsLoaded,
+      loadFromStateOnly,
+      isOffScreen,
+    }: {
       selector?: (
         data: ItemState | null,
         id: ItemPayload | null,
       ) => SelectedItem;
+      selectorUsesExternalDeps?: boolean;
       disableRefetchOnMount?: boolean;
       returnIdleStatus?: boolean;
       returnRefetchingStatus?: boolean;
@@ -1333,23 +1480,39 @@ export function newTSDFListQueryStore<
       isOffScreen?: boolean;
     } = {},
   ) {
-    const { ensureIsLoaded } = options;
-
     const query = useMemo(
-      () =>
+      (): ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[] =>
         itemPayload === false ||
         itemPayload === null ||
         itemPayload === undefined
           ? []
-          : [itemPayload],
-      [itemPayload],
+          : [
+              {
+                payload: itemPayload,
+                disableRefetchOnMount,
+                isOffScreen,
+                returnIdleStatus,
+                returnRefetchingStatus,
+              },
+            ],
+      [
+        itemPayload,
+        disableRefetchOnMount,
+        isOffScreen,
+        returnIdleStatus,
+        returnRefetchingStatus,
+      ],
     );
 
-    const queryResult = useMultipleItems<SelectedItem>(query, options);
+    const queryResult = useMultipleItems<SelectedItem>(query, {
+      selector,
+      selectorUsesExternalDeps,
+      loadFromStateOnly,
+    });
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const memoizedSelector = useCallback(
-      options.selector ?? defaultItemDataSelector,
+      selector ?? defaultItemDataSelector,
       [],
     );
 
@@ -1361,6 +1524,7 @@ export function newTSDFListQueryStore<
           status: 'idle',
           data: memoizedSelector(null, null),
           payload: itemPayload || null,
+          queryMetadata: undefined,
         },
       [itemPayload, memoizedSelector, queryResult],
     );
