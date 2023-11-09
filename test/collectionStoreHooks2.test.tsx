@@ -142,7 +142,7 @@ test('disable then enable isOffScreen', async () => {
   expect(env.serverMock.fetchsCount).toBe(1);
 });
 
-test('useMultipleItems should not trigger a mount refetch when some option changes', async () => {
+test.concurrent('useMultipleItems should not trigger a mount refetch when some option changes', async () => {
   const env = createTestEnv({
     initialServerData: { '1': defaultTodo, '2': defaultTodo },
     useLoadedSnapshot: true,
@@ -178,13 +178,13 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
 
   expect(env.serverMock.fetchsCount).toBe(2);
 
-  expect(renders1.snapshot).toMatchInlineSnapshot(`
+  expect(renders1.snapshot).toMatchInlineSnapshotString(`
     "
     status: success -- data: {title:todo, completed:false} -- payload: 1 -- rrfs: false
     status: success -- data: {title:todo, completed:false} -- payload: 1 -- rrfs: true
     "
   `);
-  expect(renders2.snapshot).toMatchInlineSnapshot(`
+  expect(renders2.snapshot).toMatchInlineSnapshotString(`
     "
     status: success -- data: {title:todo, completed:false} -- payload: 2 -- rrfs: false
     status: success -- data: {title:todo, completed:false} -- payload: 2 -- rrfs: true
@@ -192,7 +192,7 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
   `);
 });
 
-test('useMultipleItems should not trigger a mount refetch for unchanged items', async () => {
+test.concurrent('useMultipleItems should not trigger a mount refetch for unchanged items', async () => {
   const env = createTestEnv({
     initialServerData: {
       '1': defaultTodo,
@@ -250,7 +250,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
 
   expect(env.serverMock.fetchsCount).toBe(4);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     i: 1 -- status: success -- data: {title:todo, completed:false} -- payload: 1
     i: 2 -- status: success -- data: {title:todo, completed:false} -- payload: 2
