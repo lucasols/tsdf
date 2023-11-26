@@ -1,9 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-empty-interface */
-/* eslint-disable @typescript-eslint/no-namespace */
 import { format } from 'pretty-format';
 import { expect } from 'vitest';
 import { filterAndMap } from '../../src/utils/filterAndMap';
@@ -73,7 +68,6 @@ expect.extend({
     };
   },
   toMatchInlineSnapshotString(received, expected) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     const normalizedExpected = dedent(expected);
     const normalizedReceived = format(received, {
       printBasicPrototype: false,

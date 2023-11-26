@@ -43,7 +43,7 @@ export function useEnsureIsLoaded(
       }
 
       return result;
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+      // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
     }, [ensureIsLoaded, isForceLoading, result]);
   }
 

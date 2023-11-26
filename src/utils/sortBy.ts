@@ -6,7 +6,6 @@ export function sortBy<T>(
   getPriority: (item: T) => (number | string)[] | number | string,
   { order = 'asc' }: { order?: SortOrder | SortOrder[] } = {},
 ) {
-  // eslint-disable-next-line no-restricted-syntax -- in this case is ok to use this syntax
   return [...arr].sort((a, b) => {
     const _aPriority = getPriority(a);
     const _bPriority = getPriority(b);

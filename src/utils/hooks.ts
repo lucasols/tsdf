@@ -14,12 +14,12 @@ function useDeepCompareMemoize(value: any, equalityFn = deepEqual) {
 }
 
 export function useDeepMemo<T>(callback: () => T, deeps: any[]): T {
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
   return useMemo(callback, useDeepCompareMemoize(deeps));
 }
 
 export function useShallowMemo<T>(callback: () => T, deeps: any[]): T {
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
   return useMemo(callback, useDeepCompareMemoize(deeps, shallowEqual));
 }
 
