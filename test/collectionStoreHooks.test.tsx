@@ -39,8 +39,10 @@ describe('useMultipleItems', () => {
     const selectionResult = collectionStore.useMultipleItems(
       state.useKey('itemsToUse').map((item) => ({
         payload: item,
-        returnRefetchingStatus: true,
       })),
+      {
+        returnRefetchingStatus: true,
+      },
     );
 
     const [item1, item2] = selectionResult;
@@ -192,9 +194,11 @@ describe('useMultipleItems isolated tests', () => {
         const [item1, item2] = collectionStore.useMultipleItems(
           ['1', '2'].map((item) => ({
             payload: item,
+          })),
+          {
             returnRefetchingStatus: true,
             disableRefetchOnMount: true,
-          })),
+          },
         );
 
         renders1.add(pick(item1, ['status', 'payload', 'data']));

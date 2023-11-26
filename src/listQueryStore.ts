@@ -742,6 +742,12 @@ export function newTSDFListQueryStore<
     {
       itemSelector = defaultItemSelector,
       selectorUsesExternalDeps,
+      returnIdleStatus: allItemsReturnIdleStatus,
+      returnRefetchingStatus: allItemsReturnRefetchingStatus,
+      omitPayload: allItemsOmitPayload,
+      disableRefetchOnMount: allItemsDisableRefetchOnMount,
+      isOffScreen: allItemsIsOffScreen,
+      loadSize: allItemsLoadSize,
     }: {
       itemSelector?: (
         data: ItemState,
@@ -749,6 +755,12 @@ export function newTSDFListQueryStore<
         itemKey: string,
       ) => SelectedItem;
       selectorUsesExternalDeps?: boolean;
+      returnIdleStatus?: boolean;
+      returnRefetchingStatus?: boolean;
+      omitPayload?: boolean;
+      disableRefetchOnMount?: boolean;
+      isOffScreen?: boolean;
+      loadSize?: number;
     } = {},
   ) {
     type QueryWithId = {
@@ -763,18 +775,29 @@ export function newTSDFListQueryStore<
           key: getQueryKey(item.payload),
           payload: item.payload,
           disableRefetchOnMount:
-            item.disableRefetchOnMount ?? globalDisableRefetchOnMount,
-          returnIdleStatus: item.returnIdleStatus,
-          returnRefetchingStatus: item.returnRefetchingStatus,
+            item.disableRefetchOnMount ??
+            allItemsDisableRefetchOnMount ??
+            globalDisableRefetchOnMount,
+          returnIdleStatus: item.returnIdleStatus ?? allItemsReturnIdleStatus,
+          returnRefetchingStatus:
+            item.returnRefetchingStatus ?? allItemsReturnRefetchingStatus,
           queryMetadata: item.queryMetadata,
-          isOffScreen: item.isOffScreen,
-          omitPayload: item.omitPayload,
-          loadSize: item.loadSize,
+          isOffScreen: item.isOffScreen ?? allItemsIsOffScreen,
+          omitPayload: item.omitPayload ?? allItemsOmitPayload,
+          loadSize: item.loadSize ?? allItemsLoadSize,
         };
       });
-    }, [queries]);
+    }, [
+      allItemsDisableRefetchOnMount,
+      allItemsIsOffScreen,
+      allItemsLoadSize,
+      allItemsOmitPayload,
+      allItemsReturnIdleStatus,
+      allItemsReturnRefetchingStatus,
+      queries,
+    ]);
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
     const dataSelector = useCallback(itemSelector, [
       selectorUsesExternalDeps ? itemSelector : 0,
     ]);
@@ -1278,6 +1301,10 @@ export function newTSDFListQueryStore<
       selector = defaultItemDataSelector,
       loadFromStateOnly,
       selectorUsesExternalDeps,
+      returnIdleStatus: allItemsReturnIdleStatus,
+      returnRefetchingStatus: allItemsReturnRefetchingStatus,
+      disableRefetchOnMount: allItemsDisableRefetchOnMount,
+      isOffScreen: allItemsIsOffScreen,
     }: {
       loadFromStateOnly?: boolean;
       selector?: (
@@ -1285,22 +1312,20 @@ export function newTSDFListQueryStore<
         id: ItemPayload | null,
       ) => SelectedItem;
       selectorUsesExternalDeps?: boolean;
+      returnIdleStatus?: boolean;
+      returnRefetchingStatus?: boolean;
+      disableRefetchOnMount?: boolean;
+      isOffScreen?: boolean;
     } = {},
   ) {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
     const dataSelector = useCallback(selector, [
       selectorUsesExternalDeps ? selector : 0,
     ]);
 
     type PayloadWithKey = {
-      payload: ItemPayload;
       itemKey: string;
-      disableRefetchOnMount: boolean | undefined;
-      returnIdleStatus: boolean | undefined;
-      returnRefetchingStatus: boolean | undefined;
-      isOffScreen: boolean | undefined;
-      queryMetadata: QueryMetadata | undefined;
-    };
+    } & NonPartial<ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>>;
 
     const memoizedItemKeys = useDeepMemo(
       () =>
@@ -1308,14 +1333,25 @@ export function newTSDFListQueryStore<
           (itemPayload): PayloadWithKey => ({
             itemKey: getItemKey(itemPayload.payload),
             payload: itemPayload.payload,
-            disableRefetchOnMount: itemPayload.disableRefetchOnMount,
-            returnIdleStatus: itemPayload.returnIdleStatus,
-            returnRefetchingStatus: itemPayload.returnRefetchingStatus,
-            isOffScreen: itemPayload.isOffScreen,
+            disableRefetchOnMount:
+              itemPayload.disableRefetchOnMount ??
+              allItemsDisableRefetchOnMount,
+            returnIdleStatus:
+              itemPayload.returnIdleStatus ?? allItemsReturnIdleStatus,
+            returnRefetchingStatus:
+              itemPayload.returnRefetchingStatus ??
+              allItemsReturnRefetchingStatus,
+            isOffScreen: itemPayload.isOffScreen ?? allItemsIsOffScreen,
             queryMetadata: itemPayload.queryMetadata,
           }),
         ),
-      [items],
+      [
+        allItemsDisableRefetchOnMount,
+        allItemsIsOffScreen,
+        allItemsReturnIdleStatus,
+        allItemsReturnRefetchingStatus,
+        items,
+      ],
     );
 
     const resultSelector = useCallback(
@@ -1510,7 +1546,7 @@ export function newTSDFListQueryStore<
       loadFromStateOnly,
     });
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
     const memoizedSelector = useCallback(
       selector ?? defaultItemDataSelector,
       [],
