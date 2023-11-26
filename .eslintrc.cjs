@@ -22,7 +22,7 @@ module.exports = {
     browser: true,
   },
   plugins: ['@typescript-eslint', '@lucasols/extended-lint', 'vitest'],
-
+  reportUnusedDisableDirectives: true,
   rules: {
     'no-warning-comments': [ERROR_IN_CI, { terms: ['FIX:'] }],
     'no-constant-binary-expression': ERROR_IN_CI,
@@ -107,11 +107,17 @@ module.exports = {
     /* extended-lint */
     '@lucasols/extended-lint/no-unused-type-props-in-args': ERROR_IN_CI,
     '@lucasols/extended-lint/no-commented-out-code': ERROR_IN_CI,
+    '@lucasols/extended-lint/rules-of-hooks': ERROR,
+    '@lucasols/extended-lint/exhaustive-deps': [
+      ERROR_IN_CI,
+      {
+        additionalHooks: 'useDeepMemo',
+      },
+    ],
   },
   extends: [
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended',
     'plugin:@typescript-eslint/recommended-requiring-type-checking',
-    'plugin:react-hooks/recommended',
   ],
 };

@@ -20,6 +20,7 @@ import { filterAndMap } from './utils/filterAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo } from './utils/hooks';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
+import { NonPartial } from './utils/types';
 
 type CollectionItemStatus = TSDFStatus;
 
@@ -391,21 +392,24 @@ export function newTSDFCollectionStore<
     {
       selector,
       selectorUsesExternalDeps,
+      returnIdleStatus: allItemsReturnIdleStatus,
+      returnRefetchingStatus: allItemsReturnRefetchingStatus,
+      omitPayload: allItemsOmitPayload,
+      disableRefetchOnMount: allItemsDisableRefetchOnMount,
+      isOffScreen: allItemsIsOffScreen,
     }: {
       selector?: (data: ItemState | null) => Selected;
       selectorUsesExternalDeps?: boolean;
+      returnIdleStatus?: boolean;
+      returnRefetchingStatus?: boolean;
+      omitPayload?: boolean;
+      disableRefetchOnMount?: boolean;
+      isOffScreen?: boolean;
     } = {},
   ) {
     type QueryWithId = {
       itemKey: string;
-      payload: ItemPayload;
-      disableRefetchOnMount: boolean | undefined;
-      returnIdleStatus: boolean | undefined;
-      returnRefetchingStatus: boolean | undefined;
-      omitPayload: boolean | undefined;
-      isOffScreen: boolean | undefined;
-      queryMetadata: QueryMetadata | undefined;
-    };
+    } & NonPartial<CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>>;
 
     const queriesWithId = useDeepMemo((): QueryWithId[] => {
       return items.map((queryProps) => {
@@ -413,24 +417,35 @@ export function newTSDFCollectionStore<
           itemKey: getItemKey(queryProps.payload),
           payload: queryProps.payload,
           disableRefetchOnMount:
-            queryProps.disableRefetchOnMount ?? globalDisableRefetchOnMount,
-          returnIdleStatus: queryProps.returnIdleStatus,
-          returnRefetchingStatus: queryProps.returnRefetchingStatus,
-          omitPayload: queryProps.omitPayload,
-          isOffScreen: queryProps.isOffScreen,
+            queryProps.disableRefetchOnMount ??
+            allItemsDisableRefetchOnMount ??
+            globalDisableRefetchOnMount,
+          returnIdleStatus:
+            queryProps.returnIdleStatus ?? allItemsReturnIdleStatus,
+          returnRefetchingStatus:
+            queryProps.returnRefetchingStatus ?? allItemsReturnRefetchingStatus,
+          omitPayload: queryProps.omitPayload ?? allItemsOmitPayload,
+          isOffScreen: queryProps.isOffScreen ?? allItemsIsOffScreen,
           queryMetadata: queryProps.queryMetadata,
         };
       });
-    }, [items]);
+    }, [
+      items,
+      allItemsDisableRefetchOnMount,
+      allItemsIsOffScreen,
+      allItemsOmitPayload,
+      allItemsReturnIdleStatus,
+      allItemsReturnRefetchingStatus,
+    ]);
 
     const dataSelector = useCallback(
       (itemState: ItemState | null) => {
         if (selector) return selector(itemState);
 
         return itemState as Selected;
-        // eslint-disable-next-line react-hooks/exhaustive-deps
       },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+
+      // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
       [selectorUsesExternalDeps ? selector : 0],
     );
 
@@ -631,7 +646,7 @@ export function newTSDFCollectionStore<
           isLoading: false,
           queryMetadata: undefined,
         },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+      // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
       [item],
     );
 
