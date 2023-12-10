@@ -17,7 +17,6 @@ const initialServerData = {
 test.concurrent('filter items optimistically to queries', () => {
   const env = createTestEnv({
     initialServerData,
-    disableSyncInvalidation: true,
     useLoadedSnapshot: {
       queries: [
         { tableId: 'users', filters: { type: 'admin' } },
@@ -144,7 +143,6 @@ test.concurrent('filter items optimistically to queries', () => {
 test.concurrent('optimistically create a query if it not exist', () => {
   const env = createTestEnv({
     initialServerData,
-    disableSyncInvalidation: true,
     useLoadedSnapshot: {
       queries: [{ tableId: 'users', filters: { type: 'user' } }],
     },
@@ -199,7 +197,6 @@ test.concurrent('optimistically create a query if it not exist', () => {
 test.concurrent('optimistically sort items', () => {
   const env = createTestEnv({
     initialServerData,
-    disableSyncInvalidation: true,
     useLoadedSnapshot: {
       queries: [{ tableId: 'users', filters: { type: 'user' } }],
     },
