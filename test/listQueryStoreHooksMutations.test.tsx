@@ -50,7 +50,11 @@ async function updateItemName(
 
   endMutation();
 
-  if (revalidate) store.invalidateItem(id);
+  if (revalidate)
+    store.invalidateQueryAndItems({
+      itemPayload: id,
+      queryPayload: (payload) => payload.tableId === tableId,
+    });
 
   return result;
 }
@@ -86,7 +90,11 @@ async function addItemWithIdGeneratedByServer(
     name,
   });
 
-  if (invalidateAfterMutation) store.invalidateItem(`${tableId}||${id}`);
+  if (invalidateAfterMutation)
+    store.invalidateQueryAndItems({
+      itemPayload: `${tableId}||${id}`,
+      queryPayload: (payload) => payload.tableId === tableId,
+    });
 
   return result;
 }
@@ -121,7 +129,11 @@ async function addItemWithIdGeneratedByClient(
 
   endMutation();
 
-  if (revalidate) store.invalidateItem(id, 'highPriority');
+  if (revalidate)
+    store.invalidateQueryAndItems({
+      itemPayload: id,
+      queryPayload: (payload) => payload.tableId === tableId,
+    });
 
   return result;
 }
@@ -156,7 +168,11 @@ async function deleteItem(
 
   endMutation();
 
-  if (revalidate) store.invalidateItem(id);
+  if (revalidate)
+    store.invalidateQueryAndItems({
+      itemPayload: id,
+      queryPayload: (payload) => payload.tableId === tableId,
+    });
 
   return result;
 }

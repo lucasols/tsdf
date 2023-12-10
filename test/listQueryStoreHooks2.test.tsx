@@ -331,7 +331,10 @@ describe('syncMutationAndInvalidation', () => {
       comp3Renders.add({ status, error, items });
     });
 
-    store.invalidateItem('users||1');
+    store.invalidateQueryAndItems({
+      itemPayload: 'users||1',
+      queryPayload: (payload) => payload.tableId === 'users',
+    });
 
     await serverMock.waitFetchIdle();
 
@@ -403,7 +406,10 @@ describe('syncMutationAndInvalidation', () => {
       </>,
     );
 
-    store.invalidateQuery({ tableId: 'users' });
+    store.invalidateQueryAndItems({
+      itemPayload: (payload) => payload.startsWith('users||'),
+      queryPayload: (payload) => payload.tableId === 'users',
+    });
 
     await serverMock.waitFetchIdle();
 
@@ -562,8 +568,11 @@ test.concurrent(
     });
 
     function emulateWindowFocus() {
-      env.store.invalidateQuery(() => true, 'lowPriority');
-      env.store.invalidateItem(() => true, 'lowPriority');
+      env.store.invalidateQueryAndItems({
+        itemPayload: () => true,
+        queryPayload: () => true,
+        type: 'lowPriority',
+      });
     }
 
     function getState(table = 'users') {
@@ -631,8 +640,11 @@ test.concurrent(
     });
 
     function emulateWindowFocus() {
-      env.store.invalidateQuery(() => true, 'lowPriority');
-      env.store.invalidateItem(() => true, 'lowPriority');
+      env.store.invalidateQueryAndItems({
+        itemPayload: () => true,
+        queryPayload: () => true,
+        type: 'lowPriority',
+      });
     }
 
     function getItemState(itemId = 'users||1') {
@@ -702,8 +714,11 @@ test.concurrent(
     });
 
     function emulateWindowFocus() {
-      env.store.invalidateQuery(() => true, 'lowPriority');
-      env.store.invalidateItem(() => true, 'lowPriority');
+      env.store.invalidateQueryAndItems({
+        itemPayload: () => true,
+        queryPayload: () => true,
+        type: 'lowPriority',
+      });
     }
 
     function getState(table = 'products') {

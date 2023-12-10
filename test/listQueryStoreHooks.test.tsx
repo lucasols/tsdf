@@ -90,7 +90,10 @@ describe('useMultipleItemsQuery sequential tests', () => {
     serverMock.produceData((draft) => {
       draft.users![0]!.name = 'Updated User 1';
     });
-    listQueryStore.invalidateQuery(getFetchQueryForTable('users'));
+    listQueryStore.invalidateQueryAndItems({
+      itemPayload: false,
+      queryPayload: getFetchQueryForTable('users'),
+    });
 
     await serverMock.waitFetchIdle();
 
@@ -115,7 +118,6 @@ describe('useMultipleItemsQuery sequential tests', () => {
 
     let getFetchCount: () => number;
 
-    // eslint-disable-next-line vitest/expect-expect
     test('setup block', async () => {
       getFetchCount = serverMock.numOfFetchsFromHere();
 
@@ -154,7 +156,10 @@ describe('useMultipleItemsQuery sequential tests', () => {
         draft.products![0]!.name = 'Updated Product 1';
       });
 
-      listQueryStore.invalidateQuery(() => true);
+      listQueryStore.invalidateQueryAndItems({
+        itemPayload: false,
+        queryPayload: () => true,
+      });
 
       await serverMock.waitFetchIdle();
 
@@ -759,7 +764,11 @@ describe('useItem', () => {
     serverMock.produceData((draft) => {
       draft.users![1]!.name = 'Updated User 2';
     });
-    listQueryStore.invalidateItem('users||2');
+
+    listQueryStore.invalidateQueryAndItems({
+      queryPayload: false,
+      itemPayload: 'users||2',
+    });
 
     await serverMock.waitFetchIdle();
 

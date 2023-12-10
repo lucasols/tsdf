@@ -48,7 +48,6 @@ export function createDefaultListQueryStore({
   emulateRTU,
   optimisticListUpdates,
   lowPriorityThrottleMs,
-  disableSyncInvalidation,
 }: {
   initialServerData?: Tables;
   useLoadedSnapshot?: {
@@ -63,9 +62,7 @@ export function createDefaultListQueryStore({
   debugRequests?: never;
   disableInitialDataInvalidation?: boolean;
   emulateRTU?: boolean;
-  disableSyncInvalidation?: boolean;
   lowPriorityThrottleMs?: number;
-
   optimisticListUpdates?: Parameters<
     typeof newTSDFListQueryStore<Row, any, ListQueryParams, string>
   >[0]['optimisticListUpdates'];
@@ -258,16 +255,6 @@ export function createDefaultListQueryStore({
     disableInitialDataInvalidation,
     lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
-    syncMutationsAndInvalidations: disableSyncInvalidation
-      ? undefined
-      : {
-          syncItemAndQuery(itemId, query) {
-            return query.tableId === itemId.split('||')[0];
-          },
-          syncQueries(query1, query2) {
-            return query1.tableId === query2.tableId;
-          },
-        },
   });
 
   if (debug as any) {
@@ -292,7 +279,12 @@ export function createDefaultListQueryStore({
     serverMock.addOnUpdateServerData(({ prev, data }) => {
       for (const tableId of Object.keys(data)) {
         if (!deepEqual(prev[tableId], data[tableId])) {
-          listQueryStore.invalidateQuery({ tableId }, 'realtimeUpdate');
+          listQueryStore.invalidateQueryAndItems({
+            queryPayload: (queryPayload) => queryPayload.tableId === tableId,
+            itemPayload: (itemPayload) =>
+              itemPayload.split('||')[0] === tableId,
+            type: 'realtimeUpdate',
+          });
         }
       }
     });

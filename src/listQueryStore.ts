@@ -174,7 +174,6 @@ export function newTSDFListQueryStore<
   disableInitialDataInvalidation,
   mediumPriorityThrottleMs,
   dynamicRealtimeThrottleMs,
-  syncMutationsAndInvalidations,
   optimisticListUpdates,
   onInvalidateItem,
   onInvalidateQuery,
@@ -191,13 +190,6 @@ export function newTSDFListQueryStore<
     | ListQueryStoreInitialData<ItemState, QueryPayload, ItemPayload>
     | undefined;
   disableInitialDataInvalidation?: boolean;
-  syncMutationsAndInvalidations?: {
-    syncQueries: (query1: QueryPayload, query2: QueryPayload) => boolean;
-    syncItemAndQuery: (
-      itemPayload: ItemPayload,
-      query: QueryPayload,
-    ) => boolean;
-  };
   disableRefetchOnMount?: boolean;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
@@ -657,14 +649,66 @@ export function newTSDFListQueryStore<
     invalidateItem: { priority: FetchType; itemKey: string };
   }>();
 
+  const itemInvalidationWasTriggered = new Set<string>();
+
+  function invalidateItem(
+    itemId: ItemPayload | ItemPayload[] | FilterItemFn,
+    priority: FetchType = 'highPriority',
+  ) {
+    if (!fetchItemOrquestrator) {
+      throw new Error(noFetchFnError);
+    }
+
+    const itemsKey = getItemsKeyArray(itemId);
+
+    for (const { itemKey, payload } of itemsKey) {
+      const item = store.state.itemQueries[itemKey];
+
+      if (!item) continue;
+
+      const currentInvalidationPriority = item.refetchOnMount
+        ? fetchTypePriority[item.refetchOnMount]
+        : -1;
+      const newInvalidationPriority = fetchTypePriority[priority];
+
+      if (currentInvalidationPriority >= newInvalidationPriority) continue;
+
+      store.produceState(
+        (draft) => {
+          const query = draft.itemQueries[itemKey];
+
+          if (!query) return;
+
+          query.refetchOnMount = priority;
+        },
+        { action: { type: 'invalidate-item', queryKey: itemKey } },
+      );
+
+      itemInvalidationWasTriggered.delete(itemKey);
+      storeEvents.emit('invalidateItem', { priority, itemKey });
+
+      if (onInvalidateItem) {
+        const itemState = store.state.items[itemKey];
+
+        if (itemState) {
+          onInvalidateItem({ priority, itemState, payload });
+        }
+      }
+    }
+  }
+
   const queryInvalidationWasTriggered = new Set<string>();
 
-  function invalidateQuery(
-    queryPayload: QueryPayload | QueryPayload[] | FilterQueryFn,
-    priority: FetchType = 'highPriority',
-    ignoreInvalidationSync = false,
-  ) {
-    const queriesKey = getQueriesKeyArray(queryPayload);
+  function invalidateQueryAndItems({
+    itemPayload,
+    queryPayload,
+    type: priority = 'highPriority',
+  }: {
+    itemPayload: ItemPayload | ItemPayload[] | FilterItemFn | false;
+    queryPayload: QueryPayload | QueryPayload[] | FilterQueryFn | false;
+    type?: FetchType;
+  }) {
+    const queriesKey = queryPayload ? getQueriesKeyArray(queryPayload) : [];
 
     for (const { key, payload } of queriesKey) {
       const queryState = store.state.queries[key];
@@ -695,33 +739,8 @@ export function newTSDFListQueryStore<
       onInvalidateQuery?.(payload, priority);
     }
 
-    if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
-      invalidateItem(
-        (itemPayload) =>
-          queriesKey.some(({ payload }) => {
-            return syncMutationsAndInvalidations.syncItemAndQuery(
-              itemPayload,
-              payload,
-            );
-          }),
-        priority,
-        true,
-      );
-
-      invalidateQuery(
-        (queryToInvalidatePayload, _, queryToInvalidateKey) =>
-          queriesKey.some((alreadyInvalidatedQueryPayload) => {
-            return (
-              queryToInvalidateKey !== alreadyInvalidatedQueryPayload.key &&
-              syncMutationsAndInvalidations.syncQueries(
-                alreadyInvalidatedQueryPayload.payload,
-                queryToInvalidatePayload,
-              )
-            );
-          }),
-        priority,
-        true,
-      );
+    if (itemPayload) {
+      invalidateItem(itemPayload, priority);
     }
   }
 
@@ -1189,70 +1208,6 @@ export function newTSDFListQueryStore<
     return [{ payload: itemsPayload, itemKey: getItemKey(itemsPayload) }];
   }
 
-  const itemInvalidationWasTriggered = new Set<string>();
-
-  function invalidateItem(
-    itemId: ItemPayload | ItemPayload[] | FilterItemFn,
-    priority: FetchType = 'highPriority',
-    ignoreInvalidationSync = false,
-  ) {
-    if (!fetchItemOrquestrator) {
-      throw new Error(noFetchFnError);
-    }
-
-    const itemsKey = getItemsKeyArray(itemId);
-
-    for (const { itemKey, payload } of itemsKey) {
-      const item = store.state.itemQueries[itemKey];
-
-      if (!item) continue;
-
-      const currentInvalidationPriority = item.refetchOnMount
-        ? fetchTypePriority[item.refetchOnMount]
-        : -1;
-      const newInvalidationPriority = fetchTypePriority[priority];
-
-      if (currentInvalidationPriority >= newInvalidationPriority) continue;
-
-      store.produceState(
-        (draft) => {
-          const query = draft.itemQueries[itemKey];
-
-          if (!query) return;
-
-          query.refetchOnMount = priority;
-        },
-        { action: { type: 'invalidate-item', queryKey: itemKey } },
-      );
-
-      itemInvalidationWasTriggered.delete(itemKey);
-      storeEvents.emit('invalidateItem', { priority, itemKey });
-
-      if (onInvalidateItem) {
-        const itemState = store.state.items[itemKey];
-
-        if (itemState) {
-          onInvalidateItem({
-            priority,
-            itemState,
-            payload,
-          });
-        }
-      }
-    }
-
-    if (syncMutationsAndInvalidations && !ignoreInvalidationSync) {
-      invalidateQuery(
-        (query) =>
-          itemsKey.some(({ payload }) =>
-            syncMutationsAndInvalidations.syncItemAndQuery(payload, query),
-          ),
-        priority,
-        true,
-      );
-    }
-  }
-
   function startItemMutation(
     itemId: ItemPayload | ItemPayload[] | FilterItemFn,
   ) {
@@ -1260,23 +1215,16 @@ export function newTSDFListQueryStore<
 
     const endMutations: (() => void)[] = [];
 
-    for (const { itemKey, payload } of itemsKey) {
+    for (const { itemKey } of itemsKey) {
       endMutations.push(
         fetchItemOrquestrator?.get(itemKey).startMutation() || (() => {}),
       );
 
-      if (syncMutationsAndInvalidations) {
-        for (const [queryKey, query] of Object.entries(store.state.queries)) {
-          if (
-            syncMutationsAndInvalidations.syncItemAndQuery(
-              payload,
-              query.payload,
-            )
-          ) {
-            endMutations.push(
-              fetchQueryOrquestrator.get(queryKey).startMutation(),
-            );
-          }
+      for (const [queryKey, query] of Object.entries(store.state.queries)) {
+        if (query.items.includes(itemKey)) {
+          endMutations.push(
+            fetchQueryOrquestrator.get(queryKey).startMutation(),
+          );
         }
       }
     }
@@ -1762,7 +1710,11 @@ export function newTSDFListQueryStore<
       }
     });
 
-    if (queriesToInvalidate.length) invalidateQuery(queriesToInvalidate);
+    if (queriesToInvalidate.length)
+      invalidateQueryAndItems({
+        queryPayload: queriesToInvalidate,
+        itemPayload: false,
+      });
   }
 
   /** adds a item to state, if the item already exist replace it with the new one */
@@ -1868,8 +1820,7 @@ export function newTSDFListQueryStore<
     deleteItemState,
     getItemState,
     loadMore,
-    invalidateQuery,
-    invalidateItem,
+    invalidateQueryAndItems,
     scheduleItemFetch,
     awaitItemFetch,
     awaitListQueryFetch,

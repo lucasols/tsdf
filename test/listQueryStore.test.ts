@@ -186,7 +186,8 @@ describe.concurrent('fetch query', () => {
           "wasLoaded": true,
         }
       `);
-    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(`
+    expect(listQueryStore.getItemState('users||1'))
+      .toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "Updated User 1",
@@ -570,7 +571,8 @@ test.concurrent('ignore multiple load more made in sequence', async () => {
 
   await serverMock.waitFetchIdle();
 
-  expect(listQueryStore.getQueryState(query)?.items).toMatchInlineSnapshotString(`
+  expect(listQueryStore.getQueryState(query)?.items)
+    .toMatchInlineSnapshotString(`
     [
       "products||1",
       "products||2",
@@ -590,7 +592,8 @@ test.concurrent('ignore multiple load more made in sequence', async () => {
 
   await serverMock.waitFetchIdle();
 
-  expect(listQueryStore.getQueryState(query)?.items).toMatchInlineSnapshotString(`
+  expect(listQueryStore.getQueryState(query)?.items)
+    .toMatchInlineSnapshotString(`
     [
       "products||1",
       "products||2",
@@ -690,7 +693,8 @@ describe.concurrent('fetch item', () => {
         "wasLoaded": true,
       }
     `);
-    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(`
+    expect(listQueryStore.getItemState('users||1'))
+      .toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "User 1",
@@ -798,7 +802,8 @@ describe.concurrent('fetch item', () => {
           "wasLoaded": true,
         }
       `);
-    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(`
+    expect(listQueryStore.getItemState('users||1'))
+      .toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "User 1",
@@ -1030,7 +1035,8 @@ describe.concurrent('fetch item', () => {
         }
       `);
 
-    expect(listQueryStore.store.state.items['users||1']).toMatchInlineSnapshotString(`
+    expect(listQueryStore.store.state.items['users||1'])
+      .toMatchInlineSnapshotString(`
       {
         "id": 1,
         "name": "User 1",
@@ -1456,9 +1462,17 @@ describe('an item invalidation with lower priority should not override one with 
   test.concurrent('not override high priority update', () => {
     const env = createTestEnv(testEnvOptions);
 
-    env.store.invalidateItem(itemId, 'highPriority');
+    env.store.invalidateQueryAndItems({
+      itemPayload: itemId,
+      type: 'highPriority',
+      queryPayload: false,
+    });
 
-    env.store.invalidateItem(itemId, 'lowPriority');
+    env.store.invalidateQueryAndItems({
+      itemPayload: itemId,
+      type: 'lowPriority',
+      queryPayload: false,
+    });
 
     expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
       'highPriority',
@@ -1468,9 +1482,17 @@ describe('an item invalidation with lower priority should not override one with 
   test.concurrent('not override rtu update', () => {
     const env = createTestEnv(testEnvOptions);
 
-    env.store.invalidateItem(itemId, 'realtimeUpdate');
+    env.store.invalidateQueryAndItems({
+      itemPayload: itemId,
+      type: 'realtimeUpdate',
+      queryPayload: false,
+    });
 
-    env.store.invalidateItem(itemId, 'lowPriority');
+    env.store.invalidateQueryAndItems({
+      itemPayload: itemId,
+      type: 'lowPriority',
+      queryPayload: false,
+    });
 
     expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
       'realtimeUpdate',
@@ -1480,9 +1502,17 @@ describe('an item invalidation with lower priority should not override one with 
   test.concurrent('not override highPriority with rtu update', () => {
     const env = createTestEnv(testEnvOptions);
 
-    env.store.invalidateItem(itemId, 'highPriority');
+    env.store.invalidateQueryAndItems({
+      itemPayload: itemId,
+      type: 'highPriority',
+      queryPayload: false,
+    });
 
-    env.store.invalidateItem(itemId, 'realtimeUpdate');
+    env.store.invalidateQueryAndItems({
+      itemPayload: itemId,
+      type: 'realtimeUpdate',
+      queryPayload: false,
+    });
 
     expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
       'highPriority',
@@ -1500,9 +1530,17 @@ describe('a query invalidation with lower priority should not override one with 
   test.concurrent('not override high priority update', () => {
     const env = createTestEnv(testEnvOptions);
 
-    env.store.invalidateQuery(queryPayload, 'highPriority');
+    env.store.invalidateQueryAndItems({
+      itemPayload: false,
+      type: 'highPriority',
+      queryPayload,
+    });
 
-    env.store.invalidateQuery(queryPayload, 'lowPriority');
+    env.store.invalidateQueryAndItems({
+      itemPayload: false,
+      type: 'lowPriority',
+      queryPayload,
+    });
 
     expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
       'highPriority',
@@ -1512,9 +1550,17 @@ describe('a query invalidation with lower priority should not override one with 
   test.concurrent('not override rtu update', () => {
     const env = createTestEnv(testEnvOptions);
 
-    env.store.invalidateQuery(queryPayload, 'realtimeUpdate');
+    env.store.invalidateQueryAndItems({
+      queryPayload,
+      type: 'realtimeUpdate',
+      itemPayload: false,
+    });
 
-    env.store.invalidateQuery(queryPayload, 'lowPriority');
+    env.store.invalidateQueryAndItems({
+      queryPayload,
+      type: 'lowPriority',
+      itemPayload: false,
+    });
 
     expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
       'realtimeUpdate',
@@ -1524,9 +1570,17 @@ describe('a query invalidation with lower priority should not override one with 
   test.concurrent('not override highPriority with rtu update', () => {
     const env = createTestEnv(testEnvOptions);
 
-    env.store.invalidateQuery(queryPayload, 'highPriority');
+    env.store.invalidateQueryAndItems({
+      queryPayload,
+      type: 'highPriority',
+      itemPayload: false,
+    });
 
-    env.store.invalidateQuery(queryPayload, 'realtimeUpdate');
+    env.store.invalidateQueryAndItems({
+      queryPayload,
+      type: 'realtimeUpdate',
+      itemPayload: false,
+    });
 
     expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
       'highPriority',
@@ -1540,8 +1594,10 @@ test('invalidate everything does not cause a problem', () => {
     useLoadedSnapshot: { tables: ['users'] },
   });
 
-  env.store.invalidateItem(() => true);
-  env.store.invalidateQuery(() => true);
+  env.store.invalidateQueryAndItems({
+    queryPayload: () => true,
+    itemPayload: () => true,
+  });
 
   expect(env.store.store.state).toEqual({
     itemQueries: {
