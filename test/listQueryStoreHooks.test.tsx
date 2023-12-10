@@ -118,6 +118,7 @@ describe('useMultipleItemsQuery sequential tests', () => {
 
     let getFetchCount: () => number;
 
+    // eslint-disable-next-line vitest/expect-expect
     test('setup block', async () => {
       getFetchCount = serverMock.numOfFetchsFromHere();
 
