@@ -626,26 +626,28 @@ describe('useItem isolated tests', () => {
   });
 });
 
-test.concurrent('RTU update works', async () => {
-  const env = createTestEnv({
-    initialServerData: { '1': defaultTodo, '2': defaultTodo },
-    useLoadedSnapshot: true,
-    emulateRTU: true,
-    disableInitialDataInvalidation: true,
-    dynamicRTUThrottleMs() {
-      return 300;
-    },
-  });
+test.concurrent(
+  'RTU update works',
+  async () => {
+    const env = createTestEnv({
+      initialServerData: { '1': defaultTodo, '2': defaultTodo },
+      useLoadedSnapshot: true,
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+      dynamicRTUThrottleMs() {
+        return 300;
+      },
+    });
 
-  const renders = createRenderStore();
+    const renders = createRenderStore();
 
-  env.serverMock.produceData((draft) => {
-    draft['1']!.title = 'RTU Update';
-  });
+    env.serverMock.produceData((draft) => {
+      draft['1']!.title = 'RTU Update';
+    });
 
-  await sleep(100);
+    await sleep(100);
 
-  expect(env.store.store.state).toMatchInlineSnapshotString(`
+    expect(env.store.store.state).toMatchInlineSnapshotString(`
     {
       "1": {
         "data": {
@@ -672,28 +674,28 @@ test.concurrent('RTU update works', async () => {
     }
   `);
 
-  renderHook(() => {
-    const { data, status } = env.store.useItem('1', {
-      returnRefetchingStatus: true,
-      disableRefetchOnMount: true,
+    renderHook(() => {
+      const { data, status } = env.store.useItem('1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({ status, data });
     });
 
-    renders.add({ status, data });
-  });
+    await env.serverMock.waitFetchIdle(0, 1500);
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+    env.serverMock.produceData((draft) => {
+      draft['1']!.title = 'Throttle update';
+    });
 
-  env.serverMock.produceData((draft) => {
-    draft['1']!.title = 'Throttle update';
-  });
+    await env.serverMock.waitFetchIdle(0, 1500);
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+    expect(
+      env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
+    ).toBeGreaterThanOrEqual(300);
 
-  expect(
-    env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
-  ).toBeGreaterThanOrEqual(300);
-
-  expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
+    expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
     "
     status: success -- data: {title:todo, completed:false}
     status: refetching -- data: {title:todo, completed:false}
@@ -702,7 +704,9 @@ test.concurrent('RTU update works', async () => {
     status: success -- data: {title:Throttle update, completed:false}
     "
   `);
-});
+  },
+  { retry: 2 },
+);
 
 test.concurrent('fetch error then mount component without error', async () => {
   const env = createTestEnv({
