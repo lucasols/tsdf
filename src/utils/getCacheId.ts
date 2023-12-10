@@ -42,7 +42,6 @@ function orderedProps(
     return { [keys[0]!]: mapValue(value) };
   }
 
-  // eslint-disable-next-line no-restricted-syntax
   const mappedValues = filterAndMap(keys.sort(), (k, ignore) => {
     const value = obj[k];
 
