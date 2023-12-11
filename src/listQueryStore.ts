@@ -656,7 +656,7 @@ export function newTSDFListQueryStore<
     priority: FetchType = 'highPriority',
   ) {
     if (!fetchItemOrquestrator) {
-      throw new Error(noFetchFnError);
+      return;
     }
 
     const itemsKey = getItemsKeyArray(itemId);

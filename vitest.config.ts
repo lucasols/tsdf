@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = process.env.NODE_ENV === 'test';
 
 export default defineConfig({
   test: {

@@ -505,7 +505,7 @@ test('receive a RTU', async () => {
   `);
 });
 
-test('useItem loadFromStateOnly', async () => {
+test.concurrent('useItem loadFromStateOnly', async () => {
   const env = createTestEnv({
     initialServerData,
     disableFetchItemFn: true,
@@ -524,14 +524,14 @@ test('useItem loadFromStateOnly', async () => {
 
   await sleep(200);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     status: success -- data: {id:1, name:User 1} -- isLoading: false
     "
   `);
 });
 
-test('useItem loadFromStateOnly with not found item', async () => {
+test.concurrent('useItem loadFromStateOnly with not found item', async () => {
   const env = createTestEnv({
     initialServerData,
     disableFetchItemFn: true,
@@ -550,14 +550,14 @@ test('useItem loadFromStateOnly with not found item', async () => {
 
   await sleep(200);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
     status: loading -- data: null -- error: null -- isLoading: true
     "
   `);
 });
 
-test.concurrent(
+test(
   'emulate realidateOnWindowFocus behaviour for list queries',
   async () => {
     const env = createTestEnv({
@@ -703,7 +703,7 @@ test.concurrent(
   },
 );
 
-test.concurrent(
+test(
   'emulate realidateOnWindowFocus behaviour for list queries 2',
   async () => {
     const env = createTestEnv({
@@ -772,5 +772,24 @@ test.concurrent(
     await env.serverMock.waitFetchIdle();
 
     expect(env.serverMock.fetchsCount).toBe(3);
+  },
+);
+
+test.concurrent(
+  'invalidation should not throw error when fetchItemFn is not used',
+  () => {
+    const env = createTestEnv({
+      initialServerData,
+      disableFetchItemFn: true,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+    });
+
+    expect(() => {
+      env.store.invalidateQueryAndItems({
+        itemPayload: () => true,
+        queryPayload: () => true,
+        type: 'lowPriority',
+      });
+    }).not.toThrow();
   },
 );
