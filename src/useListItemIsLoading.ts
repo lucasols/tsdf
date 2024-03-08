@@ -18,7 +18,9 @@ export function useListItemIsLoading({
   itemExists: boolean;
   loadItemFallback: () => void;
 }): boolean {
-  const [willBeRefetched, setWillBeRefetched] = useState(itemExists);
+  const isNotFound = !itemExists;
+
+  const [willBeRefetched, setWillBeRefetched] = useState(isNotFound);
 
   const resetWillBeRefechedTimeout = useTimeout(1000);
   const callFallbackLoadItemTimeout = useTimeout(100);
@@ -27,7 +29,7 @@ export function useListItemIsLoading({
   const itemWasRefetched = useConst(() => new Set<string>());
 
   if (
-    itemExists &&
+    isNotFound &&
     !isRefetching &&
     !willBeRefetched &&
     !ignoreSetWillBeRefetched.current &&
@@ -90,5 +92,7 @@ export function useListItemIsLoading({
     callFallbackLoadItemTimeout,
   ]);
 
-  return listIsLoading || (itemExists && (isRefetching || !!willBeRefetched));
+  return (
+    listIsLoading || (isNotFound && (isRefetching || !!willBeRefetched))
+  );
 }

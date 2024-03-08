@@ -16,7 +16,7 @@ function emulateSuccesRefetching(
   return async () => {
     storeState.setPartialState({
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: true,
     });
 
@@ -24,7 +24,7 @@ function emulateSuccesRefetching(
 
     storeState.setPartialState({
       listIsLoading: false,
-      itemExists: false,
+      itemExists: true,
       isRefetching: false,
     });
   };
@@ -41,7 +41,7 @@ function emulateFailedRefetching(
   return async () => {
     storeState.setPartialState({
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: true,
     });
 
@@ -49,7 +49,7 @@ function emulateFailedRefetching(
 
     storeState.setPartialState({
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: false,
     });
   };
@@ -61,7 +61,7 @@ describe.concurrent('useListItemIsLoading', () => {
       const isLoadingItem = useListItemIsLoading({
         itemId: '1',
         listIsLoading: false,
-        itemExists: false,
+        itemExists: true,
         isRefetching: false,
         loadItemFallback: () => {},
       });
@@ -77,7 +77,7 @@ describe.concurrent('useListItemIsLoading', () => {
       state: {
         itemId: '1',
         listIsLoading: false,
-        itemExists: true,
+        itemExists: false,
         isRefetching: false,
       },
     });
@@ -96,7 +96,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.itemExists && !isLoadingItem,
+        notFound: !itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -105,7 +105,7 @@ describe.concurrent('useListItemIsLoading', () => {
     storeState.setState({
       itemId: '1',
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: true,
     });
 
@@ -115,7 +115,7 @@ describe.concurrent('useListItemIsLoading', () => {
       storeState.setState({
         itemId: '1',
         listIsLoading: false,
-        itemExists: false,
+        itemExists: true,
         isRefetching: false,
       });
     });
@@ -137,7 +137,7 @@ describe.concurrent('useListItemIsLoading', () => {
       state: {
         itemId: '1',
         listIsLoading: true,
-        itemExists: true,
+        itemExists: false,
         isRefetching: false,
       },
     });
@@ -154,7 +154,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.itemExists && !isLoadingItem,
+        notFound: !itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -164,7 +164,7 @@ describe.concurrent('useListItemIsLoading', () => {
       storeState.setState({
         itemId: '1',
         listIsLoading: false,
-        itemExists: false,
+        itemExists: true,
         isRefetching: false,
       });
     });
@@ -182,7 +182,7 @@ describe.concurrent('useListItemIsLoading', () => {
       state: {
         itemId: '1',
         listIsLoading: false,
-        itemExists: true,
+        itemExists: false,
         isRefetching: false,
       },
     });
@@ -199,7 +199,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.itemExists && !isLoadingItem,
+        notFound: !itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -218,7 +218,7 @@ describe.concurrent('useListItemIsLoading', () => {
       state: {
         itemId: '1',
         listIsLoading: false,
-        itemExists: false,
+        itemExists: true,
         isRefetching: false,
       },
     });
@@ -238,7 +238,7 @@ describe.concurrent('useListItemIsLoading', () => {
       rendersResult.add({
         itemId: itemResourceState.itemId,
         isLoadingItem,
-        notFound: itemResourceState.itemExists && !isLoadingItem,
+        notFound: !itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -251,14 +251,14 @@ describe.concurrent('useListItemIsLoading', () => {
     storeState.setState({
       itemId: '2',
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: false,
     });
 
     storeState.setState({
       itemId: '2',
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: true,
     });
 
@@ -269,7 +269,7 @@ describe.concurrent('useListItemIsLoading', () => {
     storeState.setState({
       itemId: '2',
       listIsLoading: false,
-      itemExists: false,
+      itemExists: true,
       isRefetching: false,
     });
 
@@ -292,7 +292,7 @@ describe.concurrent('useListItemIsLoading', () => {
       state: {
         itemId: '1',
         listIsLoading: false,
-        itemExists: false,
+        itemExists: true,
         isRefetching: false,
       },
     });
@@ -312,7 +312,7 @@ describe.concurrent('useListItemIsLoading', () => {
       rendersResult.add({
         itemId: itemResourceState.itemId,
         isLoadingItem,
-        notFound: itemResourceState.itemExists && !isLoadingItem,
+        notFound: !itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -323,14 +323,14 @@ describe.concurrent('useListItemIsLoading', () => {
     storeState.setState({
       itemId: '2',
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: false,
     });
 
     storeState.setState({
       itemId: '2',
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: true,
     });
 
@@ -341,7 +341,7 @@ describe.concurrent('useListItemIsLoading', () => {
     storeState.setState({
       itemId: '2',
       listIsLoading: false,
-      itemExists: true,
+      itemExists: false,
       isRefetching: false,
     });
 
@@ -364,7 +364,7 @@ describe.concurrent('useListItemIsLoading', () => {
       state: {
         itemId: '1',
         listIsLoading: false,
-        itemExists: true,
+        itemExists: false,
         isRefetching: false,
       },
     });
@@ -381,7 +381,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.itemExists && !isLoadingItem,
+        notFound: !itemResourceState.itemExists && !isLoadingItem,
       });
     });
 

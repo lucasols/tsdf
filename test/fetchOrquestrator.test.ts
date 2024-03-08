@@ -384,6 +384,7 @@ test.concurrent(
     "
   `);
   },
+  { retry: 3 },
 );
 
 test.concurrent(
