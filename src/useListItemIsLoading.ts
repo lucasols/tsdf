@@ -14,6 +14,7 @@ export function useListItemIsLoading({
   itemId: string | null | false;
   isRefetching: boolean;
   listIsLoading: boolean;
+  /** true if item exists in any condition, ex: if list is not loaded item not exists in memory yet */
   itemExists: boolean;
   loadItemFallback: () => void;
 }): boolean {

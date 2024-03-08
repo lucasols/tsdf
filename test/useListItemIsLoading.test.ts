@@ -8,23 +8,23 @@ import { createRenderStore } from './utils/storeUtils';
 function emulateSuccesRefetching(
   storeState: Store<{
     itemId: string;
-    isLoading: boolean;
-    isNotFound: boolean;
+    listIsLoading: boolean;
+    itemExists: boolean;
     isRefetching: boolean;
   }>,
 ) {
   return async () => {
     storeState.setPartialState({
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: true,
     });
 
     await sleep(100);
 
     storeState.setPartialState({
-      isLoading: false,
-      isNotFound: false,
+      listIsLoading: false,
+      itemExists: false,
       isRefetching: false,
     });
   };
@@ -33,23 +33,23 @@ function emulateSuccesRefetching(
 function emulateFailedRefetching(
   storeState: Store<{
     itemId: string;
-    isLoading: boolean;
-    isNotFound: boolean;
+    listIsLoading: boolean;
+    itemExists: boolean;
     isRefetching: boolean;
   }>,
 ) {
   return async () => {
     storeState.setPartialState({
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: true,
     });
 
     await sleep(100);
 
     storeState.setPartialState({
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: false,
     });
   };
@@ -60,8 +60,8 @@ describe.concurrent('useListItemIsLoading', () => {
     const { result } = renderHook(() => {
       const isLoadingItem = useListItemIsLoading({
         itemId: '1',
-        isLoading: false,
-        isNotFound: false,
+        listIsLoading: false,
+        itemExists: false,
         isRefetching: false,
         loadItemFallback: () => {},
       });
@@ -76,8 +76,8 @@ describe.concurrent('useListItemIsLoading', () => {
     const storeState = new Store({
       state: {
         itemId: '1',
-        isLoading: false,
-        isNotFound: true,
+        listIsLoading: false,
+        itemExists: true,
         isRefetching: false,
       },
     });
@@ -96,7 +96,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.isNotFound && !isLoadingItem,
+        notFound: itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -104,8 +104,8 @@ describe.concurrent('useListItemIsLoading', () => {
 
     storeState.setState({
       itemId: '1',
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: true,
     });
 
@@ -114,8 +114,8 @@ describe.concurrent('useListItemIsLoading', () => {
     act(() => {
       storeState.setState({
         itemId: '1',
-        isLoading: false,
-        isNotFound: false,
+        listIsLoading: false,
+        itemExists: false,
         isRefetching: false,
       });
     });
@@ -136,8 +136,8 @@ describe.concurrent('useListItemIsLoading', () => {
     const storeState = new Store({
       state: {
         itemId: '1',
-        isLoading: true,
-        isNotFound: true,
+        listIsLoading: true,
+        itemExists: true,
         isRefetching: false,
       },
     });
@@ -154,7 +154,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.isNotFound && !isLoadingItem,
+        notFound: itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -163,8 +163,8 @@ describe.concurrent('useListItemIsLoading', () => {
     act(() => {
       storeState.setState({
         itemId: '1',
-        isLoading: false,
-        isNotFound: false,
+        listIsLoading: false,
+        itemExists: false,
         isRefetching: false,
       });
     });
@@ -181,8 +181,8 @@ describe.concurrent('useListItemIsLoading', () => {
     const storeState = new Store({
       state: {
         itemId: '1',
-        isLoading: false,
-        isNotFound: true,
+        listIsLoading: false,
+        itemExists: true,
         isRefetching: false,
       },
     });
@@ -199,7 +199,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.isNotFound && !isLoadingItem,
+        notFound: itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -217,8 +217,8 @@ describe.concurrent('useListItemIsLoading', () => {
     const storeState = new Store({
       state: {
         itemId: '1',
-        isLoading: false,
-        isNotFound: false,
+        listIsLoading: false,
+        itemExists: false,
         isRefetching: false,
       },
     });
@@ -238,7 +238,7 @@ describe.concurrent('useListItemIsLoading', () => {
       rendersResult.add({
         itemId: itemResourceState.itemId,
         isLoadingItem,
-        notFound: itemResourceState.isNotFound && !isLoadingItem,
+        notFound: itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -250,15 +250,15 @@ describe.concurrent('useListItemIsLoading', () => {
 
     storeState.setState({
       itemId: '2',
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: false,
     });
 
     storeState.setState({
       itemId: '2',
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: true,
     });
 
@@ -268,8 +268,8 @@ describe.concurrent('useListItemIsLoading', () => {
 
     storeState.setState({
       itemId: '2',
-      isLoading: false,
-      isNotFound: false,
+      listIsLoading: false,
+      itemExists: false,
       isRefetching: false,
     });
 
@@ -291,8 +291,8 @@ describe.concurrent('useListItemIsLoading', () => {
     const storeState = new Store({
       state: {
         itemId: '1',
-        isLoading: false,
-        isNotFound: false,
+        listIsLoading: false,
+        itemExists: false,
         isRefetching: false,
       },
     });
@@ -312,7 +312,7 @@ describe.concurrent('useListItemIsLoading', () => {
       rendersResult.add({
         itemId: itemResourceState.itemId,
         isLoadingItem,
-        notFound: itemResourceState.isNotFound && !isLoadingItem,
+        notFound: itemResourceState.itemExists && !isLoadingItem,
       });
     });
 
@@ -322,15 +322,15 @@ describe.concurrent('useListItemIsLoading', () => {
 
     storeState.setState({
       itemId: '2',
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: false,
     });
 
     storeState.setState({
       itemId: '2',
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: true,
     });
 
@@ -340,8 +340,8 @@ describe.concurrent('useListItemIsLoading', () => {
 
     storeState.setState({
       itemId: '2',
-      isLoading: false,
-      isNotFound: true,
+      listIsLoading: false,
+      itemExists: true,
       isRefetching: false,
     });
 
@@ -363,8 +363,8 @@ describe.concurrent('useListItemIsLoading', () => {
     const storeState = new Store({
       state: {
         itemId: '1',
-        isLoading: false,
-        isNotFound: true,
+        listIsLoading: false,
+        itemExists: true,
         isRefetching: false,
       },
     });
@@ -381,7 +381,7 @@ describe.concurrent('useListItemIsLoading', () => {
 
       rendersResult.add({
         isLoadingItem,
-        notFound: itemResourceState.isNotFound && !isLoadingItem,
+        notFound: itemResourceState.itemExists && !isLoadingItem,
       });
     });
 

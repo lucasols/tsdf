@@ -8,6 +8,7 @@ export function useListItemIsDeleted({
   itemId,
 }: {
   itemId: string;
+  /** true if item exists in any condition, ex: if list is not loaded item not exists in memory yet */
   itemExists: boolean;
   listIsLoading: boolean;
   onDelete?: () => void;
