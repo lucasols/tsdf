@@ -34,3 +34,4 @@ export {
 export { TSDFStatus, ValidPayload, ValidStoreState } from './storeShared';
 export { useListItemIsLoading } from './useListItemIsLoading';
 export { getCacheId } from './utils/getCacheId';
+export { useListItemIsDeleted } from './useListItemIsDeleted';

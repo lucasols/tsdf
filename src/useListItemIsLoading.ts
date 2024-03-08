@@ -5,19 +5,19 @@ import { useConst, useLatestValue } from './utils/hooks';
 /** Use to detect if a item of a list may be loading in cases which there is no
  * clear indication of the status of individual items, ex: an item in a document collection that is loaded on demand */
 export function useListItemIsLoading({
-  isLoading,
+  listIsLoading,
   isRefetching,
-  isNotFound,
+  itemExists,
   loadItemFallback,
   itemId,
 }: {
   itemId: string | null | false;
   isRefetching: boolean;
-  isLoading: boolean;
-  isNotFound: boolean;
+  listIsLoading: boolean;
+  itemExists: boolean;
   loadItemFallback: () => void;
 }): boolean {
-  const [willBeRefetched, setWillBeRefetched] = useState(isNotFound);
+  const [willBeRefetched, setWillBeRefetched] = useState(itemExists);
 
   const resetWillBeRefechedTimeout = useTimeout(1000);
   const callFallbackLoadItemTimeout = useTimeout(100);
@@ -26,7 +26,7 @@ export function useListItemIsLoading({
   const itemWasRefetched = useConst(() => new Set<string>());
 
   if (
-    isNotFound &&
+    itemExists &&
     !isRefetching &&
     !willBeRefetched &&
     !ignoreSetWillBeRefetched.current &&
@@ -36,7 +36,9 @@ export function useListItemIsLoading({
     setWillBeRefetched(true);
   }
 
-  const latestIsLoadingOrRefetching = useLatestValue(isLoading || isRefetching);
+  const latestIsLoadingOrRefetching = useLatestValue(
+    listIsLoading || isRefetching,
+  );
   const latestLoadItemFallback = useLatestValue(loadItemFallback);
 
   useEffect(() => {
@@ -87,5 +89,5 @@ export function useListItemIsLoading({
     callFallbackLoadItemTimeout,
   ]);
 
-  return isLoading || (isNotFound && (isRefetching || !!willBeRefetched));
+  return listIsLoading || (itemExists && (isRefetching || !!willBeRefetched));
 }
