@@ -97,7 +97,7 @@ describe.concurrent('useListItemIsDeleted', () => {
 
       const isDeleted = useListItemIsDeleted({
         ...itemState,
-        onDelete: onDelete,
+        onDelete,
       });
 
       return isDeleted;

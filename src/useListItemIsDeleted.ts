@@ -20,9 +20,9 @@ export function useListItemIsDeleted({
 
     if (listIsLoading || !prev) return;
 
-    const isDeleted = !current.itemExists && !!prev.itemExists;
+    const wasItemDeleted = !current.itemExists && !!prev.itemExists;
 
-    if (isDeleted) {
+    if (wasItemDeleted) {
       onDelete?.();
       setIsDeleted(itemId);
     }
