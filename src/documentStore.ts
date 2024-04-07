@@ -7,7 +7,7 @@ import {
     FetchContext,
     FetchType,
     ScheduleFetchResults,
-    createFetchOrquestrator,
+    createFetchOrchestrator,
 } from './fetchOrchestrator';
 import { TSDFStatus, ValidStoreState, fetchTypePriority } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
@@ -117,7 +117,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     }
   }
 
-  const fetchOrquestrator = createFetchOrquestrator<null>({
+  const fetchOrquestrator = createFetchOrchestrator<null>({
     fetchFn: fetch,
     lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs,

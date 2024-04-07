@@ -1,7 +1,7 @@
 import {
     FetchContext,
     FetchType,
-    createFetchOrquestrator,
+    createFetchOrchestrator,
 } from '../../src/fetchOrchestrator';
 import { arrayWithPrev } from '../utils/arrayUtils';
 import { sleep } from '../utils/sleep';
@@ -162,7 +162,7 @@ export function createTestStore(
     }
   }
 
-  const fetchOrquestrator = createFetchOrquestrator({
+  const fetchOrquestrator = createFetchOrchestrator({
     fetchFn: mockFetch,
     on(event) {
       if (event === 'scheduled-fetch-started') {

@@ -13,11 +13,11 @@ export type ScheduleFetchResults =
   | 'scheduled'
   | 'rt-scheduled';
 
-export type FetchOrquestrator<T> = ReturnType<
-  typeof createFetchOrquestrator<T>
+export type FetchOrchestrator<T> = ReturnType<
+  typeof createFetchOrchestrator<T>
 >;
 
-export type CreateFetchOrquestratorOptions<T> = {
+export type CreateFetchOrchestratorOptions<T> = {
   fetchFn: (fetchContext: FetchContext, params: T) => Promise<boolean>;
   on?: (event: Events) => void;
   lowPriorityThrottleMs?: number;
@@ -25,14 +25,14 @@ export type CreateFetchOrquestratorOptions<T> = {
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 };
 
-export function createFetchOrquestrator<T>({
+export function createFetchOrchestrator<T>({
   fetchFn,
   on,
   mediumPriorityThrottleMs = 10,
   lowPriorityThrottleMs = 200,
   dynamicRealtimeThrottleMs,
-}: CreateFetchOrquestratorOptions<T>) {
-  const fetchs: {
+}: CreateFetchOrchestratorOptions<T>) {
+  const fetches: {
     inProgress_: {
       startTime: number;
       onEnd: (() => void)[];
@@ -52,9 +52,9 @@ export function createFetchOrquestrator<T>({
   let lastFetchDuration = 0;
   let onMutationEnd: (() => void) | null = null;
   let lastFetchWasAborted = false;
-  let abortFetchsBeforeOrEqual = 0;
+  let abortFetchesBeforeOrEqual = 0;
 
-  function setLastFetchDurantion(duration: number) {
+  function setLastFetchDuration(duration: number) {
     lastFetchDuration = duration;
   }
 
@@ -63,18 +63,18 @@ export function createFetchOrquestrator<T>({
   }
 
   function flushScheduledFetch() {
-    if (fetchs.scheduled_) {
+    if (fetches.scheduled_) {
       on?.('scheduled-fetch-started');
-      const params = fetchs.scheduled_.params;
-      fetchs.scheduled_ = null;
+      const params = fetches.scheduled_.params;
+      fetches.scheduled_ = null;
       startFetch(params, Date.now());
     }
   }
 
   function startMutation() {
     mutationIsInProgress = true;
-    abortFetchsBeforeOrEqual = lastFetchIdStarted;
-    fetchs.inProgress_ = null;
+    abortFetchesBeforeOrEqual = lastFetchIdStarted;
+    fetches.inProgress_ = null;
 
     const id = getAutoIncrementId();
     lastMutationIdStarted = id;
@@ -98,12 +98,12 @@ export function createFetchOrquestrator<T>({
     return false;
   }
 
-  function getFetchs() {
-    return fetchs;
+  function getFetches() {
+    return fetches;
   }
 
   async function startFetch(params: T, startTime: number): Promise<boolean> {
-    if (fetchs.inProgress_) {
+    if (fetches.inProgress_) {
       throw new Error('[tsdf] Fetch already in progress');
     }
 
@@ -111,7 +111,7 @@ export function createFetchOrquestrator<T>({
     lastFetchIdStarted = id;
 
     lastFetchWasAborted = false;
-    fetchs.inProgress_ = { startTime, onEnd: [], rtuOnEnd: null };
+    fetches.inProgress_ = { startTime, onEnd: [], rtuOnEnd: null };
     const prevFetchStartTime = lastFetchStartTime;
     lastFetchStartTime = startTime;
 
@@ -119,16 +119,16 @@ export function createFetchOrquestrator<T>({
       const abort =
         id !== lastFetchIdStarted ||
         mutationIsInProgress ||
-        id <= abortFetchsBeforeOrEqual;
+        id <= abortFetchesBeforeOrEqual;
 
       lastFetchWasAborted = abort;
 
       return abort;
     }
 
-    if (fetchs.realtimeScheduled_) {
-      clearTimeout(fetchs.realtimeScheduled_.timeoutId);
-      fetchs.realtimeScheduled_ = null;
+    if (fetches.realtimeScheduled_) {
+      clearTimeout(fetches.realtimeScheduled_.timeoutId);
+      fetches.realtimeScheduled_ = null;
     }
 
     const success = await fetchFn(
@@ -139,9 +139,9 @@ export function createFetchOrquestrator<T>({
       params,
     );
 
-    const currentFetchs = getFetchs();
+    const currentFetches = getFetches();
 
-    if (!currentFetchs.inProgress_) {
+    if (!currentFetches.inProgress_) {
       lastFetchStartTime = prevFetchStartTime;
       return false;
     }
@@ -150,19 +150,19 @@ export function createFetchOrquestrator<T>({
       lastFetchDuration = Date.now() - startTime;
     }
 
-    const rtScheduled = fetchs.realtimeScheduled_ as {
+    const rtScheduled = fetches.realtimeScheduled_ as {
       timeoutId: number;
     } | null;
 
     if (rtScheduled) {
       clearTimeout(rtScheduled.timeoutId);
-      fetchs.realtimeScheduled_ = null;
+      fetches.realtimeScheduled_ = null;
     }
 
-    const onEnd = currentFetchs.inProgress_.onEnd;
-    const rtuOnEnd = currentFetchs.inProgress_.rtuOnEnd;
+    const onEnd = currentFetches.inProgress_.onEnd;
+    const rtuOnEnd = currentFetches.inProgress_.rtuOnEnd;
 
-    currentFetchs.inProgress_ = null;
+    currentFetches.inProgress_ = null;
 
     if (onEnd.length > 0) {
       onEnd.forEach((cb) => cb());
@@ -206,8 +206,8 @@ export function createFetchOrquestrator<T>({
 
   function shouldSkipFetch(fetchType: FetchType, startTime: number): boolean {
     if (fetchType === 'highPriority') {
-      if (fetchs.inProgress_) {
-        const timeSinceLastFetch = startTime - fetchs.inProgress_.startTime;
+      if (fetches.inProgress_) {
+        const timeSinceLastFetch = startTime - fetches.inProgress_.startTime;
 
         if (timeSinceLastFetch < mediumPriorityThrottleMs) {
           return true;
@@ -216,7 +216,7 @@ export function createFetchOrquestrator<T>({
     }
 
     if (fetchType === 'lowPriority') {
-      if (fetchs.inProgress_ || fetchs.scheduled_ || mutationIsInProgress) {
+      if (fetches.inProgress_ || fetches.scheduled_ || mutationIsInProgress) {
         return true;
       }
 
@@ -238,11 +238,11 @@ export function createFetchOrquestrator<T>({
         return false;
       }
 
-      return !!fetchs.inProgress_ || !!mutationIsInProgress;
+      return !!fetches.inProgress_ || !!mutationIsInProgress;
     })();
 
     if (shouldSchedule) {
-      fetchs.scheduled_ = { params };
+      fetches.scheduled_ = { params };
     }
 
     return shouldSchedule;
@@ -261,9 +261,9 @@ export function createFetchOrquestrator<T>({
 
     const delay = minimumRealtimeInterval - timeSinceLastFetch;
 
-    fetchs.realtimeScheduled_ = {
+    fetches.realtimeScheduled_ = {
       timeoutId: window.setTimeout(() => {
-        fetchs.realtimeScheduled_ = null;
+        fetches.realtimeScheduled_ = null;
         on?.('scheduled-rt-fetch-started');
         startFetch(params, Date.now());
       }, delay),
@@ -281,12 +281,12 @@ export function createFetchOrquestrator<T>({
       return false;
     }
 
-    if (fetchs.realtimeScheduled_) {
+    if (fetches.realtimeScheduled_) {
       return true;
     }
 
-    if (fetchs.inProgress_) {
-      fetchs.inProgress_.rtuOnEnd = () => {
+    if (fetches.inProgress_) {
+      fetches.inProgress_.rtuOnEnd = () => {
         addDelayedRTU(Date.now(), params);
       };
 
@@ -312,15 +312,15 @@ export function createFetchOrquestrator<T>({
   }
 
   function addOnFetchEnd(cb: () => void) {
-    if (fetchs.inProgress_) {
-      fetchs.inProgress_.onEnd.push(cb);
+    if (fetches.inProgress_) {
+      fetches.inProgress_.onEnd.push(cb);
     }
   }
 
   async function awaitFetch(params: T): Promise<boolean> {
     scheduleFetch('highPriority', params);
 
-    if (fetchs.inProgress_) {
+    if (fetches.inProgress_) {
       await new Promise<true>((resolve) => {
         addOnFetchEnd(() => resolve(true));
       });
@@ -330,16 +330,16 @@ export function createFetchOrquestrator<T>({
   }
 
   function reset() {
-    fetchs.inProgress_ = null;
-    fetchs.scheduled_ = null;
-    fetchs.realtimeScheduled_ = null;
+    fetches.inProgress_ = null;
+    fetches.scheduled_ = null;
+    fetches.realtimeScheduled_ = null;
     lastFetchStartTime = 0;
     lastFetchDuration = 0;
     lastFetchIdStarted = 0;
     lastMutationIdStarted = 0;
     mutationIsInProgress = false;
     lastFetchWasAborted = false;
-    abortFetchsBeforeOrEqual = 0;
+    abortFetchesBeforeOrEqual = 0;
   }
 
   return {
@@ -349,18 +349,18 @@ export function createFetchOrquestrator<T>({
     startMutation,
     get hasPendingFetch() {
       return (
-        !!fetchs.inProgress_ ||
-        !!fetchs.scheduled_ ||
-        !!fetchs.realtimeScheduled_
+        !!fetches.inProgress_ ||
+        !!fetches.scheduled_ ||
+        !!fetches.realtimeScheduled_
       );
     },
     get fetchIsInProgress() {
-      return !!fetchs.inProgress_;
+      return !!fetches.inProgress_;
     },
     get mutationIsInProgress() {
       return mutationIsInProgress;
     },
-    setLastFetchDurantion,
+    setLastFetchDuration,
     setLastFetchStartTime,
   };
 }
