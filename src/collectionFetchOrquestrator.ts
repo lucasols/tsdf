@@ -1,24 +1,24 @@
 import {
-    createFetchOrquestrator,
-    CreateFetchOrquestratorOptions,
-    FetchOrquestrator,
+  CreateFetchOrquestratorOptions as CreateFetchOrchestratorOptions,
+  FetchOrquestrator as FetchOrchestrator,
+  createFetchOrquestrator,
 } from './fetchOrchestrator';
 
 export function createCollectionFetchOrchestrator<T>(
-  props: CreateFetchOrquestratorOptions<T>,
+  props: CreateFetchOrchestratorOptions<T>,
 ) {
-  const fetchOrquestrators = new Map<string, FetchOrquestrator<T>>();
+  const fetchOrchestrators = new Map<string, FetchOrchestrator<T>>();
 
-  function getFetchOrquestrator(key: string): FetchOrquestrator<T> {
-    if (!fetchOrquestrators.has(key)) {
-      fetchOrquestrators.set(key, createFetchOrquestrator(props));
+  function getFetchOrquestrator(key: string): FetchOrchestrator<T> {
+    if (!fetchOrchestrators.has(key)) {
+      fetchOrchestrators.set(key, createFetchOrquestrator(props));
     }
 
-    return fetchOrquestrators.get(key)!;
+    return fetchOrchestrators.get(key)!;
   }
 
   function reset() {
-    fetchOrquestrators.clear();
+    fetchOrchestrators.clear();
   }
 
   return {

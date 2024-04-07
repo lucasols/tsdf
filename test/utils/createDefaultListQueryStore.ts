@@ -4,7 +4,9 @@ import {
   newTSDFListQueryStore,
   TSFDListQueryState,
 } from '../../src/listQueryStore';
+import { isObject } from '../../src/utils/isObject';
 import { mockServerResource } from '../mocks/fetchMock';
+import { pick } from './objectUtils';
 import { normalizeError, StoreError } from './storeUtils';
 
 type Row = {
@@ -38,13 +40,16 @@ export type ListQueryParams = {
     archived?: boolean;
     ageRange?: [number, number];
   };
+  fields?: (keyof Row)[];
 };
+
+type ItemQueryParams = string | { id: string; fields: (keyof Row)[] };
 
 export type DefaultListQueryState = TSFDListQueryState<
   Row,
   StoreError,
   ListQueryParams,
-  string
+  ItemQueryParams
 >;
 
 export function createDefaultListQueryStore({
@@ -76,7 +81,7 @@ export function createDefaultListQueryStore({
   emulateRTU?: boolean;
   lowPriorityThrottleMs?: number;
   optimisticListUpdates?: Parameters<
-    typeof newTSDFListQueryStore<Row, any, ListQueryParams, string>
+    typeof newTSDFListQueryStore<Row, any, ListQueryParams, ItemQueryParams>
   >[0]['optimisticListUpdates'];
   partialResources?: boolean;
 } = {}) {
@@ -209,10 +214,10 @@ export function createDefaultListQueryStore({
     Row,
     StoreError,
     ListQueryParams,
-    string
+    ItemQueryParams
   >({
     optimisticListUpdates,
-    fetchListFn: async ({ tableId, filters }, size) => {
+    fetchListFn: async ({ tableId, filters, fields }, size) => {
       let result = await serverMock.fetch(tableId);
       let hasMore = false;
 
@@ -243,10 +248,14 @@ export function createDefaultListQueryStore({
         );
       }
 
+      if (partialResources && !fields) {
+        throw new Error('fields is required when partialResources is enabled');
+      }
+
       return {
         items: result.map((item) => ({
           itemPayload: getItemId({ tableId, id: item.id }),
-          data: item,
+          data: fields ? (pick(item, fields) as Row) : item,
         })),
         hasMore,
       };
@@ -254,10 +263,16 @@ export function createDefaultListQueryStore({
     fetchItemFn: disableFetchItemFn
       ? undefined
       : async (itemId) => {
-          const result = await serverMock.fetch(itemId);
+          const idToUse = typeof itemId === 'string' ? itemId : itemId.id;
+
+          const result = await serverMock.fetch(idToUse);
 
           if (Array.isArray(result)) {
             throw new Error('Invalid server response');
+          }
+
+          if (isObject(itemId)) {
+            return pick(result, itemId.fields) as Row;
           }
 
           return result;
@@ -295,8 +310,12 @@ export function createDefaultListQueryStore({
         if (!deepEqual(prev[tableId], data[tableId])) {
           listQueryStore.invalidateQueryAndItems({
             queryPayload: (queryPayload) => queryPayload.tableId === tableId,
-            itemPayload: (itemPayload) =>
-              itemPayload.split('||')[0] === tableId,
+            itemPayload: (itemPayload) => {
+              const idToUse =
+                typeof itemPayload === 'string' ? itemPayload : itemPayload.id;
+
+              return idToUse.split('||')[0] === tableId;
+            },
             type: 'realtimeUpdate',
           });
         }
