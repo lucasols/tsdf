@@ -2,10 +2,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { deepEqual, Store } from 't-state';
 import {
-  CollectionInitialStateItem,
-  newTSDFCollectionStore,
-  TSDFCollectionStore,
-  TSFDCollectionState,
+    CollectionInitialStateItem,
+    newTSDFCollectionStore,
+    TSDFCollectionStore,
+    TSFDCollectionState,
 } from '../../src/collectionStore';
 import { newTSDFDocumentStore } from '../../src/documentStore';
 import { filterAndMap } from '../../src/utils/filterAndMap';
@@ -52,7 +52,7 @@ export function createDefaultDocumentStore({
 } = {}) {
   const serverMock = mockServerResource<DefaultDocStoreData>({
     initialData: { hello: serverHello },
-    logFetchs: debug,
+    logFetches: debug,
   });
 
   const store = newTSDFDocumentStore({
@@ -134,7 +134,7 @@ export function createDefaultCollectionStore<
   const serverMock = mockServerResource<ServerData, Todo>({
     initialData: serverInitialData,
     randomTimeout,
-    logFetchs: debug,
+    logFetches: debug,
     fetchSelector(data, params) {
       let payload = params.startsWith('{"id":"')
         ? (JSON.parse(params) as { id: { id: string } })

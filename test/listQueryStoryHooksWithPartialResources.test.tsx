@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react';
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 import {
   Tables,
   createDefaultListQueryStore,
@@ -28,26 +28,72 @@ const initialServerData: Tables = {
   })),
 };
 
-test.concurrent('should load only the selected fields', async () => {
+test.only.concurrent(
+  'useItem: should load only the selected fields',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users'] },
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+      partialResources: true,
+    });
+
+    const renders = createRenderLogger({
+      rejectKeys: ['queryMetadata'],
+    });
+
+    renderHook(() => {
+      const result = env.store.useItem(
+        { id: 'users||1', fields: ['id', 'name', 'address'] },
+        { returnRefetchingStatus: true },
+      );
+
+      renders.add(result);
+    });
+
+    await env.serverMock.waitFetchIdle();
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    status: success -- error: null -- isLoading: false -- data: {id:1, name:User 1, address:Address 1} -- payload: users||1
+    status: refetching -- error: null -- isLoading: false -- data: {id:1, name:User 1, address:Address 1} -- payload: users||1
+    status: success -- error: null -- isLoading: false -- data: {id:1, name:User 1, address:Address 1} -- payload: users||1
+    "
+  `);
+  },
+);
+
+test.concurrent('useList: should load only the selected fields', async () => {
   const env = createTestEnv({
     initialServerData,
     useLoadedSnapshot: { tables: ['users'] },
     emulateRTU: true,
     disableInitialDataInvalidation: true,
+    partialResources: true,
   });
 
-  const renders = createRenderLogger();
+  const renders = createRenderLogger({
+    rejectKeys: ['queryMetadata'],
+  });
 
   renderHook(() => {
-    const result = env.store.useItem('users||1', {
-      fields: ['id', 'name', 'address'],
-      returnRefetchingStatus: true,
-    });
+    const result = env.store.useListQuery(
+      {
+        tableId: 'users',
+        fields: ['id', 'name', 'address'],
+      },
+      {
+        returnRefetchingStatus: true,
+      },
+    );
 
     renders.add(result);
   });
 
   await env.serverMock.waitFetchIdle();
 
-
+  expect(renders.snapshot).toMatchInlineSnapshot();
 });
+
+test.skip('load all fields by default');

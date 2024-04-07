@@ -7,11 +7,11 @@ import { simplifyArraySnapshot } from '../utils/storeUtils';
 export function mockServerResource<Data, S = Data>({
   initialData,
   randomTimeout,
-  logFetchs,
+  logFetches: logFetchs,
   fetchSelector = (data) => data as unknown as S,
 }: {
   initialData: Data;
-  logFetchs?: boolean;
+  logFetches?: boolean;
   randomTimeout?: [number, number] | true;
   fetchSelector?: (data: Data | null, params: string) => S | 'notFound';
 }) {

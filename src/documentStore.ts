@@ -1,17 +1,17 @@
+import { evtmitter } from 'evtmitter';
+import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { produce } from 'immer';
 import { useCallback, useEffect } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import {
-  createFetchOrquestrator,
-  FetchType,
-  ScheduleFetchResults,
-  FetchContext,
-} from './fetchOrquestrator';
-import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
+    FetchContext,
+    FetchType,
+    ScheduleFetchResults,
+    createFetchOrquestrator,
+} from './fetchOrchestrator';
+import { TSDFStatus, ValidStoreState, fetchTypePriority } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
-import { evtmitter } from 'evtmitter';
-import { useOnEvtmitterEvent } from 'evtmitter/react';
 
 type DocumentStatus = TSDFStatus | 'idle';
 

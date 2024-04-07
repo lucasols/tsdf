@@ -3,12 +3,12 @@ import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Store, deepEqual, useSubscribeToStore } from 't-state';
-import { createCollectionFetchOrquestrator } from './collectionFetchOrquestrator';
+import { createCollectionFetchOrchestrator } from './collectionFetchOrquestrator';
 import {
   FetchContext as FetchCtx,
   FetchType,
   ScheduleFetchResults,
-} from './fetchOrquestrator';
+} from './fetchOrchestrator';
 import {
   TSDFStatus,
   ValidPayload,
@@ -44,6 +44,14 @@ export type TSDFItemQuery<NError, ItemPayload> = {
   payload: ItemPayload;
 };
 
+export type TSDFPartialItemQuery<NError, ItemPayload> = {
+  error: NError | null;
+  fields: Record<string, Exclude<QueryStatus, 'loadingMore'>>;
+  wasLoaded: boolean;
+  refetchOnMount: false | FetchType;
+  payload: ItemPayload;
+};
+
 export type TSFDListQueryState<
   ItemState extends ValidStoreState,
   NError,
@@ -53,6 +61,10 @@ export type TSFDListQueryState<
   items: Record<string, ItemState | null>;
   queries: Record<string, TSFDListQuery<NError, QueryPayload>>;
   itemQueries: Record<string, TSDFItemQuery<NError, ItemPayload> | null>;
+  partialItems: Record<
+    string,
+    TSDFPartialItemQuery<NError, ItemPayload> | null
+  >;
 };
 
 export type TSFDUseListQueryReturn<
@@ -211,6 +223,7 @@ export function newTSDFListQueryStore<
   }[];
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
+  partialResources?: boolean;
 }) {
   type State = TSFDListQueryState<ItemState, NError, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<NError, QueryPayload>;
@@ -218,7 +231,12 @@ export function newTSDFListQueryStore<
   const store = new Store<State>({
     debugName,
     state: () => {
-      const initialState: State = { items: {}, queries: {}, itemQueries: {} };
+      const initialState: State = {
+        items: {},
+        queries: {},
+        itemQueries: {},
+        partialItems: {},
+      };
 
       const initialData = getInitialData?.();
 
@@ -382,10 +400,10 @@ export function newTSDFListQueryStore<
       );
 
       for (const { itemPayload: id } of items) {
-        const itemFetchOrquestrator = fetchItemOrquestrator?.get(String(id));
+        const itemFetchOrchestrator = fetchItemOrchestrator?.get(String(id));
 
-        if (itemFetchOrquestrator) {
-          itemFetchOrquestrator.setLastFetchStartTime(fetchCtx.getStartTime());
+        if (itemFetchOrchestrator) {
+          itemFetchOrchestrator.setLastFetchStartTime(fetchCtx.getStartTime());
         }
       }
 
@@ -467,7 +485,7 @@ export function newTSDFListQueryStore<
     return store.state.items[getItemKey(itemPayload)];
   }
 
-  const fetchQueryOrquestrator = createCollectionFetchOrquestrator({
+  const fetchQueryOrchestrator = createCollectionFetchOrchestrator({
     fetchFn: fetchQuery,
     lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs,
@@ -494,7 +512,7 @@ export function newTSDFListQueryStore<
     const payloads = multiplePayloads ? payload : [payload];
 
     const results = payloads.map((param) => {
-      return fetchQueryOrquestrator
+      return fetchQueryOrchestrator
         .get(getQueryKey(param))
         .scheduleFetch(fetchType, ['load', param, size]);
     });
@@ -509,7 +527,7 @@ export function newTSDFListQueryStore<
 
     if (queryState.status !== 'success') return 'skipped';
 
-    return fetchQueryOrquestrator
+    return fetchQueryOrchestrator
       .get(getQueryKey(params))
       .scheduleFetch('highPriority', ['loadMore', params, size]);
   }
@@ -544,7 +562,7 @@ export function newTSDFListQueryStore<
   > {
     const queryKey = getQueryKey(params);
 
-    const wasAborted = await fetchQueryOrquestrator
+    const wasAborted = await fetchQueryOrchestrator
       .get(queryKey)
       .awaitFetch(['load', params, size]);
 
@@ -587,11 +605,11 @@ export function newTSDFListQueryStore<
   async function awaitItemFetch(
     itemPayload: ItemPayload,
   ): Promise<{ data: null; error: NError } | { data: ItemState; error: null }> {
-    if (!fetchItemOrquestrator) throw new Error(noFetchFnError);
+    if (!fetchItemOrchestrator) throw new Error(noFetchFnError);
 
     const itemKey = getItemKey(itemPayload);
 
-    const wasAborted = await fetchItemOrquestrator
+    const wasAborted = await fetchItemOrchestrator
       .get(itemKey)
       .awaitFetch(itemPayload);
 
@@ -655,7 +673,7 @@ export function newTSDFListQueryStore<
     itemId: ItemPayload | ItemPayload[] | FilterItemFn,
     priority: FetchType = 'highPriority',
   ) {
-    if (!fetchItemOrquestrator) {
+    if (!fetchItemOrchestrator) {
       return;
     }
 
@@ -1054,7 +1072,7 @@ export function newTSDFListQueryStore<
     fetchCtx: FetchCtx,
     itemPayload: ItemPayload,
   ): Promise<boolean> {
-    if (!fetchItemOrquestrator) {
+    if (!fetchItemOrchestrator) {
       throw new Error(noFetchFnError);
     }
 
@@ -1137,9 +1155,9 @@ export function newTSDFListQueryStore<
     }
   }
 
-  const fetchItemOrquestrator =
+  const fetchItemOrchestrator =
     fetchItemFn &&
-    createCollectionFetchOrquestrator({
+    createCollectionFetchOrchestrator({
       fetchFn: fetchItem,
       lowPriorityThrottleMs,
       dynamicRealtimeThrottleMs,
@@ -1158,7 +1176,7 @@ export function newTSDFListQueryStore<
     fetchType: FetchType,
     itemPayload: ItemPayload | ItemPayload[],
   ): ScheduleFetchResults | ScheduleFetchResults[] {
-    if (!fetchItemOrquestrator) {
+    if (!fetchItemOrchestrator) {
       throw new Error(noFetchFnError);
     }
 
@@ -1169,7 +1187,7 @@ export function newTSDFListQueryStore<
     const results = itemsId.map((payload) => {
       const itemKey = getCacheId(payload);
 
-      return fetchItemOrquestrator
+      return fetchItemOrchestrator
         .get(itemKey)
         .scheduleFetch(fetchType, payload);
     });
@@ -1217,13 +1235,13 @@ export function newTSDFListQueryStore<
 
     for (const { itemKey } of itemsKey) {
       endMutations.push(
-        fetchItemOrquestrator?.get(itemKey).startMutation() || (() => {}),
+        fetchItemOrchestrator?.get(itemKey).startMutation() || (() => {}),
       );
 
       for (const [queryKey, query] of Object.entries(store.state.queries)) {
         if (query.items.includes(itemKey)) {
           endMutations.push(
-            fetchQueryOrquestrator.get(queryKey).startMutation(),
+            fetchQueryOrchestrator.get(queryKey).startMutation(),
           );
         }
       }
@@ -1802,12 +1820,13 @@ export function newTSDFListQueryStore<
   }
 
   function reset() {
-    fetchItemOrquestrator?.reset();
-    fetchQueryOrquestrator.reset();
+    fetchItemOrchestrator?.reset();
+    fetchQueryOrchestrator.reset();
     store.setState({
       items: {},
       queries: {},
       itemQueries: {},
+      partialItems: {},
     });
   }
 

@@ -3,17 +3,17 @@ import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Store, deepEqual, useSubscribeToStore } from 't-state';
-import { createCollectionFetchOrquestrator } from './collectionFetchOrquestrator';
+import { createCollectionFetchOrchestrator } from './collectionFetchOrquestrator';
 import {
-  FetchContext,
-  FetchType,
-  ScheduleFetchResults,
-} from './fetchOrquestrator';
+    FetchContext,
+    FetchType,
+    ScheduleFetchResults,
+} from './fetchOrchestrator';
 import {
-  TSDFStatus,
-  ValidPayload,
-  ValidStoreState,
-  fetchTypePriority,
+    TSDFStatus,
+    ValidPayload,
+    ValidStoreState,
+    fetchTypePriority,
 } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
@@ -238,7 +238,7 @@ export function newTSDFCollectionStore<
     }
   }
 
-  const fetchOrquestrator = createCollectionFetchOrquestrator({
+  const fetchOrquestrator = createCollectionFetchOrchestrator({
     fetchFn: fetch,
     lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs,

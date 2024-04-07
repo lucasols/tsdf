@@ -1,10 +1,10 @@
 import {
-  createFetchOrquestrator,
-  CreateFetchOrquestratorOptions,
-  FetchOrquestrator,
-} from './fetchOrquestrator';
+    createFetchOrquestrator,
+    CreateFetchOrquestratorOptions,
+    FetchOrquestrator,
+} from './fetchOrchestrator';
 
-export function createCollectionFetchOrquestrator<T>(
+export function createCollectionFetchOrchestrator<T>(
   props: CreateFetchOrquestratorOptions<T>,
 ) {
   const fetchOrquestrators = new Map<string, FetchOrquestrator<T>>();

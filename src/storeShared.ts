@@ -1,4 +1,4 @@
-import { FetchType } from './fetchOrquestrator';
+import { FetchType } from './fetchOrchestrator';
 
 export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
 

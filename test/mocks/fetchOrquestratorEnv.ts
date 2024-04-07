@@ -1,8 +1,8 @@
 import {
-  createFetchOrquestrator,
-  FetchType,
-  FetchContext,
-} from '../../src/fetchOrquestrator';
+    FetchContext,
+    FetchType,
+    createFetchOrquestrator,
+} from '../../src/fetchOrchestrator';
 import { arrayWithPrev } from '../utils/arrayUtils';
 import { sleep } from '../utils/sleep';
 

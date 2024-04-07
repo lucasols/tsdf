@@ -55,10 +55,11 @@ export function createDefaultListQueryStore({
   disableFetchItemFn,
   dynamicRTUThrottleMs,
   disableInitialDataInvalidation = false,
-  debugRequests: debuFetchs,
+  debugRequests: debugFetches,
   emulateRTU,
   optimisticListUpdates,
   lowPriorityThrottleMs,
+  partialResources,
 }: {
   initialServerData?: Tables;
   useLoadedSnapshot?: {
@@ -77,10 +78,11 @@ export function createDefaultListQueryStore({
   optimisticListUpdates?: Parameters<
     typeof newTSDFListQueryStore<Row, any, ListQueryParams, string>
   >[0]['optimisticListUpdates'];
+  partialResources?: boolean;
 } = {}) {
   const serverMock = mockServerResource<Tables, Row[] | Row>({
     initialData: initialServerData,
-    logFetchs: (debug as any) || (debuFetchs as any),
+    logFetches: (debug as any) || (debugFetches as any),
     fetchSelector: (data, param) => {
       if (param.includes('||')) {
         const [tableId, id] = param.split('||');
@@ -266,6 +268,7 @@ export function createDefaultListQueryStore({
     disableInitialDataInvalidation,
     lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
+    partialResources,
   });
 
   if (debug as any) {
