@@ -1,14 +1,14 @@
 import { cleanup, render, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
-  createDefaultListQueryStore,
-  ListQueryParams,
-  Tables,
+    ListQueryParams,
+    Tables,
+    createDefaultListQueryStore,
 } from './utils/createDefaultListQueryStore';
 import { pick } from './utils/objectUtils';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
-import { createRenderStore, shouldNotSkip } from './utils/storeUtils';
+import { createRenderLogger, shouldNotSkip } from './utils/storeUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -27,7 +27,7 @@ const CompWithItemLoaded = ({
   disableRefetchOnMount?: boolean;
   store: ReturnType<typeof createTestEnv>['store'];
   loadItem: string;
-  renderStore: ReturnType<typeof createRenderStore>;
+  renderStore: ReturnType<typeof createRenderLogger>;
 }) => {
   const {
     status,
@@ -54,7 +54,7 @@ const CompWithQueryLoaded = ({
   disableRefetchOnMount?: boolean;
   store: ReturnType<typeof createTestEnv>['store'];
   loadTable: string;
-  renderStore: ReturnType<typeof createRenderStore>;
+  renderStore: ReturnType<typeof createRenderLogger>;
   filters?: ListQueryParams['filters'];
 }) => {
   const { status, error, items, payload } = store.useListQuery(
@@ -82,9 +82,9 @@ function renderComponents({
   loadTable: string;
   disableRefetchOnMount: boolean;
 }) {
-  const compWithItemLoadedRenders = createRenderStore();
+  const compWithItemLoadedRenders = createRenderLogger();
 
-  const compWithQueryLoadedRenders = createRenderStore();
+  const compWithQueryLoadedRenders = createRenderLogger();
 
   render(
     <>
@@ -315,7 +315,7 @@ describe('syncMutationAndInvalidation', () => {
         loadTable: 'users',
       });
 
-    const comp3Renders = createRenderStore();
+    const comp3Renders = createRenderLogger();
 
     renderHook(() => {
       const { status, error, items } = store.useListQuery(
@@ -379,9 +379,9 @@ describe('syncMutationAndInvalidation', () => {
         loadTable: 'users',
       });
 
-    const ignoreItemRenders = createRenderStore();
-    const ignoreQueryRenders = createRenderStore();
-    const relatedQueryRenders = createRenderStore();
+    const ignoreItemRenders = createRenderLogger();
+    const ignoreQueryRenders = createRenderLogger();
+    const relatedQueryRenders = createRenderLogger();
 
     render(
       <>
@@ -467,7 +467,7 @@ test('receive a RTU', async () => {
       loadTable: 'users',
     });
 
-  const ignoreQueryRenders = createRenderStore();
+  const ignoreQueryRenders = createRenderLogger();
 
   render(
     <CompWithQueryLoaded
@@ -512,7 +512,7 @@ test.concurrent('useItem loadFromStateOnly', async () => {
     useLoadedSnapshot: { tables: ['users', 'products'] },
   });
 
-  const renders = createRenderStore();
+  const renders = createRenderLogger();
 
   renderHook(() => {
     const { data, status, isLoading } = env.store.useItem('users||1', {
@@ -538,7 +538,7 @@ test.concurrent('useItem loadFromStateOnly with not found item', async () => {
     useLoadedSnapshot: { tables: ['users', 'products'] },
   });
 
-  const renders = createRenderStore();
+  const renders = createRenderLogger();
 
   renderHook(() => {
     const { data, status, error, isLoading } = env.store.useItem('users||100', {

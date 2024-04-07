@@ -1,9 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
+import { Store } from 't-state';
 import { describe, expect, test, vi } from 'vitest';
 import { useListItemIsLoading } from '../src/useListItemIsLoading';
-import { Store } from 't-state';
 import { sleep } from './utils/sleep';
-import { createRenderStore } from './utils/storeUtils';
+import { createRenderLogger } from './utils/storeUtils';
 
 function emulateSuccesRefetching(
   storeState: Store<{
@@ -82,7 +82,7 @@ describe.concurrent('useListItemIsLoading', () => {
       },
     });
 
-    const rendersResult = createRenderStore();
+    const rendersResult = createRenderLogger();
 
     const loadItemFallbackMock = vi.fn();
 
@@ -142,7 +142,7 @@ describe.concurrent('useListItemIsLoading', () => {
       },
     });
 
-    const rendersResult = createRenderStore();
+    const rendersResult = createRenderLogger();
 
     renderHook(() => {
       const itemResourceState = storeState.useState();
@@ -187,7 +187,7 @@ describe.concurrent('useListItemIsLoading', () => {
       },
     });
 
-    const rendersResult = createRenderStore();
+    const rendersResult = createRenderLogger();
 
     renderHook(() => {
       const itemResourceState = storeState.useState();
@@ -223,7 +223,7 @@ describe.concurrent('useListItemIsLoading', () => {
       },
     });
 
-    const rendersResult = createRenderStore();
+    const rendersResult = createRenderLogger();
 
     const loadItemFallbackMock = vi.fn();
 
@@ -297,7 +297,7 @@ describe.concurrent('useListItemIsLoading', () => {
       },
     });
 
-    const rendersResult = createRenderStore();
+    const rendersResult = createRenderLogger();
 
     const loadItemFallbackMock = vi.fn();
 
@@ -369,7 +369,7 @@ describe.concurrent('useListItemIsLoading', () => {
       },
     });
 
-    const rendersResult = createRenderStore();
+    const rendersResult = createRenderLogger();
 
     renderHook(() => {
       const itemResourceState = storeState.useState();

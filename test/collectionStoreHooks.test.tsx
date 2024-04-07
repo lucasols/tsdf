@@ -1,16 +1,16 @@
 import { act, cleanup, render, renderHook } from '@testing-library/react';
+import { evtmitter } from 'evtmitter';
+import { useEffect, useState } from 'react';
 import { Store } from 't-state';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
-  createDefaultCollectionStore,
-  createRenderStore,
-  createValueStore,
-  shouldNotSkip,
+    createDefaultCollectionStore,
+    createRenderLogger,
+    createValueStore,
+    shouldNotSkip,
 } from './utils/storeUtils';
-import { useEffect, useState } from 'react';
-import { evtmitter } from 'evtmitter';
 
 const createTestEnv = createDefaultCollectionStore;
 
@@ -26,8 +26,8 @@ describe('useMultipleItems', () => {
     initialServerData: { '1': defaultTodo, '2': defaultTodo },
     disableInitialDataInvalidation: false,
   });
-  const renders1 = createRenderStore();
-  const renders2 = createRenderStore();
+  const renders1 = createRenderLogger();
+  const renders2 = createRenderLogger();
 
   const itemsToUse = ['1', '2'];
 
@@ -79,7 +79,7 @@ describe('useMultipleItems', () => {
     expect(serverMock.fetchsCount).toBe(2);
   });
 
-  const renders3 = createRenderStore();
+  const renders3 = createRenderLogger();
 
   let initialFetchCount: number;
 
@@ -187,8 +187,8 @@ describe('useMultipleItems isolated tests', () => {
           useLoadedSnapshot: true,
         });
 
-      const renders1 = createRenderStore();
-      const renders2 = createRenderStore();
+      const renders1 = createRenderLogger();
+      const renders2 = createRenderLogger();
 
       renderHook(() => {
         const [item1, item2] = collectionStore.useMultipleItems(
@@ -240,8 +240,8 @@ describe('useMultipleItems isolated tests', () => {
       },
     );
 
-    const renders1 = createRenderStore();
-    const renders2 = createRenderStore();
+    const renders1 = createRenderLogger();
+    const renders2 = createRenderLogger();
 
     renderHook(() => {
       const [item1, item2] = collectionStore.useMultipleItems(
@@ -282,8 +282,8 @@ describe('useMultipleItems isolated tests', () => {
       },
     );
 
-    const renders1 = createRenderStore();
-    const renders2 = createRenderStore();
+    const renders1 = createRenderLogger();
+    const renders2 = createRenderLogger();
 
     renderHook(() => {
       const [item1, item2] = collectionStore.useMultipleItems(
@@ -325,7 +325,7 @@ describe('useItem', () => {
     initialServerData: { '1': defaultTodo, '2': defaultTodo },
   });
 
-  const renders1 = createRenderStore();
+  const renders1 = createRenderLogger();
 
   const itemFetchParams = createValueStore<string | undefined | false>(false);
 
@@ -373,8 +373,8 @@ describe('useItem', () => {
   test('disableRefetchOnMount', async () => {
     const numOfFetchs = serverMock.numOfFetchsFromHere();
 
-    const comp2Renders = createRenderStore();
-    const compRenders = createRenderStore();
+    const comp2Renders = createRenderLogger();
+    const compRenders = createRenderLogger();
 
     const Comp2 = () => {
       const data = collectionStore.useItem('2', {
@@ -425,7 +425,7 @@ describe('useItem', () => {
   });
 
   test('action with optmistic update and revalidation', async () => {
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = collectionStore.useItem(
@@ -487,7 +487,7 @@ describe('useItem isolated tests', () => {
       disableInitialDataInvalidation: true,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = store.useItem('2', {
@@ -533,7 +533,7 @@ describe('useItem isolated tests', () => {
       },
     );
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = collectionStore.useItem('1', {
@@ -563,7 +563,7 @@ describe('useItem isolated tests', () => {
       useLoadedSnapshot: true,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = store.useItem('1');
@@ -588,7 +588,7 @@ describe('useItem isolated tests', () => {
       },
     );
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     const loadItem = createValueStore<string | false>(false);
 
@@ -639,7 +639,7 @@ test.concurrent(
       },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     env.serverMock.produceData((draft) => {
       draft['1']!.title = 'RTU Update';
@@ -713,7 +713,7 @@ test.concurrent('fetch error then mount component without error', async () => {
     initialServerData: { '1': defaultTodo, '2': defaultTodo },
   });
 
-  const renders = createRenderStore();
+  const renders = createRenderLogger();
 
   env.serverMock.setFetchError('error');
 
@@ -769,7 +769,7 @@ test.concurrent('initial data is invalidated on first load', async () => {
     draft['1']!.title = 'Update';
   });
 
-  const renders = createRenderStore();
+  const renders = createRenderLogger();
 
   renderHook(() => {
     const { data, status } = env.store.useItem('1', {
@@ -869,7 +869,7 @@ test.concurrent('emulate load resource during its mutation', async () => {
     disableInitialDataInvalidation: false,
   });
 
-  const renders = createRenderStore();
+  const renders = createRenderLogger();
 
   const events = evtmitter<{ openPage: undefined }>();
 

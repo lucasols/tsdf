@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  renderHook,
+    act,
+    cleanup,
+    fireEvent,
+    render,
+    renderHook,
 } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -13,10 +13,10 @@ import { ServerMock } from './mocks/fetchMock';
 import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
-  createDefaultDocumentStore,
-  createRenderStore,
-  createValueStore,
-  DefaultDocStoreData as DefaultDocumentStoreData,
+    DefaultDocStoreData as DefaultDocumentStoreData,
+    createDefaultDocumentStore,
+    createRenderLogger,
+    createValueStore,
 } from './utils/storeUtils';
 
 const createTestEnv = createDefaultDocumentStore;
@@ -717,7 +717,7 @@ describe('isolated tests', () => {
       useLoadedSnapshot: false,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = documentStore.useDocument({
@@ -760,7 +760,7 @@ describe('isolated tests', () => {
       useLoadedSnapshot: false,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     const disabled = createValueStore<boolean>(true);
 
@@ -808,7 +808,7 @@ test.concurrent('RTU update works', async () => {
     },
   });
 
-  const renders = createRenderStore();
+  const renders = createRenderLogger();
 
   env.serverMock.produceData((draft) => {
     draft.hello = 'RTU Update';
@@ -870,7 +870,7 @@ test.concurrent('initial data is invalidated on first load', async () => {
     draft.hello = 'update';
   });
 
-  const renders = createRenderStore();
+  const renders = createRenderLogger();
 
   renderHook(() => {
     const { data, status } = env.store.useDocument({

@@ -13,6 +13,17 @@ type Row = {
   type?: 'admin' | 'user';
   archived?: boolean;
   age?: number;
+  createdAt?: number;
+  createdBy?: string;
+  updatedAt?: number;
+  updatedBy?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  postalCode?: string;
+  description?: string;
 };
 
 export type Tables = {

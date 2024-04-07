@@ -3,8 +3,8 @@ import { expect, test } from 'vitest';
 import { pick } from './utils/objectUtils';
 import { sleep } from './utils/sleep';
 import {
-  createDefaultDocumentStore,
-  createRenderStore,
+    createDefaultDocumentStore,
+    createRenderLogger,
 } from './utils/storeUtils';
 
 const createTestEnv = createDefaultDocumentStore;
@@ -73,7 +73,7 @@ test.concurrent(
       disableInitialDataInvalidation: true,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     const { rerender } = renderHook(
       ({ disabled }: { disabled: boolean }) => {

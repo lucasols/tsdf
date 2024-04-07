@@ -1,14 +1,14 @@
 import { renderHook } from '@testing-library/react';
+import { useCallback } from 'react';
 import { expect, test } from 'vitest';
 import {
   Tables,
   createDefaultListQueryStore,
 } from './utils/createDefaultListQueryStore';
+import { pick } from './utils/objectUtils';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
-import { createRenderStore } from './utils/storeUtils';
-import { useCallback } from 'react';
-import { pick } from './utils/objectUtils';
+import { createRenderLogger } from './utils/storeUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -28,7 +28,7 @@ test.concurrent(
       disableInitialDataInvalidation: true,
     });
 
-    const renders = createRenderStore({
+    const renders = createRenderLogger({
       rejectKeys: ['queryMetadata'],
     });
 
@@ -106,7 +106,7 @@ test.concurrent(
       disableInitialDataInvalidation: true,
     });
 
-    const renders = createRenderStore({
+    const renders = createRenderLogger({
       rejectKeys: ['queryMetadata'],
     });
 
@@ -186,7 +186,7 @@ test.concurrent('useItem: disable then enable isOffScreen', async () => {
     lowPriorityThrottleMs: 10,
   });
 
-  const renders = createRenderStore({
+  const renders = createRenderLogger({
     filterKeys: ['status', 'data', 'payload'],
   });
 
@@ -244,7 +244,7 @@ test.concurrent('useListQuery: disable then enable isOffScreen', async () => {
     lowPriorityThrottleMs: 10,
   });
 
-  const renders = createRenderStore({
+  const renders = createRenderLogger({
     filterKeys: ['status', 'items', 'payload'],
   });
 
@@ -308,8 +308,8 @@ test.concurrent(
     });
 
     const filterKeys = ['status', 'data', 'payload', 'rrfs'];
-    const renders1 = createRenderStore({ filterKeys });
-    const renders2 = createRenderStore({ filterKeys });
+    const renders1 = createRenderLogger({ filterKeys });
+    const renders2 = createRenderLogger({ filterKeys });
 
     const { rerender } = renderHook(
       ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
@@ -360,7 +360,7 @@ test.concurrent(
       lowPriorityThrottleMs: 10,
     });
 
-    const renders = createRenderStore({
+    const renders = createRenderLogger({
       filterKeys: ['i', 'status', 'data', 'payload'],
     });
 
@@ -445,7 +445,7 @@ test.concurrent(
 
     const filterKeys = ['i', 'status', 'items', 'payload', 'rrfs'];
 
-    const renders = createRenderStore({ filterKeys });
+    const renders = createRenderLogger({ filterKeys });
 
     const { rerender } = renderHook(
       ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
@@ -493,7 +493,7 @@ test.concurrent(
       lowPriorityThrottleMs: 10,
     });
 
-    const renders = createRenderStore({
+    const renders = createRenderLogger({
       filterKeys: ['i', 'status', 'items', 'payload'],
     });
 
@@ -577,7 +577,7 @@ test.concurrent(
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     const { rerender } = renderHook(
       ({

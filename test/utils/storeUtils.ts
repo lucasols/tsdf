@@ -233,7 +233,7 @@ export function shouldNotSkip(scheduleResult: any) {
   }
 }
 
-export function createRenderStore({
+export function createRenderLogger({
   filterKeys: defaultFilterKeys,
   rejectKeys: defaultRejectKeys,
 }: {

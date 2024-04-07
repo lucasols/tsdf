@@ -1,14 +1,14 @@
 import { cleanup, render, renderHook } from '@testing-library/react';
 import { afterAll, describe, expect, test } from 'vitest';
 import {
-  createDefaultListQueryStore,
   Tables,
+  createDefaultListQueryStore,
 } from './utils/createDefaultListQueryStore';
 import { pick } from './utils/objectUtils';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
 import {
-  createRenderStore,
+  createRenderLogger,
   createValueStore,
   shouldNotSkip,
 } from './utils/storeUtils';
@@ -37,8 +37,8 @@ describe('useMultipleItemsQuery sequential tests', () => {
     disableInitialDataInvalidation: false,
   });
 
-  const usersRender = createRenderStore();
-  const productsRender = createRenderStore();
+  const usersRender = createRenderLogger();
+  const productsRender = createRenderLogger();
 
   const { result } = renderHook(() => {
     const queryResult = listQueryStore.useMultipleListQueries(
@@ -114,7 +114,7 @@ describe('useMultipleItemsQuery sequential tests', () => {
   });
 
   describe('invalidate all queries', () => {
-    const extraComponentMounted = createRenderStore();
+    const extraComponentMounted = createRenderLogger();
 
     let getFetchCount: () => number;
 
@@ -213,8 +213,8 @@ describe('useMultipleItemsQuery isolated tests', () => {
       getFetchQueryForTable('products'),
     ]);
 
-    const usersRenders = createRenderStore();
-    const productsRenders = createRenderStore();
+    const usersRenders = createRenderLogger();
+    const productsRenders = createRenderLogger();
 
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
@@ -259,8 +259,8 @@ describe('useMultipleItemsQuery isolated tests', () => {
       getFetchQueryForTable('products'),
     ]);
 
-    const usersRenders = createRenderStore();
-    const productsRenders = createRenderStore();
+    const usersRenders = createRenderLogger();
+    const productsRenders = createRenderLogger();
 
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
@@ -301,8 +301,8 @@ describe('useMultipleItemsQuery isolated tests', () => {
       getFetchQueryForTable('products'),
     ]);
 
-    const usersRenders = createRenderStore();
-    const productsRenders = createRenderStore();
+    const usersRenders = createRenderLogger();
+    const productsRenders = createRenderLogger();
 
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
@@ -344,7 +344,7 @@ describe('useQuery', () => {
       initialServerData,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     type Props = {
       payload: FetchQueryParams | false | undefined | null;
@@ -395,7 +395,7 @@ describe('useQuery', () => {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = listQueryStore.useListQuery(
@@ -422,7 +422,7 @@ describe('useQuery', () => {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = listQueryStore.useListQuery(
@@ -448,7 +448,7 @@ describe('useQuery', () => {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     const Comp = ({ payload }: { payload?: FetchQueryParams }) => {
       const selectionResult = listQueryStore.useListQuery(payload, {
@@ -492,7 +492,7 @@ describe('useQuery', () => {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const compRenders = createRenderStore();
+    const compRenders = createRenderLogger();
 
     renderHook(() => {
       const data = listQueryStore.useListQuery(
@@ -527,7 +527,7 @@ describe('useItem', () => {
       initialServerData,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     const Comp = ({
       payload,
@@ -573,7 +573,7 @@ describe('useItem', () => {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = listQueryStore.useItem('users||1', {
@@ -598,7 +598,7 @@ describe('useItem', () => {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = listQueryStore.useItem('users||1', {
@@ -625,7 +625,7 @@ describe('useItem', () => {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     const Comp = ({ payload }: { payload?: string }) => {
       const selectionResult = listQueryStore.useItem(payload, {
@@ -669,7 +669,7 @@ describe('useItem', () => {
       disableInitialDataInvalidation: true,
     });
 
-    const compRenders = createRenderStore();
+    const compRenders = createRenderLogger();
 
     renderHook(() => {
       const data = listQueryStore.useItem('users||1', {
@@ -698,7 +698,7 @@ describe('useItem', () => {
       disableInitialDataInvalidation: true,
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const selectionResult = store.useItem('users||2', {
@@ -744,8 +744,8 @@ describe('useItem', () => {
       useLoadedSnapshot: { tables: ['users', 'products'] },
     });
 
-    const users2 = createRenderStore();
-    const products1 = createRenderStore();
+    const users2 = createRenderLogger();
+    const products1 = createRenderLogger();
 
     const { result } = renderHook(() => {
       const [usersResult, productsResult] = listQueryStore.useMultipleItems(
@@ -797,8 +797,8 @@ describe('useItem', () => {
       useLoadedSnapshot: { tables: ['users', 'products'] },
     });
 
-    const users2 = createRenderStore();
-    const products1 = createRenderStore();
+    const users2 = createRenderLogger();
+    const products1 = createRenderLogger();
 
     renderHook(() => {
       const [usersResult, productsResult] = listQueryStore.useMultipleItems(
@@ -846,7 +846,7 @@ test.concurrent(
       draft.users![0]!.name = 'Updated User 1';
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const { data, status } = env.store.useItem('users||1', {
@@ -882,7 +882,7 @@ test.concurrent(
       draft.users![0]!.name = '🆕';
     });
 
-    const renders = createRenderStore();
+    const renders = createRenderLogger();
 
     renderHook(() => {
       const { items, status } = env.store.useListQuery(

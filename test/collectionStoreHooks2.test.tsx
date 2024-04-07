@@ -1,12 +1,12 @@
 import { renderHook } from '@testing-library/react';
+import { useCallback } from 'react';
 import { expect, test } from 'vitest';
 import { sleep } from './utils/sleep';
 import {
-  Todo,
-  createDefaultCollectionStore,
-  createRenderStore,
+    Todo,
+    createDefaultCollectionStore,
+    createRenderLogger,
 } from './utils/storeUtils';
-import { useCallback } from 'react';
 
 const createTestEnv = createDefaultCollectionStore;
 
@@ -22,7 +22,7 @@ test.concurrent(
       emulateRTU: true,
     });
 
-    const renders = createRenderStore({
+    const renders = createRenderLogger({
       rejectKeys: ['queryMetadata'],
     });
 
@@ -95,7 +95,7 @@ test('disable then enable isOffScreen', async () => {
     lowPriorityThrottleMs: 10,
   });
 
-  const renders = createRenderStore({
+  const renders = createRenderLogger({
     filterKeys: ['status', 'data', 'payload'],
   });
 
@@ -154,8 +154,8 @@ test.concurrent(
     });
 
     const filterKeys = ['status', 'data', 'payload', 'rrfs'];
-    const renders1 = createRenderStore({ filterKeys });
-    const renders2 = createRenderStore({ filterKeys });
+    const renders1 = createRenderLogger({ filterKeys });
+    const renders2 = createRenderLogger({ filterKeys });
 
     const { rerender } = renderHook(
       ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
@@ -212,7 +212,7 @@ test.concurrent(
       lowPriorityThrottleMs: 10,
     });
 
-    const renders = createRenderStore({
+    const renders = createRenderLogger({
       filterKeys: ['i', 'status', 'data', 'payload'],
     });
 
@@ -294,7 +294,7 @@ test.concurrent(
       useLoadedSnapshot: true,
     });
 
-    const renders = createRenderStore({
+    const renders = createRenderLogger({
       filterKeys: ['status', 'data', 'payload'],
     });
 
