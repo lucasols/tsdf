@@ -1,6 +1,4 @@
 import { defineConfig } from 'tsup';
-import glob from 'tiny-glob'
-
 
 export default defineConfig({
   entry: ['src/main.ts'],
@@ -8,5 +6,8 @@ export default defineConfig({
   format: ['cjs', 'esm'],
   esbuildOptions(options) {
     options.mangleProps = /[^_]_$/;
+    options.define = {
+      __DEV__: 'false',
+    };
   },
 });

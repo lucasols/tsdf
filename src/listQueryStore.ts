@@ -3,28 +3,40 @@ import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Store, deepEqual, useSubscribeToStore } from 't-state';
-import { createCollectionFetchOrchestrator } from './collectionFetchOrquestrator';
+import { getObjectKeyOrInsert } from '../test/utils/mutationUtils';
+import { createCollectionFetchOrchestrator } from './collectionFetchOrchestrator';
 import {
   FetchContext as FetchCtx,
   FetchType,
   ScheduleFetchResults,
 } from './fetchOrchestrator';
-import {
-  TSDFStatus,
-  ValidPayload,
-  ValidStoreState,
-  fetchTypePriority,
-} from './storeShared';
+import { TSDFStatus, ValidStoreState, fetchTypePriority } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
+import { invariant } from './utils/assertions';
 import { filterAndMap } from './utils/filterAndMap';
 import { findAndMap } from './utils/findAndMap';
 import { getCacheId } from './utils/getCacheId';
 import { useConst, useDeepMemo } from './utils/hooks';
+import { isObject } from './utils/isObject';
+import { mapGetOrInsert } from './utils/mapGetOrInsert';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { sortBy } from './utils/sortBy';
 import { NonPartial } from './utils/types';
 
 type QueryStatus = TSDFStatus | 'loadingMore';
+
+const statusByPriority: Record<QueryStatus, number> = {
+  success: 0,
+  refetching: 1,
+  error: 2,
+  loadingMore: 3,
+  loading: 4,
+};
+
+type ValidPayload =
+  | (Record<string, unknown> & { fields?: string[] })
+  | string
+  | number;
 
 export type TSFDListQuery<NError, QueryPayload extends ValidPayload> = {
   error: NError | null;
@@ -45,10 +57,17 @@ export type TSDFItemQuery<NError, ItemPayload> = {
 };
 
 export type TSDFPartialItemQuery<NError, ItemPayload> = {
-  error: NError | null;
-  fields: Record<string, Exclude<QueryStatus, 'loadingMore'>>;
-  wasLoaded: boolean;
-  refetchOnMount: false | FetchType;
+  fields: Record<
+    string,
+    {
+      status: Exclude<QueryStatus, 'loadingMore'>;
+      // FIX: test errors scenarios
+      error: NError | null;
+      wasLoaded: boolean;
+      // FIX: test invalidation scenarios
+      refetchOnMount: false | FetchType;
+    }
+  >;
   payload: ItemPayload;
 };
 
@@ -61,9 +80,13 @@ export type TSFDListQueryState<
   items: Record<string, ItemState | null>;
   queries: Record<string, TSFDListQuery<NError, QueryPayload>>;
   itemQueries: Record<string, TSDFItemQuery<NError, ItemPayload> | null>;
-  partialItems: Record<
+  partialItemsQueries: Record<
     string,
     TSDFPartialItemQuery<NError, ItemPayload> | null
+  >;
+  partialQueries: Record<
+    string,
+    [queryKey: string, fields: string[], size: number][]
   >;
 };
 
@@ -180,6 +203,7 @@ export function newTSDFListQueryStore<
   fetchItemFn,
   errorNormalizer,
   defaultQuerySize = 50,
+  // FIX: test it
   getInitialData,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   lowPriorityThrottleMs,
@@ -189,6 +213,9 @@ export function newTSDFListQueryStore<
   optimisticListUpdates,
   onInvalidateItem,
   onInvalidateQuery,
+  getItemCacheKey,
+  getListQueryKey,
+  partialResources,
 }: {
   debugName?: string;
   fetchListFn: (
@@ -203,7 +230,9 @@ export function newTSDFListQueryStore<
     | undefined;
   disableInitialDataInvalidation?: boolean;
   disableRefetchOnMount?: boolean;
+  /** @default 200ms */
   lowPriorityThrottleMs?: number;
+  /** @default 10ms */
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
   optimisticListUpdates?: {
@@ -223,10 +252,25 @@ export function newTSDFListQueryStore<
   }[];
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
-  partialResources?: boolean;
+  partialResources?: {
+    getNewStateFromFetchedItem: (
+      prevItem: ItemState | undefined,
+      item: ItemState,
+      partialFields: string[],
+    ) => ItemState;
+    getDerivedStateFromPartialFields: (
+      partialFields: string[],
+      item: ItemState,
+    ) => ItemState;
+  };
+  getItemCacheKey?: (params: ItemPayload) => ValidPayload | any[];
+  getListQueryKey?: (params: QueryPayload) => ValidPayload | any[];
 }) {
   type State = TSFDListQueryState<ItemState, NError, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<NError, QueryPayload>;
+  type PartialItemQuery = TSDFPartialItemQuery<NError, ItemPayload>;
+
+  const equivalentQueries = new Map<string, string[]>();
 
   const store = new Store<State>({
     debugName,
@@ -235,7 +279,8 @@ export function newTSDFListQueryStore<
         items: {},
         queries: {},
         itemQueries: {},
-        partialItems: {},
+        partialItemsQueries: {},
+        partialQueries: {},
       };
 
       const initialData = getInitialData?.();
@@ -277,12 +322,119 @@ export function newTSDFListQueryStore<
     },
   });
 
-  function getQueryKey(params: QueryPayload): string {
-    return getCacheId(params);
+  function getFieldsFromPayload(payload: ValidPayload): string[] | undefined {
+    if (partialResources) {
+      invariant(isObject(payload));
+
+      return payload.fields;
+    }
+
+    return undefined;
   }
 
-  function getItemKey(params: ItemPayload): string {
-    return getCacheId(params);
+  function cleanFieldsFromPayload(payload: ValidPayload): ValidPayload {
+    let paramsToUse = payload;
+
+    invariant(
+      isObject(paramsToUse),
+      'partial resources cannot use string | number as query key',
+    );
+
+    paramsToUse = { ...paramsToUse };
+
+    invariant(paramsToUse.fields, 'key fields not found in payload');
+
+    delete paramsToUse.fields;
+
+    return paramsToUse;
+  }
+
+  function getQueryKey(params: QueryPayload): string {
+    return getCacheId(getListQueryKey ? getListQueryKey(params) : params);
+  }
+
+  function getItemKey(params: ItemPayload, keepFields = false): string {
+    const paramsToUse =
+      partialResources && !keepFields
+        ? (cleanFieldsFromPayload(params) as ItemPayload)
+        : params;
+
+    return getCacheId(
+      getItemCacheKey ? getItemCacheKey(paramsToUse) : paramsToUse,
+    );
+  }
+
+  function normalizePayloadFields<T extends ValidPayload>(itemPayload: T): T {
+    if (partialResources) {
+      const payloadToUse = {
+        ...(itemPayload as Exclude<ValidPayload, string | number>),
+      };
+
+      payloadToUse.fields = [];
+
+      return payloadToUse as T;
+    }
+
+    return itemPayload;
+  }
+
+  function getEquivalentQuery(
+    state: State,
+    queryKey: string,
+    normalizedPayloadWithoutFields: QueryPayload,
+    loadSize: number,
+    partialFields: string[],
+  ): [Query, string] | [undefined, undefined] {
+    const equivalentQueriesKeys = equivalentQueries.get(queryKey);
+
+    if (__DEV__) {
+      if (
+        (
+          normalizedPayloadWithoutFields as Exclude<
+            ValidPayload,
+            string | number
+          >
+        ).fields?.length !== 0
+      ) {
+        throw new Error('Fields param must be empty');
+      }
+    }
+
+    if (equivalentQueriesKeys) {
+      for (const key of equivalentQueriesKeys) {
+        const fallback = state.queries[key];
+
+        if (fallback && !fallback?.error) {
+          return [fallback, key];
+        }
+      }
+    }
+
+    const queryKeyWithNoFields = getQueryKey(normalizedPayloadWithoutFields);
+
+    const partialQueries = state.partialQueries[queryKeyWithNoFields];
+
+    if (partialQueries) {
+      for (const [partialQueryKey, fields, size] of partialQueries) {
+        if (size >= loadSize) {
+          if (partialFields.every((field) => fields.includes(field))) {
+            const fallback = state.queries[partialQueryKey];
+
+            if (fallback) {
+              mapGetOrInsert(equivalentQueries, queryKey, () => []).push(
+                partialQueryKey,
+              );
+            }
+
+            if (fallback && !fallback?.error) {
+              return [fallback, partialQueryKey];
+            }
+          }
+        }
+      }
+    }
+
+    return [undefined, undefined];
   }
 
   async function fetchQuery(
@@ -293,27 +445,78 @@ export function newTSDFListQueryStore<
       number | undefined,
     ],
   ): Promise<boolean> {
-    const payload = klona(queryPayload);
+    const payload = queryPayload;
     const queryKey = getQueryKey(payload);
+    const partialFields = getFieldsFromPayload(payload);
 
     const queryState = store.state.queries[queryKey];
 
     const isLoading = !queryState?.wasLoaded;
 
+    if (partialResources) {
+      invariant(partialFields?.length, 'Fields param cannot be empty');
+    }
+
+    const normalizedPayloadWithoutFields =
+      partialFields && normalizePayloadFields(payload);
+
+    const partialQueryKey =
+      normalizedPayloadWithoutFields &&
+      getQueryKey(normalizedPayloadWithoutFields);
+
     store.produceState(
       (draft) => {
         const query = draft.queries[queryKey];
 
+        const payloadToUse = klona(payload);
+
         if (!query) {
-          draft.queries[queryKey] = {
-            error: null,
-            status: 'loading',
-            wasLoaded: false,
-            payload,
-            refetchOnMount: false,
-            hasMore: false,
-            items: [],
-          };
+          const equivalentQuery =
+            normalizedPayloadWithoutFields &&
+            getEquivalentQuery(
+              draft,
+              queryKey,
+              normalizedPayloadWithoutFields,
+              size,
+              partialFields,
+            )[0];
+
+          if (equivalentQuery) {
+            draft.queries[queryKey] = {
+              error: null,
+              payload: payloadToUse,
+              hasMore: equivalentQuery.hasMore,
+              items: equivalentQuery.items,
+              refetchOnMount: equivalentQuery.refetchOnMount,
+              status:
+                equivalentQuery.status === 'loadingMore'
+                  ? 'loading'
+                  : equivalentQuery.status === 'success'
+                  ? 'refetching'
+                  : equivalentQuery.status,
+              wasLoaded: equivalentQuery.wasLoaded,
+            };
+          } else {
+            draft.queries[queryKey] = {
+              error: null,
+              status: 'loading',
+              wasLoaded: false,
+              payload: payloadToUse,
+              refetchOnMount: false,
+              hasMore: false,
+              items: [],
+            };
+          }
+
+          if (partialQueryKey) {
+            const partialQueries = getObjectKeyOrInsert(
+              draft.partialQueries,
+              partialQueryKey,
+              () => [],
+            );
+
+            partialQueries.push([queryKey, partialFields, size]);
+          }
 
           return;
         }
@@ -368,29 +571,88 @@ export function newTSDFListQueryStore<
 
           query.items = [];
 
+          // FIX: update all equivalent queries
+
           for (const { data, itemPayload } of items) {
             const itemKey = getItemKey(itemPayload);
 
+            const prev = draft.items[itemKey] ?? undefined;
+
             draft.items[itemKey] = reusePrevIfEqual<ItemState>({
-              current: data,
-              prev: draft.items[itemKey] ?? undefined,
+              current:
+                partialFields && partialResources
+                  ? partialResources.getNewStateFromFetchedItem(
+                      prev,
+                      data,
+                      partialFields,
+                    )
+                  : data,
+              prev,
             });
             query.items.push(String(itemKey));
 
-            const itemQuery = draft.itemQueries[itemKey];
+            if (partialFields) {
+              const partialItemQuery = getObjectKeyOrInsert(
+                draft.partialItemsQueries,
+                itemKey,
+                () => ({
+                  fields: {},
+                  payload: normalizePayloadFields(itemPayload),
+                }),
+              );
 
-            if (
-              !itemQuery ||
-              (itemQuery.status !== 'loading' &&
-                itemQuery.status !== 'refetching')
-            ) {
-              draft.itemQueries[itemKey] = {
-                error: null,
-                refetchOnMount: false,
-                status: 'success',
-                wasLoaded: true,
-                payload: itemPayload,
-              };
+              if (!partialItemQuery) continue;
+
+              for (const field of partialFields) {
+                const itemQueryField = partialItemQuery.fields[field];
+
+                if (
+                  !itemQueryField ||
+                  (itemQueryField.status !== 'loading' &&
+                    itemQueryField.status !== 'refetching')
+                ) {
+                  partialItemQuery.fields[field] = {
+                    error: null,
+                    status: 'success',
+                    wasLoaded: true,
+                    refetchOnMount: false,
+                  };
+                }
+              }
+            } else {
+              const itemQuery = draft.itemQueries[itemKey];
+
+              if (
+                !itemQuery ||
+                (itemQuery.status !== 'loading' &&
+                  itemQuery.status !== 'refetching')
+              ) {
+                draft.itemQueries[itemKey] = {
+                  error: null,
+                  refetchOnMount: false,
+                  status: 'success',
+                  wasLoaded: true,
+                  payload: itemPayload,
+                };
+              }
+            }
+          }
+
+          if (partialQueryKey) {
+            const partialQueries = getObjectKeyOrInsert(
+              draft.partialQueries,
+              partialQueryKey,
+              () => [],
+            );
+
+            for (const partialQuery of partialQueries) {
+              if (partialQuery[0] === queryKey) {
+                const loadedItems = query.items.length;
+
+                if (loadedItems > partialQuery[2]) {
+                  partialQuery[2] = loadedItems;
+                }
+              }
             }
           }
         },
@@ -400,6 +662,7 @@ export function newTSDFListQueryStore<
       );
 
       for (const { itemPayload: id } of items) {
+        // FIX: should get all equivalent queries
         const itemFetchOrchestrator = fetchItemOrchestrator?.get(String(id));
 
         if (itemFetchOrchestrator) {
@@ -512,9 +775,35 @@ export function newTSDFListQueryStore<
     const payloads = multiplePayloads ? payload : [payload];
 
     const results = payloads.map((param) => {
-      return fetchQueryOrchestrator
-        .get(getQueryKey(param))
-        .scheduleFetch(fetchType, ['load', param, size]);
+      const currentFetchOrchestrator = fetchQueryOrchestrator.get(
+        getQueryKey(param),
+      );
+
+      if (partialResources) {
+        const [, equivalentQueryKey] = getEquivalentQuery(
+          store.state,
+          getQueryKey(param),
+          normalizePayloadFields(param),
+          size ?? defaultQuerySize,
+          getFieldsFromPayload(param)!,
+        );
+
+        if (equivalentQueryKey) {
+          const equivalentQueryFetchOrchestrator =
+            fetchQueryOrchestrator.get(equivalentQueryKey);
+
+          // FIX: test it
+          currentFetchOrchestrator.setLastFetchStartTime(
+            equivalentQueryFetchOrchestrator.getProps().lastFetchStartTime,
+          );
+        }
+      }
+
+      return currentFetchOrchestrator.scheduleFetch(fetchType, [
+        'load',
+        param,
+        size,
+      ]);
     });
 
     return multiplePayloads ? results : results[0]!;
@@ -539,10 +828,22 @@ export function newTSDFListQueryStore<
       itemPayload: ItemPayload,
       itemKey: string,
     ) => T,
+    partialFields: string[] | undefined,
   ): T[] {
     return filterAndMap(query.items, (itemKey, ignore) => {
-      const item = store.state.items[itemKey];
-      const itemPayload = store.state.itemQueries[itemKey]?.payload;
+      const state = store.state;
+      let item = state.items[itemKey];
+
+      if (partialFields && partialResources && item) {
+        item = partialResources.getDerivedStateFromPartialFields(
+          partialFields,
+          item,
+        );
+      }
+
+      const itemPayload = partialResources
+        ? state.partialItemsQueries[itemKey]?.payload
+        : state.itemQueries[itemKey]?.payload;
       return item && itemPayload
         ? itemDataSelector(item, itemPayload, itemKey)
         : ignore;
@@ -768,6 +1069,28 @@ export function newTSDFListQueryStore<
 
   type DefaultSelectedItem = ItemState;
 
+  function getQueryWithEquivalentAsFallback(
+    state: State,
+    queryKey: string,
+    normalizedPayloadWithoutFields: QueryPayload,
+    loadSize: number,
+    partialFields: string[] | undefined,
+  ) {
+    const query = state.queries[queryKey];
+
+    if (partialFields && !query) {
+      return getEquivalentQuery(
+        state,
+        queryKey,
+        normalizedPayloadWithoutFields,
+        loadSize,
+        partialFields,
+      )[0];
+    }
+
+    return query;
+  }
+
   function useMultipleListQueries<
     SelectedItem = DefaultSelectedItem,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -848,6 +1171,7 @@ export function newTSDFListQueryStore<
             returnIdleStatus,
             returnRefetchingStatus,
             omitPayload,
+            loadSize = defaultQuerySize,
             queryMetadata,
           }): TSFDUseListQueryReturn<
             SelectedItem,
@@ -855,7 +1179,24 @@ export function newTSDFListQueryStore<
             NError,
             QueryMetadata
           > => {
-            const query = state.queries[queryKey];
+            const partialFields = getFieldsFromPayload(payload);
+
+            const query = getQueryWithEquivalentAsFallback(
+              state,
+              queryKey,
+              normalizePayloadFields(payload),
+              loadSize,
+              partialFields,
+            );
+
+            let payloadToUse = query?.payload ?? payload;
+
+            if (partialFields) {
+              payloadToUse = {
+                ...(payloadToUse as Exclude<ValidPayload, string | number>),
+                fields: partialFields,
+              } as QueryPayload;
+            }
 
             if (!query) {
               return {
@@ -864,7 +1205,7 @@ export function newTSDFListQueryStore<
                 items: [],
                 error: null,
                 hasMore: false,
-                payload: omitPayload ? undefined : payload,
+                payload: omitPayload ? undefined : payloadToUse,
                 isLoading: returnIdleStatus ? false : true,
                 isLoadingMore: false,
                 queryMetadata: queryMetadata as QueryMetadata,
@@ -880,11 +1221,11 @@ export function newTSDFListQueryStore<
             return {
               queryKey,
               status,
-              items: getQueryItems(query, dataSelector),
+              items: getQueryItems(query, dataSelector, partialFields),
               error: query.error,
               hasMore: query.hasMore,
               isLoading: status === 'loading',
-              payload: omitPayload ? undefined : query.payload,
+              payload: omitPayload ? undefined : payloadToUse,
               isLoadingMore: status === 'loadingMore',
               queryMetadata: queryMetadata as QueryMetadata,
             };
@@ -937,7 +1278,14 @@ export function newTSDFListQueryStore<
         if (isOffScreen) continue;
 
         if (itemId) {
-          const itemState = getQueryState(fetchParams);
+          const itemState = getQueryWithEquivalentAsFallback(
+            store.state,
+            itemId,
+            normalizePayloadFields(fetchParams),
+            loadSize ?? defaultQuerySize,
+            getFieldsFromPayload(fetchParams),
+          );
+
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
           const shouldFetch =
@@ -1076,29 +1424,81 @@ export function newTSDFListQueryStore<
       throw new Error(noFetchFnError);
     }
 
-    const itemKey = getCacheId(itemPayload);
+    const itemKey = getItemKey(itemPayload);
+    const partialFields = getFieldsFromPayload(itemPayload);
 
     const isLoaded = !store.state.itemQueries[itemKey]?.wasLoaded;
 
     store.produceState(
       (draft) => {
-        const itemQuery = draft.itemQueries[itemKey];
+        if (partialFields) {
+          invariant(partialFields.length, 'Fields param cannot be empty');
 
-        if (!itemQuery) {
-          draft.itemQueries[itemKey] = {
-            status: 'loading',
-            error: null,
-            wasLoaded: false,
-            refetchOnMount: false,
-            payload: klona(itemPayload),
-          };
+          const itemQuery = draft.partialItemsQueries[itemKey];
 
-          return;
+          if (!itemQuery) {
+            const fields: PartialItemQuery['fields'] = {};
+
+            for (const field of partialFields) {
+              fields[field] = {
+                status: 'loading',
+                error: null,
+                wasLoaded: false,
+                refetchOnMount: false,
+              };
+            }
+
+            const payloadToUse = klona(itemPayload);
+
+            (payloadToUse as Record<string, unknown>).fields = [];
+
+            draft.partialItemsQueries[itemKey] = {
+              payload: payloadToUse,
+              fields,
+            };
+
+            return;
+          }
+
+          for (const field of partialFields) {
+            const itemQueryField = itemQuery.fields[field];
+
+            if (!itemQueryField) {
+              itemQuery.fields[field] = {
+                status: 'loading',
+                error: null,
+                wasLoaded: false,
+                refetchOnMount: false,
+              };
+
+              continue;
+            }
+
+            itemQueryField.status = itemQueryField.wasLoaded
+              ? 'refetching'
+              : 'loading';
+            itemQueryField.error = null;
+            itemQueryField.refetchOnMount = false;
+          }
+        } else {
+          const itemQuery = draft.itemQueries[itemKey];
+
+          if (!itemQuery) {
+            draft.itemQueries[itemKey] = {
+              status: 'loading',
+              error: null,
+              wasLoaded: false,
+              refetchOnMount: false,
+              payload: klona(itemPayload),
+            };
+
+            return;
+          }
+
+          itemQuery.status = itemQuery.wasLoaded ? 'refetching' : 'loading';
+          itemQuery.error = null;
+          itemQuery.refetchOnMount = false;
         }
-
-        itemQuery.status = itemQuery.wasLoaded ? 'refetching' : 'loading';
-        itemQuery.error = null;
-        itemQuery.refetchOnMount = false;
       },
       {
         action: {
@@ -1115,17 +1515,52 @@ export function newTSDFListQueryStore<
 
       store.produceState(
         (draft) => {
-          const itemQuery = draft.itemQueries[itemKey];
+          if (partialFields) {
+            invariant(
+              partialResources,
+              __DEV__ ? 'Partial resources not enabled' : undefined,
+            );
 
-          if (!itemQuery) return;
+            const partialItemQuery = draft.partialItemsQueries[itemKey];
 
-          itemQuery.status = 'success';
-          itemQuery.wasLoaded = true;
+            if (!partialItemQuery) return;
 
-          draft.items[itemKey] = reusePrevIfEqual<ItemState>({
-            current: item,
-            prev: draft.items[itemKey] ?? undefined,
-          });
+            for (const field of partialFields) {
+              const itemQueryField =
+                draft.partialItemsQueries[itemKey]?.fields[field];
+
+              invariant(
+                itemQueryField,
+                __DEV__ ? 'Field query not found' : undefined,
+              );
+
+              itemQueryField.status = 'success';
+              itemQueryField.wasLoaded = true;
+            }
+
+            const prev = draft.items[itemKey] ?? undefined;
+
+            draft.items[itemKey] = reusePrevIfEqual<ItemState>({
+              current: partialResources.getNewStateFromFetchedItem(
+                prev,
+                item,
+                partialFields,
+              ),
+              prev,
+            });
+          } else {
+            const itemQuery = draft.itemQueries[itemKey];
+
+            if (!itemQuery) return;
+
+            itemQuery.status = 'success';
+            itemQuery.wasLoaded = true;
+
+            draft.items[itemKey] = reusePrevIfEqual<ItemState>({
+              current: item,
+              prev: draft.items[itemKey] ?? undefined,
+            });
+          }
         },
         {
           action: { type: 'fetch-item-success', itemPayload },
@@ -1139,12 +1574,28 @@ export function newTSDFListQueryStore<
 
       store.produceState(
         (draft) => {
-          const itemQuery = draft.itemQueries[itemKey];
+          if (partialFields) {
+            const itemQuery = draft.partialItemsQueries[itemKey];
 
-          if (!itemQuery) return;
+            if (!itemQuery) return;
 
-          itemQuery.status = 'error';
-          itemQuery.error = error;
+            for (const field of partialFields) {
+              const itemQueryField =
+                draft.partialItemsQueries[itemKey]?.fields[field];
+
+              if (!itemQueryField) continue;
+
+              itemQueryField.status = 'error';
+              itemQueryField.error = error;
+            }
+          } else {
+            const itemQuery = draft.itemQueries[itemKey];
+
+            if (!itemQuery) return;
+
+            itemQuery.status = 'error';
+            itemQuery.error = error;
+          }
         },
         {
           action: { type: 'fetch-item-error', itemPayload },
@@ -1185,7 +1636,7 @@ export function newTSDFListQueryStore<
     const itemsId = fetchMultiple ? itemPayload : [itemPayload];
 
     const results = itemsId.map((payload) => {
-      const itemKey = getCacheId(payload);
+      const itemKey = getItemKey(payload, true);
 
       return fetchItemOrchestrator
         .get(itemKey)
@@ -1335,10 +1786,56 @@ export function newTSDFListQueryStore<
             ItemPayload,
             QueryMetadata
           > => {
-            const itemQuery = state.itemQueries[itemKey];
-            const itemState = state.items[itemKey];
+            let isDeleted = false;
+            let isNotFetched = false;
+            let status: QueryStatus = 'loading';
+            const error: NError | null = null;
+            let payloadToUse: ItemPayload | null = null;
 
-            if (itemQuery === null) {
+            const partialFields = getFieldsFromPayload(payload);
+
+            if (partialFields) {
+              const itemQuery = state.partialItemsQueries[itemKey];
+
+              isDeleted = itemQuery === null;
+
+              isNotFetched = !itemQuery;
+
+              if (itemQuery) {
+                payloadToUse = itemQuery.payload;
+
+                let highestStatusPriority = 0;
+                status = 'success';
+
+                for (const field of partialFields) {
+                  const fieldState = itemQuery.fields[field];
+
+                  if (!fieldState) {
+                    isNotFetched = true;
+                    break;
+                  }
+
+                  const statusPriority = statusByPriority[fieldState.status];
+
+                  if (statusPriority > highestStatusPriority) {
+                    highestStatusPriority = statusPriority;
+                    status = fieldState.status;
+                  }
+                }
+              }
+            } else {
+              const itemQuery = state.itemQueries[itemKey];
+
+              isDeleted = itemQuery === null;
+              isNotFetched = !itemQuery;
+
+              if (itemQuery) {
+                payloadToUse = itemQuery.payload;
+                status = itemQuery.status;
+              }
+            }
+
+            if (isDeleted) {
               return {
                 status: 'deleted',
                 error: null,
@@ -1349,7 +1846,7 @@ export function newTSDFListQueryStore<
               };
             }
 
-            if (!itemQuery) {
+            if (isNotFetched) {
               return {
                 status: returnIdleStatus ? 'idle' : 'loading',
                 error: null,
@@ -1360,17 +1857,30 @@ export function newTSDFListQueryStore<
               };
             }
 
-            let status = itemQuery.status;
-
-            if (!returnRefetchingStatus && itemQuery.status === 'refetching') {
+            if (!returnRefetchingStatus && status === 'refetching') {
               status = 'success';
+            }
+
+            let itemState = state.items[itemKey];
+
+            const isLoading = status === 'loading';
+
+            if (isLoading) {
+              itemState = null;
+            }
+
+            if (partialFields && partialResources && itemState) {
+              itemState = partialResources.getDerivedStateFromPartialFields(
+                partialFields,
+                itemState,
+              );
             }
 
             return {
               status,
-              error: itemQuery.error,
-              isLoading: status === 'loading',
-              data: dataSelector(itemState ?? null, itemQuery.payload),
+              error,
+              isLoading,
+              data: dataSelector(itemState ?? null, payloadToUse),
               payload,
               queryMetadata: queryMetadata as QueryMetadata,
             };
@@ -1426,11 +1936,48 @@ export function newTSDFListQueryStore<
         if (isOffScreen) continue;
 
         if (itemKey) {
-          const itemState = store.state.itemQueries[itemKey];
-          const fetchType = itemState?.refetchOnMount || 'lowPriority';
+          let fetchType: FetchType = 'lowPriority';
+          let shouldFetch: boolean | FetchType = false;
 
-          const shouldFetch =
-            !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
+          const partialFields = getFieldsFromPayload(payload);
+
+          if (partialFields) {
+            const queryState = store.state.partialItemsQueries[itemKey];
+
+            let refetchOnMountPriority = 0;
+            let refetchOnMount: FetchType | false = false;
+            let wasLoaded = true;
+
+            for (const field of partialFields) {
+              const fieldQueryState = queryState?.fields[field];
+
+              if (!fieldQueryState) {
+                wasLoaded = false;
+                break;
+              }
+
+              if (fieldQueryState.refetchOnMount) {
+                const priority =
+                  fetchTypePriority[fieldQueryState.refetchOnMount];
+
+                if (priority > refetchOnMountPriority) {
+                  refetchOnMountPriority = priority;
+                  refetchOnMount = fieldQueryState.refetchOnMount;
+                }
+              }
+            }
+
+            fetchType = refetchOnMount || 'lowPriority';
+
+            shouldFetch = !wasLoaded || refetchOnMount;
+          } else {
+            const itemState = store.state.itemQueries[itemKey];
+
+            fetchType = itemState?.refetchOnMount || 'lowPriority';
+
+            shouldFetch =
+              !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
+          }
 
           if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
             continue;
@@ -1826,8 +2373,10 @@ export function newTSDFListQueryStore<
       items: {},
       queries: {},
       itemQueries: {},
-      partialItems: {},
+      partialItemsQueries: {},
+      partialQueries: {},
     });
+    equivalentQueries.clear();
   }
 
   return {

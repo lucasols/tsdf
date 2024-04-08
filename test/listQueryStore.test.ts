@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
-  createDefaultListQueryStore,
   Tables,
+  createDefaultListQueryStore,
 } from './utils/createDefaultListQueryStore';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
@@ -88,6 +88,8 @@ describe.concurrent('fetch query', () => {
       items: {},
       queries: {},
       itemQueries: {},
+      partialQueries: {},
+      partialItemsQueries: {},
     });
 
     listQueryStore.scheduleListQueryFetch('lowPriority', usersQueryParams);
@@ -497,7 +499,7 @@ describe.concurrent('fetch query', () => {
   });
 
   test.concurrent(
-    'multiple fetchs with different payloads not cancel each other, but cancel same payload fetchs',
+    'multiple fetches with different payloads not cancel each other, but cancel same payload fetches',
     async () => {
       const { serverMock, store: listQueryStore } = createTestEnv({
         initialServerData,
@@ -734,7 +736,7 @@ describe.concurrent('fetch item', () => {
     expect(serverMock.fetchsCount).toEqual(2);
   });
 
-  test.concurrent('test helpers inital snapshot', async () => {
+  test.concurrent('test helpers initial snapshot', async () => {
     const loaded = createTestEnv({
       initialServerData,
       disableInitialDataInvalidation: true,
@@ -755,7 +757,7 @@ describe.concurrent('fetch item', () => {
     );
   });
 
-  test.concurrent('test helpers inital snapshot 2', async () => {
+  test.concurrent('test helpers initial snapshot 2', async () => {
     const loaded = createTestEnv({
       initialServerData,
       disableInitialDataInvalidation: true,
@@ -1094,7 +1096,7 @@ describe('update state functions', () => {
     `);
   });
 
-  test('update multiple itens state', () => {
+  test('update multiple items state', () => {
     const { store } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
@@ -1120,7 +1122,7 @@ describe('update state functions', () => {
     `);
   });
 
-  test('update multiple itens state with filter fn', () => {
+  test('update multiple items state with filter fn', () => {
     const { store } = createTestEnv({
       initialServerData,
       useLoadedSnapshot: { tables: ['users'] },
@@ -1310,6 +1312,8 @@ describe('update state functions', () => {
           wasLoaded: true,
         },
       },
+      partialQueries: {},
+      partialItemsQueries: {},
     });
   });
 
@@ -1337,6 +1341,8 @@ describe('update state functions', () => {
     );
 
     expect(store.store.state).toEqual({
+      partialQueries: {},
+      partialItemsQueries: {},
       itemQueries: {
         'users||1': {
           error: null,
@@ -1410,13 +1416,15 @@ describe('update state functions', () => {
 
     expect(store.scheduleItemFetch('highPriority', 'users||1')).toBe('started');
 
-    const defaulItemQueryProps = {
+    const defaultItemQueryProps = {
       error: null,
       refetchOnMount: false,
       status: 'success',
       wasLoaded: true,
     };
     expect(store.store.state).toEqual({
+      partialQueries: {},
+      partialItemsQueries: {},
       itemQueries: {
         'users||1': {
           error: null,
@@ -1425,10 +1433,10 @@ describe('update state functions', () => {
           status: 'loading',
           wasLoaded: false,
         },
-        'users||2': { ...defaulItemQueryProps, payload: 'users||2' },
-        'users||3': { ...defaulItemQueryProps, payload: 'users||3' },
-        'users||4': { ...defaulItemQueryProps, payload: 'users||4' },
-        'users||5': { ...defaulItemQueryProps, payload: 'users||5' },
+        'users||2': { ...defaultItemQueryProps, payload: 'users||2' },
+        'users||3': { ...defaultItemQueryProps, payload: 'users||3' },
+        'users||4': { ...defaultItemQueryProps, payload: 'users||4' },
+        'users||5': { ...defaultItemQueryProps, payload: 'users||5' },
       },
       items: {
         'users||1': null,
@@ -1600,6 +1608,8 @@ test('invalidate everything does not cause a problem', () => {
   });
 
   expect(env.store.store.state).toEqual({
+    partialQueries: {},
+    partialItemsQueries: {},
     itemQueries: {
       'users||1': {
         error: null,
