@@ -433,10 +433,58 @@ describe.concurrent('useListQuery', () => {
       "
     `);
   });
+
+  test('load correctly when fields change from more to less fields: with refetch on mount', async () => {
+    const env = createTestEnv({
+      initialServerData,
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+      partialResources: true,
+    });
+
+    const renders = createRenderLogger({
+      filterKeys: ['status', 'items', 'payload', 'error'],
+    });
+
+    const { rerender } = renderHook<void, ChangeFieldsProps>(
+      ({ fields }) => {
+        const result = env.store.useListQuery(
+          { tableId: 'users', fields },
+          { returnRefetchingStatus: true },
+        );
+
+        renders.add(result);
+      },
+      {
+        initialProps: { fields: ['id', 'name', 'address', 'country'] },
+      },
+    );
+
+    await env.serverMock.waitFetchIdle();
+
+    renders.addMark('Change fields');
+
+    rerender({ fields: ['id', 'name', 'address'] });
+
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
+      "
+      status: loading -- items: [] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
+      status: success -- items: [{id:1, name:User 1, address:Address 1, country:Country 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
+
+      >>> Change fields
+
+      status: success -- items: [{id:1, name:User 1, address:Address 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address]} -- error: null
+      "
+    `);
+  });
 });
 
 // FIX: test concurrent fetches with different fields
 
 // FIX: test use fallback list then load more
 
+// FIX: test use fallback list then load more
+
 // FIX: load list then load item with less but common fields
+
+// FIX: load two lists with different fields then load item with common fields
