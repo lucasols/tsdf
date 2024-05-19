@@ -80,13 +80,14 @@ export type CollectionUseMultipleItemsQuery<
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
   payload: ItemPayload;
-  queryMetadata?: QueryMetadata;
   omitPayload?: boolean;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
   isOffScreen?: boolean;
-};
+} & (QueryMetadata extends undefined
+  ? { queryMetadata?: undefined }
+  : { queryMetadata: QueryMetadata });
 
 export function newTSDFCollectionStore<
   ItemState extends ValidStoreState,
@@ -409,7 +410,7 @@ export function newTSDFCollectionStore<
   ) {
     type QueryWithId = {
       itemKey: string;
-    } & NonPartial<CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>>;
+    } & NonPartial<CollectionUseMultipleItemsQuery<ItemPayload, any>>;
 
     const queriesWithId = useDeepMemo((): QueryWithId[] => {
       return items.map((queryProps) => {

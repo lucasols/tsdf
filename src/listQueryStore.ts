@@ -171,26 +171,28 @@ export type ListQueryUseMultipleItemsQuery<
   QueryMetadata extends undefined | Record<string, unknown>,
 > = {
   payload: ItemPayload;
-  queryMetadata?: QueryMetadata;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
   isOffScreen?: boolean;
-};
+} & (QueryMetadata extends undefined
+  ? { queryMetadata?: undefined }
+  : { queryMetadata: QueryMetadata });
 
 export type ListQueryUseMultipleListQueriesQuery<
   QueryPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown>,
 > = {
   payload: QueryPayload;
-  queryMetadata?: QueryMetadata;
   omitPayload?: boolean;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
   isOffScreen?: boolean;
   loadSize?: number;
-};
+} & (QueryMetadata extends undefined
+  ? { queryMetadata?: undefined }
+  : { queryMetadata: QueryMetadata });
 
 export function newTSDFListQueryStore<
   ItemState extends ValidStoreState,
@@ -1125,9 +1127,7 @@ export function newTSDFListQueryStore<
   ) {
     type QueryWithId = {
       key: string;
-    } & NonPartial<
-      ListQueryUseMultipleListQueriesQuery<QueryPayload, QueryMetadata>
-    >;
+    } & NonPartial<ListQueryUseMultipleListQueriesQuery<QueryPayload, any>>;
 
     const queriesWithId = useDeepMemo(() => {
       return queries.map((item): QueryWithId => {
@@ -1742,7 +1742,7 @@ export function newTSDFListQueryStore<
 
     type PayloadWithKey = {
       itemKey: string;
-    } & NonPartial<ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>>;
+    } & NonPartial<ListQueryUseMultipleItemsQuery<ItemPayload, any>>;
 
     const memoizedItemKeys = useDeepMemo(
       () =>
