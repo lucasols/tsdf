@@ -65,6 +65,7 @@ export function createDefaultListQueryStore({
   optimisticListUpdates,
   lowPriorityThrottleMs,
   partialResources,
+  disableRefetchOnMount,
 }: {
   initialServerData?: Tables;
   useLoadedSnapshot?: {
@@ -76,6 +77,7 @@ export function createDefaultListQueryStore({
   defaultQuerySize?: number;
   dynamicRTUThrottleMs?: (duration: number) => number;
   debug?: never;
+  disableRefetchOnMount?: boolean;
   debugRequests?: never;
   disableInitialDataInvalidation?: boolean;
   emulateRTU?: boolean;
@@ -254,7 +256,9 @@ export function createDefaultListQueryStore({
 
       return {
         items: result.map((item) => ({
-          itemPayload: getItemId({ tableId, id: item.id }),
+          itemPayload: fields
+            ? { id: getItemId({ tableId, id: item.id }), fields }
+            : getItemId({ tableId, id: item.id }),
           data: fields ? (pick(item, fields) as Row) : item,
         })),
         hasMore,
@@ -275,6 +279,12 @@ export function createDefaultListQueryStore({
             return pick(result, itemId.fields) as Row;
           }
 
+          if (partialResources) {
+            throw new Error(
+              'fields is required when partialResources is enabled',
+            );
+          }
+
           return result;
         },
     errorNormalizer: normalizeError,
@@ -282,8 +292,20 @@ export function createDefaultListQueryStore({
     getInitialData: () => initialData,
     disableInitialDataInvalidation,
     lowPriorityThrottleMs,
+    disableRefetchOnMount,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
-    partialResources,
+    partialResources: partialResources
+      ? {
+          getNewStateFromFetchedItem(prevItem, item) {
+            if (!prevItem) return item;
+
+            return { ...prevItem, ...item };
+          },
+          getDerivedStateFromPartialFields(fields, item) {
+            return pick(item, fields as (keyof Row)[]) as Row;
+          },
+        }
+      : undefined,
   });
 
   if (debug as any) {

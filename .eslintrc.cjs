@@ -24,7 +24,7 @@ module.exports = {
   plugins: ['@typescript-eslint', '@lucasols/extended-lint', 'vitest'],
   reportUnusedDisableDirectives: true,
   rules: {
-    'no-warning-comments': [ERROR_IN_CI, { terms: ['FIX:'] }],
+    'no-warning-comments': [ERROR_IN_CI, { terms: ['FIX'] }],
     'no-constant-binary-expression': ERROR_IN_CI,
     'object-shorthand': ERROR_IN_CI,
     'no-useless-rename': ERROR_IN_CI,
@@ -81,14 +81,6 @@ module.exports = {
     '@typescript-eslint/no-shadow': [
       ERROR_IN_CI,
       { ignoreOnInitialization: true, allow: ['expect'] },
-    ],
-    '@typescript-eslint/ban-types': [
-      ERROR_IN_CI,
-      {
-        types: {
-          Error: 'Dont use error type',
-        },
-      },
     ],
     '@typescript-eslint/method-signature-style': ERROR_IN_CI,
 

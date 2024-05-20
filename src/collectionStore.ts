@@ -3,17 +3,17 @@ import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Store, deepEqual, useSubscribeToStore } from 't-state';
-import { createCollectionFetchOrchestrator } from './collectionFetchOrquestrator';
+import { createCollectionFetchOrchestrator } from './collectionFetchOrchestrator';
 import {
-    FetchContext,
-    FetchType,
-    ScheduleFetchResults,
+  FetchContext,
+  FetchType,
+  ScheduleFetchResults,
 } from './fetchOrchestrator';
 import {
-    TSDFStatus,
-    ValidPayload,
-    ValidStoreState,
-    fetchTypePriority,
+  TSDFStatus,
+  ValidPayload,
+  ValidStoreState,
+  fetchTypePriority,
 } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { filterAndMap } from './utils/filterAndMap';
@@ -80,13 +80,14 @@ export type CollectionUseMultipleItemsQuery<
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
   payload: ItemPayload;
-  queryMetadata?: QueryMetadata;
   omitPayload?: boolean;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
   isOffScreen?: boolean;
-};
+} & (QueryMetadata extends undefined
+  ? { queryMetadata?: undefined }
+  : { queryMetadata: QueryMetadata });
 
 export function newTSDFCollectionStore<
   ItemState extends ValidStoreState,
@@ -238,7 +239,7 @@ export function newTSDFCollectionStore<
     }
   }
 
-  const fetchOrquestrator = createCollectionFetchOrchestrator({
+  const fetchOrchestrator = createCollectionFetchOrchestrator({
     fetchFn: fetch,
     lowPriorityThrottleMs,
     dynamicRealtimeThrottleMs,
@@ -269,7 +270,7 @@ export function newTSDFCollectionStore<
       const itemKey = getItemKey(param);
 
       results.push(
-        fetchOrquestrator.get(itemKey).scheduleFetch(fetchType, param),
+        fetchOrchestrator.get(itemKey).scheduleFetch(fetchType, param),
       );
     }
 
@@ -281,7 +282,7 @@ export function newTSDFCollectionStore<
   ): Promise<{ data: null; error: NError } | { data: ItemState; error: null }> {
     const itemId = getItemKey(params);
 
-    const wasAborted = await fetchOrquestrator.get(itemId).awaitFetch(params);
+    const wasAborted = await fetchOrchestrator.get(itemId).awaitFetch(params);
 
     if (wasAborted) {
       return { data: null, error: errorNormalizer(new Error('Aborted')) };
@@ -409,7 +410,7 @@ export function newTSDFCollectionStore<
   ) {
     type QueryWithId = {
       itemKey: string;
-    } & NonPartial<CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>>;
+    } & NonPartial<CollectionUseMultipleItemsQuery<ItemPayload, any>>;
 
     const queriesWithId = useDeepMemo((): QueryWithId[] => {
       return items.map((queryProps) => {
@@ -685,7 +686,7 @@ export function newTSDFCollectionStore<
     const endMutations: (() => boolean)[] = [];
 
     for (const itemKey of itemKeys) {
-      endMutations.push(fetchOrquestrator.get(itemKey).startMutation());
+      endMutations.push(fetchOrchestrator.get(itemKey).startMutation());
     }
 
     return () => {
@@ -771,7 +772,7 @@ export function newTSDFCollectionStore<
   }
 
   function reset() {
-    fetchOrquestrator.reset();
+    fetchOrchestrator.reset();
     store.setState({});
   }
 

@@ -59,7 +59,12 @@ export function createFetchOrchestrator<T>({
   }
 
   function setLastFetchStartTime(startTime: number) {
-    lastFetchStartTime = startTime;
+    if (lastFetchStartTime < startTime) {
+      lastFetchStartTime = startTime;
+      return true;
+    }
+
+    return false;
   }
 
   function flushScheduledFetch() {
@@ -362,6 +367,10 @@ export function createFetchOrchestrator<T>({
     },
     setLastFetchDuration,
     setLastFetchStartTime,
+    getProps: () => ({
+      lastFetchStartTime,
+      lastFetchDuration,
+    }),
   };
 }
 

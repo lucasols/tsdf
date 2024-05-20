@@ -10,4 +10,7 @@ export default defineConfig({
     environment: 'happy-dom',
     allowOnly: isDev,
   },
+  define: {
+    __DEV__: isDev,
+  },
 });
