@@ -150,8 +150,8 @@ export function createDefaultListQueryStore({
 
           if (query.filters?.ageRange) {
             return (
-              item.age! >= query.filters.ageRange[0]! &&
-              item.age! <= query.filters.ageRange[1]!
+              item.age! >= query.filters.ageRange[0] &&
+              item.age! <= query.filters.ageRange[1]
             );
           }
 
@@ -225,8 +225,8 @@ export function createDefaultListQueryStore({
       if (filters?.ageRange) {
         result = result.filter(
           (item) =>
-            item.age! >= filters.ageRange![0]! &&
-            item.age! <= filters.ageRange![1]!,
+            item.age! >= filters.ageRange![0] &&
+            item.age! <= filters.ageRange![1],
         );
       }
 
