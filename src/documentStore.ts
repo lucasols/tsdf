@@ -1,17 +1,17 @@
+import { evtmitter } from 'evtmitter';
+import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { produce } from 'immer';
 import { useCallback, useEffect } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import {
-  createFetchOrquestrator,
+  FetchContext,
   FetchType,
   ScheduleFetchResults,
-  FetchContext,
+  createFetchOrquestrator,
 } from './fetchOrquestrator';
-import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
+import { TSDFStatus, ValidStoreState, fetchTypePriority } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
-import { evtmitter } from 'evtmitter';
-import { useOnEvtmitterEvent } from 'evtmitter/react';
 
 type DocumentStatus = TSDFStatus | 'idle';
 
@@ -175,6 +175,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     disableRefetchOnMount = globalDisableRefetchOnMount,
     returnIdleStatus = !!disabled,
     ensureIsLoaded,
+    selectorUsesExternalDeps,
   }: {
     selector?: (data: State | null) => Selected;
     disabled?: boolean;
@@ -183,6 +184,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     returnIdleStatus?: boolean;
     ensureIsLoaded?: boolean;
     returnRefetchingStatus?: boolean;
+    selectorUsesExternalDeps?: boolean;
   } = {}) {
     const storeStateSelector = useCallback(
       (state: DocState): TSDFUseDocumentReturn<Selected, NError> => {
@@ -211,7 +213,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     );
 
     const storeState = store.useSelector(storeStateSelector, {
-      useExternalDeps: true,
+      useExternalDeps: selectorUsesExternalDeps,
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateData', (priority) => {
