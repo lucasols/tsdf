@@ -169,8 +169,6 @@ test.concurrent(
     expect(renders.snapshot).toMatchInlineSnapshotString(`
       "
       status: success -- changed: true
-      status: success -- changed: true
-      status: success -- changed: true
 
       >>> Rerenders
 
