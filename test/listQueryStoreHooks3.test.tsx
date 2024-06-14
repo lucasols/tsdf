@@ -1,14 +1,14 @@
 import { renderHook } from '@testing-library/react';
+import { useCallback } from 'react';
 import { expect, test } from 'vitest';
 import {
   Tables,
   createDefaultListQueryStore,
 } from './utils/createDefaultListQueryStore';
+import { pick } from './utils/objectUtils';
 import { range } from './utils/range';
 import { sleep } from './utils/sleep';
 import { createRenderStore } from './utils/storeUtils';
-import { useCallback } from 'react';
-import { pick } from './utils/objectUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -653,5 +653,98 @@ test.concurrent(
       useItem: {status:success, data:1/changed again, payload:users||1} -- useListQuery: {status:success, items:[1/changed again, 2/changed again, 3/changed again, 4/changed again, 5/changed again], payload:{tableId:users}}
       "
     `);
+  },
+);
+
+test.concurrent(
+  'useItem with selector should not trigger a rerender',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+    });
+
+    const renders = createRenderStore();
+
+    let prevData: any;
+
+    const { rerender } = renderHook(() => {
+      const { data, status } = env.store.useItem('users||1', {
+        selector: () => ({}),
+      });
+
+      renders.add({ status, changed: prevData !== data });
+      prevData = data;
+    });
+
+    await env.serverMock.waitFetchIdle();
+
+    renders.addMark('Rerenders');
+
+    rerender();
+    rerender();
+    rerender();
+
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    "
+    status: success -- changed: true
+
+    >>> Rerenders
+
+    status: success -- changed: false
+    status: success -- changed: false
+    status: success -- changed: false
+    "
+  `);
+  },
+);
+
+test.concurrent(
+  'useListQuery with selector should not trigger a rerender',
+  async () => {
+    const env = createTestEnv({
+      initialServerData,
+      useLoadedSnapshot: { tables: ['users', 'products'] },
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+    });
+
+    const renders = createRenderStore();
+
+    let prevData: any;
+
+    const { rerender } = renderHook(() => {
+      const { items, status } = env.store.useListQuery(
+        { tableId: 'users' },
+        {
+          itemSelector: () => ({}),
+        },
+      );
+
+      renders.add({ status, changed: prevData !== items });
+      prevData = items;
+    });
+
+    await env.serverMock.waitFetchIdle();
+
+    renders.addMark('Rerenders');
+
+    rerender();
+    rerender();
+    rerender();
+
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    "
+    status: success -- changed: true
+
+    >>> Rerenders
+
+    status: success -- changed: false
+    status: success -- changed: false
+    status: success -- changed: false
+    "
+  `);
   },
 );

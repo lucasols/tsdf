@@ -1,4 +1,5 @@
 import { renderHook } from '@testing-library/react';
+import { useCallback } from 'react';
 import { expect, test } from 'vitest';
 import { sleep } from './utils/sleep';
 import {
@@ -6,7 +7,6 @@ import {
   createDefaultCollectionStore,
   createRenderStore,
 } from './utils/storeUtils';
-import { useCallback } from 'react';
 
 const createTestEnv = createDefaultCollectionStore;
 
@@ -301,7 +301,7 @@ test.concurrent(
     const { rerender } = renderHook(
       ({
         externalDep,
-        selectorUsesExternalDeps
+        selectorUsesExternalDeps,
       }: {
         externalDep: string;
         selectorUsesExternalDeps: boolean;
@@ -361,5 +361,50 @@ test.concurrent(
       status: success -- data: todo/changed again -- payload: 1
       "
     `);
+  },
+);
+
+test.concurrent(
+  'useItem with selector should not trigger a rerender',
+  async () => {
+    const env = createTestEnv({
+      initialServerData: { '1': defaultTodo, '2': defaultTodo },
+      useLoadedSnapshot: true,
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+    });
+
+    const renders = createRenderStore();
+
+    let prevData: any;
+
+    const { rerender } = renderHook(() => {
+      const { data, status } = env.store.useItem('1', {
+        selector: () => ({}),
+      });
+
+      renders.add({ status, changed: prevData !== data });
+      prevData = data;
+    });
+
+    await env.serverMock.waitFetchIdle();
+
+    renders.addMark('Rerenders');
+
+    rerender();
+    rerender();
+    rerender();
+
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    "
+    status: success -- changed: true
+
+    >>> Rerenders
+
+    status: success -- changed: false
+    status: success -- changed: false
+    status: success -- changed: false
+    "
+  `);
   },
 );
