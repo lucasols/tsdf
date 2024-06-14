@@ -2,7 +2,7 @@ import { evtmitter } from 'evtmitter';
 import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { produce } from 'immer';
 import { useCallback, useEffect, useMemo } from 'react';
-import { Store, useSubscribeToStore } from 't-state';
+import { Store, deepEqual, useSubscribeToStore } from 't-state';
 import {
   FetchContext,
   FetchType,
@@ -222,6 +222,7 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
 
     const storeState = store.useSelector(storeStateSelector, {
       useExternalDeps: true,
+      equalityFn: deepEqual,
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateData', (priority) => {
