@@ -134,3 +134,49 @@ test.concurrent(
     `);
   },
 );
+
+test.concurrent(
+  'useDocument with selector should not trigger a rerender',
+  async () => {
+    const env = createTestEnv({
+      useLoadedSnapshot: true,
+      emulateRTU: true,
+      disableInitialDataInvalidation: true,
+    });
+
+    const renders = createRenderStore();
+
+    let prevData: any;
+
+    const { rerender } = renderHook(() => {
+      const { data, status } = env.store.useDocument({
+        selector: () => ({}),
+      });
+
+      renders.add({ status, changed: prevData !== data });
+      prevData = data;
+    });
+
+    await env.serverMock.waitFetchIdle();
+
+    renders.addMark('Rerenders');
+
+    rerender();
+    rerender();
+    rerender();
+
+    expect(renders.snapshot).toMatchInlineSnapshotString(`
+      "
+      status: success -- changed: true
+      status: success -- changed: true
+      status: success -- changed: true
+
+      >>> Rerenders
+
+      status: success -- changed: false
+      status: success -- changed: false
+      status: success -- changed: false
+      "
+    `);
+  },
+);

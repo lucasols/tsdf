@@ -1,7 +1,7 @@
 import { evtmitter } from 'evtmitter';
 import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { produce } from 'immer';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import {
   FetchContext,
@@ -186,11 +186,19 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
     returnRefetchingStatus?: boolean;
     selectorUsesExternalDeps?: boolean;
   } = {}) {
+    const memoizedSelector = useMemo(
+      () => selector,
+      // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
+      [selectorUsesExternalDeps ? selector : 0],
+    );
+
     const storeStateSelector = useCallback(
       (state: DocState): TSDFUseDocumentReturn<Selected, NError> => {
         const { error } = state;
 
-        const data = selector ? selector(state.data) : (state.data as Selected);
+        const data = memoizedSelector
+          ? memoizedSelector(state.data)
+          : (state.data as Selected);
 
         let status = state.status;
 
@@ -209,11 +217,11 @@ export function newTSDFDocumentStore<State extends ValidStoreState, NError>({
           isLoading: status === 'loading',
         };
       },
-      [returnRefetchingStatus, returnIdleStatus, selector],
+      [returnRefetchingStatus, returnIdleStatus, memoizedSelector],
     );
 
     const storeState = store.useSelector(storeStateSelector, {
-      useExternalDeps: selectorUsesExternalDeps,
+      useExternalDeps: true,
     });
 
     useOnEvtmitterEvent(storeEvents, 'invalidateData', (priority) => {
