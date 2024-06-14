@@ -1,6 +1,6 @@
 {
   "name": "tsdf",
-  "version": "16.0.1",
+  "version": "16.0.2",
   "description": "A data fetching solution based on t-state",
   "license": "MIT",
   "author": "Lucas Santos",
