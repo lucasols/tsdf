@@ -194,6 +194,7 @@ export function newTSDFListQueryStore<
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  // FIX: export this type
   optimisticListUpdates?: {
     queries: QueryPayload | ((query: QueryPayload) => boolean) | QueryPayload[];
     filterItem?: (item: ItemState) => boolean | null;
@@ -314,8 +315,8 @@ export function newTSDFListQueryStore<
           type: isLoading
             ? 'fetch-query-start-loading'
             : fetchType === 'loadMore'
-            ? 'fetch-query-loading-more'
-            : 'refetching-query-start',
+              ? 'fetch-query-loading-more'
+              : 'refetching-query-start',
           payload,
         },
       },
@@ -699,6 +700,7 @@ export function newTSDFListQueryStore<
 
   const queryInvalidationWasTriggered = new Set<string>();
 
+  // FIX: add shortcut to invalidate all items and queries
   function invalidateQueryAndItems({
     itemPayload,
     queryPayload,
