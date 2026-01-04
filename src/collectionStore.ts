@@ -606,6 +606,7 @@ export function newTSDFCollectionStore<
       isOffScreen?: boolean;
     } = {},
   ) {
+    // FIX: throw error if payload is empty string (in all stores)
     const query = useMemo(
       () =>
         payload === false || payload === null || payload === undefined
