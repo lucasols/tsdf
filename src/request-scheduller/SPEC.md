@@ -3,7 +3,7 @@ The request scheduler is responsible for scheduling and executing fetch and muta
 - Fetch requests retrieve data from the server.
 - Mutation requests update the server data.
 
-## Rules and features
+# Features
 
 ## Correctly handles concurrent mutations and fetches
 
@@ -12,5 +12,9 @@ When fetches and mutations happen at same time, the scheduler may cancel or resc
 ## Prevent overfetching from low priority fetches or redundant fetches
 
 Low priority fetches are throttled to prevent overfetching. The same way redundant fetches are rescheduled or ignored.
+
+## Request batching (new)
+
+Allow combining multiple requests into a single request.
 
 
