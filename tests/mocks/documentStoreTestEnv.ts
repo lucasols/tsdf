@@ -25,8 +25,8 @@ export function createDocumentStoreTestEnv<D>(
   let fetchIdCounter = 0;
   let nextFetchError: string | null = null;
 
-  const uiChanges: (number | undefined)[] = [];
-  let lastTrackedValue: number | undefined;
+  const uiChanges: (number | 'error' | undefined)[] = [];
+  let lastTrackedValue: number | 'error' | undefined;
 
   const initialTime = Date.now();
 
@@ -97,7 +97,7 @@ export function createDocumentStoreTestEnv<D>(
     get uiChanges() {
       return uiChanges;
     },
-    trackUIChanges: (value: number | undefined) => {
+    trackUIChanges: (value: number | 'error' | undefined) => {
       if (value !== lastTrackedValue) {
         lastTrackedValue = value;
         uiChanges.push(value);
