@@ -324,53 +324,53 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   expect(env.numOfStartedFetches).toBe(6);
 });
 
-// test.concurrent(
-//   'multiple concurrent mutations with revalidation ',
-//   async () => {
-//     // Expected: overlapping mutations schedule a single revalidation fetch that
-//     // skips redundant requests and commits only once with the latest data.
-//     const store = createTestStore(0);
+test('multiple concurrent mutations with revalidation', async () => {
+  // Expected: overlapping mutations schedule a single revalidation fetch that
+  // skips redundant requests and commits only once with the latest data.
+  const env = createDocumentStoreTestEnv(0);
 
-//     const promises = [
-//       delayCall(0, () =>
-//         action(store, 1, {
-//           withOptimisticUpdate: true,
-//           withRevalidation: true,
-//         }),
-//       ),
-//       delayCall(50, () =>
-//         action(store, 2, {
-//           withOptimisticUpdate: true,
-//           withRevalidation: true,
-//         }),
-//       ),
-//     ];
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
 
-//     await Promise.all(promises);
+  await vi.runAllTimersAsync();
 
-//     await store.waitForNoPendingRequests();
+  // First mutation
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-//     expect(store.numOfFetchs).toBe(1);
+  // Second mutation starts 50ms after first (while first is still running)
+  await vi.advanceTimersByTimeAsync(50);
+  env.performClientUpdateAction(2, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-//     expect(store.ui.changesHistory).toEqual([0, 1, 2]);
-//     expect(store.server.history).toEqual([0, 1, 2]);
-//     expect(store.actions).toMatchTimeline(`
-//     "
-//     1 - optimistic-ui-commit
-//     1 - mutation-started
-//     1 - mutation-finished
-//       2 - optimistic-ui-commit
-//       2 - mutation-started
-//       fetch-scheduled
-//       2 - mutation-finished
-//       scheduled-fetch-started : 1
-//       fetch-skipped
-//       2 - fetch-finished : 1
-//       2 - fetch-ui-commit
-//     "
-//   `);
-//   },
-// );
+  await vi.runAllTimersAsync();
+
+  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.serverHistory).toEqual([0, 1, 2]);
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    0 - ui-initialized
+    1 - optimistic-ui-commit
+    1 - mutation-started
+    1 - ui-changed
+      2 - optimistic-ui-commit
+      2 - mutation-started
+      2 - ui-changed
+    1 - mutation-finished
+      2 - mutation-finished
+      fetch-started #1
+      2 - fetch-finished #1
+    "
+  `);
+
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.numOfStartedFetches).toBe(1);
+});
 
 // test.concurrent('multiple high priority fetchs', async () => {
 //   // Expected: high priority requests coalesce into a running fetch plus one scheduled fetch.
