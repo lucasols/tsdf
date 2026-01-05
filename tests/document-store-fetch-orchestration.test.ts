@@ -45,18 +45,29 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
 // tests to migrate are below
 
-test.concurrent('simple mutation with optimistic update', async () => {
-  const store = createTestStore(0);
+test('simple mutation with optimistic update', async () => {
+  vi.useFakeTimers();
 
-  await action(store, 1, {
+  const store = createDocumentStoreTestEnv(0);
+
+  const uiChanges = trackChangedValues();
+
+  renderHook(() => {
+    uiChanges.track(store.useDocument().data?.value);
+  });
+
+  // Wait for initial fetch
+  await vi.runAllTimersAsync();
+
+  store.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
   });
 
-  await store.waitForNoPendingRequests();
+  await vi.runAllTimersAsync();
 
-  expect(store.ui.history).toEqual([0, 1]);
+  expect(uiChanges.changes).toEqual([0, 1]);
 
-  expect(store.actions).toMatchTimeline(`
+  expect(store.actionsString).toMatchInlineSnapshot(`
     "
     1 - optimistic-ui-commit
     1 - mutation-started
