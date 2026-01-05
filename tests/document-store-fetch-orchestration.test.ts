@@ -1,7 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from './mocks/documentStoreTestEnv';
-import { trackChangedValues } from './utils/trackChangedValues';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -14,10 +13,8 @@ afterEach(() => {
 test('simple mutation with revalidation and optimistic update', async () => {
   const env = createDocumentStoreTestEnv(0);
 
-  const uiChanges = trackChangedValues();
-
   renderHook(() => {
-    uiChanges.track(env.useDocument().data?.value);
+    env.trackUIChanges(env.useDocument().data?.value);
   });
 
   // Wait for initial fetch
@@ -30,12 +27,14 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(uiChanges.changes).toEqual([0, 1]);
+  expect(env.uiChanges).toEqual([0, 1]);
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
+    0 - ui-initialized
     1 - optimistic-ui-commit
     1 - mutation-started
+    1 - ui-changed
     1 - mutation-finished
     fetch-started #1
     1 - fetch-finished #1
@@ -48,10 +47,8 @@ test('simple mutation with revalidation and optimistic update', async () => {
 test('simple mutation with optimistic update', async () => {
   const env = createDocumentStoreTestEnv(0);
 
-  const uiChanges = trackChangedValues();
-
   renderHook(() => {
-    uiChanges.track(env.useDocument().data?.value);
+    env.trackUIChanges(env.useDocument().data?.value);
   });
 
   // Wait for initial fetch
@@ -63,12 +60,14 @@ test('simple mutation with optimistic update', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(uiChanges.changes).toEqual([0, 1]);
+  expect(env.uiChanges).toEqual([0, 1]);
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
+    0 - ui-initialized
     1 - optimistic-ui-commit
     1 - mutation-started
+    1 - ui-changed
     1 - mutation-finished
     "
   `);
@@ -77,10 +76,8 @@ test('simple mutation with optimistic update', async () => {
 test('simple mutation without optimistic update', async () => {
   const env = createDocumentStoreTestEnv(0);
 
-  const uiChanges = trackChangedValues();
-
   renderHook(() => {
-    uiChanges.track(env.useDocument().data?.value);
+    env.trackUIChanges(env.useDocument().data?.value);
   });
 
   // Wait for initial fetch
@@ -92,27 +89,25 @@ test('simple mutation without optimistic update', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(uiChanges.changes).toEqual([0, 1]);
+  expect(env.uiChanges).toEqual([0, 1]);
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
+    0 - ui-initialized
     1 - mutation-started
     1 - mutation-finished
     fetch-started #1
     1 - fetch-finished #1
+    1 - ui-changed
     "
   `);
 });
 
 test('prevent overfetch of low priority fetches', async () => {
-  vi.useFakeTimers();
-
   const env = createDocumentStoreTestEnv(0);
 
-  const uiChanges = trackChangedValues();
-
   renderHook(() => {
-    uiChanges.track(env.useDocument().data?.value);
+    env.trackUIChanges(env.useDocument().data?.value);
   });
 
   // Initial data is already loaded, no fetch needed
@@ -134,11 +129,12 @@ test('prevent overfetch of low priority fetches', async () => {
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
+    0 - ui-initialized
     fetch-started #1
     fetch-skipped
     fetch-skipped
     fetch-skipped
-    fetch-finished #1
+    0 - fetch-finished #1
     "
   `);
 });

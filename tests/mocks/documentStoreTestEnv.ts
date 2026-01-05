@@ -6,11 +6,11 @@ import { createServerMock } from './serverMock';
 type Action = {
   action: string;
   time: number;
-  value: number | 'error' | undefined;
+  value: any;
 };
 
-export function createDocumentStoreTestEnv(
-  serverInitialData: number,
+export function createDocumentStoreTestEnv<D>(
+  serverInitialData: D,
   {
     forceInitialDataInvalidation,
   }: { forceInitialDataInvalidation?: boolean } = {},
@@ -19,13 +19,16 @@ export function createDocumentStoreTestEnv(
   let numOfFetches = 0;
   let fetchIdCounter = 0;
 
+  const uiChanges: (number | undefined)[] = [];
+  let lastTrackedValue: number | undefined;
+
   const initialTime = Date.now();
 
   function getRelativeTime() {
     return Date.now() - initialTime;
   }
 
-  function addAction(action: string, value?: number) {
+  function addAction(action: string, value?: unknown) {
     actionsHistory.push({
       action,
       time: getRelativeTime(),
@@ -33,12 +36,9 @@ export function createDocumentStoreTestEnv(
     });
   }
 
-  const serverMock = createServerMock<number>(serverInitialData, addAction);
+  const serverMock = createServerMock<D>(serverInitialData, addAction);
 
-  const documentStore = createDocumentStore<
-    { value: number },
-    { error: string }
-  >({
+  const documentStore = createDocumentStore<{ value: D }, { error: string }>({
     errorNormalizer(exception) {
       return { error: exception.message };
     },
@@ -67,6 +67,22 @@ export function createDocumentStoreTestEnv(
     get numOfFetches() {
       return numOfFetches;
     },
+    get uiChanges() {
+      return uiChanges;
+    },
+    trackUIChanges: (value: number | undefined) => {
+      if (value !== lastTrackedValue) {
+        lastTrackedValue = value;
+        uiChanges.push(value);
+
+        if (value !== undefined) {
+          addAction(
+            uiChanges.length === 1 ? 'ui-initialized' : 'ui-changed',
+            value,
+          );
+        }
+      }
+    },
     scheduleFetch: (fetchType: FetchType) => {
       const result = documentStore.scheduleFetch(fetchType);
 
@@ -79,7 +95,7 @@ export function createDocumentStoreTestEnv(
       }
     },
     performClientUpdateAction: (
-      newValue: number,
+      newValue: D,
       {
         withRevalidation,
         withOptimisticUpdate,
@@ -129,12 +145,12 @@ function getActionsString(actionsHistory: Action[]) {
     '\n',
     actionsHistory
       .map(({ action, value }) => {
-        if (value) {
+        if (value !== undefined) {
           lastIndentation = stringFromLength(
             value === 'error' ? 0 : (value - 1) * 2,
           );
 
-          return `${lastIndentation}${value} - ${action}`;
+          return `${lastIndentation}${typeof value === 'object' ? JSON.stringify(value) : value} - ${action}`;
         } else {
           return `${lastIndentation}${action}`;
         }
