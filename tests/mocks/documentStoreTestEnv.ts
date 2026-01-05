@@ -1,14 +1,22 @@
-import { sleep } from '@ls-stack/utils/sleep';
 import { createDocumentStore } from '../../src/documentStore';
+import { arrayWithPrev } from '../../test-old/utils/arrayUtils';
 import { createServerMock } from './serverMock';
 
-export function createDocumentStoreTestEnv(serverInitialData: number) {
-  const actionsHistory: {
-    action: string;
-    time: number;
-    value: number | undefined;
-  }[] = [];
+type Action = {
+  action: string;
+  time: number;
+  value: number | 'error' | undefined;
+};
+
+export function createDocumentStoreTestEnv(
+  serverInitialData: number,
+  {
+    forceInitialDataInvalidation,
+  }: { forceInitialDataInvalidation?: boolean } = {},
+) {
+  const actionsHistory: Action[] = [];
   let numOfFetches = 0;
+  let fetchIdCounter = 0;
 
   const initialTime = Date.now();
 
@@ -16,16 +24,15 @@ export function createDocumentStoreTestEnv(serverInitialData: number) {
     return Date.now() - initialTime;
   }
 
-  const serverMock = createServerMock<number>(
-    serverInitialData,
-    (action, value) => {
-      actionsHistory.push({
-        action,
-        time: getRelativeTime(),
-        value,
-      });
-    },
-  );
+  function addAction(action: string, value?: number) {
+    actionsHistory.push({
+      action,
+      time: getRelativeTime(),
+      value,
+    });
+  }
+
+  const serverMock = createServerMock<number>(serverInitialData, addAction);
 
   const documentStore = createDocumentStore<
     { value: number },
@@ -35,38 +42,27 @@ export function createDocumentStoreTestEnv(serverInitialData: number) {
       return { error: exception.message };
     },
     fetchFn: async () => {
+      const fetchId = ++fetchIdCounter;
+      addAction(`fetch-started #${fetchId}`);
       const value = await serverMock.fetch();
       numOfFetches++;
+      addAction(`fetch-finished #${fetchId}`, value);
       return { value };
     },
+    disableInitialDataInvalidation: !forceInitialDataInvalidation,
+    getInitialData:
+      !forceInitialDataInvalidation ?
+        () => ({ value: serverInitialData })
+      : undefined,
+    disableRefetchOnMount: !forceInitialDataInvalidation,
   });
 
-  const storeHistory: number[] = [];
-  const storeHistoryWithActions: {
-    value: number;
-    action: string | { type: string };
-  }[] = [];
-
-  documentStore.store.subscribe(({ current, action }) => {
-    if (current.data) {
-      storeHistory.push(current.data.value);
-      actionsHistory.push({
-        action: 'fetch-ui-commit',
-        time: getRelativeTime(),
-        value: current.data.value,
-      });
-    }
-    if (action) {
-      storeHistoryWithActions.push({
-        value: current.data?.value ?? 0,
-        action: action,
-      });
-    }
+  serverMock.wsEvents.on('data_changed', () => {
+    documentStore.invalidateData('realtimeUpdate');
   });
 
   return {
-    storeHistory,
-    storeHistoryWithActions,
+    useDocument: documentStore.useDocument,
     get numOfFetches() {
       return numOfFetches;
     },
@@ -91,20 +87,14 @@ export function createDocumentStoreTestEnv(serverInitialData: number) {
               documentStore.updateState((draft) => {
                 draft.value = newValue;
               });
+              addAction('optimistic-ui-commit', newValue);
             }
           : undefined,
         mutation: async () => {
           return {
             value: await serverMock.mutateData(newValue, {
               duration,
-              onServerDataChange:
-                triggerRTU ?
-                  async () => {
-                    await sleep(20);
-
-                    documentStore.invalidateData('realtimeUpdate');
-                  }
-                : undefined,
+              triggerRTUEvent: triggerRTU,
             }),
           };
         },
@@ -112,14 +102,15 @@ export function createDocumentStoreTestEnv(serverInitialData: number) {
       });
     },
     get actionsString() {
-      return getActions(actionsHistory);
+      return getActionsString(actionsHistory);
+    },
+    timeline(groupByTime = 10, startAt = 0): string {
+      return getTimelineString(actionsHistory, groupByTime, startAt);
     },
   };
 }
 
-function getActions(
-  actionsHistory: { action: string; time: number; value: number | undefined }[],
-) {
+function getActionsString(actionsHistory: Action[]) {
   let lastIndentation = '';
 
   return [
@@ -128,7 +119,7 @@ function getActions(
       .map(({ action, value }) => {
         if (value) {
           lastIndentation = stringFromLength(
-            typeof value !== 'number' ? 0 : (value - 1) * 2,
+            value === 'error' ? 0 : (value - 1) * 2,
           );
 
           return `${lastIndentation}${value} - ${action}`;
@@ -145,4 +136,95 @@ function stringFromLength(length: number, string = ' ') {
   return Array.from({ length })
     .map((_) => string)
     .join('');
+}
+
+function getTimelineString(
+  actionsHistory: Action[],
+  groupByTime: number,
+  startAt: number,
+) {
+  const timeline: string[] = [];
+  let lastIndentation = '';
+  let lastAction = '';
+
+  const dividerText = '.';
+
+  const actionsWithNormalizedTime: Action[] = [];
+
+  actionsHistory.forEach((action) => {
+    if (action.time < startAt) {
+      return;
+    }
+
+    let time = action.time;
+
+    time = time - (time % groupByTime);
+
+    actionsWithNormalizedTime.push({
+      ...action,
+      time,
+    });
+  });
+
+  for (const [{ action, time, value }, prev] of arrayWithPrev(
+    actionsWithNormalizedTime,
+  )) {
+    if (prev) {
+      const timeDiff = time - prev.time;
+
+      if (timeDiff > 50) {
+        timeline.push(dividerText);
+      }
+    }
+
+    let actionText: string;
+
+    if (value) {
+      lastIndentation = stringFromLength(
+        value === 'error' ? 0 : (value - 1) * 2,
+      );
+
+      actionText = `${lastIndentation}${value} - ${action}`;
+    } else {
+      actionText = `${lastIndentation}${action}`;
+    }
+
+    if (lastAction.startsWith(`${time}ms:`)) {
+      lastAction = `${time}ms:--${actionText}`;
+    } else {
+      lastAction = `${time}ms: ${actionText}`;
+    }
+
+    timeline.push(lastAction);
+  }
+
+  const maxTimeLength = Math.max(
+    ...timeline.map((action) =>
+      action.includes(':') ? action.split(':')[0]!.length : 0,
+    ),
+  );
+
+  const timelineWithBalancedStart = timeline.map((action) => {
+    if (action.startsWith(dividerText)) {
+      return `${stringFromLength(maxTimeLength)}-`;
+    }
+
+    const [time, actionType] = action.split(':');
+
+    return `${stringFromLength(
+      maxTimeLength - time!.length,
+    )}${time}:${actionType}`;
+  });
+
+  return `\n${timelineWithBalancedStart
+    .map((action) => {
+      if (action.includes('--')) {
+        const [time, actionType] = action.split(':--');
+
+        return ` ${stringFromLength(time!.length - 1)}: ${actionType}`;
+      }
+
+      return action;
+    })
+    .join('\n')}\n`;
 }

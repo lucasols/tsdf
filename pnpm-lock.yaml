@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@evtmitter/react':
+        specifier: ^0.1.0
+        version: 0.1.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@ls-stack/react-utils':
+        specifier: ^0.9.0
+        version: 0.9.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/utils':
         specifier: ^3.65.0
         version: 3.65.0
@@ -376,6 +382,13 @@ packages:
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
+  '@evtmitter/react@0.1.0':
+    resolution: {integrity: sha512-5k0IoI8MUHnfJ9VFw7yS2BuCHGATMVbU3Z6M1bKFAY81ug4JOOLAVK5QkRiBhWO2Rw9xshOrE/hvfWdx1im9Dg==}
+    engines: {node: '>=14.6.0'}
+    peerDependencies:
+      react: ^18.3.1 || ^19.0.0
+      react-dom: ^18.3.1 || ^19.0.0
+
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
     engines: {node: '>=18.18.0'}
@@ -407,6 +420,20 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@ls-stack/browser-utils@0.3.0':
+    resolution: {integrity: sha512-C+TeJc76A4Os4+mi4Oyi9QXLC4kUy8PY/1otWrt1vqyrOwT8GVwEgQjEOuWLUPdqMw3NO1VxozEAiB8uy34yWw==}
+    engines: {node: '>=20.0.0'}
+
+  '@ls-stack/react-utils@0.9.0':
+    resolution: {integrity: sha512-wy4SUO1PgQJVnb8u8NA4Gkg+uliCn+FVydWcTEVlXXHK3gsWS3hqP6cwlssc2UeXCAcecgqHZg4bgwtsGOgKFg==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      react: '>=18.0.0||^19.0.0'
+
+  '@ls-stack/utils@3.36.0':
+    resolution: {integrity: sha512-07hSR0SSooobOov4lakqFkzL01dMWPZ3az1TUp2uq5z1LFVRQ7m2vDgdca3EPLmPTPyrlC96dRG91H0SqJENzg==}
+    engines: {node: '>=20.0.0'}
 
   '@ls-stack/utils@3.65.0':
     resolution: {integrity: sha512-dOMK9LNuPmLRkraaRORBQqTq/JWGXyKHOKva25NhzWJgjOSZwPm/r8Ty8zd/bLCjaIO6aBUNl7zqJ6JTM6YaCQ==}
@@ -1093,6 +1120,13 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
+  evtmitter@0.3.3:
+    resolution: {integrity: sha512-McEl41bI+g5gEU/vQQ7eJfTzdKtCeYGwrvow+ktEp47m9/OVVQyJy9E5lKhsMIZws9uURsXi4nyc8ZmL7dX7uQ==}
+    engines: {node: '>=14.6.0'}
+    peerDependencies:
+      react: ^18.2.0
+      react-dom: ^18.2.0
+
   evtmitter@1.0.2:
     resolution: {integrity: sha512-Y3LObkozuxG0aCdzhMFoxbZyl9osl86mK5B/mIYpRaVsYf7I5bssOFYNBCFnoAgq0A6PkFjxpuojGpZu01w8Nw==}
     engines: {node: '>=14.6.0'}
@@ -1554,6 +1588,10 @@ packages:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
 
+  t-result@0.3.0:
+    resolution: {integrity: sha512-i8+5uNuxj9xV1SGBM10mRVc8zPmFYwqLoBpuHWtM16uelDy6Iox0lM2Ns+ZN76GGwYUF1bz5fKMOlqeiM6qVCQ==}
+    engines: {node: '>=23.0.0'}
+
   t-result@0.6.1:
     resolution: {integrity: sha512-a1aZsIAFYpjb0J51tZfrS93xxpTp4WY70EhZBCKcHylh/y/tF4uWXIyJUoDQKcg88lDdPlAcwuzE5JAC/4MVZg==}
     engines: {node: '>=23.0.0'}
@@ -2014,6 +2052,12 @@ snapshots:
       '@eslint/core': 0.17.0
       levn: 0.4.1
 
+  '@evtmitter/react@0.1.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      evtmitter: 1.0.2
+      react: 19.2.3
+      react-dom: 19.2.3(react@19.2.3)
+
   '@humanfs/core@0.19.1': {}
 
   '@humanfs/node@0.16.7':
@@ -2043,6 +2087,32 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@ls-stack/browser-utils@0.3.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      '@ls-stack/utils': 3.36.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    transitivePeerDependencies:
+      - react
+      - react-dom
+
+  '@ls-stack/react-utils@0.9.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      '@evtmitter/react': 0.1.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@ls-stack/browser-utils': 0.3.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@ls-stack/utils': 3.65.0
+      evtmitter: 1.0.2
+      react: 19.2.3
+      t-result: 0.6.1
+    transitivePeerDependencies:
+      - react-dom
+
+  '@ls-stack/utils@3.36.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      evtmitter: 0.3.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      t-result: 0.3.0
+    transitivePeerDependencies:
+      - react
+      - react-dom
 
   '@ls-stack/utils@3.65.0':
     dependencies:
@@ -2726,6 +2796,11 @@ snapshots:
 
   esutils@2.0.3: {}
 
+  evtmitter@0.3.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
+    dependencies:
+      react: 19.2.3
+      react-dom: 19.2.3(react@19.2.3)
+
   evtmitter@1.0.2: {}
 
   expect-type@1.3.0: {}
@@ -3118,6 +3193,8 @@ snapshots:
   supports-color@7.2.0:
     dependencies:
       has-flag: 4.0.0
+
+  t-result@0.3.0: {}
 
   t-result@0.6.1: {}
 

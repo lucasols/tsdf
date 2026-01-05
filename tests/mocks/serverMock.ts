@@ -1,3 +1,4 @@
+import { evtmitter } from 'evtmitter';
 import { sleep } from '../../test-old/utils/sleep';
 
 export function createServerMock<Data>(
@@ -8,6 +9,7 @@ export function createServerMock<Data>(
   ) => void,
 ) {
   const serverDataHistory: Data[] = [initialData];
+  const wsEvents = evtmitter<{ data_changed: undefined }>();
 
   /** default duration: 1200ms */
   async function mutateData(
@@ -15,16 +17,16 @@ export function createServerMock<Data>(
     {
       duration = 1200,
       setDataAt = duration * 0.7,
-      onServerDataChange,
+      triggerRTUEvent,
       addServerDataChangeAction,
     }: {
       duration?: number;
       setDataAt?: number;
-      onServerDataChange?: () => void;
+      triggerRTUEvent?: boolean;
       addServerDataChangeAction?: boolean;
     } = {},
   ) {
-    listenForActions?.('mutation-started');
+    listenForActions?.('mutation-started', newData);
 
     await sleep(setDataAt);
 
@@ -34,15 +36,20 @@ export function createServerMock<Data>(
       listenForActions?.('server-data-changed', newData);
     }
 
-    onServerDataChange?.();
+    if (triggerRTUEvent) {
+      sleep(100).then(() => {
+        wsEvents.emit('data_changed', undefined);
+      });
+    }
 
-    listenForActions?.('mutation-finished');
+    listenForActions?.('mutation-finished', newData);
 
     await sleep(duration - setDataAt);
   }
 
   return {
     mutateData,
+    wsEvents,
     setData(value: Data) {
       listenForActions?.('server-data-changed', value);
       serverDataHistory.push(value);

@@ -1,7 +1,8 @@
+import { useOnEvtmitterEvent } from '@evtmitter/react';
+import { useConst } from '@ls-stack/react-utils/useConst';
+import { useOnChange } from '@ls-stack/react-utils/useOnChange';
 import { evtmitter } from 'evtmitter';
-import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { useMemo, useState } from 'react';
-import { useConst, useOnChange } from './utils/hooks';
 
 export function useEnsureIsLoaded(
   ensureIsLoaded: boolean | undefined,
@@ -22,11 +23,15 @@ export function useEnsureIsLoaded(
     { callOnMount: true },
   );
 
-  useOnEvtmitterEvent(isLoadedEvtEmitter, 'isLoaded', (isLoaded) => {
-    if (ensureIsLoaded && enabled && isLoaded) {
-      setIsForceLoading(false);
-    }
-  });
+  useOnEvtmitterEvent(
+    isLoadedEvtEmitter,
+    'isLoaded',
+    ({ payload: isLoaded }) => {
+      if (ensureIsLoaded && enabled && isLoaded) {
+        setIsForceLoading(false);
+      }
+    },
+  );
 
   function useModifyResult<T extends { isLoading: boolean; status: string }>(
     result: T,
@@ -43,8 +48,7 @@ export function useEnsureIsLoaded(
       }
 
       return result;
-      // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
-    }, [ensureIsLoaded, isForceLoading, result]);
+    }, [ensureIsLoaded, isForceLoading, result, enabled]);
   }
 
   return [useModifyResult, isLoadedEvtEmitter.emit] as const;

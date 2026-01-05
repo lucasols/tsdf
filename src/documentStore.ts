@@ -1,12 +1,11 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
-import { useOnEvtmitterEvent } from 'evtmitter/react';
+import { useOnEvtmitterEvent } from '@evtmitter/react';
 import { produce } from 'immer';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Result, ResultValidErrors, unknownToError } from 't-result';
 import { deepEqual, Store, useSubscribeToStore } from 't-state';
-import { TSDFUseDocumentReturn } from '../src-old/documentStore';
-import { useEnsureIsLoaded } from '../src-old/useEnsureIsLoaded';
+import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import {
   FetchContext,
   FetchType,
@@ -17,6 +16,13 @@ import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
+
+export type TSDFUseDocumentReturn<Selected, NError> = {
+  status: DocumentStatus;
+  data: Selected;
+  error: NError | null;
+  isLoading: boolean;
+};
 
 export type DocumentStoreState<
   State extends ValidStoreState,
@@ -42,6 +48,7 @@ export type DocumentStoreOptions<
   fetchFn: () => Promise<State>;
   getInitialData?: () => State | undefined;
   disableInitialDataInvalidation?: boolean;
+  disableRefetchOnMount?: boolean;
   errorNormalizer: (exception: Error) => NError;
   lowPriorityThrottleMs?: number;
   mediumPriorityThrottleMs?: number;
@@ -65,6 +72,7 @@ export function createDocumentStore<
   fetchFn,
   getInitialData,
   disableInitialDataInvalidation,
+  disableRefetchOnMount: globalDisableRefetchOnMount,
   errorNormalizer,
   lowPriorityThrottleMs,
   mediumPriorityThrottleMs,
@@ -325,7 +333,9 @@ export function createDocumentStore<
     );
 
     const storeStateSelector = useCallback(
-      (state: DocState): TSDFUseDocumentReturn<Selected, NError> => {
+      (
+        state: DocumentStoreState<State, NError>,
+      ): TSDFUseDocumentReturn<Selected, NError> => {
         const { error } = state;
 
         const data =
@@ -358,7 +368,7 @@ export function createDocumentStore<
       equalityFn: deepEqual,
     });
 
-    useOnEvtmitterEvent(storeEvents, 'invalidateData', (priority) => {
+    useOnEvtmitterEvent(events, 'invalidateData', ({ payload: priority }) => {
       if (disabled) return;
 
       if (!invalidationWasTriggered) {
