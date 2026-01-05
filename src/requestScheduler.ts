@@ -6,7 +6,7 @@ export type FetchContext = {
 
 export type FetchType = 'lowPriority' | 'highPriority' | 'realtimeUpdate';
 
-type RequestSchedulerEvents =
+export type RequestSchedulerEvents =
   | 'scheduled-fetch-started'
   | 'scheduled-rt-fetch-started';
 

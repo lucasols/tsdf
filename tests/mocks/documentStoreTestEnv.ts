@@ -80,6 +80,11 @@ export function createDocumentStoreTestEnv<D>(
       : undefined,
     disableRefetchOnMount: !forceInitialDataInvalidation,
     dynamicRealtimeThrottleMs,
+    onSchedulerEvent: (event) => {
+      if (event === 'scheduled-rt-fetch-started') {
+        addAction(`scheduled-rt-fetch-started #${fetchIdCounter + 1}`);
+      }
+    },
   });
 
   serverMock.wsEvents.on('data_changed', () => {
@@ -135,11 +140,13 @@ export function createDocumentStoreTestEnv<D>(
         withOptimisticUpdate,
         duration,
         triggerRTU,
+        addServerDataChangeAction,
       }: {
         withRevalidation?: boolean;
         withOptimisticUpdate?: boolean;
         duration?: number;
         triggerRTU?: boolean;
+        addServerDataChangeAction?: boolean;
       } = {},
     ) => {
       return documentStore.performMutation({
@@ -157,6 +164,7 @@ export function createDocumentStoreTestEnv<D>(
             value: await serverMock.mutateData(newValue, {
               duration,
               triggerRTUEvent: triggerRTU,
+              addServerDataChangeAction,
             }),
           };
         },
