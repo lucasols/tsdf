@@ -1,19 +1,26 @@
-import { expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from './mocks/documentStoreTestEnv';
 
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
+});
+
 test('simple mutation with revalidation and optimistic update', async () => {
+  vi.useFakeTimers();
+
   const store = createDocumentStoreTestEnv(0);
 
-  await store.performClientUpdateAction(1, {
+  store.performClientUpdateAction(1, {
     withRevalidation: true,
     withOptimisticUpdate: true,
   });
 
-  await store.waitForNoPendingRequests();
+  await vi.runAllTimersAsync();
 
   expect(store.storeHistory).toEqual([0, 1, 1]);
 
-  expect(store.actions).toMatchInlineSnapshot(`
+  expect(store.actionsString).toMatchInlineSnapshot(`
     "
     1 - optimistic-ui-commit
     1 - mutation-started

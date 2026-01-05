@@ -1,8 +1,12 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
+import { useOnEvtmitterEvent } from 'evtmitter/react';
 import { produce } from 'immer';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Result, ResultValidErrors, unknownToError } from 't-result';
-import { Store } from 't-state';
+import { deepEqual, Store, useSubscribeToStore } from 't-state';
+import { TSDFUseDocumentReturn } from '../src-old/documentStore';
+import { useEnsureIsLoaded } from '../src-old/useEnsureIsLoaded';
 import {
   FetchContext,
   FetchType,
@@ -295,6 +299,114 @@ export function createDocumentStore<
     }
   }
 
+  function useDocument<Selected = State | null>({
+    selector,
+    isOffScreen,
+    disabled = isOffScreen,
+    returnRefetchingStatus,
+    disableRefetchOnMount = globalDisableRefetchOnMount,
+    returnIdleStatus = !!disabled,
+    ensureIsLoaded,
+    selectorUsesExternalDeps,
+  }: {
+    selector?: (data: State | null) => Selected;
+    disabled?: boolean;
+    isOffScreen?: boolean;
+    disableRefetchOnMount?: boolean;
+    returnIdleStatus?: boolean;
+    ensureIsLoaded?: boolean;
+    returnRefetchingStatus?: boolean;
+    selectorUsesExternalDeps?: boolean;
+  } = {}) {
+    const memoizedSelector = useMemo(
+      () => selector,
+      // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
+      [selectorUsesExternalDeps ? selector : 0],
+    );
+
+    const storeStateSelector = useCallback(
+      (state: DocState): TSDFUseDocumentReturn<Selected, NError> => {
+        const { error } = state;
+
+        const data =
+          memoizedSelector ?
+            memoizedSelector(state.data)
+          : (state.data as Selected);
+
+        let status = state.status;
+
+        if (!returnIdleStatus && status === 'idle') {
+          status = 'loading';
+        }
+
+        if (!returnRefetchingStatus && status === 'refetching') {
+          status = 'success';
+        }
+
+        return {
+          data,
+          error,
+          status,
+          isLoading: status === 'loading',
+        };
+      },
+      [returnRefetchingStatus, returnIdleStatus, memoizedSelector],
+    );
+
+    const storeState = store.useSelector(storeStateSelector, {
+      useExternalDeps: true,
+      equalityFn: deepEqual,
+    });
+
+    useOnEvtmitterEvent(storeEvents, 'invalidateData', (priority) => {
+      if (disabled) return;
+
+      if (!invalidationWasTriggered) {
+        store.setKey('refetchOnMount', false);
+
+        scheduleFetch(priority);
+        invalidationWasTriggered = true;
+      }
+    });
+
+    useEffect(() => {
+      if (disabled) return;
+
+      const fetchType = store.state.refetchOnMount || 'lowPriority';
+
+      if (disableRefetchOnMount) {
+        const shouldFetch =
+          store.state.refetchOnMount || store.state.status === 'idle';
+
+        if (shouldFetch) {
+          scheduleFetch(fetchType);
+        }
+      } else {
+        scheduleFetch(fetchType);
+      }
+    }, [disableRefetchOnMount, disabled]);
+
+    const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
+      ensureIsLoaded,
+      !disabled,
+      () => {
+        scheduleFetch('highPriority');
+      },
+    );
+
+    useSubscribeToStore(store, ({ observe }) => {
+      observe
+        .ifSelector((state) => state.status)
+        .change.then(({ current }) => {
+          if (current === 'success' || current === 'error') {
+            emitIsLoadedEvt('isLoaded', true);
+          }
+        });
+    });
+
+    return useModifyResult(storeState);
+  }
+
   return {
     store,
     events,
@@ -310,6 +422,7 @@ export function createDocumentStore<
     updateState,
     reset,
     startMutation,
+    useDocument,
     performMutation,
   };
 }

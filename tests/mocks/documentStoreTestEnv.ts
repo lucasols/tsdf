@@ -111,7 +111,7 @@ export function createDocumentStoreTestEnv(serverInitialData: number) {
         revalidateOnSuccess: withRevalidation,
       });
     },
-    get actions() {
+    get actionsString() {
       return getActions(actionsHistory);
     },
   };

@@ -14,8 +14,8 @@
     },
     {
       "type": "npm",
-      "script": "test",
-      "label": "run tests",
+      "script": "test:ui",
+      "label": "run tests ui",
       "problemMatcher": [],
       "presentation": {
         "clear": true
