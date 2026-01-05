@@ -13,11 +13,16 @@ export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
     forceInitialDataInvalidation,
-  }: { forceInitialDataInvalidation?: boolean } = {},
+    dynamicRealtimeThrottleMs,
+  }: {
+    forceInitialDataInvalidation?: boolean;
+    dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  } = {},
 ) {
   const actionsHistory: Action[] = [];
   let numOfFetches = 0;
   let fetchIdCounter = 0;
+  let nextFetchError: string | null = null;
 
   const uiChanges: (number | undefined)[] = [];
   let lastTrackedValue: number | undefined;
@@ -45,6 +50,15 @@ export function createDocumentStoreTestEnv<D>(
     fetchFn: async () => {
       const fetchId = ++fetchIdCounter;
       addAction(`fetch-started #${fetchId}`);
+
+      if (nextFetchError) {
+        numOfFetches++;
+        const error = nextFetchError;
+        nextFetchError = null;
+        addAction(`fetch-error #${fetchId}`, 'error');
+        throw new Error(error);
+      }
+
       const value = await serverMock.fetch();
       numOfFetches++;
       addAction(`fetch-finished #${fetchId}`, value);
@@ -56,6 +70,7 @@ export function createDocumentStoreTestEnv<D>(
         () => ({ value: serverInitialData })
       : undefined,
     disableRefetchOnMount: !forceInitialDataInvalidation,
+    dynamicRealtimeThrottleMs,
   });
 
   serverMock.wsEvents.on('data_changed', () => {
@@ -94,6 +109,7 @@ export function createDocumentStoreTestEnv<D>(
         addAction('rt-fetch-scheduled');
       }
     },
+    /** default duration: 1200ms */
     performClientUpdateAction: (
       newValue: D,
       {
@@ -134,6 +150,21 @@ export function createDocumentStoreTestEnv<D>(
     },
     timeline(groupByTime = 10, startAt = 0): string {
       return getTimelineString(actionsHistory, groupByTime, startAt);
+    },
+    get serverHistory() {
+      return serverMock.history;
+    },
+    errorInNextFetch(error = 'Fetch error') {
+      nextFetchError = error;
+    },
+    emulateExternalRTU(value: D, fetchDuration?: number) {
+      serverMock.setData(value);
+
+      if (fetchDuration !== undefined) {
+        serverMock.setFetchDuration(fetchDuration);
+      }
+
+      serverMock.wsEvents.emit('data_changed', undefined);
     },
   };
 }
