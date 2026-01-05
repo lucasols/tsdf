@@ -1,5 +1,5 @@
 {
   "typescript.tsdk": "node_modules/typescript/lib",
   "git.branchProtection": ["main"],
-  "eslint.experimental.useFlatConfig": false
+  "typescript.preferences.includePackageJsonAutoImports": "on"
 }

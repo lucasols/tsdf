@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@ls-stack/utils':
+        specifier: ^3.65.0
+        version: 3.65.0
       evtmitter:
         specifier: ^1.0.2
         version: 1.0.2
@@ -17,6 +20,9 @@ importers:
       klona:
         specifier: ^2.0.6
         version: 2.0.6
+      t-result:
+        specifier: ^0.6.1
+        version: 0.6.1
       t-state:
         specifier: ^9.8.1
         version: 9.8.1(react@19.2.3)
@@ -401,6 +407,10 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@ls-stack/utils@3.65.0':
+    resolution: {integrity: sha512-dOMK9LNuPmLRkraaRORBQqTq/JWGXyKHOKva25NhzWJgjOSZwPm/r8Ty8zd/bLCjaIO6aBUNl7zqJ6JTM6YaCQ==}
+    engines: {node: '>=20.0.0'}
 
   '@lucasols/eslint-plugin-extended-lint@1.6.0':
     resolution: {integrity: sha512-B4hZJz81NNtOBGiglZASWg32Za3KLVz5KTLdsHWVO1moc/f30HK87jOYpTIkNLQ3TrwCN9lzcwx3twBAU19tLg==}
@@ -1544,6 +1554,10 @@ packages:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
 
+  t-result@0.6.1:
+    resolution: {integrity: sha512-a1aZsIAFYpjb0J51tZfrS93xxpTp4WY70EhZBCKcHylh/y/tF4uWXIyJUoDQKcg88lDdPlAcwuzE5JAC/4MVZg==}
+    engines: {node: '>=23.0.0'}
+
   t-state@9.8.1:
     resolution: {integrity: sha512-HiNxMHA/Gx3nZ/s+t44ChqqwxOVDYW+5gfE5DzZHFq8LiUjm940400+O8QJg1OVwMPba11eQxhQEn/zM55iYFA==}
     engines: {node: '>=16.0.0'}
@@ -2029,6 +2043,11 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@ls-stack/utils@3.65.0':
+    dependencies:
+      evtmitter: 1.0.2
+      t-result: 0.6.1
 
   '@lucasols/eslint-plugin-extended-lint@1.6.0(eslint@9.39.2)(typescript@5.9.3)':
     dependencies:
@@ -3099,6 +3118,8 @@ snapshots:
   supports-color@7.2.0:
     dependencies:
       has-flag: 4.0.0
+
+  t-result@0.6.1: {}
 
   t-state@9.8.1(react@19.2.3):
     dependencies:

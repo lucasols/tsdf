@@ -11,7 +11,7 @@ When fetches and mutations happen at same time, the scheduler may cancel or resc
 
 ## Prevent overfetching from low priority fetches or redundant fetches
 
-Low priority fetches are throttled to prevent overfetching. The same way redundant fetches are rescheduled or ignored.
+Low priority fetches are throttled to prevent overfetching. The same way redundant fetches are rescheduled or ignored. Two requests with the same payload never happen at same time.
 
 ## Request batching (new)
 
