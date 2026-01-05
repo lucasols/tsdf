@@ -21,6 +21,7 @@ export function createDocumentStoreTestEnv<D>(
 ) {
   const actionsHistory: Action[] = [];
   let numOfFetches = 0;
+  let numOfStartedFetches = 0;
   let fetchIdCounter = 0;
   let nextFetchError: string | null = null;
 
@@ -47,9 +48,11 @@ export function createDocumentStoreTestEnv<D>(
     errorNormalizer(exception) {
       return { error: exception.message };
     },
-    fetchFn: async () => {
+    fetchFn: async (signal) => {
       const fetchId = ++fetchIdCounter;
       addAction(`fetch-started #${fetchId}`);
+
+      numOfStartedFetches++;
 
       if (nextFetchError) {
         numOfFetches++;
@@ -60,6 +63,12 @@ export function createDocumentStoreTestEnv<D>(
       }
 
       const value = await serverMock.fetch();
+
+      if (signal.aborted) {
+        addAction(`fetch-aborted #${fetchId}`);
+        throw new Error('Aborted');
+      }
+
       numOfFetches++;
       addAction(`fetch-finished #${fetchId}`, value);
       return { value };
@@ -79,8 +88,11 @@ export function createDocumentStoreTestEnv<D>(
 
   return {
     useDocument: documentStore.useDocument,
-    get numOfFetches() {
+    get numOfFinishedFetches() {
       return numOfFetches;
+    },
+    get numOfStartedFetches() {
+      return numOfStartedFetches;
     },
     get uiChanges() {
       return uiChanges;

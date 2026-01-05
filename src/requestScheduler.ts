@@ -1,6 +1,7 @@
 export type FetchContext = {
   shouldAbort: () => boolean;
   getStartTime: () => number;
+  signal: AbortSignal;
 };
 
 export type FetchType = 'lowPriority' | 'highPriority' | 'realtimeUpdate';
@@ -71,6 +72,7 @@ export class RequestScheduler<T> {
   private onMutationEnd: (() => void) | null = null;
   private lastFetchWasAborted: boolean = false;
   private abortFetchesBeforeOrEqual: number = 0;
+  private currentAbortController: AbortController | null = null;
 
   constructor(options: RequestSchedulerOptions<T>) {
     this.fetchFn = options.fetchFn;
@@ -155,6 +157,11 @@ export class RequestScheduler<T> {
     this.abortFetchesBeforeOrEqual = this.lastFetchIdStarted;
     this.fetchState.inProgress = null;
 
+    if (this.currentAbortController) {
+      this.currentAbortController.abort();
+      this.currentAbortController = null;
+    }
+
     const id = getAutoIncrementId();
     this.lastMutationIdStarted = id;
 
@@ -172,6 +179,7 @@ export class RequestScheduler<T> {
     this.mutationInProgress = false;
     this.lastFetchWasAborted = false;
     this.abortFetchesBeforeOrEqual = 0;
+    this.currentAbortController = null;
   }
 
   private flushScheduledFetch(): void {
@@ -212,6 +220,9 @@ export class RequestScheduler<T> {
     const prevFetchStartTime = this.lastFetchStartTime;
     this.lastFetchStartTime = startTime;
 
+    const abortController = new AbortController();
+    this.currentAbortController = abortController;
+
     const shouldAbort = (): boolean => {
       const abort =
         id !== this.lastFetchIdStarted ||
@@ -219,6 +230,10 @@ export class RequestScheduler<T> {
         id <= this.abortFetchesBeforeOrEqual;
 
       this.lastFetchWasAborted = abort;
+
+      if (abort) {
+        abortController.abort();
+      }
 
       return abort;
     };
@@ -232,9 +247,12 @@ export class RequestScheduler<T> {
       {
         shouldAbort,
         getStartTime: () => startTime,
+        signal: abortController.signal,
       },
       params,
     );
+
+    this.currentAbortController = null;
 
     if (!this.fetchState.inProgress) {
       this.lastFetchStartTime = prevFetchStartTime;

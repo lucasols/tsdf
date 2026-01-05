@@ -123,7 +123,7 @@ test('prevent overfetch of low priority fetches', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFetches).toBe(1);
+  expect(env.numOfFinishedFetches).toBe(1);
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
@@ -180,86 +180,102 @@ test('multiple mutations with revalidation in sequence', async () => {
   `);
 });
 
-test.concurrent(
-  'multiple mutations with revalidation in sequence 2',
-  async () => {
-    const store = createTestStore(0);
+test('multiple mutations with revalidation in sequence 2', async () => {
+  // mutations should abort in progress fetches
+  const env = createDocumentStoreTestEnv(0);
 
-    const mutateValue = (value: number, revalidationDuration: number) =>
-      action(store, value, {
-        withOptimisticUpdate: true,
-        withRevalidation: true,
-        duration: 60,
-        revalidationDuration,
-      });
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
 
-    const promises = [
-      delayCall(0, () => store.fetch('lowPriority', 438)),
-      delayCall(7, () => mutateValue(1, 400)),
-      delayCall(283, () => mutateValue(2, 476)),
-      delayCall(536, () => mutateValue(3, 400)),
-      delayCall(781, () => mutateValue(4, 407)),
-      delayCall(1_030, () => mutateValue(4, 233)),
-    ];
+  await vi.runAllTimersAsync();
 
-    await Promise.all(promises);
+  // Initial low priority fetch
+  env.scheduleFetch('lowPriority');
 
-    await store.waitForNoPendingRequests();
+  // First mutation (start shortly after fetch begins)
+  await vi.advanceTimersByTimeAsync(100);
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-    await sleep(200);
+  // Wait for mutation to finish (1200ms) + small buffer, but not the full revalidation fetch
+  await vi.advanceTimersByTimeAsync(1300);
 
-    expect(store.ui.changesHistory).toEqual([0, 1, 2, 3, 4]);
-    expect(store.actions).toMatchTimeline(`
-      "
-      fetch-started : 1
+  // Second mutation (revalidation fetch from mutation 1 still in progress)
+  env.performClientUpdateAction(2, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-      1 - optimistic-ui-commit
-      1 - mutation-started
-      1 - mutation-finished
+  await vi.advanceTimersByTimeAsync(1300);
 
-        fetch-started : 2
+  // Third mutation
+  env.performClientUpdateAction(3, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-          2 - optimistic-ui-commit
-          2 - mutation-started
-          2 - mutation-finished
+  await vi.advanceTimersByTimeAsync(1300);
 
-            fetch-started : 3
-      fetch-aborted : 1
-        fetch-aborted : 2
+  // Fourth mutation
+  env.performClientUpdateAction(4, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-            3 - optimistic-ui-commit
-            3 - mutation-started
-            3 - mutation-finished
+  await vi.advanceTimersByTimeAsync(1300);
 
-              fetch-started : 4
+  // Fifth mutation with same value
+  env.performClientUpdateAction(4, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-                4 - optimistic-ui-commit
-                4 - mutation-started
-                ---
-                fetch-aborted : 3
-                4 - mutation-finished
-                OR
-                4 - mutation-finished
-                fetch-aborted : 3
-                ---
+  await vi.runAllTimersAsync();
 
-                fetch-started : 5
-              fetch-aborted : 4
+  expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    0 - ui-initialized
+    fetch-started #1
+    1 - optimistic-ui-commit
+    1 - mutation-started
+    1 - ui-changed
+    1 - mutation-finished
+    fetch-aborted #1
+    fetch-started #2
+      2 - optimistic-ui-commit
+      2 - mutation-started
+      2 - ui-changed
+      2 - mutation-finished
+      fetch-aborted #2
+      fetch-started #3
+        3 - optimistic-ui-commit
+        3 - mutation-started
+        3 - ui-changed
+        3 - mutation-finished
+        fetch-aborted #3
+        fetch-started #4
+          4 - optimistic-ui-commit
+          4 - mutation-started
+          4 - ui-changed
+          4 - mutation-finished
+          fetch-aborted #4
+          fetch-started #5
+          4 - optimistic-ui-commit
+          4 - mutation-started
+          4 - mutation-finished
+          fetch-aborted #5
+          fetch-started #6
+          4 - fetch-finished #6
+    "
+  `);
 
-              4 - optimistic-ui-commit
-              4 - mutation-started
-              4 - mutation-finished
-
-                  fetch-started : 6
-                fetch-aborted : 5
-                  4 - fetch-finished : 6
-                  4 - fetch-ui-commit
-      "
-    `);
-
-    expect(store.numOfFetchs).toBe(6);
-  },
-);
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.numOfStartedFetches).toBe(6);
+});
 
 // test.concurrent(
 //   'multiple mutations with revalidation in sequence 3',

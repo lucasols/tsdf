@@ -45,7 +45,7 @@ export type DocumentStoreOptions<
   NError extends ResultValidErrors,
 > = {
   debugName?: string;
-  fetchFn: () => Promise<State>;
+  fetchFn: (signal: AbortSignal) => Promise<State>;
   getInitialData?: () => State | undefined;
   disableInitialDataInvalidation?: boolean;
   disableRefetchOnMount?: boolean;
@@ -119,9 +119,11 @@ export function createDocumentStore<
     );
 
     try {
-      const data = await fetchFn();
+      const data = await fetchFn(fetchCtx.signal);
 
-      if (fetchCtx.shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) {
+        return false;
+      }
 
       store.setPartialState(
         {
@@ -136,7 +138,9 @@ export function createDocumentStore<
 
       return true;
     } catch (exception) {
-      if (fetchCtx.shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) {
+        return false;
+      }
 
       store.setPartialState(
         {
