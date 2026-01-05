@@ -1,29 +1,29 @@
 import { renderHook } from '@testing-library/react';
-import { afterEach, expect, test, vi } from 'vitest';
-import { createTestStore } from '../test-old/mocks/fetchOrquestratorEnv';
+import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from './mocks/documentStoreTestEnv';
 import { trackChangedValues } from './utils/trackChangedValues';
 
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
   vi.runOnlyPendingTimers();
-  vi.useRealTimers();
 });
 
 test('simple mutation with revalidation and optimistic update', async () => {
-  vi.useFakeTimers();
-
-  const store = createDocumentStoreTestEnv(0);
+  const env = createDocumentStoreTestEnv(0);
 
   const uiChanges = trackChangedValues();
 
   renderHook(() => {
-    uiChanges.track(store.useDocument().data?.value);
+    uiChanges.track(env.useDocument().data?.value);
   });
 
   // Wait for initial fetch
   await vi.runAllTimersAsync();
 
-  store.performClientUpdateAction(1, {
+  env.performClientUpdateAction(1, {
     withRevalidation: true,
     withOptimisticUpdate: true,
   });
@@ -32,7 +32,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   expect(uiChanges.changes).toEqual([0, 1]);
 
-  expect(store.actionsString).toMatchInlineSnapshot(`
+  expect(env.actionsString).toMatchInlineSnapshot(`
     "
     1 - optimistic-ui-commit
     1 - mutation-started
@@ -46,20 +46,18 @@ test('simple mutation with revalidation and optimistic update', async () => {
 // tests to migrate are below
 
 test('simple mutation with optimistic update', async () => {
-  vi.useFakeTimers();
-
-  const store = createDocumentStoreTestEnv(0);
+  const env = createDocumentStoreTestEnv(0);
 
   const uiChanges = trackChangedValues();
 
   renderHook(() => {
-    uiChanges.track(store.useDocument().data?.value);
+    uiChanges.track(env.useDocument().data?.value);
   });
 
   // Wait for initial fetch
   await vi.runAllTimersAsync();
 
-  store.performClientUpdateAction(1, {
+  env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
   });
 
@@ -67,7 +65,7 @@ test('simple mutation with optimistic update', async () => {
 
   expect(uiChanges.changes).toEqual([0, 1]);
 
-  expect(store.actionsString).toMatchInlineSnapshot(`
+  expect(env.actionsString).toMatchInlineSnapshot(`
     "
     1 - optimistic-ui-commit
     1 - mutation-started
@@ -76,54 +74,74 @@ test('simple mutation with optimistic update', async () => {
   `);
 });
 
-// test.concurrent('simple mutation without optimistic update', async () => {
-//   const store = createTestStore(0);
+test('simple mutation without optimistic update', async () => {
+  const env = createDocumentStoreTestEnv(0);
 
-//   await action(store, 1, {
-//     withRevalidation: true,
-//   });
+  const uiChanges = trackChangedValues();
 
-//   await store.waitForNoPendingRequests();
+  renderHook(() => {
+    uiChanges.track(env.useDocument().data?.value);
+  });
 
-//   expect(store.ui.history).toEqual([0, 1]);
+  // Wait for initial fetch
+  await vi.runAllTimersAsync();
 
-//   expect(store.actions).toMatchTimeline(`
-//     "
-//     1 - mutation-started
-//     1 - mutation-finished
-//     fetch-started : 1
-//     1 - fetch-finished : 1
-//     1 - fetch-ui-commit
-//     "
-//   `);
-// });
+  env.performClientUpdateAction(1, {
+    withRevalidation: true,
+  });
 
-// test.concurrent('prevent overfetch of low priority fetchs', async () => {
-//   const store = createTestStore(0);
+  await vi.runAllTimersAsync();
 
-//   const promises = [
-//     delayCall(0, () => store.fetch('lowPriority')),
-//     delayCall(10, () => store.fetch('lowPriority')),
-//     delayCall(20, () => store.fetch('lowPriority')),
-//     delayCall(30, () => store.fetch('lowPriority')),
-//   ];
+  expect(uiChanges.changes).toEqual([0, 1]);
 
-//   await Promise.all(promises);
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    1 - mutation-started
+    1 - mutation-finished
+    fetch-started #1
+    1 - fetch-finished #1
+    "
+  `);
+});
 
-//   await store.waitForNoPendingRequests();
+test('prevent overfetch of low priority fetches', async () => {
+  vi.useFakeTimers();
 
-//   expect(store.numOfFetchs).toBe(1);
-//   expect(store.actions).toMatchTimeline(`
-//     "
-//     fetch-started : 1
-//     fetch-skipped
-//     fetch-skipped
-//     fetch-skipped
-//     fetch-finished : 1
-//     fetch-ui-commit
-//     "
-//   `);
-// });
+  const env = createDocumentStoreTestEnv(0);
+
+  const uiChanges = trackChangedValues();
+
+  renderHook(() => {
+    uiChanges.track(env.useDocument().data?.value);
+  });
+
+  // Initial data is already loaded, no fetch needed
+
+  env.scheduleFetch('lowPriority');
+  await vi.advanceTimersByTimeAsync(10);
+
+  env.scheduleFetch('lowPriority');
+  await vi.advanceTimersByTimeAsync(10);
+
+  env.scheduleFetch('lowPriority');
+  await vi.advanceTimersByTimeAsync(10);
+
+  env.scheduleFetch('lowPriority');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.numOfFetches).toBe(1);
+
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    fetch-started #1
+    fetch-skipped
+    fetch-skipped
+    fetch-skipped
+    fetch-finished #1
+    "
+  `);
+});
 
 // test.concurrent(
 //   'multiple mutations with revalidation in sequence',

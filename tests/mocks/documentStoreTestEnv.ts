@@ -1,4 +1,5 @@
 import { createDocumentStore } from '../../src/documentStore';
+import type { FetchType } from '../../src/requestScheduler';
 import { arrayWithPrev } from '../../test-old/utils/arrayUtils';
 import { createServerMock } from './serverMock';
 
@@ -65,6 +66,17 @@ export function createDocumentStoreTestEnv(
     useDocument: documentStore.useDocument,
     get numOfFetches() {
       return numOfFetches;
+    },
+    scheduleFetch: (fetchType: FetchType) => {
+      const result = documentStore.scheduleFetch(fetchType);
+
+      if (result === 'skipped') {
+        addAction('fetch-skipped');
+      }
+
+      if (result === 'rt-scheduled') {
+        addAction('rt-fetch-scheduled');
+      }
     },
     performClientUpdateAction: (
       newValue: number,
