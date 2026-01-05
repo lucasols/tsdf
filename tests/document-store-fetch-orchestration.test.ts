@@ -65,11 +65,10 @@ test('simple mutation with optimistic update', async () => {
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - optimistic-ui-commit
-    1 - mutation-started
-    1 - ui-changed
-    1 - mutation-finished
+    0 | ui-initialized
+    1 | optimistic-ui-commit
+    1 | mutation-started
+    1 | mutation-finished
     "
   `);
 });
