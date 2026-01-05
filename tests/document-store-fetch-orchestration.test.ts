@@ -129,12 +129,12 @@ test('prevent overfetch of low priority fetches', async () => {
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    fetch-started #1
+    0 | ui-initialized
+    #1 fetch-started
     fetch-skipped
     fetch-skipped
     fetch-skipped
-    0 - fetch-finished #1
+    #1 fetch-finished -> 0
     "
   `);
 });
