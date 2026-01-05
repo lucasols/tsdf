@@ -180,8 +180,55 @@ test('multiple mutations with revalidation in sequence', async () => {
   `);
 });
 
-test('multiple mutations with revalidation in sequence 2', async () => {
+test('multiple mutations with revalidation in sequence, causing concurrent updates', async () => {
   // mutations should abort in progress fetches
+  const env = createDocumentStoreTestEnv(0);
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // First mutation
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
+
+  // Wait for mutation to finish but not the revalidation fetch
+  await vi.advanceTimersByTimeAsync(1250);
+
+  // Second mutation starts during revalidation
+  env.performClientUpdateAction(2, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
+
+  await vi.runAllTimersAsync();
+
+  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    0 - ui-initialized
+    1 - optimistic-ui-commit
+    1 - mutation-started
+    1 - ui-changed
+    1 - mutation-finished
+    fetch-started #1
+      2 - optimistic-ui-commit
+      2 - mutation-started
+      2 - ui-changed
+      2 - mutation-finished
+      fetch-aborted #1
+      fetch-started #2
+      2 - fetch-finished #2
+    "
+  `);
+});
+
+test('multiple mutations with revalidation in sequence 2', async () => {
+  // mutations should abort in progress fetches, stress test
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
@@ -278,52 +325,10 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 });
 
 // test.concurrent(
-//   'multiple mutations with revalidation in sequence, causing concurrent updates',
-//   async () => {
-//     const store = createTestStore(0);
-
-//     const promises = [
-//       delayCall(0, () =>
-//         action(store, 1, {
-//           withOptimisticUpdate: true,
-//           withRevalidation: true,
-//         }),
-//       ),
-//       delayCall(70, () =>
-//         action(store, 2, {
-//           withOptimisticUpdate: true,
-//           withRevalidation: true,
-//         }),
-//       ),
-//     ];
-
-//     await Promise.all(promises);
-
-//     await store.waitForNoPendingRequests();
-
-//     expect(store.ui.changesHistory).toEqual([0, 1, 2]);
-//     expect(store.actions).toMatchTimeline(`
-//     "
-//     1 - optimistic-ui-commit
-//     1 - mutation-started
-//     1 - mutation-finished
-//     fetch-started : 1
-//       2 - optimistic-ui-commit
-//       2 - mutation-started
-//     fetch-aborted : 1
-//       2 - mutation-finished
-//       fetch-started : 2
-//       2 - fetch-finished : 2
-//       2 - fetch-ui-commit
-//     "
-//   `);
-//   },
-//   { retry: 3 },
-// );
-
-// test.concurrent(
 //   'multiple concurrent mutations with revalidation ',
 //   async () => {
+//     // Expected: overlapping mutations schedule a single revalidation fetch that
+//     // skips redundant requests and commits only once with the latest data.
 //     const store = createTestStore(0);
 
 //     const promises = [
@@ -368,6 +373,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 // );
 
 // test.concurrent('multiple high priority fetchs', async () => {
+//   // Expected: high priority requests coalesce into a running fetch plus one scheduled fetch.
 //   const store = createTestStore(0);
 
 //   const promises = [
@@ -400,6 +406,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 // });
 
 // test.concurrent('throttle low priority updates', async () => {
+//   // Expected: low priority requests are throttled so only the first and last execute.
 //   const store = createTestStore(0);
 
 //   const promises = [
@@ -434,6 +441,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 // test.concurrent(
 //   'multiple mutations with low priority fetch between',
 //   async () => {
+//     // Expected: low priority fetch is scheduled but coalesced with mutation revalidation,
+//     // resulting in a single fetch commit.
 //     const store = createTestStore(0);
 
 //     const promises = [
@@ -482,6 +491,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 // test.concurrent(
 //   'very slow mutation with revalidation then mutation',
 //   async () => {
+//     // Expected: long revalidation fetch overlaps a second mutation, causing the
+//     // first fetch to be aborted and a fresh fetch to commit the latest value.
 //     const store = createTestStore(0);
 
 //     await waitTimeline([
@@ -530,6 +541,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 // );
 
 // test.concurrent('fetch error', async () => {
+//   // Expected: first fetch succeeds, second fetch errors and commits error state.
 //   const store = createTestStore(0);
 
 //   await waitTimeline(
@@ -567,6 +579,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   test.concurrent(
 //     'dynamically throttle realtime updates',
 //     async () => {
+//       // Expected: slow RTU fetch increases throttle window, causing coalescing of RTUs
+//       // and eventual commits for the latest updates.
 //       const store = createTestStore(0);
 
 //       const slowDuration = 300;
@@ -638,6 +652,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   test.concurrent(
 //     'dynamically throttle multiple realtime updates at same time with delay inferior to debounce 2',
 //     async () => {
+//       // Expected: dynamic throttle shortens for recent fetches, allowing two RTU fetches
+//       // while coalescing multiple RTU signals into the last update.
 //       const store = createTestStore(0, {
 //         dynamicRealtimeThrottleMs(lastFetch) {
 //           return lastFetch < 100 ? 10 : 200;
@@ -693,6 +709,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   );
 
 //   test.concurrent('simple mutation that triggers a RTU', async () => {
+//     // Expected: mutation triggers RTU fetch after optimistic commit, committing the server state.
 //     const store = createTestStore(0);
 
 //     await waitTimeline(
@@ -734,6 +751,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   test.concurrent(
 //     'slow mutation then external RTU while mutation RTU is running',
 //     async () => {
+//       // Expected: external RTU schedules another fetch while mutation RTU is in flight,
+//       // both fetches eventually commit in order.
 //       const store = createTestStore(0);
 
 //       await waitTimeline(
@@ -780,6 +799,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   test.concurrent(
 //     'slow mutation then new mutation while prev mutation RTU is running',
 //     async () => {
+//       // Expected: new mutation aborts in-flight RTU fetch, then schedules a new RTU fetch
+//       // that commits the latest mutation result.
 //       const store = createTestStore(0);
 
 //       await waitTimeline(
@@ -826,6 +847,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   test.concurrent(
 //     'slow mutation then new mutation while prev mutation is running',
 //     async () => {
+//       // Expected: overlapping mutations each trigger RTU scheduling, but only one RTU fetch runs,
+//       // committing the latest data.
 //       const store = createTestStore(0);
 
 //       await waitTimeline(
@@ -863,6 +886,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   );
 
 //   test.concurrent('rtu mutations without optimistic updates', async () => {
+//     // Expected: no optimistic UI commits, RTU fetches drive UI updates after server change.
 //     const store = createTestStore(0);
 
 //     const rtuWithoutOptimisticUpdate = {
@@ -910,6 +934,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   test.concurrent(
 //     'schedule rtu updates then schedulle a fetch right before the rtu starts',
 //     async () => {
+//       // Expected: low priority fetch starts before RTU fetch, so RTU is skipped and
+//       // the low priority fetch commits the server state.
 //       const store = createTestStore(0, {
 //         dynamicRealtimeThrottleMs() {
 //           return 300;
@@ -946,6 +972,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 //   );
 
 //   test.concurrent('mutation that triggers multiple rtu updates', async () => {
+//     // Expected: burst of RTU fetch requests is coalesced into a single scheduled RTU fetch.
 //     const store = createTestStore(0, {
 //       dynamicRealtimeThrottleMs() {
 //         return 300;
