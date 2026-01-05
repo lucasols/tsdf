@@ -1,6 +1,10 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from './mocks/documentStoreTestEnv';
+import {
+  DEFAULT_FETCH_DURATION_MS,
+  DEFAULT_MUTATION_DURATION_MS,
+} from './mocks/serverMock';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -31,13 +35,12 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - optimistic-ui-commit
-    1 - mutation-started
-    1 - ui-changed
-    1 - mutation-finished
-    fetch-started #1
-    1 - fetch-finished #1
+    0 | ui-initialized
+    1 | optimistic-ui-commit
+    1 | mutation-started
+    1 | mutation-finished
+    #1 fetch-started
+    #1 fetch-finished -> 1
     "
   `);
 });
