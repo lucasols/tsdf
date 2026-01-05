@@ -10,7 +10,7 @@ export function createServerMock<Data>(
 ) {
   const serverDataHistory: Data[] = [initialData];
   const wsEvents = evtmitter<{ data_changed: undefined }>();
-  let customFetchDuration: number | null = null;
+  const customFetchDurations: number[] = [];
 
   /** default duration: 1200ms */
   async function mutateData(
@@ -60,13 +60,12 @@ export function createServerMock<Data>(
     },
     history: serverDataHistory,
     fetch: async (duration = 1200) => {
-      const actualDuration = customFetchDuration ?? duration;
-      customFetchDuration = null;
+      const actualDuration = customFetchDurations.shift() ?? duration;
       await sleep(actualDuration);
       return serverDataHistory.at(-1)!;
     },
-    setFetchDuration(duration: number) {
-      customFetchDuration = duration;
+    setFetchDurations(...durations: number[]) {
+      customFetchDurations.push(...durations);
     },
   };
 }

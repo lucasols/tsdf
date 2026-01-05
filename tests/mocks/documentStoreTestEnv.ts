@@ -124,6 +124,8 @@ export function createDocumentStoreTestEnv<D>(
       if (result === 'rt-scheduled') {
         addAction('rt-fetch-scheduled');
       }
+
+      return result;
     },
     /** default duration: 1200ms */
     performClientUpdateAction: (
@@ -173,11 +175,14 @@ export function createDocumentStoreTestEnv<D>(
     errorInNextFetch(error = 'Fetch error') {
       nextFetchError = error;
     },
+    setNextFetchDurations(...durations: number[]) {
+      serverMock.setFetchDurations(...durations);
+    },
     emulateExternalRTU(value: D, fetchDuration?: number) {
       serverMock.setData(value);
 
       if (fetchDuration !== undefined) {
-        serverMock.setFetchDuration(fetchDuration);
+        serverMock.setFetchDurations(fetchDuration);
       }
 
       serverMock.wsEvents.emit('data_changed', undefined);

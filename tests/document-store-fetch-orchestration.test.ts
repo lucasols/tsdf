@@ -417,140 +417,161 @@ test('multiple high priority fetches', async () => {
   `);
 });
 
-// test.concurrent('throttle low priority updates', async () => {
-//   // Expected: low priority requests are throttled so only the first and last execute.
-//   const store = createTestStore(0);
+test('throttle low priority updates', async () => {
+  // Expected: low priority requests are throttled so only the first and last execute.
+  const env = createDocumentStoreTestEnv(0);
 
-//   const promises = [
-//     delayCall(0, () => store.fetch('lowPriority')),
-//     delayCall(100, () => store.fetch('lowPriority')),
-//     delayCall(110, () => store.fetch('lowPriority')),
-//     delayCall(120, () => store.fetch('lowPriority')),
-//     delayCall(210, () => store.fetch('lowPriority')),
-//   ];
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
 
-//   await Promise.all(promises);
+  await vi.runAllTimersAsync();
 
-//   await store.waitForNoPendingRequests();
+  // t=0: first low priority fetch starts (1200ms duration)
+  env.scheduleFetch('lowPriority');
 
-//   expect(store.numOfFetchs).toBe(2);
+  // t=100: skipped - first fetch in progress
+  await vi.advanceTimersByTimeAsync(100);
+  env.scheduleFetch('lowPriority');
 
-//   expect(store.actions).toMatchTimeline(`
-//     "
-//     fetch-started : 1
-//     fetch-finished : 1
-//     fetch-ui-commit
-//     fetch-skipped
-//     fetch-skipped
-//     fetch-skipped
-//     fetch-started : 2
-//     fetch-finished : 2
-//     fetch-ui-commit
-//     "
-//   `);
-// });
+  // t=110: skipped - first fetch in progress
+  await vi.advanceTimersByTimeAsync(10);
+  env.scheduleFetch('lowPriority');
 
-// test.concurrent(
-//   'multiple mutations with low priority fetch between',
-//   async () => {
-//     // Expected: low priority fetch is scheduled but coalesced with mutation revalidation,
-//     // resulting in a single fetch commit.
-//     const store = createTestStore(0);
+  // t=120: skipped - first fetch in progress
+  await vi.advanceTimersByTimeAsync(10);
+  env.scheduleFetch('lowPriority');
 
-//     const promises = [
-//       delayCall(0, () =>
-//         action(store, 1, {
-//           withOptimisticUpdate: true,
-//           withRevalidation: true,
-//         }),
-//       ),
-//       delayCall(50, () =>
-//         action(store, 2, {
-//           withOptimisticUpdate: true,
-//           withRevalidation: true,
-//         }),
-//       ),
-//       delayCall(70, () => store.fetch('lowPriority')),
-//     ];
+  // Wait for first fetch to complete (1200ms from start)
+  await vi.advanceTimersByTimeAsync(1200);
 
-//     await Promise.all(promises);
+  // t=1320: second fetch starts (outside 200ms throttle window from t=0)
+  env.scheduleFetch('lowPriority');
 
-//     await store.waitForNoPendingRequests();
+  await vi.runAllTimersAsync();
 
-//     expect(store.ui.changesHistory).toEqual([0, 1, 2]);
-//     expect(store.numOfFetchs).toBe(1);
-//     expect(store.actions).toMatchTimeline(`
-//     "
-//     1 - optimistic-ui-commit
-//     1 - mutation-started
-//     1 - mutation-finished
-//       2 - optimistic-ui-commit
-//       2 - mutation-started
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    0 - ui-initialized
+    fetch-started #1
+    fetch-skipped
+    fetch-skipped
+    fetch-skipped
+    0 - fetch-finished #1
+    fetch-started #2
+    0 - fetch-finished #2
+    "
+  `);
+  expect(env.numOfFinishedFetches).toBe(2);
+});
 
-//     fetch-scheduled
-//     fetch-scheduled
+test('multiple mutations with low priority fetch between', async () => {
+  // Expected: low priority fetch is scheduled but coalesced with mutation revalidation,
+  // resulting in a single fetch commit.
+  const env = createDocumentStoreTestEnv(0);
 
-//       2 - mutation-finished
-//       scheduled-fetch-started : 1
-//       fetch-skipped
-//       2 - fetch-finished : 1
-//       2 - fetch-ui-commit
-//     "
-//   `);
-//   },
-// );
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
 
-// test.concurrent(
-//   'very slow mutation with revalidation then mutation',
-//   async () => {
-//     // Expected: long revalidation fetch overlaps a second mutation, causing the
-//     // first fetch to be aborted and a fresh fetch to commit the latest value.
-//     const store = createTestStore(0);
+  await vi.runAllTimersAsync();
 
-//     await waitTimeline([
-//       [
-//         0,
-//         () =>
-//           action(store, 1, {
-//             withOptimisticUpdate: true,
-//             withRevalidation: true,
-//             revalidationDuration: 400,
-//           }),
-//       ],
-//       [
-//         100,
-//         () =>
-//           action(store, 2, {
-//             withOptimisticUpdate: true,
-//             withRevalidation: true,
-//           }),
-//       ],
-//     ]);
+  // t=0: first mutation with revalidation
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-//     await store.waitForNoPendingRequests();
+  // t=50: second mutation with revalidation
+  await vi.advanceTimersByTimeAsync(50);
+  env.performClientUpdateAction(2, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
 
-//     await sleep(400);
+  // t=70: low priority fetch (should be coalesced with revalidation)
+  await vi.advanceTimersByTimeAsync(20);
+  const result = env.scheduleFetch('lowPriority');
+  expect(result).toBe('scheduled');
 
-//     expect(store.ui.changesHistory).toEqual([0, 1, 2]);
-//     expect(store.numOfFetchs).toBe(2);
-//     expect(store.actions).toMatchTimeline(`
-//     "
-//     1 - optimistic-ui-commit
-//     1 - mutation-started
-//     1 - mutation-finished
+  await vi.runAllTimersAsync();
 
-//     fetch-started : 1
-//       2 - optimistic-ui-commit
-//       2 - mutation-started
-//       2 - mutation-finished
-//       fetch-started : 2
-//       2 - fetch-finished : 2
-//       2 - fetch-ui-commit
-//     fetch-aborted : 1
-//     "
-//   `);
-//   },
-// );
+  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    0 - ui-initialized
+    1 - optimistic-ui-commit
+    1 - mutation-started
+    1 - ui-changed
+      2 - optimistic-ui-commit
+      2 - mutation-started
+      2 - ui-changed
+      fetch-scheduled
+    1 - mutation-finished
+      2 - mutation-finished
+      fetch-started #1
+      2 - fetch-finished #1
+    "
+  `);
+});
+
+test('very slow mutation with revalidation then mutation', async () => {
+  // Expected: long revalidation fetch overlaps a second mutation, causing the
+  // first fetch to be aborted and a fresh fetch to commit the latest value.
+  // First revalidation (2000ms) > second mutation (200ms) + second revalidation (200ms)
+  const env = createDocumentStoreTestEnv(0);
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // Set fetch durations: first revalidation slow (2000ms), second revalidation fast (200ms)
+  env.setNextFetchDurations(2000, 200);
+
+  // t=0: first mutation with revalidation (short 200ms mutation)
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+    duration: 200,
+  });
+
+  // Wait for mutation (200ms) to finish, revalidation starts (2000ms)
+  // Start second mutation while first revalidation is still in progress
+  await vi.advanceTimersByTimeAsync(300);
+
+  // t=300: second mutation starts during first revalidation (which started at t=200)
+  // First revalidation would finish at t=2200, but gets aborted
+  env.performClientUpdateAction(2, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+    duration: 200, // Second mutation + revalidation = 200 + 200 = 400ms < 2000ms first revalidation
+  });
+
+  await vi.runAllTimersAsync();
+
+  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    0 - ui-initialized
+    1 - optimistic-ui-commit
+    1 - mutation-started
+    1 - ui-changed
+    1 - mutation-finished
+    fetch-started #1
+      2 - optimistic-ui-commit
+      2 - mutation-started
+      2 - ui-changed
+      2 - mutation-finished
+      fetch-started #2
+      2 - fetch-finished #2
+      fetch-aborted #1
+    "
+  `);
+});
 
 // test.concurrent('fetch error', async () => {
 //   // Expected: first fetch succeeds, second fetch errors and commits error state.
