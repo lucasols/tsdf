@@ -372,38 +372,50 @@ test('multiple concurrent mutations with revalidation', async () => {
   expect(env.numOfStartedFetches).toBe(1);
 });
 
-// test.concurrent('multiple high priority fetchs', async () => {
-//   // Expected: high priority requests coalesce into a running fetch plus one scheduled fetch.
-//   const store = createTestStore(0);
+test('multiple high priority fetches', async () => {
+  // Expected: high priority requests coalesce into a running fetch plus one scheduled fetch.
+  const env = createDocumentStoreTestEnv(0);
 
-//   const promises = [
-//     delayCall(0, () => store.fetch('highPriority')),
-//     delayCall(5, () => store.fetch('highPriority')),
-//     delayCall(8, () => store.fetch('highPriority')),
-//     delayCall(15, () => store.fetch('highPriority')),
-//     delayCall(20, () => store.fetch('highPriority')),
-//   ];
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
 
-//   await Promise.all(promises);
+  await vi.runAllTimersAsync();
 
-//   await store.waitForNoPendingRequests();
+  // First high priority fetch starts immediately
+  env.scheduleFetch('highPriority');
 
-//   expect(store.numOfFetchs).toBe(2);
-//   expect(store.actions).toMatchTimeline(`
-//     "
-//     fetch-started : 1
-//     fetch-skipped
-//     fetch-skipped
-//     fetch-scheduled
-//     fetch-scheduled
-//     fetch-finished : 1
-//     fetch-ui-commit
-//     scheduled-fetch-started : 2
-//     fetch-finished : 2
-//     fetch-ui-commit
-//     "
-//   `);
-// });
+  // These are skipped (fetch already in progress, within throttle window)
+  await vi.advanceTimersByTimeAsync(5);
+  env.scheduleFetch('highPriority');
+
+  await vi.advanceTimersByTimeAsync(3);
+  env.scheduleFetch('highPriority');
+
+  // These get scheduled (outside throttle window but fetch still in progress)
+  await vi.advanceTimersByTimeAsync(7);
+  env.scheduleFetch('highPriority');
+
+  await vi.advanceTimersByTimeAsync(5);
+  env.scheduleFetch('highPriority');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.actionsString).toMatchInlineSnapshot(`
+    "
+    0 - ui-initialized
+    fetch-started #1
+    fetch-skipped
+    fetch-skipped
+    fetch-scheduled
+    fetch-scheduled
+    0 - fetch-finished #1
+    fetch-started #2
+    0 - fetch-finished #2
+    "
+  `);
+});
 
 // test.concurrent('throttle low priority updates', async () => {
 //   // Expected: low priority requests are throttled so only the first and last execute.

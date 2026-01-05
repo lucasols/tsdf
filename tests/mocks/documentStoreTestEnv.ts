@@ -117,6 +117,10 @@ export function createDocumentStoreTestEnv<D>(
         addAction('fetch-skipped');
       }
 
+      if (result === 'scheduled') {
+        addAction('fetch-scheduled');
+      }
+
       if (result === 'rt-scheduled') {
         addAction('rt-fetch-scheduled');
       }
