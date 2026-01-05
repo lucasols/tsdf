@@ -575,7 +575,9 @@ test('very slow mutation with revalidation then mutation', async () => {
 
 test('fetch error', async () => {
   // Expected: first fetch succeeds, second fetch errors and commits error state.
-  const env = createDocumentStoreTestEnv(0, { forceInitialDataInvalidation: true });
+  const env = createDocumentStoreTestEnv(0, {
+    forceInitialDataInvalidation: true,
+  });
 
   renderHook(() => {
     const { data, error } = env.useDocument();
@@ -714,7 +716,6 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
         3 - fetch-finished #2
     "
   `);
-});
 
   test.concurrent('simple mutation that triggers a RTU', async () => {
     // Expected: mutation triggers RTU fetch after optimistic commit, committing the server state.
