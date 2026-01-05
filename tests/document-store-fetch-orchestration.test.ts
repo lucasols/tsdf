@@ -93,12 +93,12 @@ test('simple mutation without optimistic update', async () => {
 
   expect(env.actionsString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - mutation-started
-    1 - mutation-finished
-    fetch-started #1
-    1 - fetch-finished #1
-    1 - ui-changed
+    0 | ui-initialized
+    1 | mutation-started
+    1 | mutation-finished
+    #1 fetch-started
+    #1 fetch-finished -> 1
+    1 | ui-changed
     "
   `);
 });
