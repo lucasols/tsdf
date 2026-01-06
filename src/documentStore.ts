@@ -1,5 +1,8 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
-import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import {
+  __LEGIT_CAST__,
+  type __LEGIT_ANY__,
+} from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -101,10 +104,7 @@ export function createDocumentStore<
 
   const events = evtmitter<DocumentStoreEvents>();
 
-  async function executeFetch(
-    fetchCtx: FetchContext,
-    _params: null,
-  ): Promise<boolean> {
+  async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
 
     store.setPartialState(
@@ -124,9 +124,7 @@ export function createDocumentStore<
     try {
       const data = await fetchFn(fetchCtx.signal);
 
-      if (fetchCtx.shouldAbort()) {
-        return false;
-      }
+      if (fetchCtx.shouldAbort()) return false;
 
       store.setPartialState(
         {
@@ -141,9 +139,7 @@ export function createDocumentStore<
 
       return true;
     } catch (exception) {
-      if (fetchCtx.shouldAbort()) {
-        return false;
-      }
+      if (fetchCtx.shouldAbort()) return false;
 
       store.setPartialState(
         {
@@ -336,7 +332,7 @@ export function createDocumentStore<
   } = {}) {
     const memoizedSelector = useMemo(
       () => selector,
-      // eslint-disable-next-line @lucasols/extended-lint/exhaustive-deps
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- this is special case
       [selectorUsesExternalDeps ? selector : 0],
     );
 
@@ -349,7 +345,7 @@ export function createDocumentStore<
         const data =
           memoizedSelector ?
             memoizedSelector(state.data)
-          : (state.data as Selected);
+          : __LEGIT_CAST__<Selected>(state.data);
 
         let status = state.status;
 
