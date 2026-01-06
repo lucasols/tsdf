@@ -24,7 +24,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
   // Wait for initial fetch
   await vi.runAllTimersAsync();
 
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withRevalidation: true,
     withOptimisticUpdate: true,
   });
@@ -56,7 +56,7 @@ test('simple mutation with optimistic update', async () => {
   // Wait for initial fetch
   await vi.runAllTimersAsync();
 
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
   });
 
@@ -85,7 +85,7 @@ test('simple mutation without optimistic update', async () => {
   // Wait for initial fetch
   await vi.runAllTimersAsync();
 
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withRevalidation: true,
   });
 
@@ -160,14 +160,14 @@ test('multiple mutations with revalidation in sequence', async () => {
   const sequentialGapMs =
     DEFAULT_MUTATION_DURATION_MS + DEFAULT_FETCH_DURATION_MS + 50;
 
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
   await vi.advanceTimersByTimeAsync(sequentialGapMs);
 
-  env.performClientUpdateAction(2, {
+  void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -204,7 +204,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   await vi.runAllTimersAsync();
 
   // First mutation
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -219,7 +219,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   );
 
   // Second mutation starts during revalidation
-  env.performClientUpdateAction(2, {
+  void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -265,7 +265,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 
   // First mutation (start shortly after fetch begins)
   await vi.advanceTimersByTimeAsync(100);
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -278,7 +278,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   );
 
   // Second mutation (revalidation fetch from mutation 1 still in progress)
-  env.performClientUpdateAction(2, {
+  void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -286,7 +286,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
 
   // Third mutation
-  env.performClientUpdateAction(3, {
+  void env.performClientUpdateAction(3, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -294,7 +294,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
 
   // Fourth mutation
-  env.performClientUpdateAction(4, {
+  void env.performClientUpdateAction(4, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -302,7 +302,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
 
   // Fifth mutation with same value
-  env.performClientUpdateAction(4, {
+  void env.performClientUpdateAction(4, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -361,7 +361,7 @@ test('multiple mutations with revalidation in sequence 3', async () => {
 
   const duringRevalidationMs = DEFAULT_MUTATION_DURATION_MS + 50;
 
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -370,25 +370,25 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   env.addTimelineComment(
     'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
   );
-  env.performClientUpdateAction(2, {
+  void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
-  env.performClientUpdateAction(3, {
+  void env.performClientUpdateAction(3, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
-  env.performClientUpdateAction(4, {
+  void env.performClientUpdateAction(4, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
-  env.performClientUpdateAction(4, {
+  void env.performClientUpdateAction(4, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -444,7 +444,7 @@ test('high priority fetch during mutation', async () => {
   await vi.runAllTimersAsync();
 
   // Start a mutation (without revalidation to isolate the high priority fetch behavior)
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
   });
 
@@ -487,7 +487,7 @@ test('multiple concurrent mutations with revalidation', async () => {
   await vi.runAllTimersAsync();
 
   // First mutation
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -495,7 +495,7 @@ test('multiple concurrent mutations with revalidation', async () => {
   // Second mutation starts 50ms after first (while first is still running)
   await vi.advanceTimersByTimeAsync(50);
   env.addTimelineComment('Second mutation overlaps first');
-  env.performClientUpdateAction(2, {
+  void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -568,6 +568,34 @@ test('multiple high priority fetches', async () => {
     1.6s  | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
+});
+
+test('multiple high priority fetches within high base request delay window', async () => {
+  // Expected: high priority requests coalesce into a single fetch if triggered within high base request delay window.
+  const env = createDocumentStoreTestEnv(0, {
+    baseRequestDelayMs: 20,
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // First high priority fetch starts immediately
+  env.scheduleFetch('highPriority');
+
+  await vi.advanceTimersByTimeAsync(3);
+  env.scheduleFetch('highPriority');
+
+  await vi.advanceTimersByTimeAsync(10);
+  env.scheduleFetch('highPriority');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.numOfFinishedFetches).toBe(1);
+
+  expect(env.timelineString).toMatchInlineSnapshot();
 });
 
 test('throttle low priority updates', async () => {
@@ -671,14 +699,14 @@ test('multiple mutations with low priority fetch between', async () => {
   await vi.runAllTimersAsync();
 
   // t=0: first mutation with revalidation
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
   // t=50: second mutation with revalidation
   await vi.advanceTimersByTimeAsync(50);
-  env.performClientUpdateAction(2, {
+  void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -725,7 +753,7 @@ test('very slow mutation revalidation then mutation', async () => {
   env.setNextFetchDurations(2000, 200);
 
   // t=0: first mutation with revalidation (short 200ms mutation)
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
     duration: 200,
@@ -741,7 +769,7 @@ test('very slow mutation revalidation then mutation', async () => {
 
   // t=300: second mutation starts during first revalidation (which started at t=200)
   // First revalidation would finish at t=2200, but gets aborted
-  env.performClientUpdateAction(2, {
+  void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
     duration: 200, // Second mutation + revalidation = 200 + 200 = 400ms < 2000ms first revalidation
@@ -797,13 +825,13 @@ test('fetch error', async () => {
   expect(env.timelineString).toContain('fetch-error');
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui    |
-    0     | -     | 🔴 >fetch-started
-    800ms | -     | 🔴 <fetch-finished (value: 0)
-    .     | 0     | ui-initialized
-    810ms | 0     | 🟠 >fetch-started-from-manual-scheduling
-    .     | 0     | 🟠 <fetch-error (value: "error")
-    .     | error | ui-changed
+    time  | ui      |
+    0     | -       | 🔴 >fetch-started
+    800ms | -       | 🔴 <fetch-finished (value: 0)
+    .     | 0       | ui-initialized
+    810ms | 0       | 🟠 >fetch-started-from-manual-scheduling
+    .     | 0       | 🟠 <fetch-error (value: "error")
+    .     | "error" | ui-changed
     "
   `);
 });

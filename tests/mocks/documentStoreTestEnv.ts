@@ -2,6 +2,9 @@ import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
 import { createServerMock } from './serverMock';
 
+const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
+const mutationEmojis = ['⬜', '⬛', '🟫', '🟪', '🟦', '🟩', '🟨', '🟧', '🟥'];
+
 type Action = {
   action: string;
   time: number;
@@ -9,9 +12,6 @@ type Action = {
   actionValue?: unknown;
   id?: string | number;
 };
-
-const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
-const mutationEmojis = ['⬜', '⬛', '🟫', '🟪', '🟦', '🟩', '🟨', '🟧', '🟥'];
 
 export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
@@ -63,7 +63,7 @@ export function createDocumentStoreTestEnv<D>(
   ) {
     if (action === 'scheduled-fetch-started') {
       const relatedFetchStartAction = actionsHistory.find(
-        (action) => action.action === '>fetch-started' && time === action.time,
+        (a) => a.action === '>fetch-started' && time === a.time,
       );
 
       if (relatedFetchStartAction) {
@@ -77,7 +77,7 @@ export function createDocumentStoreTestEnv<D>(
       action,
       time,
       uiValue,
-      actionValue: actionValue,
+      actionValue,
       id,
     });
   }
@@ -316,7 +316,7 @@ function getTimelineString(actionsHistory: Action[]): string {
     if (uiValue !== undefined) currentUI = uiValue;
 
     const timeStr = formatTime(time, prevTime);
-    const uiStr = currentUI !== undefined ? String(currentUI) : '-';
+    const uiStr = currentUI !== undefined ? JSON.stringify(currentUI) : '-';
 
     const idStr = formatId(id);
     let actionStr = `${idStr}${action}`;
@@ -338,9 +338,9 @@ function formatTableString(
 
   const colWidths: number[] = [];
   for (const { cols } of rows) {
-    cols.forEach((col, i) => {
+    for (const [i, col] of cols.entries()) {
       colWidths[i] = Math.max(colWidths[i] ?? 0, col.length);
-    });
+    }
   }
 
   return rows
