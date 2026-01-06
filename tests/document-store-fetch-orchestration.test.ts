@@ -896,36 +896,59 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
 
   await vi.runAllTimersAsync();
 
-  // t=0: first RTU
+  const shortFetch = 90;
+  const mediumFetch = 150;
+  env.setNextFetchDurations(shortFetch, mediumFetch, shortFetch);
+
+  // t=0: first RTU triggers immediate fetch (no prior fetch, no throttle)
   env.emulateExternalRTU(1);
 
-  // t=50: second RTU with shorter fetch
-  await vi.advanceTimersByTimeAsync(50);
-  env.setNextFetchDurations(100);
+  // t=90: first fetch completes (90ms < 100ms → short 10ms throttle starts after)
+  env.addTimelineComment('vvv 10ms throttle (90ms fetch < 100ms) vvv', 91);
+  env.addTimelineComment('^^^ throttle ends ^^^', 100);
+
+  // t=120: second RTU after throttle window → immediate start
+  await vi.advanceTimersByTimeAsync(120);
   env.emulateExternalRTU(2);
 
-  // t=80: third RTU with even shorter fetch
+  // t=150: third RTU while second fetch is in flight → coalesced
   await vi.advanceTimersByTimeAsync(30);
-  env.setNextFetchDurations(40);
   env.emulateExternalRTU(3);
+
+  // t=270: second fetch completes (150ms >= 100ms → long 200ms throttle starts after)
+  env.addTimelineComment('vvv 200ms throttle (150ms fetch >= 100ms) vvv', 271);
+  env.addTimelineComment('^^^ throttle ends, delayed fetch runs ^^^', 470);
 
   await vi.runAllTimersAsync();
 
-  expect(env.uiChanges).toEqual([0, 3]);
-  expect(env.numOfFinishedFetches).toBe(2);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.uiChanges).toEqual([0, 1, 3]);
+  expect(env.numOfFinishedFetches).toBe(3);
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - server-data-changed
-    fetch-started #1
-      2 - server-data-changed
-        3 - server-data-changed
-        3 - fetch-finished #1
-        3 - ui-changed
-        fetch-started #2
-        3 - fetch-finished #2
+    time  | ui |                                                 
+    0     | 0  | ui-initialized                                  
+    .     | 0  | server-data-changed (value: 1)                  
+    .     | 0  | received-ws-data-change-event                   
+    .     | 0  | 🔴 >fetch-started                               
+    90ms  | 0  | 🔴 <fetch-finished (value: 1)                   
+    .     | 1  | ui-changed                                      
+    91ms  | 1  | -- vvv 10ms throttle (90ms fetch < 100ms) vvv   
+    100ms | 1  | -- ^^^ throttle ends ^^^                        
+    120ms | 1  | server-data-changed (value: 2)                  
+    .     | 1  | received-ws-data-change-event                   
+    .     | 1  | 🟠 >fetch-started                               
+    150ms | 1  | server-data-changed (value: 3)                  
+    .     | 1  | received-ws-data-change-event                   
+    270ms | 1  | 🟠 <fetch-finished (value: 3)                   
+    .     | 3  | ui-changed                                      
+    271ms | 3  | -- vvv 200ms throttle (150ms fetch >= 100ms) vvv
+    470ms | 3  | -- ^^^ throttle ends, delayed fetch runs ^^^    
+    .     | 3  | scheduled-rt-fetch-started                      
+    .     | 3  | 🟡 >fetch-started                               
+    560ms | 3  | 🟡 <fetch-finished (value: 3)                   
     "
   `);
+});
 
   test.concurrent('simple mutation that triggers a RTU', async () => {
     // Expected: mutation triggers RTU fetch after optimistic commit, committing the server state.
