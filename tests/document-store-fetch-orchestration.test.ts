@@ -35,13 +35,13 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                      
-    0     | 0  | ui-initialized                       
-    .     | 1  | ⬜ optimistic-ui-commit               
-    .     | 1  | ⬜ >mutation-started (value: 1)       
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 1  | 🔴 >fetch-started                    
-    2s    | 1  | 🔴 <fetch-finished (value: 1)        
+    1.2s  | 1  | 🔴 >fetch-started
+    2s    | 1  | 🔴 <fetch-finished (value: 1)
     "
   `);
 });
@@ -66,10 +66,10 @@ test('simple mutation with optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                      
-    0     | 0  | ui-initialized                       
-    .     | 1  | ⬜ optimistic-ui-commit               
-    .     | 1  | ⬜ >mutation-started (value: 1)       
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     "
   `);
@@ -95,13 +95,13 @@ test('simple mutation without optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                      
-    0     | 0  | ui-initialized                       
-    .     | 0  | ⬜ >mutation-started (value: 1)       
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | ⬜ >mutation-started (value: 1)
     840ms | 0  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 0  | 🔴 >fetch-started                    
-    2s    | 0  | 🔴 <fetch-finished (value: 1)        
-    .     | 1  | ui-changed                           
+    1.2s  | 0  | 🔴 >fetch-started
+    2s    | 0  | 🔴 <fetch-finished (value: 1)
+    .     | 1  | ui-changed
     "
   `);
 });
@@ -136,14 +136,14 @@ test('prevent overfetch of low priority fetches', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                                          
-    0     | 0  | ui-initialized                                           
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling                 
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
     10ms  | 0  | -- All fetches started after this point should be skipped
-    .     | 0  | scheduled-fetch-skipped                                  
-    20ms  | 0  | scheduled-fetch-skipped                                  
-    30ms  | 0  | scheduled-fetch-skipped                                  
-    800ms | 0  | 🔴 <fetch-finished (value: 0)                            
+    .     | 0  | scheduled-fetch-skipped
+    20ms  | 0  | scheduled-fetch-skipped
+    30ms  | 0  | scheduled-fetch-skipped
+    800ms | 0  | 🔴 <fetch-finished (value: 0)
     "
   `);
 });
@@ -177,18 +177,18 @@ test('multiple mutations with revalidation in sequence', async () => {
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                      
-    0     | 0  | ui-initialized                       
-    .     | 1  | ⬜ optimistic-ui-commit               
-    .     | 1  | ⬜ >mutation-started (value: 1)       
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 1  | 🔴 >fetch-started                    
-    2s    | 1  | 🔴 <fetch-finished (value: 1)        
-    2.05s | 2  | ⬛ optimistic-ui-commit               
-    .     | 2  | ⬛ >mutation-started (value: 2)       
+    1.2s  | 1  | 🔴 >fetch-started
+    2s    | 1  | 🔴 <fetch-finished (value: 1)
+    2.05s | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
     2.89s | 2  | ⬛ <mutation-data-persisted (value: 2)
-    3.25s | 2  | 🟠 >fetch-started                    
-    4.05s | 2  | 🟠 <fetch-finished (value: 2)        
+    3.25s | 2  | 🟠 >fetch-started
+    4.05s | 2  | 🟠 <fetch-finished (value: 2)
     "
   `);
 });
@@ -231,19 +231,19 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   expect(env.numOfStartedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                                                                                      
-    0     | 0  | ui-initialized                                                                                       
-    .     | 1  | ⬜ optimistic-ui-commit                                                                               
-    .     | 1  | ⬜ >mutation-started (value: 1)                                                                       
-    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)                                                                
-    1.2s  | 1  | 🔴 >fetch-started                                                                                    
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
+    1.2s  | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
-    .     | 2  | ⬛ optimistic-ui-commit                                                                               
-    .     | 2  | ⬛ >mutation-started (value: 2)                                                                       
-    2s    | 2  | 🔴 <fetch-aborted 🚫                                                                                 
-    2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)                                                                
-    2.45s | 2  | 🟠 >fetch-started                                                                                    
-    3.25s | 2  | 🟠 <fetch-finished (value: 2)                                                                        
+    .     | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
+    2s    | 2  | 🔴 <fetch-aborted 🚫
+    2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
+    2.45s | 2  | 🟠 >fetch-started
+    3.25s | 2  | 🟠 <fetch-finished (value: 2)
     "
   `);
 });
@@ -312,36 +312,36 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                                                                                      
-    0     | 0  | ui-initialized                                                                                       
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling                                                             
-    100ms | 1  | ⬜ optimistic-ui-commit                                                                               
-    .     | 1  | ⬜ >mutation-started (value: 1)                                                                       
-    800ms | 1  | 🔴 <fetch-aborted 🚫                                                                                 
-    940ms | 1  | ⬜ <mutation-data-persisted (value: 1)                                                                
-    1.3s  | 1  | 🟠 >fetch-started                                                                                    
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    100ms | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    800ms | 1  | 🔴 <fetch-aborted 🚫
+    940ms | 1  | ⬜ <mutation-data-persisted (value: 1)
+    1.3s  | 1  | 🟠 >fetch-started
     1.35s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
-    .     | 2  | ⬛ optimistic-ui-commit                                                                               
-    .     | 2  | ⬛ >mutation-started (value: 2)                                                                       
-    2.1s  | 2  | 🟠 <fetch-aborted 🚫                                                                                 
-    2.19s | 2  | ⬛ <mutation-data-persisted (value: 2)                                                                
-    2.55s | 2  | 🟡 >fetch-started                                                                                    
-    2.6s  | 3  | 🟫 optimistic-ui-commit                                                                              
-    .     | 3  | 🟫 >mutation-started (value: 3)                                                                      
-    3.35s | 3  | 🟡 <fetch-aborted 🚫                                                                                 
-    3.44s | 3  | 🟫 <mutation-data-persisted (value: 3)                                                               
-    3.8s  | 3  | 🟢 >fetch-started                                                                                    
-    3.85s | 4  | 🟪 optimistic-ui-commit                                                                              
-    .     | 4  | 🟪 >mutation-started (value: 4)                                                                      
-    4.6s  | 4  | 🟢 <fetch-aborted 🚫                                                                                 
-    4.69s | 4  | 🟪 <mutation-data-persisted (value: 4)                                                               
-    5.05s | 4  | 🔵 >fetch-started                                                                                    
-    5.1s  | 4  | 🟦 optimistic-ui-commit                                                                              
-    .     | 4  | 🟦 >mutation-started (value: 4)                                                                      
-    5.85s | 4  | 🔵 <fetch-aborted 🚫                                                                                 
-    5.94s | 4  | 🟦 <mutation-data-persisted (value: 4)                                                               
-    6.3s  | 4  | 🟣 >fetch-started                                                                                    
-    7.1s  | 4  | 🟣 <fetch-finished (value: 4)                                                                        
+    .     | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
+    2.1s  | 2  | 🟠 <fetch-aborted 🚫
+    2.19s | 2  | ⬛ <mutation-data-persisted (value: 2)
+    2.55s | 2  | 🟡 >fetch-started
+    2.6s  | 3  | 🟫 optimistic-ui-commit
+    .     | 3  | 🟫 >mutation-started (value: 3)
+    3.35s | 3  | 🟡 <fetch-aborted 🚫
+    3.44s | 3  | 🟫 <mutation-data-persisted (value: 3)
+    3.8s  | 3  | 🟢 >fetch-started
+    3.85s | 4  | 🟪 optimistic-ui-commit
+    .     | 4  | 🟪 >mutation-started (value: 4)
+    4.6s  | 4  | 🟢 <fetch-aborted 🚫
+    4.69s | 4  | 🟪 <mutation-data-persisted (value: 4)
+    5.05s | 4  | 🔵 >fetch-started
+    5.1s  | 4  | 🟦 optimistic-ui-commit
+    .     | 4  | 🟦 >mutation-started (value: 4)
+    5.85s | 4  | 🔵 <fetch-aborted 🚫
+    5.94s | 4  | 🟦 <mutation-data-persisted (value: 4)
+    6.3s  | 4  | 🟣 >fetch-started
+    7.1s  | 4  | 🟣 <fetch-finished (value: 4)
     "
   `);
 
@@ -400,34 +400,34 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   expect(env.numOfStartedFetches).toBe(5);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                                                                                      
-    0     | 0  | ui-initialized                                                                                       
-    .     | 1  | ⬜ optimistic-ui-commit                                                                               
-    .     | 1  | ⬜ >mutation-started (value: 1)                                                                       
-    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)                                                                
-    1.2s  | 1  | 🔴 >fetch-started                                                                                    
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
+    1.2s  | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
-    .     | 2  | ⬛ optimistic-ui-commit                                                                               
-    .     | 2  | ⬛ >mutation-started (value: 2)                                                                       
-    2s    | 2  | 🔴 <fetch-aborted 🚫                                                                                 
-    2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)                                                                
-    2.45s | 2  | 🟠 >fetch-started                                                                                    
-    2.5s  | 3  | 🟫 optimistic-ui-commit                                                                              
-    .     | 3  | 🟫 >mutation-started (value: 3)                                                                      
-    3.25s | 3  | 🟠 <fetch-aborted 🚫                                                                                 
-    3.34s | 3  | 🟫 <mutation-data-persisted (value: 3)                                                               
-    3.7s  | 3  | 🟡 >fetch-started                                                                                    
-    3.75s | 4  | 🟪 optimistic-ui-commit                                                                              
-    .     | 4  | 🟪 >mutation-started (value: 4)                                                                      
-    4.5s  | 4  | 🟡 <fetch-aborted 🚫                                                                                 
-    4.59s | 4  | 🟪 <mutation-data-persisted (value: 4)                                                               
-    4.95s | 4  | 🟢 >fetch-started                                                                                    
-    5s    | 4  | 🟦 optimistic-ui-commit                                                                              
-    .     | 4  | 🟦 >mutation-started (value: 4)                                                                      
-    5.75s | 4  | 🟢 <fetch-aborted 🚫                                                                                 
-    5.84s | 4  | 🟦 <mutation-data-persisted (value: 4)                                                               
-    6.2s  | 4  | 🔵 >fetch-started                                                                                    
-    7s    | 4  | 🔵 <fetch-finished (value: 4)                                                                        
+    .     | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
+    2s    | 2  | 🔴 <fetch-aborted 🚫
+    2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
+    2.45s | 2  | 🟠 >fetch-started
+    2.5s  | 3  | 🟫 optimistic-ui-commit
+    .     | 3  | 🟫 >mutation-started (value: 3)
+    3.25s | 3  | 🟠 <fetch-aborted 🚫
+    3.34s | 3  | 🟫 <mutation-data-persisted (value: 3)
+    3.7s  | 3  | 🟡 >fetch-started
+    3.75s | 4  | 🟪 optimistic-ui-commit
+    .     | 4  | 🟪 >mutation-started (value: 4)
+    4.5s  | 4  | 🟡 <fetch-aborted 🚫
+    4.59s | 4  | 🟪 <mutation-data-persisted (value: 4)
+    4.95s | 4  | 🟢 >fetch-started
+    5s    | 4  | 🟦 optimistic-ui-commit
+    .     | 4  | 🟦 >mutation-started (value: 4)
+    5.75s | 4  | 🟢 <fetch-aborted 🚫
+    5.84s | 4  | 🟦 <mutation-data-persisted (value: 4)
+    6.2s  | 4  | 🔵 >fetch-started
+    7s    | 4  | 🔵 <fetch-finished (value: 4)
     "
   `);
 });
@@ -462,15 +462,15 @@ test('high priority fetch during mutation', async () => {
   expect(env.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                                                                      
-    0     | 0  | ui-initialized                                                                       
-    .     | 1  | ⬜ optimistic-ui-commit                                                               
-    .     | 1  | ⬜ >mutation-started (value: 1)                                                       
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
     100ms | 1  | -- High priority fetch during mutation; should be scheduled after mutation completes.
-    .     | 1  | scheduled-fetch-scheduled                                                            
-    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)                                                
-    1.2s  | 1  | 🔴 >fetch-started                                                                    
-    2s    | 1  | 🔴 <fetch-finished (value: 1)                                                        
+    .     | 1  | scheduled-fetch-scheduled
+    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
+    1.2s  | 1  | 🔴 >fetch-started
+    2s    | 1  | 🔴 <fetch-finished (value: 1)
     "
   `);
 });
@@ -506,17 +506,17 @@ test('multiple concurrent mutations with revalidation', async () => {
   expect(env.serverHistory).toEqual([0, 1, 2]);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                      
-    0     | 0  | ui-initialized                       
-    .     | 1  | ⬜ optimistic-ui-commit               
-    .     | 1  | ⬜ >mutation-started (value: 1)       
-    50ms  | 1  | -- Second mutation overlaps first    
-    .     | 2  | ⬛ optimistic-ui-commit               
-    .     | 2  | ⬛ >mutation-started (value: 2)       
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    50ms  | 1  | -- Second mutation overlaps first
+    .     | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
     840ms | 2  | ⬜ <mutation-data-persisted (value: 1)
     890ms | 2  | ⬛ <mutation-data-persisted (value: 2)
-    1.25s | 2  | 🔴 >fetch-started                    
-    2.05s | 2  | 🔴 <fetch-finished (value: 2)        
+    1.25s | 2  | 🔴 >fetch-started
+    2.05s | 2  | 🔴 <fetch-finished (value: 2)
     "
   `);
 
@@ -556,16 +556,16 @@ test('multiple high priority fetches', async () => {
   expect(env.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                         
-    0     | 0  | ui-initialized                          
+    time  | ui |
+    0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    5ms   | 0  | scheduled-fetch-skipped                 
-    8ms   | 0  | scheduled-fetch-skipped                 
-    15ms  | 0  | scheduled-fetch-scheduled               
-    20ms  | 0  | scheduled-fetch-scheduled               
-    800ms | 0  | 🔴 <fetch-finished (value: 0)           
-    .     | 0  | 🟠 >fetch-started                       
-    1.6s  | 0  | 🟠 <fetch-finished (value: 0)           
+    5ms   | 0  | scheduled-fetch-skipped
+    8ms   | 0  | scheduled-fetch-skipped
+    15ms  | 0  | scheduled-fetch-scheduled
+    20ms  | 0  | scheduled-fetch-scheduled
+    800ms | 0  | 🔴 <fetch-finished (value: 0)
+    .     | 0  | 🟠 >fetch-started
+    1.6s  | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });
@@ -605,15 +605,15 @@ test('throttle low priority updates', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                         
-    0     | 0  | ui-initialized                          
+    time  | ui |
+    0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    100ms | 0  | scheduled-fetch-skipped                 
-    110ms | 0  | scheduled-fetch-skipped                 
-    120ms | 0  | scheduled-fetch-skipped                 
-    800ms | 0  | 🔴 <fetch-finished (value: 0)           
+    100ms | 0  | scheduled-fetch-skipped
+    110ms | 0  | scheduled-fetch-skipped
+    120ms | 0  | scheduled-fetch-skipped
+    800ms | 0  | 🔴 <fetch-finished (value: 0)
     930ms | 0  | 🟠 >fetch-started-from-manual-scheduling
-    1.73s | 0  | 🟠 <fetch-finished (value: 0)           
+    1.73s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
   expect(env.numOfFinishedFetches).toBe(2);
@@ -648,13 +648,13 @@ test('throttle low priority after a fast fetch completes', async () => {
   expect(env.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                         
-    0     | 0  | ui-initialized                          
+    time  | ui |
+    0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    50ms  | 0  | 🔴 <fetch-finished (value: 0)           
-    60ms  | 0  | scheduled-fetch-skipped                 
+    50ms  | 0  | 🔴 <fetch-finished (value: 0)
+    60ms  | 0  | scheduled-fetch-skipped
     210ms | 0  | 🟠 >fetch-started-from-manual-scheduling
-    260ms | 0  | 🟠 <fetch-finished (value: 0)           
+    260ms | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });
@@ -694,17 +694,17 @@ test('multiple mutations with low priority fetch between', async () => {
   expect(env.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                      
-    0     | 0  | ui-initialized                       
-    .     | 1  | ⬜ optimistic-ui-commit               
-    .     | 1  | ⬜ >mutation-started (value: 1)       
-    50ms  | 2  | ⬛ optimistic-ui-commit               
-    .     | 2  | ⬛ >mutation-started (value: 2)       
-    70ms  | 2  | scheduled-fetch-scheduled            
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    50ms  | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
+    70ms  | 2  | scheduled-fetch-scheduled
     840ms | 2  | ⬜ <mutation-data-persisted (value: 1)
     890ms | 2  | ⬛ <mutation-data-persisted (value: 2)
-    1.25s | 2  | 🔴 >fetch-started                    
-    2.05s | 2  | 🔴 <fetch-finished (value: 2)        
+    1.25s | 2  | 🔴 >fetch-started
+    2.05s | 2  | 🔴 <fetch-finished (value: 2)
     "
   `);
 });
@@ -753,19 +753,19 @@ test('very slow mutation revalidation then mutation', async () => {
   expect(env.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                                                                                                 
-    0     | 0  | ui-initialized                                                                                                  
-    .     | 1  | ⬜ optimistic-ui-commit                                                                                          
-    .     | 1  | ⬜ >mutation-started (value: 1)                                                                                  
-    140ms | 1  | ⬜ <mutation-data-persisted (value: 1)                                                                           
-    200ms | 1  | 🔴 >fetch-started                                                                                               
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    140ms | 1  | ⬜ <mutation-data-persisted (value: 1)
+    200ms | 1  | 🔴 >fetch-started
     300ms | 1  | -- Slow revalidation still running; scheduler aborts in-flight fetch after new mutation to prevent stale commit.
-    .     | 2  | ⬛ optimistic-ui-commit                                                                                          
-    .     | 2  | ⬛ >mutation-started (value: 2)                                                                                  
-    440ms | 2  | ⬛ <mutation-data-persisted (value: 2)                                                                           
-    500ms | 2  | 🟠 >fetch-started                                                                                               
-    700ms | 2  | 🟠 <fetch-finished (value: 2)                                                                                   
-    2.2s  | 2  | 🔴 <fetch-aborted 🚫                                                                                            
+    .     | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
+    440ms | 2  | ⬛ <mutation-data-persisted (value: 2)
+    500ms | 2  | 🟠 >fetch-started
+    700ms | 2  | 🟠 <fetch-finished (value: 2)
+    2.2s  | 2  | 🔴 <fetch-aborted 🚫
     "
   `);
 });
@@ -797,13 +797,13 @@ test('fetch error', async () => {
   expect(env.timelineString).toContain('fetch-error');
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui    |                                         
-    0     | -     | 🔴 >fetch-started                       
-    800ms | -     | 🔴 <fetch-finished (value: 0)           
-    .     | 0     | ui-initialized                          
+    time  | ui    |
+    0     | -     | 🔴 >fetch-started
+    800ms | -     | 🔴 <fetch-finished (value: 0)
+    .     | 0     | ui-initialized
     810ms | 0     | 🟠 >fetch-started-from-manual-scheduling
-    .     | 0     | 🟠 <fetch-error (value: "error")        
-    .     | error | ui-changed                              
+    .     | 0     | 🟠 <fetch-error (value: "error")
+    .     | error | ui-changed
     "
   `);
 });
@@ -854,29 +854,29 @@ test('dynamically throttle realtime updates', async () => {
   expect(env.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                   
-    0     | 0  | ui-initialized                    
-    .     | 0  | server-data-changed (value: 1)    
-    .     | 0  | received-ws-data-change-event     
-    .     | 0  | 🔴 >fetch-started                 
-    300ms | 0  | 🔴 <fetch-finished (value: 1)     
-    .     | 1  | ui-changed                        
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | server-data-changed (value: 1)
+    .     | 0  | received-ws-data-change-event
+    .     | 0  | 🔴 >fetch-started
+    300ms | 0  | 🔴 <fetch-finished (value: 1)
+    .     | 1  | ui-changed
     .     | 1  | -- vvv throttle window (100ms) vvv
-    320ms | 1  | server-data-changed (value: 2)    
-    .     | 1  | received-ws-data-change-event     
-    330ms | 1  | server-data-changed (value: 3)    
-    .     | 1  | received-ws-data-change-event     
-    400ms | 1  | -- ^^^ throttle window ^^^        
-    .     | 1  | scheduled-rt-fetch-started        
-    .     | 1  | 🟠 >fetch-started                 
-    600ms | 1  | 🟠 <fetch-finished (value: 3)     
-    .     | 3  | ui-changed                        
-    660ms | 3  | server-data-changed (value: 4)    
-    .     | 3  | received-ws-data-change-event     
-    700ms | 3  | scheduled-rt-fetch-started        
-    .     | 3  | 🟡 >fetch-started                 
-    900ms | 3  | 🟡 <fetch-finished (value: 4)     
-    .     | 4  | ui-changed                        
+    320ms | 1  | server-data-changed (value: 2)
+    .     | 1  | received-ws-data-change-event
+    330ms | 1  | server-data-changed (value: 3)
+    .     | 1  | received-ws-data-change-event
+    400ms | 1  | -- ^^^ throttle window ^^^
+    .     | 1  | scheduled-rt-fetch-started
+    .     | 1  | 🟠 >fetch-started
+    600ms | 1  | 🟠 <fetch-finished (value: 3)
+    .     | 3  | ui-changed
+    660ms | 3  | server-data-changed (value: 4)
+    .     | 3  | received-ws-data-change-event
+    700ms | 3  | scheduled-rt-fetch-started
+    .     | 3  | 🟡 >fetch-started
+    900ms | 3  | 🟡 <fetch-finished (value: 4)
+    .     | 4  | ui-changed
     "
   `);
 });
@@ -928,27 +928,27 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   expect(env.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time   | ui |                                                  
-    0      | 0  | ui-initialized                                   
-    .      | 0  | server-data-changed (value: 1)                   
-    .      | 0  | received-ws-data-change-event                    
-    .      | 0  | 🔴 >fetch-started                                
-    500ms  | 0  | 🔴 <fetch-finished (value: 1)                    
-    .      | 1  | ui-changed                                       
-    501ms  | 1  | -- vvv 100ms throttle (500ms fetch < 700ms) vvv  
-    600ms  | 1  | -- ^^^ throttle ends ^^^                         
-    700ms  | 1  | server-data-changed (value: 2)                   
-    .      | 1  | received-ws-data-change-event                    
-    .      | 1  | 🟠 >fetch-started                                
-    900ms  | 1  | server-data-changed (value: 3)                   
-    .      | 1  | received-ws-data-change-event                    
-    1.7s   | 1  | 🟠 <fetch-finished (value: 3)                    
-    .      | 3  | ui-changed                                       
+    time   | ui |
+    0      | 0  | ui-initialized
+    .      | 0  | server-data-changed (value: 1)
+    .      | 0  | received-ws-data-change-event
+    .      | 0  | 🔴 >fetch-started
+    500ms  | 0  | 🔴 <fetch-finished (value: 1)
+    .      | 1  | ui-changed
+    501ms  | 1  | -- vvv 100ms throttle (500ms fetch < 700ms) vvv
+    600ms  | 1  | -- ^^^ throttle ends ^^^
+    700ms  | 1  | server-data-changed (value: 2)
+    .      | 1  | received-ws-data-change-event
+    .      | 1  | 🟠 >fetch-started
+    900ms  | 1  | server-data-changed (value: 3)
+    .      | 1  | received-ws-data-change-event
+    1.7s   | 1  | 🟠 <fetch-finished (value: 3)
+    .      | 3  | ui-changed
     1.701s | 3  | -- vvv 500ms throttle (1000ms fetch >= 700ms) vvv
-    2.2s   | 3  | -- ^^^ throttle ends, delayed fetch runs ^^^     
-    .      | 3  | scheduled-rt-fetch-started                       
-    .      | 3  | 🟡 >fetch-started                                
-    2.7s   | 3  | 🟡 <fetch-finished (value: 3)                    
+    2.2s   | 3  | -- ^^^ throttle ends, delayed fetch runs ^^^
+    .      | 3  | scheduled-rt-fetch-started
+    .      | 3  | 🟡 >fetch-started
+    2.7s   | 3  | 🟡 <fetch-finished (value: 3)
     "
   `);
 });
@@ -987,18 +987,18 @@ test('simple mutation that triggers a RTU', async () => {
   expect(env.timelineString).toContain('scheduled-rt-fetch-started');
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                         
-    0     | 0  | ui-initialized                          
+    time  | ui |
+    0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)           
-    110ms | 1  | ⬜ optimistic-ui-commit                  
-    .     | 1  | ⬜ >mutation-started (value: 1)          
-    250ms | 1  | server-data-changed (value: 1)          
-    .     | 1  | ⬜ <mutation-data-persisted (value: 1)   
-    300ms | 1  | received-ws-data-change-event           
-    310ms | 1  | scheduled-rt-fetch-started              
-    .     | 1  | 🟠 >fetch-started                       
-    1.11s | 1  | 🟠 <fetch-finished (value: 1)           
+    20ms  | 0  | 🔴 <fetch-finished (value: 0)
+    110ms | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    250ms | 1  | server-data-changed (value: 1)
+    .     | 1  | ⬜ <mutation-data-persisted (value: 1)
+    300ms | 1  | received-ws-data-change-event
+    310ms | 1  | scheduled-rt-fetch-started
+    .     | 1  | 🟠 >fetch-started
+    1.11s | 1  | 🟠 <fetch-finished (value: 1)
     "
   `);
 });
@@ -1054,28 +1054,28 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
   expect(env.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time   | ui |                                                     
-    0      | 0  | ui-initialized                                      
-    .      | 0  | 🔴 >fetch-started-from-manual-scheduling            
-    800ms  | 0  | 🔴 <fetch-finished (value: 0)                       
-    1s     | 1  | ⬜ optimistic-ui-commit                              
-    .      | 1  | ⬜ >mutation-started (value: 1)                      
-    1.84s  | 1  | server-data-changed (value: 1)                      
-    .      | 1  | ⬜ <mutation-data-persisted (value: 1)               
-    1.89s  | 1  | received-ws-data-change-event                       
-    2.2s   | 1  | -- mutation completes at 2.2s, RTU fetch can start  
-    .      | 1  | scheduled-rt-fetch-started                          
-    .      | 1  | 🟠 >fetch-started                                   
-    2.3s   | 1  | server-data-changed (value: 2)                      
-    .      | 1  | received-ws-data-change-event                       
+    time   | ui |
+    0      | 0  | ui-initialized
+    .      | 0  | 🔴 >fetch-started-from-manual-scheduling
+    800ms  | 0  | 🔴 <fetch-finished (value: 0)
+    1s     | 1  | ⬜ optimistic-ui-commit
+    .      | 1  | ⬜ >mutation-started (value: 1)
+    1.84s  | 1  | server-data-changed (value: 1)
+    .      | 1  | ⬜ <mutation-data-persisted (value: 1)
+    1.89s  | 1  | received-ws-data-change-event
+    2.2s   | 1  | -- mutation completes at 2.2s, RTU fetch can start
+    .      | 1  | scheduled-rt-fetch-started
+    .      | 1  | 🟠 >fetch-started
+    2.3s   | 1  | server-data-changed (value: 2)
+    .      | 1  | received-ws-data-change-event
     .      | 1  | -- external RTU coalesced, schedules follow-up fetch
-    3s     | 1  | 🟠 <fetch-finished (value: 2)                       
-    .      | 2  | ui-changed                                          
-    3.001s | 2  | -- vvv 200ms throttle (800ms fetch < 1000ms) vvv    
-    3.2s   | 2  | -- ^^^ throttle ends, follow-up fetch runs ^^^      
-    .      | 2  | scheduled-rt-fetch-started                          
-    .      | 2  | 🟡 >fetch-started                                   
-    4s     | 2  | 🟡 <fetch-finished (value: 2)                       
+    3s     | 1  | 🟠 <fetch-finished (value: 2)
+    .      | 2  | ui-changed
+    3.001s | 2  | -- vvv 200ms throttle (800ms fetch < 1000ms) vvv
+    3.2s   | 2  | -- ^^^ throttle ends, follow-up fetch runs ^^^
+    .      | 2  | scheduled-rt-fetch-started
+    .      | 2  | 🟡 >fetch-started
+    4s     | 2  | 🟡 <fetch-finished (value: 2)
     "
   `);
 });
@@ -1128,27 +1128,27 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
   expect(env.numOfStartedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                              
-    0     | 0  | ui-initialized                               
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling     
-    800ms | 0  | 🔴 <fetch-finished (value: 0)                
-    1s    | 1  | ⬜ optimistic-ui-commit                       
-    .     | 1  | ⬜ >mutation-started (value: 1)               
-    1.84s | 1  | ⬜ <mutation-data-persisted (value: 1)        
-    1.89s | 1  | received-ws-data-change-event                
-    2.2s  | 1  | -- mutation 1 completes, RTU fetch starts    
-    .     | 1  | scheduled-rt-fetch-started                   
-    .     | 1  | 🟠 >fetch-started                            
-    2.5s  | 1  | -- mutation 2 aborts in-flight RTU fetch     
-    .     | 2  | ⬛ optimistic-ui-commit                       
-    .     | 2  | ⬛ >mutation-started (value: 2)               
-    3s    | 2  | 🟠 <fetch-aborted 🚫                         
-    3.34s | 2  | ⬛ <mutation-data-persisted (value: 2)        
-    3.39s | 2  | received-ws-data-change-event                
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    800ms | 0  | 🔴 <fetch-finished (value: 0)
+    1s    | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    1.84s | 1  | ⬜ <mutation-data-persisted (value: 1)
+    1.89s | 1  | received-ws-data-change-event
+    2.2s  | 1  | -- mutation 1 completes, RTU fetch starts
+    .     | 1  | scheduled-rt-fetch-started
+    .     | 1  | 🟠 >fetch-started
+    2.5s  | 1  | -- mutation 2 aborts in-flight RTU fetch
+    .     | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
+    3s    | 2  | 🟠 <fetch-aborted 🚫
+    3.34s | 2  | ⬛ <mutation-data-persisted (value: 2)
+    3.39s | 2  | received-ws-data-change-event
     3.7s  | 2  | -- mutation 2 completes, new RTU fetch starts
-    .     | 2  | scheduled-rt-fetch-started                   
-    .     | 2  | 🟡 >fetch-started                            
-    4.5s  | 2  | 🟡 <fetch-finished (value: 2)                
+    .     | 2  | scheduled-rt-fetch-started
+    .     | 2  | 🟡 >fetch-started
+    4.5s  | 2  | 🟡 <fetch-finished (value: 2)
     "
   `);
 });
@@ -1198,24 +1198,24 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   expect(env.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                              
-    0     | 0  | ui-initialized                               
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling     
-    800ms | 0  | 🔴 <fetch-finished (value: 0)                
-    1s    | 1  | ⬜ optimistic-ui-commit                       
-    .     | 1  | ⬜ >mutation-started (value: 1)               
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    800ms | 0  | 🔴 <fetch-finished (value: 0)
+    1s    | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
     1.5s  | 1  | -- mutation 2 starts while mutation 1 running
-    .     | 2  | ⬛ optimistic-ui-commit                       
-    .     | 2  | ⬛ >mutation-started (value: 2)               
-    1.84s | 2  | ⬜ <mutation-data-persisted (value: 1)        
-    1.89s | 2  | received-ws-data-change-event                
-    2.2s  | 2  | -- mutation 1 completes                      
-    2.34s | 2  | ⬛ <mutation-data-persisted (value: 2)        
-    2.39s | 2  | received-ws-data-change-event                
-    2.7s  | 2  | -- mutation 2 completes, RTU fetch can start 
-    .     | 2  | scheduled-rt-fetch-started                   
-    .     | 2  | 🟠 >fetch-started                            
-    3.5s  | 2  | 🟠 <fetch-finished (value: 2)                
+    .     | 2  | ⬛ optimistic-ui-commit
+    .     | 2  | ⬛ >mutation-started (value: 2)
+    1.84s | 2  | ⬜ <mutation-data-persisted (value: 1)
+    1.89s | 2  | received-ws-data-change-event
+    2.2s  | 2  | -- mutation 1 completes
+    2.34s | 2  | ⬛ <mutation-data-persisted (value: 2)
+    2.39s | 2  | received-ws-data-change-event
+    2.7s  | 2  | -- mutation 2 completes, RTU fetch can start
+    .     | 2  | scheduled-rt-fetch-started
+    .     | 2  | 🟠 >fetch-started
+    3.5s  | 2  | 🟠 <fetch-finished (value: 2)
     "
   `);
 });
@@ -1224,7 +1224,7 @@ test('rtu mutations without optimistic updates', async () => {
   // Expected: no optimistic UI commits, RTU fetches drive UI updates after server change.
   const env = createDocumentStoreTestEnv(0, {
     dynamicRealtimeThrottleMs: (lastDuration) =>
-      lastDuration > 300 ? 300 : 100,
+      lastDuration > 1000 ? 500 : 200,
   });
 
   renderHook(() => {
@@ -1233,25 +1233,32 @@ test('rtu mutations without optimistic updates', async () => {
 
   await vi.runAllTimersAsync();
 
-  // t=0: low priority fetch
-  env.setNextFetchDurations(20);
+  // t=0: low priority fetch (800ms default)
   env.scheduleFetch('lowPriority');
 
-  // t=110: mutation 1 without optimistic update, with RTU
-  await vi.advanceTimersByTimeAsync(110);
+  // t=1s: mutation 1 without optimistic update, with RTU (1200ms duration)
+  await vi.advanceTimersByTimeAsync(1000);
   env.performClientUpdateAction(1, {
     withOptimisticUpdate: false,
-    duration: 200,
+    duration: 1200,
     triggerRTU: true,
   });
 
-  // t=330: mutation 2 without optimistic update, with RTU
-  await vi.advanceTimersByTimeAsync(220);
+  // mutation 1 completes at 2.2s, RTU fetch starts
+  env.addTimelineComment('no optimistic update, UI stays at 0', 1000);
+  env.addTimelineComment('mutation 1 completes, RTU fetch starts', 2200);
+
+  // t=2.5s: mutation 2 starts while mutation 1's RTU fetch is running
+  await vi.advanceTimersByTimeAsync(1500);
+  env.addTimelineComment('mutation 2 aborts in-flight RTU fetch', 2500);
   env.performClientUpdateAction(2, {
     withOptimisticUpdate: false,
-    duration: 200,
+    duration: 1200,
     triggerRTU: true,
   });
+
+  // mutation 2 completes at 3.7s, its RTU fetch runs and finally updates UI
+  env.addTimelineComment('mutation 2 completes, RTU fetch updates UI', 3700);
 
   await vi.runAllTimersAsync();
 
@@ -1261,23 +1268,27 @@ test('rtu mutations without optimistic updates', async () => {
   expect(env.numOfStartedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                         
-    0     | 0  | ui-initialized                          
+    time  | ui |
+    0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)           
-    110ms | 0  | ⬜ >mutation-started (value: 1)          
-    250ms | 0  | ⬜ <mutation-data-persisted (value: 1)   
-    300ms | 0  | received-ws-data-change-event           
-    310ms | 0  | scheduled-rt-fetch-started              
-    .     | 0  | 🟠 >fetch-started                       
-    330ms | 0  | ⬛ >mutation-started (value: 2)          
-    470ms | 0  | ⬛ <mutation-data-persisted (value: 2)   
-    520ms | 0  | received-ws-data-change-event           
-    530ms | 0  | scheduled-rt-fetch-started              
-    .     | 0  | 🟡 >fetch-started                       
-    1.11s | 0  | 🟠 <fetch-aborted 🚫                    
-    1.33s | 0  | 🟡 <fetch-finished (value: 2)           
-    .     | 2  | ui-changed                              
+    800ms | 0  | 🔴 <fetch-finished (value: 0)
+    1s    | 0  | ⬜ >mutation-started (value: 1)
+    .     | 0  | -- no optimistic update, UI stays at 0
+    1.84s | 0  | ⬜ <mutation-data-persisted (value: 1)
+    1.89s | 0  | received-ws-data-change-event
+    2.2s  | 0  | -- mutation 1 completes, RTU fetch starts
+    .     | 0  | scheduled-rt-fetch-started
+    .     | 0  | 🟠 >fetch-started
+    2.5s  | 0  | -- mutation 2 aborts in-flight RTU fetch
+    .     | 0  | ⬛ >mutation-started (value: 2)
+    3s    | 0  | 🟠 <fetch-aborted 🚫
+    3.34s | 0  | ⬛ <mutation-data-persisted (value: 2)
+    3.39s | 0  | received-ws-data-change-event
+    3.7s  | 0  | -- mutation 2 completes, RTU fetch updates UI
+    .     | 0  | scheduled-rt-fetch-started
+    .     | 0  | 🟡 >fetch-started
+    4.5s  | 0  | 🟡 <fetch-finished (value: 2)
+    .     | 2  | ui-changed
     "
   `);
 });
@@ -1318,15 +1329,15 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                         
-    0     | 0  | ui-initialized                          
+    time  | ui |
+    0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)           
-    110ms | 0  | server-data-changed (value: 1)          
-    .     | 0  | received-ws-data-change-event           
+    20ms  | 0  | 🔴 <fetch-finished (value: 0)
+    110ms | 0  | server-data-changed (value: 1)
+    .     | 0  | received-ws-data-change-event
     300ms | 0  | 🟠 >fetch-started-from-manual-scheduling
-    320ms | 0  | 🟠 <fetch-finished (value: 1)           
-    .     | 1  | ui-changed                              
+    320ms | 0  | 🟠 <fetch-finished (value: 1)
+    .     | 1  | ui-changed
     "
   `);
 });
@@ -1372,23 +1383,23 @@ test('mutation that triggers multiple rtu updates', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                         
-    0     | 0  | ui-initialized                          
+    time  | ui |
+    0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)           
-    110ms | 0  | ⬜ >mutation-started (value: 1)          
-    310ms | 0  | rt-fetch-scheduled                      
-    .     | 0  | rt-fetch-scheduled                      
-    .     | 0  | rt-fetch-scheduled                      
-    .     | 0  | rt-fetch-scheduled                      
-    .     | 0  | rt-fetch-scheduled                      
-    .     | 0  | rt-fetch-scheduled                      
-    390ms | 0  | server-data-changed (value: 1)          
-    .     | 0  | ⬜ <mutation-data-persisted (value: 1)   
-    510ms | 0  | scheduled-rt-fetch-started              
-    .     | 0  | 🟠 >fetch-started                       
-    1.31s | 0  | 🟠 <fetch-finished (value: 1)           
-    .     | 1  | ui-changed                              
+    20ms  | 0  | 🔴 <fetch-finished (value: 0)
+    110ms | 0  | ⬜ >mutation-started (value: 1)
+    310ms | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    390ms | 0  | server-data-changed (value: 1)
+    .     | 0  | ⬜ <mutation-data-persisted (value: 1)
+    510ms | 0  | scheduled-rt-fetch-started
+    .     | 0  | 🟠 >fetch-started
+    1.31s | 0  | 🟠 <fetch-finished (value: 1)
+    .     | 1  | ui-changed
     "
   `);
 });

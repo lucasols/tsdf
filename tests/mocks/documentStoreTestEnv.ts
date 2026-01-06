@@ -182,7 +182,10 @@ export function createDocumentStoreTestEnv<D>(
         }
       }
     },
-    addTimelineComment: (comment: string, time?: number | `+${number}` | `-${number}`) => {
+    addTimelineComment: (
+      comment: string,
+      time?: number | `+${number}` | `-${number}`,
+    ) => {
       let resolvedTime: number;
       if (time === undefined) {
         resolvedTime = getRelativeTime();
@@ -344,7 +347,8 @@ function formatTableString(
     .map(({ cols, separator = '|' }) =>
       cols
         .map((col, i) => col.padEnd(colWidths[i] ?? 0))
-        .join(` ${separator} `),
+        .join(` ${separator} `)
+        .trimEnd(),
     )
     .join('\n');
 }
