@@ -36,7 +36,7 @@ export function createServerMock<Data>(
       mutationId?: string | number;
     } = {},
   ) {
-    listenForActions?.('mutation-started', newData, mutationId);
+    listenForActions?.('>mutation-started', newData, mutationId);
 
     await sleep(setDataAt);
 
@@ -53,12 +53,12 @@ export function createServerMock<Data>(
     }
 
     // "mutation-finished" marks when server data is applied (setDataAt), not promise resolution.
-    listenForActions?.('mutation-data-persisted', newData, mutationId);
+    listenForActions?.('<mutation-data-persisted', newData, mutationId);
 
     await sleep(duration - setDataAt);
 
     if (addMutationResolvedAction) {
-      listenForActions?.('mutation-resolved', newData, mutationId);
+      listenForActions?.('<mutation-resolved', newData, mutationId);
     }
   }
 

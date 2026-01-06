@@ -86,7 +86,7 @@ export function createDocumentStoreTestEnv<D>(
     },
     fetchFn: async (signal) => {
       const fetchId = getFetchEmoji();
-      addAction(`fetch-started`, { id: fetchId });
+      addAction(`>fetch-started`, { id: fetchId });
 
       numOfStartedFetches++;
 
@@ -94,19 +94,19 @@ export function createDocumentStoreTestEnv<D>(
         numOfFetches++;
         const error = nextFetchError;
         nextFetchError = null;
-        addAction(`fetch-error`, { actionValue: 'error', id: fetchId });
+        addAction(`<fetch-error`, { actionValue: 'error', id: fetchId });
         throw new Error(error);
       }
 
       const value = await serverMock.fetch();
 
       if (signal.aborted) {
-        addAction(`fetch-aborted`, { id: fetchId });
+        addAction(`<fetch-aborted 🚫`, { id: fetchId });
         throw new Error('Aborted');
       }
 
       numOfFetches++;
-      addAction(`fetch-finished`, { actionValue: value, id: fetchId });
+      addAction(`<fetch-finished`, { actionValue: value, id: fetchId });
       return { value };
     },
     disableInitialDataInvalidation: !forceInitialDataInvalidation,
@@ -118,9 +118,7 @@ export function createDocumentStoreTestEnv<D>(
     dynamicRealtimeThrottleMs,
     onSchedulerEvent: (event) => {
       if (event === 'scheduled-rt-fetch-started') {
-        addAction('scheduled-rt-fetch-started', {
-          id: fetchEmojis[fetchIdCounter % fetchEmojis.length],
-        });
+        addAction('scheduled-rt-fetch-started');
       }
     },
   });
@@ -257,11 +255,14 @@ export function createDocumentStoreTestEnv<D>(
   };
 }
 
+const secondsFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 3,
+});
+
 function formatTime(ms: number, prevMs: number | undefined): string {
   if (prevMs !== undefined && ms === prevMs) return '.';
   if (ms === 0) return '0';
-  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`;
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms >= 1000) return `${secondsFormatter.format(ms / 1000)}s`;
   return `${ms}ms`;
 }
 
