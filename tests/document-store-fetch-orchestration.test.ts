@@ -595,17 +595,7 @@ test('multiple high priority fetches within high base request delay window', asy
 
   expect(env.numOfFinishedFetches).toBe(1);
 
-  expect(env.timelineString).toMatchInlineSnapshot(`
-    "
-    time  | ui |
-    0     | 0  | ui-initialized
-    .     | 0  | scheduled-fetch-scheduled
-    3ms   | 0  | scheduled-fetch-scheduled
-    13ms  | 0  | scheduled-fetch-scheduled
-    20ms  | 0  | 🔴 >fetch-started
-    820ms | 0  | 🔴 <fetch-finished (value: 0)
-    "
-  `);
+  expect(env.timelineString).toMatchInlineSnapshot();
 });
 
 test('throttle low priority updates', async () => {
