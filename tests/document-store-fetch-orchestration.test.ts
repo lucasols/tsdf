@@ -35,13 +35,13 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                             
-    0     | 0  | ui-initialized              
-    .     | 1  | ⬜ optimistic-ui-commit      
-    .     | 1  | ⬜ mutation-started          
-    840ms | 1  | ⬜ mutation-data-persisted   
-    1.2s  | 1  | 🔴 fetch-started            
-    2s    | 1  | 🔴 fetch-finished (value: 1)
+    time  | ui |                                     
+    0     | 0  | ui-initialized                      
+    .     | 1  | ⬜ optimistic-ui-commit              
+    .     | 1  | ⬜ mutation-started (value: 1)       
+    840ms | 1  | ⬜ mutation-data-persisted (value: 1)
+    1.2s  | 1  | 🔴 fetch-started                    
+    2s    | 1  | 🔴 fetch-finished (value: 1)        
     "
   `);
 });
@@ -66,11 +66,11 @@ test('simple mutation with optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                          
-    0     | 0  | ui-initialized           
-    .     | 1  | ⬜ optimistic-ui-commit   
-    .     | 1  | ⬜ mutation-started       
-    840ms | 1  | ⬜ mutation-data-persisted
+    time  | ui |                                     
+    0     | 0  | ui-initialized                      
+    .     | 1  | ⬜ optimistic-ui-commit              
+    .     | 1  | ⬜ mutation-started (value: 1)       
+    840ms | 1  | ⬜ mutation-data-persisted (value: 1)
     "
   `);
 });
@@ -95,13 +95,13 @@ test('simple mutation without optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                             
-    0     | 0  | ui-initialized              
-    .     | 0  | ⬜ mutation-started          
-    840ms | 0  | ⬜ mutation-data-persisted   
-    1.2s  | 0  | 🔴 fetch-started            
-    2s    | 0  | 🔴 fetch-finished (value: 1)
-    .     | 1  | ui-changed                  
+    time  | ui |                                     
+    0     | 0  | ui-initialized                      
+    .     | 0  | ⬜ mutation-started (value: 1)       
+    840ms | 0  | ⬜ mutation-data-persisted (value: 1)
+    1.2s  | 0  | 🔴 fetch-started                    
+    2s    | 0  | 🔴 fetch-finished (value: 1)        
+    .     | 1  | ui-changed                          
     "
   `);
 });

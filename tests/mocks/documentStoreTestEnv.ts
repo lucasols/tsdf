@@ -286,7 +286,7 @@ function getTimelineString(actionsHistory: Action[]): string {
 
     const idStr = formatId(id);
     let actionStr = `${idStr}${action}`;
-    if (actionValue !== undefined && action.includes('fetch-finished')) {
+    if (actionValue !== undefined) {
       actionStr += ` (value: ${JSON.stringify(actionValue)})`;
     }
 
