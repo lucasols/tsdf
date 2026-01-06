@@ -1158,7 +1158,7 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   // committing the latest data.
   const env = createDocumentStoreTestEnv(0, {
     dynamicRealtimeThrottleMs: (lastDuration) =>
-      lastDuration > 300 ? 300 : 100,
+      lastDuration > 1000 ? 500 : 200,
   });
 
   renderHook(() => {
@@ -1167,26 +1167,29 @@ test('slow mutation then new mutation while prev mutation is running', async () 
 
   await vi.runAllTimersAsync();
 
-  // t=0: low priority fetch
-  env.setNextFetchDurations(20);
+  // t=0: low priority fetch to set dynamic realtime last duration (800ms default)
   env.scheduleFetch('lowPriority');
 
-  // t=110: mutation 1 with RTU
-  await vi.advanceTimersByTimeAsync(110);
+  // t=1s: mutation 1 with RTU (1200ms duration)
+  await vi.advanceTimersByTimeAsync(1000);
   env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
-    duration: 200,
+    duration: 1200,
     triggerRTU: true,
   });
 
-  // t=200: mutation 2 with RTU (while mutation 1 is still running)
-  await vi.advanceTimersByTimeAsync(90);
-  env.addTimelineComment('Overlapping mutations share one RTU fetch');
+  // t=1.5s: mutation 2 starts while mutation 1 is still running
+  await vi.advanceTimersByTimeAsync(500);
+  env.addTimelineComment('mutation 2 starts while mutation 1 running', 1500);
   env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
-    duration: 200,
+    duration: 1200,
     triggerRTU: true,
   });
+
+  // Both mutations complete, RTU events coalesce, single RTU fetch runs
+  env.addTimelineComment('mutation 1 completes', 2200);
+  env.addTimelineComment('mutation 2 completes, RTU fetch can start', 2700);
 
   await vi.runAllTimersAsync();
 
@@ -1195,22 +1198,24 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   expect(env.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                                             
-    0     | 0  | ui-initialized                              
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling    
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)               
-    110ms | 1  | ⬜ optimistic-ui-commit                      
-    .     | 1  | ⬜ >mutation-started (value: 1)              
-    200ms | 1  | -- Overlapping mutations share one RTU fetch
-    .     | 2  | ⬛ optimistic-ui-commit                      
-    .     | 2  | ⬛ >mutation-started (value: 2)              
-    250ms | 2  | ⬜ <mutation-data-persisted (value: 1)       
-    300ms | 2  | received-ws-data-change-event               
-    340ms | 2  | ⬛ <mutation-data-persisted (value: 2)       
-    390ms | 2  | received-ws-data-change-event               
-    400ms | 2  | scheduled-rt-fetch-started                  
-    .     | 2  | 🟠 >fetch-started                           
-    1.2s  | 2  | 🟠 <fetch-finished (value: 2)               
+    time  | ui |                                              
+    0     | 0  | ui-initialized                               
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling     
+    800ms | 0  | 🔴 <fetch-finished (value: 0)                
+    1s    | 1  | ⬜ optimistic-ui-commit                       
+    .     | 1  | ⬜ >mutation-started (value: 1)               
+    1.5s  | 1  | -- mutation 2 starts while mutation 1 running
+    .     | 2  | ⬛ optimistic-ui-commit                       
+    .     | 2  | ⬛ >mutation-started (value: 2)               
+    1.84s | 2  | ⬜ <mutation-data-persisted (value: 1)        
+    1.89s | 2  | received-ws-data-change-event                
+    2.2s  | 2  | -- mutation 1 completes                      
+    2.34s | 2  | ⬛ <mutation-data-persisted (value: 2)        
+    2.39s | 2  | received-ws-data-change-event                
+    2.7s  | 2  | -- mutation 2 completes, RTU fetch can start 
+    .     | 2  | scheduled-rt-fetch-started                   
+    .     | 2  | 🟠 >fetch-started                            
+    3.5s  | 2  | 🟠 <fetch-finished (value: 2)                
     "
   `);
 });
