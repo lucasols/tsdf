@@ -573,7 +573,7 @@ test('multiple high priority fetches', async () => {
 test('multiple high priority fetches within high base request delay window', async () => {
   // Expected: high priority requests coalesce into a single fetch if triggered within high base request delay window.
   const env = createDocumentStoreTestEnv(0, {
-    baseRequestDelayMs: 20,
+    baseCoalescingWindowMs: 20,
   });
 
   renderHook(() => {
@@ -595,7 +595,17 @@ test('multiple high priority fetches within high base request delay window', asy
 
   expect(env.numOfFinishedFetches).toBe(1);
 
-  expect(env.timelineString).toMatchInlineSnapshot();
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | scheduled-fetch-scheduled
+    3ms   | 0  | scheduled-fetch-scheduled
+    13ms  | 0  | scheduled-fetch-scheduled
+    20ms  | 0  | 🔴 >fetch-started
+    820ms | 0  | 🔴 <fetch-finished (value: 0)
+    "
+  `);
 });
 
 test('throttle low priority updates', async () => {
