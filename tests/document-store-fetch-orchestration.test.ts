@@ -538,17 +538,17 @@ test('multiple high priority fetches', async () => {
   env.scheduleFetch('highPriority');
 
   // These are skipped (fetch already in progress, within throttle window)
-  await vi.advanceTimersByTimeAsync(5);
+  await vi.advanceTimersByTimeAsync(40);
   env.scheduleFetch('highPriority');
 
-  await vi.advanceTimersByTimeAsync(3);
+  await vi.advanceTimersByTimeAsync(50);
   env.scheduleFetch('highPriority');
 
   // These get scheduled (outside throttle window but fetch still in progress)
-  await vi.advanceTimersByTimeAsync(7);
+  await vi.advanceTimersByTimeAsync(60);
   env.scheduleFetch('highPriority');
 
-  await vi.advanceTimersByTimeAsync(5);
+  await vi.advanceTimersByTimeAsync(80);
   env.scheduleFetch('highPriority');
 
   await vi.runAllTimersAsync();
@@ -559,10 +559,10 @@ test('multiple high priority fetches', async () => {
     time  | ui |
     0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    5ms   | 0  | scheduled-fetch-skipped
-    8ms   | 0  | scheduled-fetch-skipped
-    15ms  | 0  | scheduled-fetch-scheduled
-    20ms  | 0  | scheduled-fetch-scheduled
+    40ms  | 0  | scheduled-fetch-scheduled
+    90ms  | 0  | scheduled-fetch-scheduled
+    150ms | 0  | scheduled-fetch-scheduled
+    230ms | 0  | scheduled-fetch-scheduled
     800ms | 0  | 🔴 <fetch-finished (value: 0)
     .     | 0  | 🟠 >fetch-started
     1.6s  | 0  | 🟠 <fetch-finished (value: 0)
