@@ -157,12 +157,15 @@ test('multiple mutations with revalidation in sequence', async () => {
 
   await vi.runAllTimersAsync();
 
+  const sequentialGapMs =
+    DEFAULT_MUTATION_DURATION_MS + DEFAULT_FETCH_DURATION_MS + 50;
+
   env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(2500);
+  await vi.advanceTimersByTimeAsync(sequentialGapMs);
 
   env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
@@ -172,21 +175,20 @@ test('multiple mutations with revalidation in sequence', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - optimistic-ui-commit
-    1 - mutation-started
-    1 - ui-changed
-    1 - mutation-finished
-    fetch-started #1
-    1 - fetch-finished #1
-      2 - optimistic-ui-commit
-      2 - mutation-started
-      2 - ui-changed
-      2 - mutation-finished
-      fetch-started #2
-      2 - fetch-finished #2
+    time  | ui |                                     
+    0     | 0  | ui-initialized                      
+    .     | 1  | ⬜ optimistic-ui-commit              
+    .     | 1  | ⬜ mutation-started (value: 1)       
+    840ms | 1  | ⬜ mutation-data-persisted (value: 1)
+    1.2s  | 1  | 🔴 fetch-started                    
+    2s    | 1  | 🔴 fetch-finished (value: 1)        
+    2.05s | 2  | ⬛ optimistic-ui-commit              
+    .     | 2  | ⬛ mutation-started (value: 2)       
+    2.89s | 2  | ⬛ mutation-data-persisted (value: 2)
+    3.25s | 2  | 🟠 fetch-started                    
+    4.05s | 2  | 🟠 fetch-finished (value: 2)        
     "
   `);
 });
@@ -207,8 +209,14 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
     withRevalidation: true,
   });
 
-  // Wait for mutation to finish but not the revalidation fetch
-  await vi.advanceTimersByTimeAsync(1250);
+  const duringRevalidationMs = DEFAULT_MUTATION_DURATION_MS + 50;
+
+  // Wait for the server write (mutation-finished event), but not the revalidation fetch
+  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+
+  env.addTimelineComment(
+    'Next mutation should abort the first revalidation fetch',
+  );
 
   // Second mutation starts during revalidation
   env.performClientUpdateAction(2, {
@@ -219,21 +227,23 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.numOfStartedFetches).toBe(2);
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - optimistic-ui-commit
-    1 - mutation-started
-    1 - ui-changed
-    1 - mutation-finished
-    fetch-started #1
-      2 - optimistic-ui-commit
-      2 - mutation-started
-      2 - ui-changed
-      2 - mutation-finished
-      fetch-aborted #1
-      fetch-started #2
-      2 - fetch-finished #2
+    time  | ui |                                           
+    0     | 0  | ui-initialized                            
+    .     | 1  | ⬜ optimistic-ui-commit                    
+    .     | 1  | ⬜ mutation-started (value: 1)             
+    840ms | 1  | ⬜ mutation-data-persisted (value: 1)      
+    1.2s  | 1  | 🔴 fetch-started                          
+    1.25s | 1  | -- Next mutation should abort the first revalidation fetch
+    .     | 2  | ⬛ optimistic-ui-commit                    
+    .     | 2  | ⬛ mutation-started (value: 2)             
+    2s    | 2  | 🔴 fetch-aborted                          
+    2.09s | 2  | ⬛ mutation-data-persisted (value: 2)      
+    2.45s | 2  | 🟠 fetch-started                          
+    3.25s | 2  | 🟠 fetch-finished (value: 2)              
     "
   `);
 });
