@@ -10,6 +10,9 @@ type Action = {
   id?: string | number;
 };
 
+const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
+const mutationEmojis = ['⬜', '⬛', '🟫', '🟪', '🟦', '🟩', '🟨', '🟧', '🟥'];
+
 export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
@@ -25,6 +28,14 @@ export function createDocumentStoreTestEnv<D>(
   let numOfStartedFetches = 0;
   let fetchIdCounter = 0;
   let mutationIdCounter = 0;
+
+  function getFetchEmoji() {
+    return fetchEmojis[fetchIdCounter++ % fetchEmojis.length];
+  }
+
+  function getMutationEmoji() {
+    return mutationEmojis[mutationIdCounter++ % mutationEmojis.length];
+  }
   let nextFetchError: string | null = null;
 
   const uiChanges: (number | 'error' | undefined)[] = [];
@@ -74,7 +85,7 @@ export function createDocumentStoreTestEnv<D>(
       return { error: exception.message };
     },
     fetchFn: async (signal) => {
-      const fetchId = `F#${++fetchIdCounter}`;
+      const fetchId = getFetchEmoji();
       addAction(`fetch-started`, { id: fetchId });
 
       numOfStartedFetches++;
@@ -107,7 +118,9 @@ export function createDocumentStoreTestEnv<D>(
     dynamicRealtimeThrottleMs,
     onSchedulerEvent: (event) => {
       if (event === 'scheduled-rt-fetch-started') {
-        addAction('scheduled-rt-fetch-started', { id: `F#${fetchIdCounter + 1}` });
+        addAction('scheduled-rt-fetch-started', {
+          id: fetchEmojis[fetchIdCounter % fetchEmojis.length],
+        });
       }
     },
   });
@@ -191,7 +204,7 @@ export function createDocumentStoreTestEnv<D>(
         addServerDataChangeAction?: boolean;
       } = {},
     ) => {
-      const mutationId = `M#${++mutationIdCounter}`;
+      const mutationId = getMutationEmoji();
 
       return documentStore.performMutation({
         optimisticUpdate:

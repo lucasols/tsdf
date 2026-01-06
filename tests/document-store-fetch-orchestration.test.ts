@@ -35,13 +35,13 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                              
-    0     | 0  | ui-initialized               
-    .     | 1  | M#1 optimistic-ui-commit     
-    .     | 1  | M#1 mutation-started         
-    840ms | 1  | M#1 mutation-data-persisted  
-    1.2s  | 1  | F#1 fetch-started            
-    2s    | 1  | F#1 fetch-finished (value: 1)
+    time  | ui |                             
+    0     | 0  | ui-initialized              
+    .     | 1  | ⬜ optimistic-ui-commit      
+    .     | 1  | ⬜ mutation-started          
+    840ms | 1  | ⬜ mutation-data-persisted   
+    1.2s  | 1  | 🔴 fetch-started            
+    2s    | 1  | 🔴 fetch-finished (value: 1)
     "
   `);
 });
@@ -66,11 +66,11 @@ test('simple mutation with optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                            
-    0     | 0  | ui-initialized             
-    .     | 1  | M#1 optimistic-ui-commit   
-    .     | 1  | M#1 mutation-started       
-    840ms | 1  | M#1 mutation-data-persisted
+    time  | ui |                          
+    0     | 0  | ui-initialized           
+    .     | 1  | ⬜ optimistic-ui-commit   
+    .     | 1  | ⬜ mutation-started       
+    840ms | 1  | ⬜ mutation-data-persisted
     "
   `);
 });
@@ -95,13 +95,13 @@ test('simple mutation without optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                              
-    0     | 0  | ui-initialized               
-    .     | 0  | M#1 mutation-started         
-    840ms | 0  | M#1 mutation-data-persisted  
-    1.2s  | 0  | F#1 fetch-started            
-    2s    | 0  | F#1 fetch-finished (value: 1)
-    .     | 1  | ui-changed                   
+    time  | ui |                             
+    0     | 0  | ui-initialized              
+    .     | 0  | ⬜ mutation-started          
+    840ms | 0  | ⬜ mutation-data-persisted   
+    1.2s  | 0  | 🔴 fetch-started            
+    2s    | 0  | 🔴 fetch-finished (value: 1)
+    .     | 1  | ui-changed                  
     "
   `);
 });
@@ -138,12 +138,12 @@ test('prevent overfetch of low priority fetches', async () => {
     "
     time  | ui |                                                          
     0     | 0  | ui-initialized                                           
-    .     | 0  | F#1 fetch-started                                        
+    .     | 0  | 🔴 fetch-started                                         
     10ms  | 0  | -- All fetches started after this point should be skipped
     .     | 0  | fetch-skipped                                            
     20ms  | 0  | fetch-skipped                                            
     30ms  | 0  | fetch-skipped                                            
-    800ms | 0  | F#1 fetch-finished (value: 0)                            
+    800ms | 0  | 🔴 fetch-finished (value: 0)                             
     "
   `);
 });

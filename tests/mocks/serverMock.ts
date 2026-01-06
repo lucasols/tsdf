@@ -53,7 +53,7 @@ export function createServerMock<Data>(
     }
 
     // "mutation-finished" marks when server data is applied (setDataAt), not promise resolution.
-    listenForActions?.('mutation-finished', newData, mutationId);
+    listenForActions?.('mutation-data-persisted', newData, mutationId);
 
     await sleep(duration - setDataAt);
 
