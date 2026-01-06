@@ -39,7 +39,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
     0     | 0  | ui-initialized               
     .     | 1  | M#1 optimistic-ui-commit     
     .     | 1  | M#1 mutation-started         
-    840ms | 1  | M#1 mutation-finished        
+    840ms | 1  | M#1 mutation-data-persisted  
     1.2s  | 1  | F#1 fetch-started            
     2s    | 1  | F#1 fetch-finished (value: 1)
     "
@@ -66,11 +66,11 @@ test('simple mutation with optimistic update', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |                         
-    0     | 0  | ui-initialized          
-    .     | 1  | M#1 optimistic-ui-commit
-    .     | 1  | M#1 mutation-started    
-    840ms | 1  | M#1 mutation-finished   
+    time  | ui |                            
+    0     | 0  | ui-initialized             
+    .     | 1  | M#1 optimistic-ui-commit   
+    .     | 1  | M#1 mutation-started       
+    840ms | 1  | M#1 mutation-data-persisted
     "
   `);
 });
@@ -98,7 +98,7 @@ test('simple mutation without optimistic update', async () => {
     time  | ui |                              
     0     | 0  | ui-initialized               
     .     | 0  | M#1 mutation-started         
-    840ms | 0  | M#1 mutation-finished        
+    840ms | 0  | M#1 mutation-data-persisted  
     1.2s  | 0  | F#1 fetch-started            
     2s    | 0  | F#1 fetch-finished (value: 1)
     .     | 1  | ui-changed                   
