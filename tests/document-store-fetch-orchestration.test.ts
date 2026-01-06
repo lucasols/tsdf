@@ -916,7 +916,10 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   env.emulateExternalRTU(3);
 
   // t=1700: second fetch completes (1000ms >= 700ms → long 500ms throttle starts after)
-  env.addTimelineComment('vvv 500ms throttle (1000ms fetch >= 700ms) vvv', 1701);
+  env.addTimelineComment(
+    'vvv 500ms throttle (1000ms fetch >= 700ms) vvv',
+    1701,
+  );
   env.addTimelineComment('^^^ throttle ends, delayed fetch runs ^^^', 2200);
 
   await vi.runAllTimersAsync();
@@ -953,7 +956,8 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
 test('simple mutation that triggers a RTU', async () => {
     // Expected: mutation triggers RTU fetch after optimistic commit, committing the server state.
   const env = createDocumentStoreTestEnv(0, {
-    dynamicRealtimeThrottleMs: (lastDuration) => (lastDuration > 300 ? 300 : 100),
+    dynamicRealtimeThrottleMs: (lastDuration) =>
+      lastDuration > 300 ? 300 : 100,
   });
 
   renderHook(() => {
@@ -999,53 +1003,82 @@ test('simple mutation that triggers a RTU', async () => {
     `);
   });
 
-  test.concurrent(
-    'slow mutation then external RTU while mutation RTU is running',
-    async () => {
+test('slow mutation then external RTU while mutation RTU is running', async () => {
       // Expected: external RTU schedules another fetch while mutation RTU is in flight,
       // both fetches eventually commit in order.
-      const store = createTestStore(0);
+  const env = createDocumentStoreTestEnv(0, {
+    dynamicRealtimeThrottleMs: (lastDuration) =>
+      lastDuration > 1000 ? 500 : 200,
+  });
 
-      await waitTimeline(
-        [
-          [0, () => store.fetch('lowPriority', 20)],
-          [110, () => action(store, 1, defaultRTUMutation)],
-          [340, () => store.emulateExternalRTU(2)],
-        ],
-        510,
-      );
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
 
-      expect(store.server.history).toEqual([0, 1, 2]);
-      expect(store.ui.changesHistory).toEqual([0, 1, 2]);
-      expect(store.numOfFetchs).toEqual(3);
+  await vi.runAllTimersAsync();
 
-      expect(store.actions).toMatchTimeline(`
+  // t=0: low priority fetch to set dynamic realtime last duration (800ms default)
+  env.scheduleFetch('lowPriority');
+
+  // t=1s: mutation with RTU (1200ms duration, data persisted at 840ms = 70%)
+  await vi.advanceTimersByTimeAsync(1000);
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    duration: 1200,
+    triggerRTU: true,
+    addServerDataChangeAction: true,
+  });
+
+  // t=1.89s: RTU event triggers fetch scheduling (waits for mutation to complete)
+  env.addTimelineComment(
+    'mutation completes at 2.2s, RTU fetch can start',
+    2200,
+  );
+
+  // t=2.3s: external RTU arrives while mutation's RTU fetch is running
+  await vi.advanceTimersByTimeAsync(1300);
+  env.emulateExternalRTU(2);
+  env.addTimelineComment(
+    'external RTU coalesced, schedules follow-up fetch',
+    2300,
+  );
+
+  // t=3s: first RTU fetch finishes (800ms < 1000ms → 200ms throttle)
+  env.addTimelineComment('vvv 200ms throttle (800ms fetch < 1000ms) vvv', 3001);
+  env.addTimelineComment('^^^ throttle ends, follow-up fetch runs ^^^', 3200);
+
+  await vi.runAllTimersAsync();
+
+  expect(env.serverHistory).toEqual([0, 1, 2]);
+  expect(env.uiChanges).toEqual([0, 1, 2]);
+  expect(env.numOfFinishedFetches).toBe(3);
+  expect(env.timelineString).toMatchInlineSnapshot(`
         "
-        .
-        1 - optimistic-ui-commit
-        1 - mutation-started
-        1 - server-data-changed
-        1 - mutation-finished
-        rt-fetch-scheduled
-        scheduled-rt-fetch-started : 2
-          2 - server-data-changed
-          rt-fetch-scheduled
-
-        ---
-        2 - fetch-finished : 2
-        2 - fetch-ui-commit
-        OR
-        1 - fetch-finished : 2
-        1 - fetch-ui-commit
-        ---
-
-          scheduled-rt-fetch-started : 3
-          2 - fetch-finished : 3
-          2 - fetch-ui-commit
+    time   | ui |                                                     
+    0      | 0  | ui-initialized                                      
+    .      | 0  | 🔴 >fetch-started-from-manual-scheduling            
+    800ms  | 0  | 🔴 <fetch-finished (value: 0)                       
+    1s     | 1  | ⬜ optimistic-ui-commit                              
+    .      | 1  | ⬜ >mutation-started (value: 1)                      
+    1.84s  | 1  | server-data-changed (value: 1)                      
+    .      | 1  | ⬜ <mutation-data-persisted (value: 1)               
+    1.89s  | 1  | received-ws-data-change-event                       
+    2.2s   | 1  | -- mutation completes at 2.2s, RTU fetch can start  
+    .      | 1  | scheduled-rt-fetch-started                          
+    .      | 1  | 🟠 >fetch-started                                   
+    2.3s   | 1  | server-data-changed (value: 2)                      
+    .      | 1  | received-ws-data-change-event                       
+    .      | 1  | -- external RTU coalesced, schedules follow-up fetch
+    3s     | 1  | 🟠 <fetch-finished (value: 2)                       
+    .      | 2  | ui-changed                                          
+    3.001s | 2  | -- vvv 200ms throttle (800ms fetch < 1000ms) vvv    
+    3.2s   | 2  | -- ^^^ throttle ends, follow-up fetch runs ^^^      
+    .      | 2  | scheduled-rt-fetch-started                          
+    .      | 2  | 🟡 >fetch-started                                   
+    4s     | 2  | 🟡 <fetch-finished (value: 2)                       
         "
     `);
-    },
-  );
+});
 
   test.concurrent(
     'slow mutation then new mutation while prev mutation RTU is running',
