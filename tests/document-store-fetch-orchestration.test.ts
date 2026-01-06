@@ -349,6 +349,87 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   expect(env.numOfStartedFetches).toBe(6);
 });
 
+test('multiple mutations with revalidation in sequence 3', async () => {
+  // mutations should abort in progress fetches, no initial low priority fetch
+  const env = createDocumentStoreTestEnv(0);
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  const duringRevalidationMs = DEFAULT_MUTATION_DURATION_MS + 50;
+
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
+
+  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  env.addTimelineComment('Mutation starts; abort refetch (stale).');
+  env.performClientUpdateAction(2, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
+
+  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  env.performClientUpdateAction(3, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
+
+  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  env.performClientUpdateAction(4, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
+
+  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  env.performClientUpdateAction(4, {
+    withOptimisticUpdate: true,
+    withRevalidation: true,
+  });
+
+  await vi.runAllTimersAsync();
+
+  expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.numOfStartedFetches).toBe(5);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |                                           
+    0     | 0  | ui-initialized                            
+    .     | 1  | ⬜ optimistic-ui-commit                    
+    .     | 1  | ⬜ >mutation-started (value: 1)            
+    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)     
+    1.2s  | 1  | 🔴 >fetch-started                         
+    1.25s | 1  | -- Mutation starts; abort refetch (stale).
+    .     | 2  | ⬛ optimistic-ui-commit                    
+    .     | 2  | ⬛ >mutation-started (value: 2)            
+    2s    | 2  | 🔴 <fetch-aborted 🚫                      
+    2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)     
+    2.45s | 2  | 🟠 >fetch-started                         
+    2.5s  | 3  | 🟫 optimistic-ui-commit                   
+    .     | 3  | 🟫 >mutation-started (value: 3)           
+    3.25s | 3  | 🟠 <fetch-aborted 🚫                      
+    3.34s | 3  | 🟫 <mutation-data-persisted (value: 3)    
+    3.7s  | 3  | 🟡 >fetch-started                         
+    3.75s | 4  | 🟪 optimistic-ui-commit                   
+    .     | 4  | 🟪 >mutation-started (value: 4)           
+    4.5s  | 4  | 🟡 <fetch-aborted 🚫                      
+    4.59s | 4  | 🟪 <mutation-data-persisted (value: 4)    
+    4.95s | 4  | 🟢 >fetch-started                         
+    5s    | 4  | 🟦 optimistic-ui-commit                   
+    .     | 4  | 🟦 >mutation-started (value: 4)           
+    5.75s | 4  | 🟢 <fetch-aborted 🚫                      
+    5.84s | 4  | 🟦 <mutation-data-persisted (value: 4)    
+    6.2s  | 4  | 🔵 >fetch-started                         
+    7s    | 4  | 🔵 <fetch-finished (value: 4)             
+    "
+  `);
+});
+
 test('multiple concurrent mutations with revalidation', async () => {
   // Expected: overlapping mutations schedule a single revalidation fetch that
   // skips redundant requests and commits only once with the latest data.
