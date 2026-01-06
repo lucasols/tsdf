@@ -1,11 +1,10 @@
+import { useOnEvtmitterEvent } from '@evtmitter/react';
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
-import { useOnEvtmitterEvent } from '@evtmitter/react';
 import { produce } from 'immer';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Result, ResultValidErrors, unknownToError } from 't-result';
 import { deepEqual, Store, useSubscribeToStore } from 't-state';
-import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import {
   FetchContext,
   FetchType,
@@ -14,6 +13,7 @@ import {
   ScheduleFetchResults,
 } from './requestScheduler';
 import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
+import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -51,8 +51,8 @@ export type DocumentStoreOptions<
   disableInitialDataInvalidation?: boolean;
   disableRefetchOnMount?: boolean;
   errorNormalizer: (exception: Error) => NError;
-  lowPriorityThrottleMs?: number;
-  mediumPriorityThrottleMs?: number;
+  lowPriorityThrottleMs: number;
+  mediumPriorityThrottleMs: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (

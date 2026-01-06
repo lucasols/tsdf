@@ -17,7 +17,7 @@ export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
     forceInitialDataInvalidation,
-    dynamicRealtimeThrottleMs = getDynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs,
   }: {
     forceInitialDataInvalidation?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -96,6 +96,8 @@ export function createDocumentStoreTestEnv<D>(
     errorNormalizer(exception) {
       return { error: exception.message };
     },
+    lowPriorityThrottleMs: 200,
+    mediumPriorityThrottleMs: 10,
     fetchFn: async (signal) => {
       const fetchId = getFetchEmoji();
       addAction(`>fetch-started`, { id: fetchId });
@@ -138,6 +140,7 @@ export function createDocumentStoreTestEnv<D>(
   });
 
   serverMock.wsEvents.on('data_changed', () => {
+    addAction('received-ws-data-change-event');
     documentStore.invalidateData('realtimeUpdate');
   });
 
@@ -179,8 +182,16 @@ export function createDocumentStoreTestEnv<D>(
         }
       }
     },
-    addTimelineComment: (comment: string) => {
-      addAction(`-- ${comment}`);
+    addTimelineComment: (comment: string, time?: number | `+${number}` | `-${number}`) => {
+      let resolvedTime: number;
+      if (time === undefined) {
+        resolvedTime = getRelativeTime();
+      } else if (typeof time === 'string') {
+        resolvedTime = getRelativeTime() + parseInt(time, 10);
+      } else {
+        resolvedTime = time;
+      }
+      addAction(`-- ${comment}`, { time: resolvedTime });
     },
     scheduleFetch: (fetchType: FetchType) => {
       const result = documentStore.scheduleFetch(fetchType);
@@ -255,7 +266,6 @@ export function createDocumentStoreTestEnv<D>(
     },
     errorInNextFetch(error = 'Fetch error') {
       nextFetchError = error;
-      serverMock.setData('error' as D);
     },
     setNextFetchDurations(...durations: number[]) {
       serverMock.setFetchDurations(...durations);
@@ -334,12 +344,4 @@ function formatTableString(
         .join(` ${separator} `),
     )
     .join('\n');
-}
-
-function getDynamicRealtimeThrottleMs(lastDuration: number): number {
-  if (lastDuration > 300) {
-    return 300;
-  }
-
-  return 100;
 }

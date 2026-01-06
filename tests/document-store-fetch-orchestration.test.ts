@@ -827,18 +827,22 @@ test('dynamically throttle realtime updates', async () => {
   await vi.runAllTimersAsync();
 
   const slowDuration = 300;
+  const fastDuration = 200;
 
   // t=0: first RTU with slow fetch
-  env.setNextFetchDurations(slowDuration);
+  env.setNextFetchDurations(slowDuration, fastDuration, fastDuration);
   env.emulateExternalRTU(1);
 
   // t=320: second RTU
   await vi.advanceTimersByTimeAsync(slowDuration + 20);
+  env.addTimelineComment('vvv throttle window (100ms) vvv', 300);
   env.emulateExternalRTU(2);
 
   // t=330: third RTU
   await vi.advanceTimersByTimeAsync(10);
   env.emulateExternalRTU(3);
+
+  env.addTimelineComment('^^^ throttle window ^^^', 400);
 
   // t=660: fourth RTU
   await vi.advanceTimersByTimeAsync(330);
@@ -846,23 +850,33 @@ test('dynamically throttle realtime updates', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.uiChanges).toEqual([0, 1, 4]);
+  expect(env.uiChanges).toEqual([0, 1, 3, 4]);
   expect(env.numOfFinishedFetches).toBe(3);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - server-data-changed
-    fetch-started #1
-    1 - fetch-finished #1
-    1 - ui-changed
-      2 - server-data-changed
-        3 - server-data-changed
-        fetch-started #2
-          4 - server-data-changed
-          4 - fetch-finished #2
-          4 - ui-changed
-          fetch-started #3
-          4 - fetch-finished #3
+    time  | ui |                                   
+    0     | 0  | ui-initialized                    
+    .     | 0  | server-data-changed (value: 1)    
+    .     | 0  | received-ws-data-change-event     
+    .     | 0  | 🔴 >fetch-started                 
+    300ms | 0  | 🔴 <fetch-finished (value: 1)     
+    .     | 1  | ui-changed                        
+    .     | 1  | -- vvv throttle window (100ms) vvv
+    320ms | 1  | server-data-changed (value: 2)    
+    .     | 1  | received-ws-data-change-event     
+    330ms | 1  | server-data-changed (value: 3)    
+    .     | 1  | received-ws-data-change-event     
+    400ms | 1  | -- ^^^ throttle window ^^^        
+    .     | 1  | scheduled-rt-fetch-started        
+    .     | 1  | 🟠 >fetch-started                 
+    600ms | 1  | 🟠 <fetch-finished (value: 3)     
+    .     | 3  | ui-changed                        
+    660ms | 3  | server-data-changed (value: 4)    
+    .     | 3  | received-ws-data-change-event     
+    700ms | 3  | scheduled-rt-fetch-started        
+    .     | 3  | 🟡 >fetch-started                 
+    900ms | 3  | 🟡 <fetch-finished (value: 4)     
+    .     | 4  | ui-changed                        
     "
   `);
 });

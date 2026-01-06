@@ -39,8 +39,8 @@ type FetchState<T> = {
 export type RequestSchedulerOptions<T> = {
   fetchFn: (fetchContext: FetchContext, params: T) => Promise<boolean>;
   on?: (event: RequestSchedulerEvents) => void;
-  lowPriorityThrottleMs?: number;
-  mediumPriorityThrottleMs?: number;
+  lowPriorityThrottleMs: number;
+  mediumPriorityThrottleMs: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 };
 
@@ -77,8 +77,8 @@ export class RequestScheduler<T> {
   constructor(options: RequestSchedulerOptions<T>) {
     this.fetchFn = options.fetchFn;
     this.onEvent = options.on;
-    this.lowPriorityThrottleMs = options.lowPriorityThrottleMs ?? 200;
-    this.mediumPriorityThrottleMs = options.mediumPriorityThrottleMs ?? 10;
+    this.lowPriorityThrottleMs = options.lowPriorityThrottleMs;
+    this.mediumPriorityThrottleMs = options.mediumPriorityThrottleMs;
     this.dynamicRealtimeThrottleMs = options.dynamicRealtimeThrottleMs;
 
     this.fetchState = {
@@ -90,9 +90,9 @@ export class RequestScheduler<T> {
 
   get hasPendingFetch(): boolean {
     return (
-      this.fetchState.inProgress !== null ||
-      this.fetchState.scheduled !== null ||
-      this.fetchState.realtimeScheduled !== null
+      this.fetchState.inProgress !== null
+      || this.fetchState.scheduled !== null
+      || this.fetchState.realtimeScheduled !== null
     );
   }
 
@@ -118,10 +118,7 @@ export class RequestScheduler<T> {
     const fetchTypeToUse =
       this.lastFetchStartTime === 0 ? 'highPriority' : fetchType;
 
-    if (
-      this.dynamicRealtimeThrottleMs &&
-      fetchTypeToUse === 'realtimeUpdate'
-    ) {
+    if (this.dynamicRealtimeThrottleMs && fetchTypeToUse === 'realtimeUpdate') {
       if (this.scheduleRTU(startTime, params)) {
         return 'rt-scheduled';
       }
@@ -225,9 +222,9 @@ export class RequestScheduler<T> {
 
     const shouldAbort = (): boolean => {
       const abort =
-        id !== this.lastFetchIdStarted ||
-        this.mutationInProgress ||
-        id <= this.abortFetchesBeforeOrEqual;
+        id !== this.lastFetchIdStarted
+        || this.mutationInProgress
+        || id <= this.abortFetchesBeforeOrEqual;
 
       this.lastFetchWasAborted = abort;
 
@@ -303,9 +300,9 @@ export class RequestScheduler<T> {
 
     if (fetchType === 'lowPriority') {
       if (
-        this.fetchState.inProgress ||
-        this.fetchState.scheduled ||
-        this.mutationInProgress
+        this.fetchState.inProgress
+        || this.fetchState.scheduled
+        || this.mutationInProgress
       ) {
         return true;
       }
@@ -365,9 +362,9 @@ export class RequestScheduler<T> {
 
   private scheduleRTU(startTime: number, params: T): boolean {
     if (
-      !this.lastFetchDuration ||
-      !this.lastFetchStartTime ||
-      !this.dynamicRealtimeThrottleMs
+      !this.lastFetchDuration
+      || !this.lastFetchStartTime
+      || !this.dynamicRealtimeThrottleMs
     ) {
       return false;
     }
