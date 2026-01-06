@@ -301,12 +301,15 @@ function formatId(id: string | number | undefined): string {
 function getTimelineString(actionsHistory: Action[]): string {
   if (actionsHistory.length === 0) return '\n\n';
 
+  // Sort actions by time, preserving insertion order for same-time events
+  const sortedActions = [...actionsHistory].sort((a, b) => a.time - b.time);
+
   let currentUI: unknown = undefined;
   let prevTime: number | undefined = undefined;
 
   const rows: Array<{ cols: string[] }> = [{ cols: ['time', 'ui', ''] }];
 
-  for (const { action, time, uiValue, actionValue, id } of actionsHistory) {
+  for (const { action, time, uiValue, actionValue, id } of sortedActions) {
     if (uiValue !== undefined) currentUI = uiValue;
 
     const timeStr = formatTime(time, prevTime);
