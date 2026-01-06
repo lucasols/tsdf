@@ -61,6 +61,18 @@ export function createDocumentStoreTestEnv<D>(
       id?: string | number;
     } = {},
   ) {
+    if (action === 'scheduled-fetch-started') {
+      const relatedFetchStartAction = actionsHistory.find(
+        (action) => action.action === '>fetch-started' && time === action.time,
+      );
+
+      if (relatedFetchStartAction) {
+        relatedFetchStartAction.action =
+          '>fetch-started-from-manual-scheduling';
+        return;
+      }
+    }
+
     actionsHistory.push({
       action,
       time,
@@ -117,8 +129,10 @@ export function createDocumentStoreTestEnv<D>(
     disableRefetchOnMount: !forceInitialDataInvalidation,
     dynamicRealtimeThrottleMs,
     onSchedulerEvent: (event) => {
-      if (event === 'scheduled-rt-fetch-started') {
-        addAction('scheduled-rt-fetch-started');
+      switch (event) {
+        case 'scheduled-rt-fetch-started':
+          addAction('scheduled-rt-fetch-started');
+          break;
       }
     },
   });
@@ -171,16 +185,19 @@ export function createDocumentStoreTestEnv<D>(
     scheduleFetch: (fetchType: FetchType) => {
       const result = documentStore.scheduleFetch(fetchType);
 
-      if (result === 'skipped') {
-        addAction('fetch-skipped');
-      }
-
-      if (result === 'scheduled') {
-        addAction('fetch-scheduled');
-      }
-
-      if (result === 'rt-scheduled') {
-        addAction('rt-fetch-scheduled');
+      switch (result) {
+        case 'started':
+          addAction('scheduled-fetch-started');
+          break;
+        case 'skipped':
+          addAction('scheduled-fetch-skipped');
+          break;
+        case 'scheduled':
+          addAction('scheduled-fetch-scheduled');
+          break;
+        case 'rt-scheduled':
+          addAction('rt-fetch-scheduled');
+          break;
       }
 
       return result;

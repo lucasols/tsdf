@@ -666,7 +666,7 @@ test('multiple mutations with low priority fetch between', async () => {
   `);
 });
 
-test('very slow mutation with revalidation then mutation', async () => {
+test('very slow mutation revalidation then mutation', async () => {
   // Expected: long revalidation fetch overlaps a second mutation, causing the
   // first fetch to be aborted and a fresh fetch to commit the latest value.
   // First revalidation (2000ms) > second mutation (200ms) + second revalidation (200ms)
@@ -688,9 +688,13 @@ test('very slow mutation with revalidation then mutation', async () => {
     duration: 200,
   });
 
-  // Wait for mutation (200ms) to finish, revalidation starts (2000ms)
+  // Wait for the mutation to resolve (200ms) so revalidation starts (2000ms)
   // Start second mutation while first revalidation is still in progress
   await vi.advanceTimersByTimeAsync(300);
+
+  env.addTimelineComment(
+    'Slow revalidation still running; scheduler aborts in-flight fetch after new mutation to prevent stale commit.',
+  );
 
   // t=300: second mutation starts during first revalidation (which started at t=200)
   // First revalidation would finish at t=2200, but gets aborted
@@ -704,21 +708,21 @@ test('very slow mutation with revalidation then mutation', async () => {
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - optimistic-ui-commit
-    1 - mutation-started
-    1 - ui-changed
-    1 - mutation-finished
-    fetch-started #1
-      2 - optimistic-ui-commit
-      2 - mutation-started
-      2 - ui-changed
-      2 - mutation-finished
-      fetch-started #2
-      2 - fetch-finished #2
-      fetch-aborted #1
+    time  | ui |                                                                                                                 
+    0     | 0  | ui-initialized                                                                                                  
+    .     | 1  | ⬜ optimistic-ui-commit                                                                                          
+    .     | 1  | ⬜ >mutation-started (value: 1)                                                                                  
+    140ms | 1  | ⬜ <mutation-data-persisted (value: 1)                                                                           
+    200ms | 1  | 🔴 >fetch-started                                                                                               
+    300ms | 1  | -- Slow revalidation still running; scheduler aborts in-flight fetch after new mutation to prevent stale commit.
+    .     | 2  | ⬛ optimistic-ui-commit                                                                                          
+    .     | 2  | ⬛ >mutation-started (value: 2)                                                                                  
+    440ms | 2  | ⬛ <mutation-data-persisted (value: 2)                                                                           
+    500ms | 2  | 🟠 >fetch-started                                                                                               
+    700ms | 2  | 🟠 <fetch-finished (value: 2)                                                                                   
+    2.2s  | 2  | 🔴 <fetch-aborted 🚫                                                                                            
     "
   `);
 });
