@@ -138,11 +138,11 @@ test('prevent overfetch of low priority fetches', async () => {
     "
     time  | ui |                                                          
     0     | 0  | ui-initialized                                           
-    .     | 0  | 🔴 >fetch-started                                        
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling                 
     10ms  | 0  | -- All fetches started after this point should be skipped
-    .     | 0  | fetch-skipped                                            
-    20ms  | 0  | fetch-skipped                                            
-    30ms  | 0  | fetch-skipped                                            
+    .     | 0  | scheduled-fetch-skipped                                  
+    20ms  | 0  | scheduled-fetch-skipped                                  
+    30ms  | 0  | scheduled-fetch-skipped                                  
     800ms | 0  | 🔴 <fetch-finished (value: 0)                            
     "
   `);
@@ -314,7 +314,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     "
     time  | ui |                                           
     0     | 0  | ui-initialized                            
-    .     | 0  | 🔴 >fetch-started                         
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling                                                             
     100ms | 1  | ⬜ optimistic-ui-commit                    
     .     | 1  | ⬜ >mutation-started (value: 1)            
     800ms | 1  | 🔴 <fetch-aborted 🚫                      
