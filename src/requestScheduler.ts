@@ -16,18 +16,18 @@ export type ScheduleFetchResults =
   | 'scheduled'
   | 'rt-scheduled';
 
-type InProgressState = {
-  startTime: number;
-  onEnd: (() => void)[];
-  rtuOnEnd: (() => void) | null;
-};
-
 type ScheduledState<T> = {
   params: T;
 };
 
 type RealtimeScheduledState = {
   timeoutId: ReturnType<typeof setTimeout>;
+};
+
+type InProgressState = {
+  startTime: number;
+  onEnd: (() => void)[];
+  rtuOnEnd: (() => void) | null;
 };
 
 type FetchState<T> = {
@@ -123,9 +123,7 @@ export class RequestScheduler<T> {
       this.lastFetchStartTime === 0 ? 'highPriority' : fetchType;
 
     if (this.dynamicRealtimeThrottleMs && fetchTypeToUse === 'realtimeUpdate') {
-      if (this.scheduleRTU(startTime, params)) {
-        return 'rt-scheduled';
-      }
+      if (this.scheduleRTU(startTime, params)) return 'rt-scheduled';
     }
 
     if (this.shouldSkipFetch(fetchTypeToUse, startTime)) {
@@ -136,7 +134,7 @@ export class RequestScheduler<T> {
       return 'scheduled';
     }
 
-    this.startFetch(params, startTime);
+    void this.startFetch(params, startTime);
 
     return 'started';
   }
@@ -188,7 +186,7 @@ export class RequestScheduler<T> {
       this.onEvent?.('scheduled-fetch-started');
       const params = this.fetchState.scheduled.params;
       this.fetchState.scheduled = null;
-      this.startFetch(params, Date.now());
+      void this.startFetch(params, Date.now());
     }
   }
 
@@ -208,6 +206,10 @@ export class RequestScheduler<T> {
     return false;
   }
 
+  getFetchIsInProgress(): boolean {
+    return this.fetchState.inProgress !== null;
+  }
+
   private async startFetch(params: T, startTime: number): Promise<boolean> {
     if (this.fetchState.inProgress) {
       throw new Error('[tsdf] Fetch already in progress');
@@ -224,7 +226,7 @@ export class RequestScheduler<T> {
     const abortController = new AbortController();
     this.currentAbortController = abortController;
 
-    const shouldAbort = (): boolean => {
+    const shouldAbort: () => boolean = () => {
       const abort =
         id !== this.lastFetchIdStarted
         || this.mutationInProgress
@@ -255,7 +257,7 @@ export class RequestScheduler<T> {
 
     this.currentAbortController = null;
 
-    if (!this.fetchState.inProgress) {
+    if (!this.getFetchIsInProgress()) {
       this.lastFetchStartTime = prevFetchStartTime;
       return false;
     }
@@ -272,9 +274,7 @@ export class RequestScheduler<T> {
       fetchState.realtimeScheduled = null;
     }
 
-    if (!inProgress) {
-      return false;
-    }
+    if (!inProgress) return false;
 
     const onEnd = inProgress.onEnd;
     const rtuOnEnd = inProgress.rtuOnEnd;
@@ -282,7 +282,7 @@ export class RequestScheduler<T> {
     fetchState.inProgress = null;
 
     if (onEnd.length > 0) {
-      onEnd.forEach((cb) => cb());
+      for (const cb of onEnd) cb();
     }
 
     if (rtuOnEnd) {
@@ -329,9 +329,7 @@ export class RequestScheduler<T> {
 
   private shouldScheduleFetch(priority: FetchType, params: T): boolean {
     const shouldSchedule = (() => {
-      if (priority === 'lowPriority') {
-        return false;
-      }
+      if (priority === 'lowPriority') return false;
 
       return this.fetchState.inProgress !== null || this.mutationInProgress;
     })();
@@ -361,7 +359,7 @@ export class RequestScheduler<T> {
       timeoutId: setTimeout(() => {
         this.fetchState.realtimeScheduled = null;
         this.onEvent?.('scheduled-rt-fetch-started');
-        this.startFetch(params, Date.now());
+        void this.startFetch(params, Date.now());
       }, delay),
     };
 
@@ -377,9 +375,7 @@ export class RequestScheduler<T> {
       return false;
     }
 
-    if (this.fetchState.realtimeScheduled) {
-      return true;
-    }
+    if (this.fetchState.realtimeScheduled) return true;
 
     if (this.fetchState.inProgress) {
       this.fetchState.inProgress.rtuOnEnd = () => {
@@ -399,9 +395,7 @@ export class RequestScheduler<T> {
 
       return true;
     } else {
-      if (!this.addDelayedRTU(startTime, params)) {
-        return false;
-      }
+      if (!this.addDelayedRTU(startTime, params)) return false;
     }
 
     return true;

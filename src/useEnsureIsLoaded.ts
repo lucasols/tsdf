@@ -36,20 +36,37 @@ export function useEnsureIsLoaded(
   function useModifyResult<T extends { isLoading: boolean; status: string }>(
     result: T,
   ) {
-    return useMemo(() => {
-      if (ensureIsLoaded) {
-        const newStatus = enabled && isForceLoading ? 'loading' : result.status;
-
-        return {
-          ...result,
-          isLoading: newStatus === 'loading',
-          status: newStatus,
-        };
-      }
-
-      return result;
-    }, [ensureIsLoaded, isForceLoading, result, enabled]);
+    return useGetModifyResult<T>(
+      result,
+      ensureIsLoaded,
+      enabled,
+      isForceLoading,
+    );
   }
 
-  return [useModifyResult, isLoadedEvtEmitter.emit] as const;
+  return [
+    useModifyResult,
+    (isLoaded: boolean) => isLoadedEvtEmitter.emit('isLoaded', isLoaded),
+  ] as const;
+}
+
+function useGetModifyResult<T extends { isLoading: boolean; status: string }>(
+  result: T,
+  ensureIsLoaded: boolean | undefined,
+  enabled: boolean,
+  isForceLoading: boolean,
+) {
+  return useMemo(() => {
+    if (ensureIsLoaded) {
+      const newStatus = enabled && isForceLoading ? 'loading' : result.status;
+
+      return {
+        ...result,
+        isLoading: newStatus === 'loading',
+        status: newStatus,
+      };
+    }
+
+    return result;
+  }, [ensureIsLoaded, isForceLoading, result, enabled]);
 }
