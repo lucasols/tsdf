@@ -640,7 +640,7 @@ test('multiple mutations with low priority fetch between', async () => {
     withRevalidation: true,
   });
 
-  // t=70: low priority fetch (should be coalesced with revalidation)
+  // t=70: low priority fetch (should be skipped while mutations are in flight)
   await vi.advanceTimersByTimeAsync(20);
   const result = env.scheduleFetch('lowPriority');
   expect(result).toBe('scheduled');
@@ -649,20 +649,19 @@ test('multiple mutations with low priority fetch between', async () => {
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - optimistic-ui-commit
-    1 - mutation-started
-    1 - ui-changed
-      2 - optimistic-ui-commit
-      2 - mutation-started
-      2 - ui-changed
-      fetch-scheduled
-    1 - mutation-finished
-      2 - mutation-finished
-      fetch-started #1
-      2 - fetch-finished #1
+    time  | ui |                                      
+    0     | 0  | ui-initialized                       
+    .     | 1  | ⬜ optimistic-ui-commit               
+    .     | 1  | ⬜ >mutation-started (value: 1)       
+    50ms  | 2  | ⬛ optimistic-ui-commit               
+    .     | 2  | ⬛ >mutation-started (value: 2)       
+    70ms  | 2  | scheduled-fetch-scheduled            
+    840ms | 2  | ⬜ <mutation-data-persisted (value: 1)
+    890ms | 2  | ⬛ <mutation-data-persisted (value: 2)
+    1.25s | 2  | 🔴 >fetch-started                    
+    2.05s | 2  | 🔴 <fetch-finished (value: 2)        
     "
   `);
 });
