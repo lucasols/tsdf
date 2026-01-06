@@ -1323,7 +1323,10 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
   env.scheduleFetch('lowPriority');
 
   // RTU fetch is skipped because low priority fetch already handles it
-  env.addTimelineComment('^^^ RTU fetch skipped (low priority already fetching) ^^^', 1500);
+  env.addTimelineComment(
+    '^^^ RTU fetch skipped (low priority already fetching) ^^^',
+    1500,
+  );
 
   await vi.runAllTimersAsync();
 
@@ -1356,7 +1359,7 @@ test('mutation that triggers multiple rtu updates', async () => {
   // Expected: burst of RTU fetch requests is coalesced into a single scheduled RTU fetch.
   const env = createDocumentStoreTestEnv(0, {
     dynamicRealtimeThrottleMs() {
-      return 300;
+      return 500;
     },
   });
 
@@ -1366,25 +1369,32 @@ test('mutation that triggers multiple rtu updates', async () => {
 
   await vi.runAllTimersAsync();
 
-  // t=0: low priority fetch
-  env.setNextFetchDurations(20);
+  // t=0: low priority fetch (800ms default)
   env.scheduleFetch('lowPriority');
 
-  // t=110: mutation (duration 400)
-  await vi.advanceTimersByTimeAsync(110);
+  // t=1s: mutation (1200ms duration, data persisted at 840ms = 70%)
+  await vi.advanceTimersByTimeAsync(1000);
   env.performClientUpdateAction(1, {
-    duration: 400,
+    duration: 1200,
     addServerDataChangeAction: true,
   });
 
-  // t=310: multiple realtime update fetches
-  await vi.advanceTimersByTimeAsync(200);
+  // t=1.9s: burst of RTU requests after server data changed simulating multiple external RTU events (at 1.84s)
+  await vi.advanceTimersByTimeAsync(900);
+  env.addTimelineComment('burst of 6 RTU requests after data change', 1900);
   env.scheduleFetch('realtimeUpdate');
   env.scheduleFetch('realtimeUpdate');
   env.scheduleFetch('realtimeUpdate');
   env.scheduleFetch('realtimeUpdate');
   env.scheduleFetch('realtimeUpdate');
   env.scheduleFetch('realtimeUpdate');
+
+  // All RTU requests coalesce into single fetch after mutation completes
+  env.addTimelineComment('mutation completes at 2.2s', 2200);
+  env.addTimelineComment(
+    'single RTU fetch runs (coalesced from 6 requests)',
+    2700,
+  );
 
   await vi.runAllTimersAsync();
 
@@ -1396,19 +1406,22 @@ test('mutation that triggers multiple rtu updates', async () => {
     time  | ui |
     0     | 0  | ui-initialized
     .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)
-    110ms | 0  | ⬜ >mutation-started (value: 1)
-    310ms | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    390ms | 0  | server-data-changed (value: 1)
+    800ms | 0  | 🔴 <fetch-finished (value: 0)
+    1s    | 0  | ⬜ >mutation-started (value: 1)
+    1.84s | 0  | server-data-changed (value: 1)
     .     | 0  | ⬜ <mutation-data-persisted (value: 1)
-    510ms | 0  | scheduled-rt-fetch-started
+    1.9s  | 0  | -- burst of 6 RTU requests after data change
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    .     | 0  | rt-fetch-scheduled
+    2.2s  | 0  | -- mutation completes at 2.2s
+    .     | 0  | scheduled-rt-fetch-started
     .     | 0  | 🟠 >fetch-started
-    1.31s | 0  | 🟠 <fetch-finished (value: 1)
+    2.7s  | 0  | -- single RTU fetch runs (coalesced from 6 requests)
+    3s    | 0  | 🟠 <fetch-finished (value: 1)
     .     | 1  | ui-changed
     "
   `);
