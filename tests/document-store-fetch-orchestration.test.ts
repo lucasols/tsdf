@@ -215,7 +215,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
 
   env.addTimelineComment(
-    'Revalidation fetch in flight; next mutation aborts it to avoid stale commit.',
+    'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
   );
 
   // Second mutation starts during revalidation
@@ -237,7 +237,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
     .     | 1  | ⬜ >mutation-started (value: 1)                            
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)                     
     1.2s  | 1  | 🔴 >fetch-started                                         
-    1.25s | 1  | -- Revalidation fetch in flight; next mutation aborts it to avoid stale commit.
+    1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
     .     | 2  | ⬛ optimistic-ui-commit                    
     .     | 2  | ⬛ >mutation-started (value: 2)                            
     2s    | 2  | 🔴 <fetch-aborted 🚫                                      
@@ -274,7 +274,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
 
   env.addTimelineComment(
-    'Revalidation fetch in flight; next mutation aborts it to avoid stale commit.',
+    'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
   );
 
   // Second mutation (revalidation fetch from mutation 1 still in progress)
@@ -320,7 +320,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     800ms | 1  | 🔴 <fetch-aborted 🚫                      
     940ms | 1  | ⬜ <mutation-data-persisted (value: 1)     
     1.3s  | 1  | 🟠 >fetch-started                         
-    1.35s | 1  | -- Revalidation fetch in flight; next mutation aborts it to avoid stale commit.
+    1.35s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
     .     | 2  | ⬛ optimistic-ui-commit                    
     .     | 2  | ⬛ >mutation-started (value: 2)            
     2.1s  | 2  | 🟠 <fetch-aborted 🚫                      
@@ -367,7 +367,9 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   });
 
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
-  env.addTimelineComment('Mutation starts; abort refetch (stale).');
+  env.addTimelineComment(
+    'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
+  );
   env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
@@ -404,7 +406,7 @@ test('multiple mutations with revalidation in sequence 3', async () => {
     .     | 1  | ⬜ >mutation-started (value: 1)            
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)     
     1.2s  | 1  | 🔴 >fetch-started                         
-    1.25s | 1  | -- Mutation starts; abort refetch (stale).
+    1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
     .     | 2  | ⬛ optimistic-ui-commit                    
     .     | 2  | ⬛ >mutation-started (value: 2)            
     2s    | 2  | 🔴 <fetch-aborted 🚫                      
