@@ -511,17 +511,18 @@ test('multiple high priority fetches', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.numOfFinishedFetches).toBe(2);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    fetch-started #1
-    fetch-skipped
-    fetch-skipped
-    fetch-scheduled
-    fetch-scheduled
-    0 - fetch-finished #1
-    fetch-started #2
-    0 - fetch-finished #2
+    time  | ui |                                         
+    0     | 0  | ui-initialized                          
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    5ms   | 0  | scheduled-fetch-skipped                 
+    8ms   | 0  | scheduled-fetch-skipped                 
+    15ms  | 0  | scheduled-fetch-scheduled               
+    20ms  | 0  | scheduled-fetch-scheduled               
+    800ms | 0  | 🔴 <fetch-finished (value: 0)           
+    .     | 0  | 🟠 >fetch-started                       
+    1.6s  | 0  | 🟠 <fetch-finished (value: 0)           
     "
   `);
 });
@@ -536,7 +537,7 @@ test('throttle low priority updates', async () => {
 
   await vi.runAllTimersAsync();
 
-  // t=0: first low priority fetch starts (1200ms duration)
+  // t=0: first low priority fetch starts
   env.scheduleFetch('lowPriority');
 
   // t=100: skipped - first fetch in progress
@@ -551,24 +552,25 @@ test('throttle low priority updates', async () => {
   await vi.advanceTimersByTimeAsync(10);
   env.scheduleFetch('lowPriority');
 
-  // Wait for first fetch to complete (1200ms from start)
-  await vi.advanceTimersByTimeAsync(1200);
+  // Wait for first fetch to complete
+  await vi.advanceTimersByTimeAsync(DEFAULT_FETCH_DURATION_MS + 10);
 
-  // t=1320: second fetch starts (outside 200ms throttle window from t=0)
+  // Second fetch starts outside the throttle window from t=0
   env.scheduleFetch('lowPriority');
 
   await vi.runAllTimersAsync();
 
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    fetch-started #1
-    fetch-skipped
-    fetch-skipped
-    fetch-skipped
-    0 - fetch-finished #1
-    fetch-started #2
-    0 - fetch-finished #2
+    time  | ui |                                         
+    0     | 0  | ui-initialized                          
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    100ms | 0  | scheduled-fetch-skipped                 
+    110ms | 0  | scheduled-fetch-skipped                 
+    120ms | 0  | scheduled-fetch-skipped                 
+    800ms | 0  | 🔴 <fetch-finished (value: 0)           
+    930ms | 0  | 🟠 >fetch-started-from-manual-scheduling
+    1.73s | 0  | 🟠 <fetch-finished (value: 0)           
     "
   `);
   expect(env.numOfFinishedFetches).toBe(2);
