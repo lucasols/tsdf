@@ -451,6 +451,7 @@ test('multiple concurrent mutations with revalidation', async () => {
 
   // Second mutation starts 50ms after first (while first is still running)
   await vi.advanceTimersByTimeAsync(50);
+  env.addTimelineComment('Second mutation overlaps first');
   env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
@@ -460,19 +461,19 @@ test('multiple concurrent mutations with revalidation', async () => {
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.serverHistory).toEqual([0, 1, 2]);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 - ui-initialized
-    1 - optimistic-ui-commit
-    1 - mutation-started
-    1 - ui-changed
-      2 - optimistic-ui-commit
-      2 - mutation-started
-      2 - ui-changed
-    1 - mutation-finished
-      2 - mutation-finished
-      fetch-started #1
-      2 - fetch-finished #1
+    time  | ui |                                      
+    0     | 0  | ui-initialized                       
+    .     | 1  | ⬜ optimistic-ui-commit               
+    .     | 1  | ⬜ >mutation-started (value: 1)       
+    50ms  | 1  | -- Second mutation overlaps first    
+    .     | 2  | ⬛ optimistic-ui-commit               
+    .     | 2  | ⬛ >mutation-started (value: 2)       
+    840ms | 2  | ⬜ <mutation-data-persisted (value: 1)
+    890ms | 2  | ⬛ <mutation-data-persisted (value: 2)
+    1.25s | 2  | 🔴 >fetch-started                    
+    2.05s | 2  | 🔴 <fetch-finished (value: 2)        
     "
   `);
 
