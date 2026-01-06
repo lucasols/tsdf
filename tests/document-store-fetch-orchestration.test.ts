@@ -576,6 +576,46 @@ test('throttle low priority updates', async () => {
   expect(env.numOfFinishedFetches).toBe(2);
 });
 
+test('throttle low priority after a fast fetch completes', async () => {
+  // Expected: low priority throttling uses the fetch start time, even if it finishes quickly.
+  const env = createDocumentStoreTestEnv(0);
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  env.setNextFetchDurations(50, 50);
+
+  // t=0: first low priority fetch starts (treated as high priority when no prior fetch exists)
+  env.scheduleFetch('lowPriority');
+
+  // t=60: first fetch finished (50ms), still within the throttle window
+  await vi.advanceTimersByTimeAsync(60);
+  const result = env.scheduleFetch('lowPriority');
+  expect(result).toBe('skipped');
+
+  // t=210: outside throttle window
+  await vi.advanceTimersByTimeAsync(150);
+  env.scheduleFetch('lowPriority');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |                                         
+    0     | 0  | ui-initialized                          
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    50ms  | 0  | 🔴 <fetch-finished (value: 0)           
+    60ms  | 0  | scheduled-fetch-skipped                 
+    210ms | 0  | 🟠 >fetch-started-from-manual-scheduling
+    260ms | 0  | 🟠 <fetch-finished (value: 0)           
+    "
+  `);
+});
+
 test('multiple mutations with low priority fetch between', async () => {
   // Expected: low priority fetch is scheduled but coalesced with mutation revalidation,
   // resulting in a single fetch commit.
