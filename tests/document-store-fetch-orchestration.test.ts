@@ -728,7 +728,7 @@ test('very slow mutation revalidation then mutation', async () => {
 });
 
 test('fetch error', async () => {
-  // Expected: first fetch succeeds, second fetch errors and commits error state.
+  // Expected: first fetch succeeds, second fetch errors and UI enters error state.
   const env = createDocumentStoreTestEnv(0, {
     forceInitialDataInvalidation: true,
   });
@@ -738,30 +738,29 @@ test('fetch error', async () => {
     env.trackUIChanges(error ? 'error' : data?.value);
   });
 
-  // t=0: first fetch starts automatically due to forceInitialDataInvalidation
-  await vi.advanceTimersByTimeAsync(50);
+  // First fetch starts automatically due to forceInitialDataInvalidation
+  await vi.advanceTimersByTimeAsync(DEFAULT_FETCH_DURATION_MS + 10);
 
-  // t=50: mark next fetch as error
+  // Mark next fetch as error (helper also mutates server data for timeline)
   env.errorInNextFetch();
 
-  // Wait for first fetch to complete (1200ms default)
-  await vi.advanceTimersByTimeAsync(1200);
-
-  // t=1250: second fetch (will error)
+  // Second fetch (will error)
   env.scheduleFetch('lowPriority');
 
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 'error']);
   expect(env.numOfFinishedFetches).toBe(2);
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toContain('fetch-error');
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    fetch-started #1
-    0 - fetch-finished #1
-    0 - ui-initialized
-    fetch-started #2
-    error - fetch-error #2
-    error - ui-changed
+    time  | ui    |                                         
+    0     | -     | 🔴 >fetch-started                       
+    800ms | -     | 🔴 <fetch-finished (value: 0)           
+    .     | 0     | ui-initialized                          
+    810ms | 0     | 🟠 >fetch-started-from-manual-scheduling
+    .     | 0     | 🟠 <fetch-error (value: "error")        
+    .     | error | ui-changed                              
     "
   `);
 });
