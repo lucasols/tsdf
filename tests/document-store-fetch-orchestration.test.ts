@@ -1298,7 +1298,7 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
   // the low priority fetch commits the server state.
   const env = createDocumentStoreTestEnv(0, {
     dynamicRealtimeThrottleMs() {
-      return 300;
+      return 500;
     },
   });
 
@@ -1308,18 +1308,22 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
 
   await vi.runAllTimersAsync();
 
-  // t=0: low priority fetch
-  env.setNextFetchDurations(20);
+  // t=0: low priority fetch (800ms default)
   env.scheduleFetch('lowPriority');
 
-  // t=110: external RTU
-  await vi.advanceTimersByTimeAsync(110);
+  // t=1s: external RTU schedules fetch after 500ms throttle (would start at 1.5s)
+  await vi.advanceTimersByTimeAsync(1000);
   env.emulateExternalRTU(1);
+  env.addTimelineComment('RTU received, fetch scheduled for 1.5s', 1000);
+  env.addTimelineComment('vvv 500ms RTU throttle vvv', 1001);
 
-  // t=300: low priority fetch
-  await vi.advanceTimersByTimeAsync(190);
-  env.setNextFetchDurations(20);
+  // t=1.3s: low priority fetch scheduled before RTU throttle ends
+  await vi.advanceTimersByTimeAsync(300);
+  env.addTimelineComment('low priority fetch preempts RTU fetch', 1300);
   env.scheduleFetch('lowPriority');
+
+  // RTU fetch is skipped because low priority fetch already handles it
+  env.addTimelineComment('^^^ RTU fetch skipped (low priority already fetching) ^^^', 1500);
 
   await vi.runAllTimersAsync();
 
@@ -1329,15 +1333,21 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |
-    0     | 0  | ui-initialized
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)
-    110ms | 0  | server-data-changed (value: 1)
-    .     | 0  | received-ws-data-change-event
-    300ms | 0  | 🟠 >fetch-started-from-manual-scheduling
-    320ms | 0  | 🟠 <fetch-finished (value: 1)
-    .     | 1  | ui-changed
+    time   | ui |
+    0      | 0  | ui-initialized
+    .      | 0  | 🔴 >fetch-started-from-manual-scheduling
+    800ms  | 0  | 🔴 <fetch-finished (value: 0)
+    1s     | 0  | server-data-changed (value: 1)
+    .      | 0  | received-ws-data-change-event
+    .      | 0  | -- RTU received, fetch scheduled for 1.5s
+    1.001s | 0  | -- vvv 500ms RTU throttle vvv
+    1.3s   | 0  | scheduled-rt-fetch-started
+    .      | 0  | 🟠 >fetch-started
+    .      | 0  | -- low priority fetch preempts RTU fetch
+    .      | 0  | scheduled-fetch-skipped
+    1.5s   | 0  | -- ^^^ RTU fetch skipped (low priority already fetching) ^^^
+    2.1s   | 0  | 🟠 <fetch-finished (value: 1)
+    .      | 1  | ui-changed
     "
   `);
 });
