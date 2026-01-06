@@ -432,6 +432,49 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   `);
 });
 
+test('high priority fetch during mutation', async () => {
+  // Expected: high priority fetch triggered during mutation should be scheduled
+  // to run after the mutation completes, preventing stale data commits.
+  const env = createDocumentStoreTestEnv(0);
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // Start a mutation (without revalidation to isolate the high priority fetch behavior)
+  env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+  });
+
+  // Trigger high priority fetch while mutation is in progress
+  await vi.advanceTimersByTimeAsync(100);
+  env.addTimelineComment(
+    'High priority fetch during mutation; should be scheduled after mutation completes.',
+  );
+  const result = env.scheduleFetch('highPriority');
+  expect(result).toBe('scheduled');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |                                                                                      
+    0     | 0  | ui-initialized                                                                       
+    .     | 1  | ⬜ optimistic-ui-commit                                                               
+    .     | 1  | ⬜ >mutation-started (value: 1)                                                       
+    100ms | 1  | -- High priority fetch during mutation; should be scheduled after mutation completes.
+    .     | 1  | scheduled-fetch-scheduled                                                            
+    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)                                                
+    1.2s  | 1  | 🔴 >fetch-started                                                                    
+    2s    | 1  | 🔴 <fetch-finished (value: 1)                                                        
+    "
+  `);
+});
+
 test('multiple concurrent mutations with revalidation', async () => {
   // Expected: overlapping mutations schedule a single revalidation fetch that
   // skips redundant requests and commits only once with the latest data.
