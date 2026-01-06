@@ -112,6 +112,10 @@ export class RequestScheduler<T> {
     this.lastFetchStartTime = startTime;
   }
 
+  private getFetchState(): FetchState<T> {
+    return this.fetchState;
+  }
+
   scheduleFetch(fetchType: FetchType, params: T): ScheduleFetchResults {
     const startTime = Date.now();
 
@@ -260,18 +264,22 @@ export class RequestScheduler<T> {
       this.lastFetchDuration = Date.now() - startTime;
     }
 
-    const rtScheduled: RealtimeScheduledState | null =
-      this.fetchState.realtimeScheduled;
-    if (rtScheduled) {
-      clearTimeout(rtScheduled.timeoutId);
-      this.fetchState.realtimeScheduled = null;
+    const fetchState = this.getFetchState();
+    const { realtimeScheduled, inProgress } = fetchState;
+
+    if (realtimeScheduled) {
+      clearTimeout(realtimeScheduled.timeoutId);
+      fetchState.realtimeScheduled = null;
     }
 
-    const inProgress = this.fetchState.inProgress;
+    if (!inProgress) {
+      return false;
+    }
+
     const onEnd = inProgress.onEnd;
     const rtuOnEnd = inProgress.rtuOnEnd;
 
-    this.fetchState.inProgress = null;
+    fetchState.inProgress = null;
 
     if (onEnd.length > 0) {
       onEnd.forEach((cb) => cb());
