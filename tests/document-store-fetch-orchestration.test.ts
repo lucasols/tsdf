@@ -950,42 +950,51 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   `);
 });
 
-  test.concurrent('simple mutation that triggers a RTU', async () => {
+test('simple mutation that triggers a RTU', async () => {
     // Expected: mutation triggers RTU fetch after optimistic commit, committing the server state.
-    const store = createTestStore(0);
+  const env = createDocumentStoreTestEnv(0, {
+    dynamicRealtimeThrottleMs: (lastDuration) => (lastDuration > 300 ? 300 : 100),
+  });
 
-    await waitTimeline(
-      [
-        [0, () => store.fetch('lowPriority', 20)],
-        [
-          110,
-          () =>
-            action(store, 1, {
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // t=0: schedule low priority fetch (short duration)
+  env.setNextFetchDurations(20);
+  env.scheduleFetch('lowPriority');
+
+  // t=110: mutation with RTU
+  await vi.advanceTimersByTimeAsync(110);
+  env.performClientUpdateAction(1, {
               withOptimisticUpdate: true,
               duration: 200,
               triggerRTU: true,
-            }),
-        ],
-      ],
-      600,
-    );
+    addServerDataChangeAction: true,
+  });
 
-    expect(store.server.history).toEqual([0, 1]);
-    expect(store.ui.changesHistory).toEqual([0, 1]);
-    expect(store.numOfFetchs).toEqual(2);
+  await vi.runAllTimersAsync();
 
-    expect(store.actions).toMatchTimeline(`
+  expect(env.serverHistory).toEqual([0, 1]);
+  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.timelineString).toContain('scheduled-rt-fetch-started');
+  expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      .
-      1 - optimistic-ui-commit
-      1 - mutation-started
-      1 - server-data-changed
-      1 - mutation-finished
-
-      rt-fetch-scheduled
-      scheduled-rt-fetch-started : 2
-      1 - fetch-finished : 2
-      1 - fetch-ui-commit
+    time  | ui |                                         
+    0     | 0  | ui-initialized                          
+    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    20ms  | 0  | 🔴 <fetch-finished (value: 0)           
+    110ms | 1  | ⬜ optimistic-ui-commit                  
+    .     | 1  | ⬜ >mutation-started (value: 1)          
+    250ms | 1  | server-data-changed (value: 1)          
+    .     | 1  | ⬜ <mutation-data-persisted (value: 1)   
+    300ms | 1  | received-ws-data-change-event           
+    310ms | 1  | scheduled-rt-fetch-started              
+    .     | 1  | 🟠 >fetch-started                       
+    1.11s | 1  | 🟠 <fetch-finished (value: 1)           
       "
     `);
   });
