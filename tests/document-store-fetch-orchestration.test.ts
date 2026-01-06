@@ -33,14 +33,15 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   expect(env.uiChanges).toEqual([0, 1]);
 
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 | ui-initialized
-    1 | optimistic-ui-commit
-    1 | mutation-started
-    1 | mutation-finished
-    #1 fetch-started
-    #1 fetch-finished -> 1
+    time  | ui |                              
+    0     | 0  | ui-initialized               
+    .     | 1  | M#1 optimistic-ui-commit     
+    .     | 1  | M#1 mutation-started         
+    840ms | 1  | M#1 mutation-finished        
+    1.2s  | 1  | F#1 fetch-started            
+    2s    | 1  | F#1 fetch-finished (value: 1)
     "
   `);
 });
@@ -63,12 +64,13 @@ test('simple mutation with optimistic update', async () => {
 
   expect(env.uiChanges).toEqual([0, 1]);
 
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 | ui-initialized
-    1 | optimistic-ui-commit
-    1 | mutation-started
-    1 | mutation-finished
+    time  | ui |                         
+    0     | 0  | ui-initialized          
+    .     | 1  | M#1 optimistic-ui-commit
+    .     | 1  | M#1 mutation-started    
+    840ms | 1  | M#1 mutation-finished   
     "
   `);
 });
@@ -91,14 +93,15 @@ test('simple mutation without optimistic update', async () => {
 
   expect(env.uiChanges).toEqual([0, 1]);
 
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 | ui-initialized
-    1 | mutation-started
-    1 | mutation-finished
-    #1 fetch-started
-    #1 fetch-finished -> 1
-    1 | ui-changed
+    time  | ui |                              
+    0     | 0  | ui-initialized               
+    .     | 0  | M#1 mutation-started         
+    840ms | 0  | M#1 mutation-finished        
+    1.2s  | 0  | F#1 fetch-started            
+    2s    | 0  | F#1 fetch-finished (value: 1)
+    .     | 1  | ui-changed                   
     "
   `);
 });
@@ -115,6 +118,10 @@ test('prevent overfetch of low priority fetches', async () => {
   env.scheduleFetch('lowPriority');
   await vi.advanceTimersByTimeAsync(10);
 
+  env.addTimelineComment(
+    'All fetches started after this point should be skipped',
+  );
+
   env.scheduleFetch('lowPriority');
   await vi.advanceTimersByTimeAsync(10);
 
@@ -127,14 +134,16 @@ test('prevent overfetch of low priority fetches', async () => {
 
   expect(env.numOfFinishedFetches).toBe(1);
 
-  expect(env.actionsString).toMatchInlineSnapshot(`
+  expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    0 | ui-initialized
-    #1 fetch-started
-    fetch-skipped
-    fetch-skipped
-    fetch-skipped
-    #1 fetch-finished -> 0
+    time  | ui |                                                          
+    0     | 0  | ui-initialized                                           
+    .     | 0  | F#1 fetch-started                                        
+    10ms  | 0  | -- All fetches started after this point should be skipped
+    .     | 0  | fetch-skipped                                            
+    20ms  | 0  | fetch-skipped                                            
+    30ms  | 0  | fetch-skipped                                            
+    800ms | 0  | F#1 fetch-finished (value: 0)                            
     "
   `);
 });

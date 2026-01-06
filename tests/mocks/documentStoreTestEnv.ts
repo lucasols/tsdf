@@ -1,19 +1,20 @@
 import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
-import { arrayWithPrev } from '../../test-old/utils/arrayUtils';
 import { createServerMock } from './serverMock';
 
 type Action = {
   action: string;
   time: number;
-  value: any;
+  uiValue: unknown;
+  actionValue?: unknown;
+  id?: string | number;
 };
 
 export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
     forceInitialDataInvalidation,
-    dynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs = getDynamicRealtimeThrottleMs,
   }: {
     forceInitialDataInvalidation?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -23,6 +24,7 @@ export function createDocumentStoreTestEnv<D>(
   let numOfFetches = 0;
   let numOfStartedFetches = 0;
   let fetchIdCounter = 0;
+  let mutationIdCounter = 0;
   let nextFetchError: string | null = null;
 
   const uiChanges: (number | 'error' | undefined)[] = [];
@@ -34,23 +36,46 @@ export function createDocumentStoreTestEnv<D>(
     return Date.now() - initialTime;
   }
 
-  function addAction(action: string, value?: unknown) {
+  function addAction(
+    action: string,
+    {
+      uiValue,
+      actionValue,
+      time = getRelativeTime(),
+      id,
+    }: {
+      uiValue?: unknown;
+      actionValue?: unknown;
+      time?: number;
+      id?: string | number;
+    } = {},
+  ) {
     actionsHistory.push({
       action,
-      time: getRelativeTime(),
-      value,
+      time,
+      uiValue,
+      actionValue: actionValue,
+      id,
     });
   }
 
-  const serverMock = createServerMock<D>(serverInitialData, addAction);
+  const serverMock = createServerMock<D>(
+    serverInitialData,
+    (action, data, id) => {
+      addAction(action, {
+        actionValue: data,
+        id,
+      });
+    },
+  );
 
   const documentStore = createDocumentStore<{ value: D }, { error: string }>({
     errorNormalizer(exception) {
       return { error: exception.message };
     },
     fetchFn: async (signal) => {
-      const fetchId = ++fetchIdCounter;
-      addAction(`fetch-started #${fetchId}`);
+      const fetchId = `F#${++fetchIdCounter}`;
+      addAction(`fetch-started`, { id: fetchId });
 
       numOfStartedFetches++;
 
@@ -58,19 +83,19 @@ export function createDocumentStoreTestEnv<D>(
         numOfFetches++;
         const error = nextFetchError;
         nextFetchError = null;
-        addAction(`fetch-error #${fetchId}`, 'error');
+        addAction(`fetch-error`, { actionValue: 'error', id: fetchId });
         throw new Error(error);
       }
 
       const value = await serverMock.fetch();
 
       if (signal.aborted) {
-        addAction(`fetch-aborted #${fetchId}`);
+        addAction(`fetch-aborted`, { id: fetchId });
         throw new Error('Aborted');
       }
 
       numOfFetches++;
-      addAction(`fetch-finished #${fetchId}`, value);
+      addAction(`fetch-finished`, { actionValue: value, id: fetchId });
       return { value };
     },
     disableInitialDataInvalidation: !forceInitialDataInvalidation,
@@ -82,7 +107,7 @@ export function createDocumentStoreTestEnv<D>(
     dynamicRealtimeThrottleMs,
     onSchedulerEvent: (event) => {
       if (event === 'scheduled-rt-fetch-started') {
-        addAction(`scheduled-rt-fetch-started #${fetchIdCounter + 1}`);
+        addAction('scheduled-rt-fetch-started', { id: `F#${fetchIdCounter + 1}` });
       }
     },
   });
@@ -102,18 +127,35 @@ export function createDocumentStoreTestEnv<D>(
     get uiChanges() {
       return uiChanges;
     },
+    get actions() {
+      return actionsHistory;
+    },
     trackUIChanges: (value: number | 'error' | undefined) => {
       if (value !== lastTrackedValue) {
         lastTrackedValue = value;
         uiChanges.push(value);
 
         if (value !== undefined) {
-          addAction(
-            uiChanges.length === 1 ? 'ui-initialized' : 'ui-changed',
-            value,
-          );
+          const time = getRelativeTime();
+          if (
+            actionsHistory.some(
+              (action) =>
+                action.action === 'optimistic-ui-commit'
+                && action.time === time
+                && action.uiValue === value,
+            )
+          ) {
+            return;
+          }
+
+          addAction(uiChanges.length === 1 ? 'ui-initialized' : 'ui-changed', {
+            uiValue: value,
+          });
         }
       }
+    },
+    addTimelineComment: (comment: string) => {
+      addAction(`-- ${comment}`);
     },
     scheduleFetch: (fetchType: FetchType) => {
       const result = documentStore.scheduleFetch(fetchType);
@@ -149,6 +191,8 @@ export function createDocumentStoreTestEnv<D>(
         addServerDataChangeAction?: boolean;
       } = {},
     ) => {
+      const mutationId = `M#${++mutationIdCounter}`;
+
       return documentStore.performMutation({
         optimisticUpdate:
           withOptimisticUpdate ?
@@ -156,7 +200,10 @@ export function createDocumentStoreTestEnv<D>(
               documentStore.updateState((draft) => {
                 draft.value = newValue;
               });
-              addAction('optimistic-ui-commit', newValue);
+              addAction('optimistic-ui-commit', {
+                uiValue: newValue,
+                id: mutationId,
+              });
             }
           : undefined,
         mutation: async () => {
@@ -165,23 +212,22 @@ export function createDocumentStoreTestEnv<D>(
               duration,
               triggerRTUEvent: triggerRTU,
               addServerDataChangeAction,
+              mutationId,
             }),
           };
         },
         revalidateOnSuccess: withRevalidation,
       });
     },
-    get actionsString() {
-      return getActionsString(actionsHistory);
-    },
-    timeline(groupByTime = 10, startAt = 0): string {
-      return getTimelineString(actionsHistory, groupByTime, startAt);
+    get timelineString() {
+      return getTimelineString(actionsHistory);
     },
     get serverHistory() {
       return serverMock.history;
     },
     errorInNextFetch(error = 'Fetch error') {
       nextFetchError = error;
+      serverMock.setData('error' as D);
     },
     setNextFetchDurations(...durations: number[]) {
       serverMock.setFetchDurations(...durations);
@@ -198,121 +244,71 @@ export function createDocumentStoreTestEnv<D>(
   };
 }
 
-function getActionsString(actionsHistory: Action[]) {
-  let lastIndentation = '';
-
-  return [
-    '\n',
-    actionsHistory
-      .map(({ action, value }) => {
-        if (value !== undefined) {
-          lastIndentation = stringFromLength(
-            value === 'error' ? 0 : (value - 1) * 2,
-          );
-
-          return `${lastIndentation}${typeof value === 'object' ? JSON.stringify(value) : value} - ${action}`;
-        } else {
-          return `${lastIndentation}${action}`;
-        }
-      })
-      .join('\n'),
-    '\n',
-  ].join('');
+function formatTime(ms: number, prevMs: number | undefined): string {
+  if (prevMs !== undefined && ms === prevMs) return '.';
+  if (ms === 0) return '0';
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`;
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${ms}ms`;
 }
 
-function stringFromLength(length: number, string = ' ') {
-  return Array.from({ length })
-    .map((_) => string)
-    .join('');
+function formatId(id: string | number | undefined): string {
+  if (id === undefined) return '';
+  return `${id} `;
 }
 
-function getTimelineString(
-  actionsHistory: Action[],
-  groupByTime: number,
-  startAt: number,
-) {
-  const timeline: string[] = [];
-  let lastIndentation = '';
-  let lastAction = '';
+function getTimelineString(actionsHistory: Action[]): string {
+  if (actionsHistory.length === 0) return '\n\n';
 
-  const dividerText = '.';
+  let currentUI: unknown = undefined;
+  let prevTime: number | undefined = undefined;
 
-  const actionsWithNormalizedTime: Action[] = [];
+  const rows: Array<{ cols: string[] }> = [{ cols: ['time', 'ui', ''] }];
 
-  actionsHistory.forEach((action) => {
-    if (action.time < startAt) {
-      return;
+  for (const { action, time, uiValue, actionValue, id } of actionsHistory) {
+    if (uiValue !== undefined) currentUI = uiValue;
+
+    const timeStr = formatTime(time, prevTime);
+    const uiStr = currentUI !== undefined ? String(currentUI) : '-';
+
+    const idStr = formatId(id);
+    let actionStr = `${idStr}${action}`;
+    if (actionValue !== undefined && action.includes('fetch-finished')) {
+      actionStr += ` (value: ${JSON.stringify(actionValue)})`;
     }
 
-    let time = action.time;
-
-    time = time - (time % groupByTime);
-
-    actionsWithNormalizedTime.push({
-      ...action,
-      time,
-    });
-  });
-
-  for (const [{ action, time, value }, prev] of arrayWithPrev(
-    actionsWithNormalizedTime,
-  )) {
-    if (prev) {
-      const timeDiff = time - prev.time;
-
-      if (timeDiff > 50) {
-        timeline.push(dividerText);
-      }
-    }
-
-    let actionText: string;
-
-    if (value) {
-      lastIndentation = stringFromLength(
-        value === 'error' ? 0 : (value - 1) * 2,
-      );
-
-      actionText = `${lastIndentation}${value} - ${action}`;
-    } else {
-      actionText = `${lastIndentation}${action}`;
-    }
-
-    if (lastAction.startsWith(`${time}ms:`)) {
-      lastAction = `${time}ms:--${actionText}`;
-    } else {
-      lastAction = `${time}ms: ${actionText}`;
-    }
-
-    timeline.push(lastAction);
+    rows.push({ cols: [timeStr, uiStr, actionStr] });
+    prevTime = time;
   }
 
-  const maxTimeLength = Math.max(
-    ...timeline.map((action) =>
-      action.includes(':') ? action.split(':')[0]!.length : 0,
-    ),
-  );
+  return ['\n', formatTableString(rows), '\n'].join('');
+}
 
-  const timelineWithBalancedStart = timeline.map((action) => {
-    if (action.startsWith(dividerText)) {
-      return `${stringFromLength(maxTimeLength)}-`;
-    }
+function formatTableString(
+  rows: Array<{ cols: string[]; separator?: string }>,
+): string {
+  if (rows.length === 0) return '';
 
-    const [time, actionType] = action.split(':');
+  const colWidths: number[] = [];
+  for (const { cols } of rows) {
+    cols.forEach((col, i) => {
+      colWidths[i] = Math.max(colWidths[i] ?? 0, col.length);
+    });
+  }
 
-    return `${stringFromLength(
-      maxTimeLength - time!.length,
-    )}${time}:${actionType}`;
-  });
+  return rows
+    .map(({ cols, separator = '|' }) =>
+      cols
+        .map((col, i) => col.padEnd(colWidths[i] ?? 0))
+        .join(` ${separator} `),
+    )
+    .join('\n');
+}
 
-  return `\n${timelineWithBalancedStart
-    .map((action) => {
-      if (action.includes('--')) {
-        const [time, actionType] = action.split(':--');
+function getDynamicRealtimeThrottleMs(lastDuration: number): number {
+  if (lastDuration > 300) {
+    return 300;
+  }
 
-        return ` ${stringFromLength(time!.length - 1)}: ${actionType}`;
-      }
-
-      return action;
-    })
-    .join('\n')}\n`;
+  return 100;
 }

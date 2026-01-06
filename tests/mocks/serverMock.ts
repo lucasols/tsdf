@@ -1,11 +1,16 @@
 import { evtmitter } from 'evtmitter';
 import { sleep } from '../../test-old/utils/sleep';
 
+export const DEFAULT_FETCH_DURATION_MS = 800;
+export const DEFAULT_MUTATION_DURATION_MS = 1200;
+export const DEFAULT_RTU_DELAY_MS = 50;
+
 export function createServerMock<Data>(
   initialData: Data,
   listenForActions?: (
-    action: 'mutation-started' | 'mutation-finished' | 'server-data-changed',
+    action: string,
     data?: Data,
+    id?: string | number,
   ) => void,
 ) {
   const serverDataHistory: Data[] = [initialData];
@@ -16,18 +21,22 @@ export function createServerMock<Data>(
   async function mutateData(
     newData: Data,
     {
-      duration = 1200,
+      duration = DEFAULT_MUTATION_DURATION_MS,
       setDataAt = duration * 0.7,
       triggerRTUEvent,
       addServerDataChangeAction,
+      mutationId,
+      addMutationResolvedAction,
     }: {
       duration?: number;
       setDataAt?: number;
       triggerRTUEvent?: boolean;
       addServerDataChangeAction?: boolean;
+      addMutationResolvedAction?: boolean;
+      mutationId?: string | number;
     } = {},
   ) {
-    listenForActions?.('mutation-started', newData);
+    listenForActions?.('mutation-started', newData, mutationId);
 
     await sleep(setDataAt);
 
@@ -38,14 +47,19 @@ export function createServerMock<Data>(
     }
 
     if (triggerRTUEvent) {
-      sleep(100).then(() => {
+      sleep(DEFAULT_RTU_DELAY_MS).then(() => {
         wsEvents.emit('data_changed', undefined);
       });
     }
 
-    listenForActions?.('mutation-finished', newData);
+    // "mutation-finished" marks when server data is applied (setDataAt), not promise resolution.
+    listenForActions?.('mutation-finished', newData, mutationId);
 
     await sleep(duration - setDataAt);
+
+    if (addMutationResolvedAction) {
+      listenForActions?.('mutation-resolved', newData, mutationId);
+    }
   }
 
   return {
@@ -59,7 +73,7 @@ export function createServerMock<Data>(
       return serverDataHistory.at(-1)!;
     },
     history: serverDataHistory,
-    fetch: async (duration = 1200) => {
+    fetch: async (duration = DEFAULT_FETCH_DURATION_MS) => {
       const actualDuration = customFetchDurations.shift() ?? duration;
       await sleep(actualDuration);
       return serverDataHistory.at(-1)!;
