@@ -372,16 +372,19 @@ export function formatTimelineString(actionsHistory: Action[]): string {
     return formatMultiItemTimelineString(sortedActions, Array.from(itemIds).sort());
   }
 
+  // Check if any action has UI values
+  const hasUIValues = sortedActions.some((a) => a.uiValue !== undefined);
+
   let currentUI: unknown = undefined;
   let prevTime: number | undefined = undefined;
 
-  const rows: Array<{ cols: string[] }> = [{ cols: ['time', 'ui', ''] }];
+  const headerCols = hasUIValues ? ['time', 'ui', ''] : ['time', ''];
+  const rows: Array<{ cols: string[] }> = [{ cols: headerCols }];
 
   for (const { action, time, uiValue, actionValue, id } of sortedActions) {
     if (uiValue !== undefined) currentUI = uiValue;
 
     const timeStr = formatTime(time, prevTime);
-    const uiStr = currentUI !== undefined ? JSON.stringify(currentUI) : '-';
 
     const idStr = formatId(id);
     let actionStr = `${idStr}${action}`;
@@ -389,7 +392,13 @@ export function formatTimelineString(actionsHistory: Action[]): string {
       actionStr += ` (value: ${JSON.stringify(actionValue)})`;
     }
 
-    rows.push({ cols: [timeStr, uiStr, actionStr] });
+    if (hasUIValues) {
+      const uiStr = currentUI !== undefined ? JSON.stringify(currentUI) : '-';
+      rows.push({ cols: [timeStr, uiStr, actionStr] });
+    } else {
+      rows.push({ cols: [timeStr, actionStr] });
+    }
+
     prevTime = time;
   }
 

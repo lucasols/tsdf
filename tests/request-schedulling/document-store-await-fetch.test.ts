@@ -11,7 +11,9 @@ afterEach(() => {
 
 describe('awaitFetch basic behavior', () => {
   test('returns data on successful fetch', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      forceInitialDataInvalidation: true,
+    });
 
     const resultPromise = env.awaitFetch();
 
@@ -28,7 +30,9 @@ describe('awaitFetch basic behavior', () => {
   });
 
   test('returns error on failed fetch', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      forceInitialDataInvalidation: true,
+    });
 
     env.errorInNextFetch('Network error');
 
@@ -91,6 +95,14 @@ describe('awaitFetch coalescing behavior', () => {
 
     // Only one fetch should have been executed
     expect(env.numOfFinishedFetches).toBe(1);
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      10ms  | 🔴 >fetch-started
+      810ms | 🔴 <fetch-finished (value: 42)
+      "
+    `);
   });
 
   test('awaitFetch during coalescing window joins the window', async () => {
@@ -114,6 +126,14 @@ describe('awaitFetch coalescing behavior', () => {
     expect(result1).toEqual({ data: { value: 42 }, error: null });
     expect(result2).toEqual({ data: { value: 42 }, error: null });
     expect(env.numOfFinishedFetches).toBe(1);
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      50ms  | 🔴 >fetch-started
+      850ms | 🔴 <fetch-finished (value: 42)
+      "
+    `);
   });
 
   test('awaitFetch during ongoing fetch waits for completion then schedules another', async () => {
@@ -137,6 +157,16 @@ describe('awaitFetch coalescing behavior', () => {
 
     // Two fetches: first one completes, second one scheduled during first
     expect(env.numOfFinishedFetches).toBe(2);
+
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      10ms  | 🔴 >fetch-started
+      810ms | 🔴 <fetch-finished (value: 42)
+      820ms | 🟠 >fetch-started
+      1.62s | 🟠 <fetch-finished (value: 42)
+      "
+    `);
   });
 });
 
@@ -276,22 +306,5 @@ describe('awaitFetch timing', () => {
     await vi.runAllTimersAsync();
     await fetchPromise;
     expect(resolved).toBe(true);
-  });
-
-  test('awaitFetch with timeline tracking', async () => {
-    const env = createDocumentStoreTestEnv(42);
-
-    const fetchPromise = env.awaitFetch();
-
-    await vi.runAllTimersAsync();
-    await fetchPromise;
-
-    expect(env.timelineString).toMatchInlineSnapshot(`
-      "
-      time  | ui |
-      10ms  | -  | 🔴 >fetch-started
-      810ms | -  | 🔴 <fetch-finished (value: 42)
-      "
-    `);
   });
 });
