@@ -240,9 +240,24 @@ export class RequestScheduler<T> {
     return 'triggered';
   }
 
-  async awaitFetch(params: T): Promise<boolean> {
+  async awaitFetch(
+    params: T,
+    options: { timeoutMs?: number } = {},
+  ): Promise<boolean | 'timeout'> {
+    const { timeoutMs = 30_000 } = options;
+
     this.scheduleFetch('highPriority', params);
 
+    const fetchPromise = this.waitForCurrentFetch();
+
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      setTimeout(() => resolve('timeout'), timeoutMs);
+    });
+
+    return Promise.race([fetchPromise, timeoutPromise]);
+  }
+
+  private async waitForCurrentFetch(): Promise<boolean> {
     // Wait for coalescing window to complete first
     if (this.state.phase.type === 'coalescing') {
       await new Promise<void>((resolve) => {

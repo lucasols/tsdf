@@ -177,12 +177,16 @@ export function createDocumentStore<
     return scheduler.scheduleFetch(fetchType, null, options);
   }
 
-  async function awaitFetch(): Promise<
-    { data: State; error: null } | { data: null; error: NError }
-  > {
-    const wasAborted = await scheduler.awaitFetch(null);
+  async function awaitFetch(
+    options: { timeoutMs?: number } = {},
+  ): Promise<{ data: State; error: null } | { data: null; error: NError }> {
+    const result = await scheduler.awaitFetch(null, options);
 
-    if (wasAborted) {
+    if (result === 'timeout') {
+      return { data: null, error: errorNormalizer(new Error('Timeout')) };
+    }
+
+    if (result === true) {
       return { data: null, error: errorNormalizer(new Error('Aborted')) };
     }
 
