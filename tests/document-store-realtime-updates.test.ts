@@ -35,14 +35,18 @@ test('dynamically throttle realtime updates', async () => {
 
   // t=320: second RTU
   await vi.advanceTimersByTimeAsync(slowDuration + 20);
-  env.addTimelineComment('vvv throttle window (100ms) vvv', 300);
+  env.addTimelineComments(
+    { id: '🔴', action: '<fetch-finished', actionValue: 1 },
+    [
+      'vvv throttle window (100ms) vvv',
+      { comment: '^^^ throttle window ^^^', deltaMs: 100 },
+    ],
+  );
   env.emulateExternalRTU(2);
 
   // t=330: third RTU
   await vi.advanceTimersByTimeAsync(10);
   env.emulateExternalRTU(3);
-
-  env.addTimelineComment('^^^ throttle window ^^^', 400);
 
   // t=660: fourth RTU
   await vi.advanceTimersByTimeAsync(330);
@@ -58,24 +62,24 @@ test('dynamically throttle realtime updates', async () => {
     0     | 0  | ui-initialized
     .     | 0  | server-data-changed (value: 1)
     .     | 0  | received-ws-data-change-event
-    .     | 0  | 🔴 >fetch-started
-    300ms | 0  | 🔴 <fetch-finished (value: 1)
+    10ms  | 0  | 🔴 >fetch-started
+    310ms | 0  | 🔴 <fetch-finished (value: 1)
     .     | 1  | ui-changed
     .     | 1  | -- vvv throttle window (100ms) vvv
     320ms | 1  | server-data-changed (value: 2)
     .     | 1  | received-ws-data-change-event
     330ms | 1  | server-data-changed (value: 3)
     .     | 1  | received-ws-data-change-event
-    400ms | 1  | -- ^^^ throttle window ^^^
+    410ms | 1  | -- ^^^ throttle window ^^^
     .     | 1  | scheduled-rt-fetch-started
-    .     | 1  | 🟠 >fetch-started
-    600ms | 1  | 🟠 <fetch-finished (value: 3)
+    420ms | 1  | 🟠 >fetch-started
+    620ms | 1  | 🟠 <fetch-finished (value: 3)
     .     | 3  | ui-changed
     660ms | 3  | server-data-changed (value: 4)
     .     | 3  | received-ws-data-change-event
-    700ms | 3  | scheduled-rt-fetch-started
-    .     | 3  | 🟡 >fetch-started
-    900ms | 3  | 🟡 <fetch-finished (value: 4)
+    720ms | 3  | scheduled-rt-fetch-started
+    730ms | 3  | 🟡 >fetch-started
+    930ms | 3  | 🟡 <fetch-finished (value: 4)
     .     | 4  | ui-changed
     "
   `);
@@ -103,26 +107,32 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   // t=0: first RTU triggers immediate fetch (no prior fetch, no throttle)
   env.emulateExternalRTU(1);
 
-  // t=500: first fetch completes (500ms < 700ms → short 100ms throttle starts after)
-  env.addTimelineComment('vvv 100ms throttle (500ms fetch < 700ms) vvv', 501);
-  env.addTimelineComment('^^^ throttle ends ^^^', 600);
-
   // t=700: second RTU after throttle window → immediate start
   await vi.advanceTimersByTimeAsync(700);
+  // t=500: first fetch completes (500ms < 700ms → short 100ms throttle starts after)
+  env.addTimelineComments(
+    { id: '🔴', action: '<fetch-finished', actionValue: 1 },
+    [
+      { comment: 'vvv 100ms throttle (500ms fetch < 700ms) vvv', deltaMs: 1 },
+      { comment: '^^^ throttle ends ^^^', deltaMs: 100 },
+    ],
+  );
   env.emulateExternalRTU(2);
 
   // t=900: third RTU while second fetch is in flight → coalesced
   await vi.advanceTimersByTimeAsync(200);
   env.emulateExternalRTU(3);
 
-  // t=1700: second fetch completes (1000ms >= 700ms → long 500ms throttle starts after)
-  env.addTimelineComment(
-    'vvv 500ms throttle (1000ms fetch >= 700ms) vvv',
-    1701,
-  );
-  env.addTimelineComment('^^^ throttle ends, delayed fetch runs ^^^', 2200);
-
   await vi.runAllTimersAsync();
+
+  // t=1700: second fetch completes (1000ms >= 700ms → long 500ms throttle starts after)
+  env.addTimelineComments(
+    { id: '🟠', action: '<fetch-finished', actionValue: 3 },
+    [
+      { comment: 'vvv 500ms throttle (1000ms fetch >= 700ms) vvv', deltaMs: 1 },
+      { comment: '^^^ throttle ends, delayed fetch runs ^^^', deltaMs: 500 },
+    ],
+  );
 
   expect(env.uiChanges).toEqual([0, 1, 3]);
   expect(env.numOfFinishedFetches).toBe(3);
@@ -132,23 +142,23 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
     0      | 0  | ui-initialized
     .      | 0  | server-data-changed (value: 1)
     .      | 0  | received-ws-data-change-event
-    .      | 0  | 🔴 >fetch-started
-    500ms  | 0  | 🔴 <fetch-finished (value: 1)
+    10ms   | 0  | 🔴 >fetch-started
+    510ms  | 0  | 🔴 <fetch-finished (value: 1)
     .      | 1  | ui-changed
-    501ms  | 1  | -- vvv 100ms throttle (500ms fetch < 700ms) vvv
-    600ms  | 1  | -- ^^^ throttle ends ^^^
+    511ms  | 1  | -- vvv 100ms throttle (500ms fetch < 700ms) vvv
+    610ms  | 1  | -- ^^^ throttle ends ^^^
     700ms  | 1  | server-data-changed (value: 2)
     .      | 1  | received-ws-data-change-event
-    .      | 1  | 🟠 >fetch-started
+    710ms  | 1  | 🟠 >fetch-started
     900ms  | 1  | server-data-changed (value: 3)
     .      | 1  | received-ws-data-change-event
-    1.7s   | 1  | 🟠 <fetch-finished (value: 3)
+    1.71s  | 1  | 🟠 <fetch-finished (value: 3)
     .      | 3  | ui-changed
-    1.701s | 3  | -- vvv 500ms throttle (1000ms fetch >= 700ms) vvv
-    2.2s   | 3  | -- ^^^ throttle ends, delayed fetch runs ^^^
-    .      | 3  | scheduled-rt-fetch-started
-    .      | 3  | 🟡 >fetch-started
-    2.7s   | 3  | 🟡 <fetch-finished (value: 3)
+    1.711s | 3  | -- vvv 500ms throttle (1000ms fetch >= 700ms) vvv
+    2.21s  | 3  | scheduled-rt-fetch-started
+    .      | 3  | -- ^^^ throttle ends, delayed fetch runs ^^^
+    2.22s  | 3  | 🟡 >fetch-started
+    2.72s  | 3  | 🟡 <fetch-finished (value: 3)
     "
   `);
 });
@@ -189,16 +199,17 @@ test('simple mutation that triggers a RTU', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    20ms  | 0  | 🔴 <fetch-finished (value: 0)
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | 🔴 >fetch-started
+    30ms  | 0  | 🔴 <fetch-finished (value: 0)
     110ms | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
     250ms | 1  | server-data-changed (value: 1)
     .     | 1  | ⬜ <mutation-data-persisted (value: 1)
     300ms | 1  | received-ws-data-change-event
     310ms | 1  | scheduled-rt-fetch-started
-    .     | 1  | 🟠 >fetch-started
-    1.11s | 1  | 🟠 <fetch-finished (value: 1)
+    320ms | 1  | 🟠 >fetch-started
+    1.12s | 1  | 🟠 <fetch-finished (value: 1)
     "
   `);
 });
