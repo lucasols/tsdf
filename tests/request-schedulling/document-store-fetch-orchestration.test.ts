@@ -1,10 +1,10 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
-import { createDocumentStoreTestEnv } from './mocks/documentStoreTestEnv';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   DEFAULT_FETCH_DURATION_MS,
   DEFAULT_MUTATION_DURATION_MS,
-} from './mocks/serverMock';
+} from '../mocks/serverMock';
 
 beforeAll(() => {
   vi.useFakeTimers();

@@ -4,6 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 
 export default lsStackEslintCfg({
   tsconfigRootDir: import.meta.dirname,
+  ignore: ['src-old/**/*', 'test-old/**/*'],
   extraRuleGroups: [
     {
       plugins: {
