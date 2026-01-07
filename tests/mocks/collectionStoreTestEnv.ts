@@ -1,5 +1,6 @@
 import { createCollectionStore } from '../../src/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
+import type { StoreError } from '../../src/storeShared';
 import { createServerMock } from './serverMock';
 import {
   createActionTracker,
@@ -106,13 +107,9 @@ export function createCollectionStoreTestEnv<D>(
     Record<string, number | 'error' | undefined>
   >(addAction, getRelativeTime, actionsHistory);
 
-  const collectionStore = createCollectionStore<
-    CollectionTestItem<D>,
-    string,
-    { error: string }
-  >({
-    errorNormalizer(exception) {
-      return { error: exception.message };
+  const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
+    errorNormalizer(exception): StoreError {
+      return { code: 500, id: 'fetch-error', message: exception.message };
     },
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,

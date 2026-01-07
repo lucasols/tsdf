@@ -1,5 +1,6 @@
 import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
+import type { StoreError } from '../../src/storeShared';
 import { createServerMock } from './serverMock';
 import {
   createActionTracker,
@@ -51,9 +52,9 @@ export function createDocumentStoreTestEnv<D>(
     },
   );
 
-  const documentStore = createDocumentStore<{ value: D }, { error: string }>({
-    errorNormalizer(exception) {
-      return { error: exception.message };
+  const documentStore = createDocumentStore<{ value: D }>({
+    errorNormalizer(exception): StoreError {
+      return { code: 500, id: 'fetch-error', message: exception.message };
     },
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,

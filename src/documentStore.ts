@@ -1,4 +1,5 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
+import { deepEqual } from '@ls-stack/utils/deepEqual';
 import {
   __LEGIT_CAST__,
   type __LEGIT_ANY__,
@@ -6,8 +7,7 @@ import {
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useEffect } from 'react';
-import { Result, ResultValidErrors, unknownToError } from 't-result';
-import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { Result, unknownToError } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import {
   FetchContext,
@@ -17,25 +17,28 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
-import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
+import {
+  fetchTypePriority,
+  StoreFetchError,
+  TSDFStatus,
+  ValidStoreState,
+  type StoreError,
+} from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
 
-export type TSDFUseDocumentReturn<Selected, NError> = {
+export type TSDFUseDocumentReturn<Selected> = {
   status: DocumentStatus;
   data: Selected;
-  error: NError | null;
+  error: StoreError | null;
   isLoading: boolean;
 };
 
-export type DocumentStoreState<
-  State extends ValidStoreState,
-  NError extends ResultValidErrors,
-> = {
+export type DocumentStoreState<State extends ValidStoreState> = {
   data: State | null;
-  error: NError | null;
+  error: StoreError | null;
   status: DocumentStatus;
   refetchOnMount: false | FetchType;
 };
@@ -46,16 +49,13 @@ type DocumentStoreEvents = {
 
 export type OnDocumentInvalidate = (priority: FetchType) => void;
 
-export type DocumentStoreOptions<
-  State extends ValidStoreState,
-  NError extends ResultValidErrors,
-> = {
+export type DocumentStoreOptions<State extends ValidStoreState> = {
   debugName?: string;
   fetchFn: (signal: AbortSignal) => Promise<State>;
   getInitialData?: () => State | undefined;
   disableInitialDataInvalidation?: boolean;
   disableRefetchOnMount?: boolean;
-  errorNormalizer: (exception: Error) => NError;
+  errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -67,15 +67,11 @@ export type DocumentStoreOptions<
   ) => void;
 };
 
-export type DocumentStore<
-  State extends ValidStoreState,
-  NError extends ResultValidErrors,
-> = ReturnType<typeof createDocumentStore<State, NError>>;
+export type DocumentStore<State extends ValidStoreState> = ReturnType<
+  typeof createDocumentStore<State>
+>;
 
-export function createDocumentStore<
-  State extends ValidStoreState,
-  NError extends ResultValidErrors,
->({
+export function createDocumentStore<State extends ValidStoreState>({
   debugName,
   fetchFn,
   getInitialData,
@@ -88,12 +84,12 @@ export function createDocumentStore<
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
-}: DocumentStoreOptions<State, NError>) {
+}: DocumentStoreOptions<State>) {
   let invalidationWasTriggered = false;
 
   const initialData = getInitialData?.();
 
-  const store = new Store<DocumentStoreState<State, NError>>({
+  const store = new Store<DocumentStoreState<State>>({
     debugName,
     state: () => ({
       data: initialData ?? null,
@@ -179,25 +175,45 @@ export function createDocumentStore<
 
   async function awaitFetch(
     options: { timeoutMs?: number } = {},
-  ): Promise<{ data: State; error: null } | { data: null; error: NError }> {
+  ): Promise<
+    { data: State; error: null } | { data: null; error: StoreFetchError }
+  > {
     const result = await scheduler.awaitFetch(null, options);
 
     if (result === 'timeout') {
-      return { data: null, error: errorNormalizer(new Error('Timeout')) };
+      return {
+        data: null,
+        error: new StoreFetchError(
+          { code: 408, id: 'timeout', message: 'Timeout' },
+          'timeout',
+        ),
+      };
     }
 
     if (result === true) {
-      return { data: null, error: errorNormalizer(new Error('Aborted')) };
+      return {
+        data: null,
+        error: new StoreFetchError(
+          { code: 408, id: 'aborted', message: 'Aborted' },
+          'aborted',
+        ),
+      };
     }
 
     if (store.state.error) {
-      return { data: null, error: store.state.error };
+      return {
+        data: null,
+        error: new StoreFetchError(store.state.error, 'fetch'),
+      };
     }
 
     if (!store.state.data) {
       return {
         data: null,
-        error: errorNormalizer(new Error('Not found')),
+        error: new StoreFetchError(
+          { code: 404, id: 'not-found', message: 'Not found' },
+          'fetch',
+        ),
       };
     }
 
@@ -266,7 +282,7 @@ export function createDocumentStore<
       currentState: State | null;
     }) => Promise<T>;
     revalidateOnSuccess?: boolean;
-  }): Promise<Result<Awaited<T>, NError | true>> {
+  }): Promise<Result<Awaited<T>, StoreError | true>> {
     const endMutation = startMutation();
 
     if (optimisticUpdate) {
@@ -341,9 +357,7 @@ export function createDocumentStore<
     returnRefetchingStatus?: boolean;
   } = {}) {
     const storeStateSelector = useCallback(
-      (
-        state: DocumentStoreState<State, NError>,
-      ): TSDFUseDocumentReturn<Selected, NError> => {
+      (state: DocumentStoreState<State>): TSDFUseDocumentReturn<Selected> => {
         const { error } = state;
 
         const data =

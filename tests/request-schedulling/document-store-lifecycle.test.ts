@@ -144,7 +144,9 @@ describe('basic fetch lifecycle', () => {
           "value": 100,
         },
         "error": {
-          "error": "Network error",
+          "code": 500,
+          "id": "fetch-error",
+          "message": "Network error",
         },
         "refetchOnMount": false,
         "status": "error",

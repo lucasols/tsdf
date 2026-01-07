@@ -7,7 +7,7 @@ import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
-import { Result, ResultValidErrors, unknownToError } from 't-result';
+import { Result, unknownToError } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import {
   FetchContext,
@@ -19,9 +19,11 @@ import {
 } from './requestScheduler';
 import {
   fetchTypePriority,
+  StoreFetchError,
   TSDFStatus,
   ValidPayload,
   ValidStoreState,
+  type StoreError,
 } from './storeShared';
 import { useEnsureIsLoaded } from './useEnsureIsLoaded';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
@@ -31,10 +33,9 @@ export type CollectionItemStatus = TSDFStatus;
 export type TSFDCollectionItem<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  NError,
 > = {
   data: ItemState | null;
-  error: NError | null;
+  error: StoreError | null;
   status: CollectionItemStatus;
   payload: ItemPayload;
   refetchOnMount: false | FetchType;
@@ -44,19 +45,17 @@ export type TSFDCollectionItem<
 export type TSFDCollectionState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  NError,
-> = Record<string, TSFDCollectionItem<ItemState, ItemPayload, NError> | null>;
+> = Record<string, TSFDCollectionItem<ItemState, ItemPayload> | null>;
 
 export type TSFDUseCollectionItemReturn<
   Selected,
   ItemPayload,
-  NError,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
   data: Selected;
   status: CollectionItemStatus | 'idle' | 'deleted';
   payload: ItemPayload | undefined;
-  error: NError | null;
+  error: StoreError | null;
   itemStateKey: string;
   isLoading: boolean;
   queryMetadata: QueryMetadata;
@@ -95,12 +94,11 @@ export type CollectionUseMultipleItemsQuery<
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  NError extends ResultValidErrors,
 > = {
   debugName?: string;
   fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
-  errorNormalizer: (exception: Error) => NError;
+  errorNormalizer: (exception: Error) => StoreError;
   disableRefetchOnMount?: boolean;
   getInitialData?: () =>
     | CollectionInitialStateItem<ItemPayload, ItemState>[]
@@ -121,8 +119,7 @@ export type CollectionStoreOptions<
 export type CollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  NError extends ResultValidErrors,
-> = ReturnType<typeof createCollectionStore<ItemState, ItemPayload, NError>>;
+> = ReturnType<typeof createCollectionStore<ItemState, ItemPayload>>;
 
 type CollectionStoreEvents = {
   invalidateData: { priority: FetchType; itemKey: string };
@@ -131,7 +128,6 @@ type CollectionStoreEvents = {
 export function createCollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  NError extends ResultValidErrors,
 >({
   debugName,
   fetchFn,
@@ -147,9 +143,9 @@ export function createCollectionStore<
   onInvalidate,
   onSchedulerEvent,
   onMutationError,
-}: CollectionStoreOptions<ItemState, ItemPayload, NError>) {
-  type CollectionState = TSFDCollectionState<ItemState, ItemPayload, NError>;
-  type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload, NError>;
+}: CollectionStoreOptions<ItemState, ItemPayload>) {
+  type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
+  type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
 
   const store = new Store<CollectionState>({
     debugName,
@@ -324,23 +320,51 @@ export function createCollectionStore<
 
   async function awaitFetch(
     params: ItemPayload,
-  ): Promise<{ data: null; error: NError } | { data: ItemState; error: null }> {
+    options: { timeoutMs?: number } = {},
+  ): Promise<
+    { data: ItemState; error: null } | { data: null; error: StoreFetchError }
+  > {
     const itemId = getItemKey(params);
 
-    const wasAborted = await getScheduler(itemId).awaitFetch(params);
+    const result = await getScheduler(itemId).awaitFetch(params, options);
 
-    if (wasAborted) {
-      return { data: null, error: errorNormalizer(new Error('Aborted')) };
+    if (result === 'timeout') {
+      return {
+        data: null,
+        error: new StoreFetchError(
+          { code: 408, id: 'timeout', message: 'Timeout' },
+          'timeout',
+        ),
+      };
+    }
+
+    if (result === true) {
+      return {
+        data: null,
+        error: new StoreFetchError(
+          { code: 408, id: 'aborted', message: 'Aborted' },
+          'aborted',
+        ),
+      };
     }
 
     const item = store.state[itemId];
 
     if (item?.error) {
-      return { data: null, error: item.error };
+      return {
+        data: null,
+        error: new StoreFetchError(item.error, 'fetch'),
+      };
     }
 
     if (!item?.data) {
-      return { data: null, error: errorNormalizer(new Error('Not found')) };
+      return {
+        data: null,
+        error: new StoreFetchError(
+          { code: 404, id: 'not-found', message: 'Not found' },
+          'fetch',
+        ),
+      };
     }
 
     return { data: item.data, error: null };
@@ -499,7 +523,6 @@ export function createCollectionStore<
           }): TSFDUseCollectionItemReturn<
             Selected,
             ItemPayload,
-            NError,
             QueryMetadata
           > => {
             const item = state[itemKey];
@@ -674,7 +697,7 @@ export function createCollectionStore<
     });
 
     const result = useMemo(
-      (): TSFDUseCollectionItemReturn<Selected, ItemPayload, NError> =>
+      (): TSFDUseCollectionItemReturn<Selected, ItemPayload> =>
         item[0] ?? {
           payload: undefined,
           data: selector ? selector(null) : __LEGIT_CAST__<Selected>(null),
@@ -826,7 +849,7 @@ export function createCollectionStore<
       silentErrors?: boolean;
       debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
     },
-  ): Promise<Result<Awaited<T>, NError | true>> {
+  ): Promise<Result<Awaited<T>, StoreError | true>> {
     const endMutation = startMutation(payload);
 
     if (optimisticUpdate) {

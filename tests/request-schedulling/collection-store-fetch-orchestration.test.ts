@@ -261,7 +261,7 @@ test('error on one item does not affect other items', async () => {
   const item2State = env.getItemState('item2');
 
   expect(item1State?.status).toBe('error');
-  expect(item1State?.error?.error).toBe('Network error');
+  expect(item1State?.error?.message).toBe('Network error');
 
   expect(item2State?.status).toBe('success');
   expect(item2State?.data?.value).toBe(2);

@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import { StoreFetchError } from '../../src/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 
 beforeAll(() => {
@@ -42,10 +43,10 @@ describe('awaitFetch basic behavior', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: null,
-      error: { error: 'Network error' },
-    });
+    expect(result.data).toBeNull();
+    expect(result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.error?.message).toBe('Network error');
+    expect(result.error?.type).toBe('fetch');
   });
 
   test('triggers new fetch even when data exists', async () => {
@@ -227,10 +228,10 @@ describe('awaitFetch edge cases', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: null,
-      error: { error: 'Immediate failure' },
-    });
+    expect(result.data).toBeNull();
+    expect(result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.error?.message).toBe('Immediate failure');
+    expect(result.error?.type).toBe('fetch');
   });
 
   test('awaitFetch preserves previous data on error', async () => {
@@ -250,14 +251,19 @@ describe('awaitFetch edge cases', () => {
     await vi.runAllTimersAsync();
 
     // awaitFetch returns error
-    expect(await result2).toEqual({
-      data: null,
-      error: { error: 'Fetch failed' },
-    });
+    const errorResult = await result2;
+    expect(errorResult.data).toBeNull();
+    expect(errorResult.error).toBeInstanceOf(StoreFetchError);
+    expect(errorResult.error?.message).toBe('Fetch failed');
+    expect(errorResult.error?.type).toBe('fetch');
 
     // But store still has the previous data
     expect(env.store.state.data).toEqual({ value: 42 });
-    expect(env.store.state.error).toEqual({ error: 'Fetch failed' });
+    expect(env.store.state.error).toEqual({
+      code: 500,
+      id: 'fetch-error',
+      message: 'Fetch failed',
+    });
   });
 });
 
@@ -379,10 +385,11 @@ describe('awaitFetch timeout', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: null,
-      error: { error: 'Timeout' },
-    });
+    expect(result.data).toBeNull();
+    expect(result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.error?.message).toBe('Timeout');
+    expect(result.error?.type).toBe('timeout');
+    expect(result.error?.code).toBe(408);
   });
 
   test('awaitFetch times out after custom timeout', async () => {
@@ -397,10 +404,10 @@ describe('awaitFetch timeout', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: null,
-      error: { error: 'Timeout' },
-    });
+    expect(result.data).toBeNull();
+    expect(result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.error?.message).toBe('Timeout');
+    expect(result.error?.type).toBe('timeout');
   });
 
   test('awaitFetch completes before timeout returns data', async () => {
@@ -430,10 +437,10 @@ describe('awaitFetch timeout', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: null,
-      error: { error: 'Timeout' },
-    });
+    expect(result.data).toBeNull();
+    expect(result.error).toBeInstanceOf(StoreFetchError);
+    expect(result.error?.message).toBe('Timeout');
+    expect(result.error?.type).toBe('timeout');
   });
 
   test('multiple awaitFetch calls with different timeouts', async () => {
@@ -449,7 +456,10 @@ describe('awaitFetch timeout', () => {
     // Advance past first timeout but before fetch completes
     await vi.advanceTimersByTimeAsync(1_001);
     const result1 = await promise1;
-    expect(result1).toEqual({ data: null, error: { error: 'Timeout' } });
+    expect(result1.data).toBeNull();
+    expect(result1.error).toBeInstanceOf(StoreFetchError);
+    expect(result1.error?.message).toBe('Timeout');
+    expect(result1.error?.type).toBe('timeout');
 
     // Complete the fetch
     await vi.runAllTimersAsync();

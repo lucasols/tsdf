@@ -12,3 +12,23 @@ export const fetchTypePriority: Record<FetchType, number> = {
   realtimeUpdate: 2,
   highPriority: 3,
 };
+
+export type StoreError = {
+  code: number;
+  id: string;
+  message: string;
+};
+
+export class StoreFetchError extends Error {
+  code: number;
+  id: string;
+  type: 'fetch' | 'aborted' | 'timeout';
+
+  constructor(error: StoreError, type: 'fetch' | 'aborted' | 'timeout') {
+    super(error.message);
+    this.name = 'StoreFetchError';
+    this.code = error.code;
+    this.id = error.id;
+    this.type = type;
+  }
+}
