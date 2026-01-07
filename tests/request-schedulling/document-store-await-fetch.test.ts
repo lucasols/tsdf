@@ -35,7 +35,12 @@ describe('awaitFetch basic behavior', () => {
       forceInitialDataInvalidation: true,
     });
 
-    env.errorInNextFetch('Network error');
+    env.errorInNextFetch({
+      message: 'Network error',
+      path: '/api/documents/42',
+      method: 'GET',
+      code: 500,
+    });
 
     const resultPromise = env.awaitFetch();
 
@@ -47,6 +52,9 @@ describe('awaitFetch basic behavior', () => {
     expect(result.error).toBeInstanceOf(StoreFetchError);
     expect(result.error?.message).toBe('Network error');
     expect(result.error?.type).toBe('fetch');
+    expect(result.error?.path).toBe('/api/documents/42');
+    expect(result.error?.method).toBe('GET');
+    expect(result.error?.code).toBe(500);
   });
 
   test('triggers new fetch even when data exists', async () => {
@@ -220,7 +228,12 @@ describe('awaitFetch edge cases', () => {
   test('awaitFetch with immediate error', async () => {
     const env = createDocumentStoreTestEnv(42);
 
-    env.errorInNextFetch('Immediate failure');
+    env.errorInNextFetch({
+      message: 'Immediate failure',
+      path: '/api/data',
+      method: 'POST',
+      code: 400,
+    });
 
     const resultPromise = env.awaitFetch();
 
@@ -232,6 +245,9 @@ describe('awaitFetch edge cases', () => {
     expect(result.error).toBeInstanceOf(StoreFetchError);
     expect(result.error?.message).toBe('Immediate failure');
     expect(result.error?.type).toBe('fetch');
+    expect(result.error?.path).toBe('/api/data');
+    expect(result.error?.method).toBe('POST');
+    expect(result.error?.code).toBe(400);
   });
 
   test('awaitFetch preserves previous data on error', async () => {
@@ -246,7 +262,12 @@ describe('awaitFetch edge cases', () => {
     expect(env.store.state.data).toEqual({ value: 42 });
 
     // Second fetch fails
-    env.errorInNextFetch('Fetch failed');
+    env.errorInNextFetch({
+      message: 'Fetch failed',
+      path: '/api/documents/42',
+      method: 'GET',
+      code: 404,
+    });
     const result2 = env.awaitFetch();
     await vi.runAllTimersAsync();
 
@@ -256,13 +277,17 @@ describe('awaitFetch edge cases', () => {
     expect(errorResult.error).toBeInstanceOf(StoreFetchError);
     expect(errorResult.error?.message).toBe('Fetch failed');
     expect(errorResult.error?.type).toBe('fetch');
+    expect(errorResult.error?.path).toBe('/api/documents/42');
+    expect(errorResult.error?.method).toBe('GET');
 
     // But store still has the previous data
     expect(env.store.state.data).toEqual({ value: 42 });
     expect(env.store.state.error).toEqual({
-      code: 500,
+      code: 404,
       id: 'fetch-error',
       message: 'Fetch failed',
+      path: '/api/documents/42',
+      method: 'GET',
     });
   });
 });

@@ -7,8 +7,10 @@ import {
   createEmojiCyclers,
   createFetchCounter,
   createUITracker,
+  FetchError,
   logScheduleFetchResult,
   logSchedulerEvent,
+  normalizeError,
 } from './testEnvUtils';
 
 export function createDocumentStoreTestEnv<D>(
@@ -36,7 +38,12 @@ export function createDocumentStoreTestEnv<D>(
   const { getFetchEmoji, getMutationEmoji } = createEmojiCyclers();
   const fetchCounter = createFetchCounter();
 
-  let nextFetchError: string | null = null;
+  let nextFetchError: {
+    message: string;
+    path?: string;
+    method?: StoreError['method'];
+    code?: number;
+  } | null = null;
 
   const { uiChanges, trackUIChanges } = createUITracker<
     number | string | undefined
@@ -53,9 +60,7 @@ export function createDocumentStoreTestEnv<D>(
   );
 
   const documentStore = createDocumentStore<{ value: D }>({
-    errorNormalizer(exception): StoreError {
-      return { code: 500, id: 'fetch-error', message: exception.message };
-    },
+    errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,
     fetchFn: async (signal) => {
@@ -66,10 +71,18 @@ export function createDocumentStoreTestEnv<D>(
 
       if (nextFetchError) {
         fetchCounter.incrementFinished();
-        const error = nextFetchError;
+        const errorConfig = nextFetchError;
         nextFetchError = null;
         addAction(`<fetch-error`, { actionValue: 'error', id: fetchId });
-        throw new Error(error);
+
+        if (errorConfig.path) {
+          throw new FetchError(errorConfig.message, {
+            path: errorConfig.path,
+            method: errorConfig.method,
+            code: errorConfig.code,
+          });
+        }
+        throw new Error(errorConfig.message);
       }
 
       const value = await serverMock.fetch();
@@ -181,8 +194,17 @@ export function createDocumentStoreTestEnv<D>(
     get serverHistory() {
       return serverMock.history;
     },
-    errorInNextFetch(error = 'Fetch error') {
-      nextFetchError = error;
+    errorInNextFetch(
+      error:
+        | string
+        | {
+            message: string;
+            path?: string;
+            method?: StoreError['method'];
+            code?: number;
+          } = 'Fetch error',
+    ) {
+      nextFetchError = typeof error === 'string' ? { message: error } : error;
     },
     setNextFetchDurations(...durations: number[]) {
       serverMock.setFetchDurations(...durations);

@@ -1,4 +1,54 @@
 import type { ScheduleFetchResults } from '../../src/requestScheduler';
+import type { StoreError } from '../../src/storeShared';
+
+/**
+ * Custom error class that carries path and method information for testing
+ */
+export class FetchError extends Error {
+  path: string;
+  method: StoreError['method'];
+  code: number;
+
+  constructor(
+    message: string,
+    {
+      path,
+      method = 'GET',
+      code = 500,
+    }: {
+      path: string;
+      method?: StoreError['method'];
+      code?: number;
+    },
+  ) {
+    super(message);
+    this.name = 'FetchError';
+    this.path = path;
+    this.method = method;
+    this.code = code;
+  }
+}
+
+/**
+ * Normalizes an error to StoreError format, extracting path/method if available
+ */
+export function normalizeError(exception: Error): StoreError {
+  if (exception instanceof FetchError) {
+    return {
+      code: exception.code,
+      id: 'fetch-error',
+      message: exception.message,
+      path: exception.path,
+      method: exception.method,
+    };
+  }
+
+  return {
+    code: 500,
+    id: 'fetch-error',
+    message: exception.message,
+  };
+}
 
 // Emojis for visual identification in timelines
 export const fetchEmojis = [

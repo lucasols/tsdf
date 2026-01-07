@@ -7,8 +7,10 @@ import {
   createEmojiCyclers,
   createFetchCounter,
   createUITracker,
+  FetchError,
   logScheduleFetchResult,
   logSchedulerEvent,
+  normalizeError,
 } from './testEnvUtils';
 
 export type CollectionTestItem<D> = { value: D };
@@ -68,7 +70,15 @@ export function createCollectionStoreTestEnv<D>(
     getServerMock(itemId);
   }
 
-  const nextFetchErrors = new Map<string, string>();
+  const nextFetchErrors = new Map<
+    string,
+    {
+      message: string;
+      path?: string;
+      method?: StoreError['method'];
+      code?: number;
+    }
+  >();
 
   // Per-item UI tracking
   const itemUIValues: Record<string, unknown> = {};
@@ -108,9 +118,7 @@ export function createCollectionStoreTestEnv<D>(
   >(addAction, getRelativeTime, actionsHistory);
 
   const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
-    errorNormalizer(exception): StoreError {
-      return { code: 500, id: 'fetch-error', message: exception.message };
-    },
+    errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,
     fetchFn: async (itemId, signal) => {
@@ -119,8 +127,8 @@ export function createCollectionStoreTestEnv<D>(
 
       fetchCounter.incrementStarted();
 
-      const errorForItem = nextFetchErrors.get(itemId);
-      if (errorForItem) {
+      const errorConfig = nextFetchErrors.get(itemId);
+      if (errorConfig) {
         fetchCounter.incrementFinished();
         nextFetchErrors.delete(itemId);
         addAction('<fetch-error', {
@@ -128,7 +136,15 @@ export function createCollectionStoreTestEnv<D>(
           id: fetchId,
           itemId,
         });
-        throw new Error(errorForItem);
+
+        if (errorConfig.path) {
+          throw new FetchError(errorConfig.message, {
+            path: errorConfig.path,
+            method: errorConfig.method,
+            code: errorConfig.code,
+          });
+        }
+        throw new Error(errorConfig.message);
       }
 
       const serverMock = getServerMock(itemId);
@@ -273,8 +289,21 @@ export function createCollectionStoreTestEnv<D>(
     getServerHistory(itemId: string) {
       return getServerMock(itemId).history;
     },
-    errorInNextFetch(itemId: string, error = 'Fetch error') {
-      nextFetchErrors.set(itemId, error);
+    errorInNextFetch(
+      itemId: string,
+      error:
+        | string
+        | {
+            message: string;
+            path?: string;
+            method?: StoreError['method'];
+            code?: number;
+          } = 'Fetch error',
+    ) {
+      nextFetchErrors.set(
+        itemId,
+        typeof error === 'string' ? { message: error } : error,
+      );
     },
     setNextFetchDurations(itemId: string, ...durations: number[]) {
       getServerMock(itemId).setFetchDurations(...durations);

@@ -17,12 +17,16 @@ export type StoreError = {
   code: number;
   id: string;
   message: string;
+  path?: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 };
 
 export class StoreFetchError extends Error {
   code: number;
   id: string;
   type: 'fetch' | 'aborted' | 'timeout';
+  path?: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
   constructor(error: StoreError, type: 'fetch' | 'aborted' | 'timeout') {
     super(error.message);
@@ -30,5 +34,7 @@ export class StoreFetchError extends Error {
     this.code = error.code;
     this.id = error.id;
     this.type = type;
+    this.path = error.path;
+    this.method = error.method;
   }
 }
