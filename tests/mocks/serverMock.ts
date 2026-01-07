@@ -47,7 +47,7 @@ export function createServerMock<Data>(
     }
 
     if (triggerRTUEvent) {
-      sleep(DEFAULT_RTU_DELAY_MS).then(() => {
+      void sleep(DEFAULT_RTU_DELAY_MS).then(() => {
         wsEvents.emit('data_changed', undefined);
       });
     }

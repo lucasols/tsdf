@@ -19,5 +19,6 @@
     "stripInternal": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*", "tests/**/*", "types/**/*"]
+  "include": ["src/**/*", "tests/**/*", "types/**/*"],
+  "exclude": ["src-old/**/*", "test-old/**/*"]
 }

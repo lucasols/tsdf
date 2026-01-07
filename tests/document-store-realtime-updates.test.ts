@@ -35,13 +35,10 @@ test('dynamically throttle realtime updates', async () => {
 
   // t=320: second RTU
   await vi.advanceTimersByTimeAsync(slowDuration + 20);
-  env.addTimelineComments(
-    { id: '🔴', action: '<fetch-finished', actionValue: 1 },
-    [
-      'vvv throttle window (100ms) vvv',
-      { comment: '^^^ throttle window ^^^', deltaMs: 100 },
-    ],
-  );
+  env.addTimelineComments({ id: '🔴', action: '<fetch-finished' }, [
+    'vvv throttle window (100ms) vvv',
+    { comment: '^^^ throttle window ^^^', deltaMs: 100 },
+  ]);
   env.emulateExternalRTU(2);
 
   // t=330: third RTU
@@ -110,13 +107,10 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   // t=700: second RTU after throttle window → immediate start
   await vi.advanceTimersByTimeAsync(700);
   // t=500: first fetch completes (500ms < 700ms → short 100ms throttle starts after)
-  env.addTimelineComments(
-    { id: '🔴', action: '<fetch-finished', actionValue: 1 },
-    [
-      { comment: 'vvv 100ms throttle (500ms fetch < 700ms) vvv', deltaMs: 1 },
-      { comment: '^^^ throttle ends ^^^', deltaMs: 100 },
-    ],
-  );
+  env.addTimelineComments({ id: '🔴', action: '<fetch-finished' }, [
+    { comment: 'vvv 100ms throttle (500ms fetch < 700ms) vvv', deltaMs: 1 },
+    { comment: '^^^ throttle ends ^^^', deltaMs: 100 },
+  ]);
   env.emulateExternalRTU(2);
 
   // t=900: third RTU while second fetch is in flight → coalesced
@@ -126,13 +120,10 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   await vi.runAllTimersAsync();
 
   // t=1700: second fetch completes (1000ms >= 700ms → long 500ms throttle starts after)
-  env.addTimelineComments(
-    { id: '🟠', action: '<fetch-finished', actionValue: 3 },
-    [
-      { comment: 'vvv 500ms throttle (1000ms fetch >= 700ms) vvv', deltaMs: 1 },
-      { comment: '^^^ throttle ends, delayed fetch runs ^^^', deltaMs: 500 },
-    ],
-  );
+  env.addTimelineComments({ id: '🟠', action: '<fetch-finished' }, [
+    { comment: 'vvv 500ms throttle (1000ms fetch >= 700ms) vvv', deltaMs: 1 },
+    { comment: '^^^ throttle ends, delayed fetch runs ^^^', deltaMs: 500 },
+  ]);
 
   expect(env.uiChanges).toEqual([0, 1, 3]);
   expect(env.numOfFinishedFetches).toBe(3);
@@ -243,15 +234,12 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
   // t=2.3s: external RTU arrives while mutation's RTU fetch is running
   await vi.advanceTimersByTimeAsync(1300);
   // t=1.89s: RTU event triggers fetch scheduling (waits for mutation to complete)
-  env.addTimelineComments(
-    { id: '⬜', action: '<mutation-data-persisted', actionValue: 1 },
-    [
-      {
-        comment: 'mutation completes at 2.2s, RTU fetch can start',
-        deltaMs: 360,
-      },
-    ],
-  );
+  env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
+    {
+      comment: 'mutation completes at 2.2s, RTU fetch can start',
+      deltaMs: 360,
+    },
+  ]);
   env.emulateExternalRTU(2);
   env.addTimelineComments('afterLastAction', [
     'external RTU coalesced, schedules follow-up fetch',
@@ -260,13 +248,10 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
   await vi.runAllTimersAsync();
 
   // t=3s: first RTU fetch finishes (800ms < 1000ms → 200ms throttle)
-  env.addTimelineComments(
-    { id: '🟠', action: '<fetch-finished', actionValue: 2 },
-    [
-      { comment: 'vvv 200ms throttle (800ms fetch < 1000ms) vvv', deltaMs: 1 },
-      { comment: '^^^ throttle ends, follow-up fetch runs ^^^', deltaMs: 200 },
-    ],
-  );
+  env.addTimelineComments({ id: '🟠', action: '<fetch-finished' }, [
+    { comment: 'vvv 200ms throttle (800ms fetch < 1000ms) vvv', deltaMs: 1 },
+    { comment: '^^^ throttle ends, follow-up fetch runs ^^^', deltaMs: 200 },
+  ]);
 
   expect(env.serverHistory).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 1, 2]);
@@ -328,10 +313,9 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
   // t=2.5s: mutation 2 starts while mutation 1's RTU fetch is running
   await vi.advanceTimersByTimeAsync(1500);
   // mutation 1 completes at 2.2s, RTU fetch starts
-  env.addTimelineComments(
-    { id: '⬜', action: '<mutation-data-persisted', actionValue: 1 },
-    [{ comment: 'mutation 1 completes, RTU fetch starts' }],
-  );
+  env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
+    { comment: 'mutation 1 completes, RTU fetch starts' },
+  ]);
   env.addTimelineComments({ id: '🟠', action: '<fetch-aborted 🚫' }, [
     'mutation 2 aborts in-flight RTU fetch',
   ]);
@@ -344,10 +328,9 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
   await vi.runAllTimersAsync();
 
   // mutation 2 completes at 3.7s, its RTU fetch runs
-  env.addTimelineComments(
-    { id: '⬛', action: '<mutation-data-persisted', actionValue: 2 },
-    [{ comment: 'mutation 2 completes, new RTU fetch starts' }],
-  );
+  env.addTimelineComments({ id: '⬛', action: '<mutation-data-persisted' }, [
+    { comment: 'mutation 2 completes, new RTU fetch starts' },
+  ]);
 
   expect(env.serverHistory).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 1, 2]);
@@ -420,14 +403,12 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   await vi.runAllTimersAsync();
 
   // Both mutations complete, RTU events coalesce, single RTU fetch runs
-  env.addTimelineComments(
-    { id: '⬜', action: '<mutation-data-persisted', actionValue: 1 },
-    [{ comment: 'mutation 1 completes', deltaMs: 360 }],
-  );
-  env.addTimelineComments(
-    { id: '⬛', action: '<mutation-data-persisted', actionValue: 2 },
-    [{ comment: 'mutation 2 completes, RTU fetch can start', deltaMs: 360 }],
-  );
+  env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
+    { comment: 'mutation 1 completes', deltaMs: 360 },
+  ]);
+  env.addTimelineComments({ id: '⬛', action: '<mutation-data-persisted' }, [
+    { comment: 'mutation 2 completes, RTU fetch can start', deltaMs: 360 },
+  ]);
 
   expect(env.serverHistory).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 1, 2]);
@@ -484,14 +465,12 @@ test('rtu mutations without optimistic updates', async () => {
   // t=2.5s: mutation 2 starts while mutation 1's RTU fetch is running
   await vi.advanceTimersByTimeAsync(1500);
   // mutation 1 completes at 2.2s, RTU fetch starts
-  env.addTimelineComments(
-    { id: '⬜', action: '>mutation-started', actionValue: 1 },
-    ['no optimistic update, UI stays at 0'],
-  );
-  env.addTimelineComments(
-    { id: '⬜', action: '<mutation-data-persisted', actionValue: 1 },
-    [{ comment: 'mutation 1 completes, RTU fetch starts' }],
-  );
+  env.addTimelineComments({ id: '⬜', action: '>mutation-started' }, [
+    'no optimistic update, UI stays at 0',
+  ]);
+  env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
+    { comment: 'mutation 1 completes, RTU fetch starts' },
+  ]);
   env.addTimelineComments({ id: '🟠', action: '<fetch-aborted 🚫' }, [
     'mutation 2 aborts in-flight RTU fetch',
   ]);
@@ -504,10 +483,9 @@ test('rtu mutations without optimistic updates', async () => {
   await vi.runAllTimersAsync();
 
   // mutation 2 completes at 3.7s, its RTU fetch runs and finally updates UI
-  env.addTimelineComments(
-    { id: '⬛', action: '<mutation-data-persisted', actionValue: 2 },
-    [{ comment: 'mutation 2 completes, RTU fetch updates UI' }],
-  );
+  env.addTimelineComments({ id: '⬛', action: '<mutation-data-persisted' }, [
+    { comment: 'mutation 2 completes, RTU fetch updates UI' },
+  ]);
 
   expect(env.serverHistory).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 2]);
@@ -577,15 +555,12 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
   await vi.runAllTimersAsync();
 
   // RTU fetch is skipped because low priority fetch already handles it
-  env.addTimelineComments(
-    { id: '🟠', action: '<fetch-finished', actionValue: 1 },
-    [
-      {
-        comment: '^^^ RTU fetch coalesced (low priority already fetching) ^^^',
-        deltaMs: -600,
-      },
-    ],
-  );
+  env.addTimelineComments({ id: '🟠', action: '<fetch-finished' }, [
+    {
+      comment: '^^^ RTU fetch coalesced (low priority already fetching) ^^^',
+      deltaMs: -600,
+    },
+  ]);
 
   expect(env.serverHistory).toEqual([0, 1]);
   expect(env.uiChanges).toEqual([0, 1]);
@@ -606,7 +581,7 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
     1.3s   | 0  | scheduled-fetch-triggered
     1.31s  | 0  | scheduled-rt-fetch-started
     .      | 0  | 🟠 >fetch-started
-    1.51s  | 0  | -- ^^^ RTU fetch skipped (low priority already fetching) ^^^
+    1.51s  | 0  | -- ^^^ RTU fetch coalesced (low priority already fetching) ^^^
     2.11s  | 0  | 🟠 <fetch-finished (value: 1)
     .      | 1  | ui-changed
     "
@@ -652,19 +627,15 @@ test('mutation that triggers multiple rtu updates', async () => {
   await vi.runAllTimersAsync();
 
   // All RTU requests coalesce into single fetch after mutation completes
-  env.addTimelineComments(
-    { id: '⬜', action: '<mutation-data-persisted', actionValue: 1 },
-    [{ comment: 'mutation completes at 2.2s', deltaMs: 360 }],
-  );
-  env.addTimelineComments(
-    { id: '🟠', action: '<fetch-finished', actionValue: 1 },
-    [
-      {
-        comment: 'single RTU fetch runs (coalesced from 6 requests)',
-        deltaMs: -300,
-      },
-    ],
-  );
+  env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
+    { comment: 'mutation completes at 2.2s', deltaMs: 360 },
+  ]);
+  env.addTimelineComments({ id: '🟠', action: '<fetch-finished' }, [
+    {
+      comment: 'single RTU fetch runs (coalesced from 6 requests)',
+      deltaMs: -300,
+    },
+  ]);
 
   expect(env.uiChanges).toEqual([0, 1]);
   expect(env.numOfFinishedFetches).toBe(2);
