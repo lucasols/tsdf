@@ -1,13 +1,13 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
 import { useConst } from '@ls-stack/react-utils/useConst';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
+import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Result, ResultValidErrors, unknownToError } from 't-result';
-import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { Store, useSubscribeToStore } from 't-state';
 import {
   FetchContext,
