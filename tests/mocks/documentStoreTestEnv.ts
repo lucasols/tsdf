@@ -54,6 +54,11 @@ export function createDocumentStoreTestEnv<D>(
     | { comment: string; deltaMs?: number }
   )[] = [];
 
+  const pendingActionReferenceComments: Array<{
+    reference: Pick<Action, 'id' | 'action'>;
+    comments: (string | { comment: string; deltaMs?: number })[];
+  }> = [];
+
   function flushPendingComments(time: number) {
     for (const comment of pendingBeforeNextActionComments) {
       if (typeof comment === 'string') {
@@ -174,7 +179,7 @@ export function createDocumentStoreTestEnv<D>(
 
   function addTimelineComments(
     reference:
-      | Pick<Action, 'id' | 'action' | 'actionValue'>
+      | Pick<Action, 'id' | 'action'>
       | 'afterLastAction'
       | 'beforeNextAction',
     comments: (string | { comment: string; deltaMs?: number })[],
@@ -200,16 +205,13 @@ export function createDocumentStoreTestEnv<D>(
     }
 
     const matchingAction = actionsHistory.findLast(
-      (a) =>
-        a.id === reference.id
-        && a.action === reference.action
-        && a.actionValue === reference.actionValue,
+      (a) => a.id === reference.id && a.action === reference.action,
     );
 
     if (!matchingAction) {
-      throw new Error(
-        `No action matching ${JSON.stringify(reference)} found in actions history`,
-      );
+      // Defer error checking to timeline generation
+      pendingActionReferenceComments.push({ reference, comments });
+      return;
     }
 
     for (const comment of comments) {
@@ -334,6 +336,40 @@ export function createDocumentStoreTestEnv<D>(
       });
     },
     get timelineString() {
+      // Resolve pending action reference comments
+      for (const { reference, comments } of pendingActionReferenceComments) {
+        const matchingAction = actionsHistory.findLast(
+          (a) => a.id === reference.id && a.action === reference.action,
+        );
+
+        if (!matchingAction) {
+          throw new Error(
+            `No action matching ${JSON.stringify(reference)} found in actions history`,
+          );
+        }
+
+        for (const comment of comments) {
+          if (typeof comment === 'string') {
+            actionsHistory.push({
+              action: `-- ${comment}`,
+              time: matchingAction.time,
+              uiValue: undefined,
+            });
+          } else {
+            actionsHistory.push({
+              action: `-- ${comment.comment}`,
+              time: matchingAction.time + (comment.deltaMs ?? 0),
+              uiValue: undefined,
+            });
+          }
+        }
+      }
+      pendingActionReferenceComments.length = 0;
+
+      if (pendingBeforeNextActionComments.length > 0) {
+        throw new Error('Pending before next action comments found');
+      }
+
       return getTimelineString(actionsHistory);
     },
     get serverHistory() {
