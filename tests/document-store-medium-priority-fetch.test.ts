@@ -225,6 +225,51 @@ test('medium priority during in-progress fetch schedules when delay expires', as
   `);
 });
 
+test('medium priority with long delay runs normally after in-progress fetch completes', async () => {
+  // When medium priority has a delay longer than the in-progress fetch duration,
+  // it should run normally via coalescing (not via scheduled state)
+  const env = createDocumentStoreTestEnv(0, {
+    mediumPriorityDelayMs: 1000,
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // Start a high priority fetch first (will take ~800ms)
+  env.scheduleFetch('highPriority');
+
+  // Wait for fetch to start
+  await vi.advanceTimersByTimeAsync(15);
+
+  // Medium priority with 1000ms delay - will expire at t=1015, after first fetch completes at ~810ms
+  const result = env.scheduleFetch('mediumPriority');
+
+  expect(result).toBe('medium-scheduled');
+
+  await vi.runAllTimersAsync();
+
+  // 2 fetches - medium priority delay expired after first fetch completed,
+  // so it ran via normal coalescing path (not scheduled state)
+  expect(env.numOfFinishedFetches).toBe(2);
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time   | ui |
+    0      | 0  | ui-initialized
+    .      | 0  | scheduled-fetch-triggered
+    10ms   | 0  | 🔴 >fetch-started
+    15ms   | 0  | medium-fetch-scheduled
+    810ms  | 0  | 🔴 <fetch-finished (value: 0)
+    1.015s | 0  | medium-priority-fetch-started
+    1.025s | 0  | 🟠 >fetch-started
+    1.825s | 0  | 🟠 <fetch-finished (value: 0)
+    "
+  `);
+});
+
 test('medium priority uses coalescing window after delay expires', async () => {
   const env = createDocumentStoreTestEnv(0, {
     mediumPriorityDelayMs: 300,
