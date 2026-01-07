@@ -118,9 +118,9 @@ test('prevent overfetch of low priority fetches', async () => {
   env.scheduleFetch('lowPriority');
   await vi.advanceTimersByTimeAsync(10);
 
-  env.addTimelineComment(
+  env.addTimelineComments('afterLastAction', [
     'All fetches started after this point should be skipped',
-  );
+  ]);
 
   env.scheduleFetch('lowPriority');
   await vi.advanceTimersByTimeAsync(10);
@@ -215,9 +215,9 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   // Wait for the server write (mutation-finished event), but not the revalidation fetch
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
 
-  env.addTimelineComment(
+  env.addTimelineComments('afterLastAction', [
     'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
-  );
+  ]);
 
   // Second mutation starts during revalidation
   void env.performClientUpdateAction(2, {
@@ -274,9 +274,9 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   // Wait for the server write (mutation-finished event) + small buffer, but not the full revalidation fetch
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
 
-  env.addTimelineComment(
+  env.addTimelineComments('afterLastAction', [
     'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
-  );
+  ]);
 
   // Second mutation (revalidation fetch from mutation 1 still in progress)
   void env.performClientUpdateAction(2, {
@@ -369,9 +369,9 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   });
 
   await vi.advanceTimersByTimeAsync(duringRevalidationMs);
-  env.addTimelineComment(
+  env.addTimelineComments('afterLastAction', [
     'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
-  );
+  ]);
   void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
@@ -452,9 +452,9 @@ test('high priority fetch during mutation', async () => {
 
   // Trigger high priority fetch while mutation is in progress
   await vi.advanceTimersByTimeAsync(100);
-  env.addTimelineComment(
+  env.addTimelineComments('afterLastAction', [
     'High priority fetch during mutation; should be scheduled after mutation completes.',
-  );
+  ]);
   const result = env.scheduleFetch('highPriority');
   expect(result).toBe('scheduled');
 
@@ -496,7 +496,9 @@ test('multiple concurrent mutations with revalidation', async () => {
 
   // Second mutation starts 50ms after first (while first is still running)
   await vi.advanceTimersByTimeAsync(50);
-  env.addTimelineComment('Second mutation overlaps first');
+  env.addTimelineComments('afterLastAction', [
+    'Second mutation overlaps first',
+  ]);
   void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
