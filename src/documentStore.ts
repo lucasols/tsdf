@@ -5,7 +5,7 @@ import {
 } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Result, ResultValidErrors, unknownToError } from 't-result';
 import { deepEqual, Store, useSubscribeToStore } from 't-state';
 import {
@@ -326,7 +326,6 @@ export function createDocumentStore<
     disableRefetchOnMount = globalDisableRefetchOnMount,
     returnIdleStatus = !!disabled,
     ensureIsLoaded,
-    selectorUsesExternalDeps,
   }: {
     selector?: (data: State | null) => Selected;
     disabled?: boolean;
@@ -335,14 +334,7 @@ export function createDocumentStore<
     returnIdleStatus?: boolean;
     ensureIsLoaded?: boolean;
     returnRefetchingStatus?: boolean;
-    selectorUsesExternalDeps?: boolean;
   } = {}) {
-    const memoizedSelector = useMemo(
-      () => selector,
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- this is special case
-      [selectorUsesExternalDeps ? selector : 0],
-    );
-
     const storeStateSelector = useCallback(
       (
         state: DocumentStoreState<State, NError>,
@@ -350,8 +342,8 @@ export function createDocumentStore<
         const { error } = state;
 
         const data =
-          memoizedSelector ?
-            memoizedSelector(state.data)
+          selector ?
+            selector(state.data)
           : __LEGIT_CAST__<Selected>(state.data);
 
         let status = state.status;
@@ -371,11 +363,10 @@ export function createDocumentStore<
           isLoading: status === 'loading',
         };
       },
-      [returnRefetchingStatus, returnIdleStatus, memoizedSelector],
+      [selector, returnIdleStatus, returnRefetchingStatus],
     );
 
-    const storeState = store.useSelector(storeStateSelector, {
-      useExternalDeps: true,
+    const storeState = store.useSelectorRC(storeStateSelector, {
       equalityFn: deepEqual,
     });
 
