@@ -11,9 +11,7 @@ afterEach(() => {
 });
 
 function dynamicRealtimeThrottleMs(lastDuration: number): number {
-  if (lastDuration > 300) {
-    return 300;
-  }
+  if (lastDuration > 300) return 300;
   return 100;
 }
 
@@ -174,7 +172,7 @@ test('simple mutation that triggers a RTU', async () => {
 
   // t=110: mutation with RTU
   await vi.advanceTimersByTimeAsync(110);
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     duration: 200,
     triggerRTU: true,
@@ -224,7 +222,7 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
 
   // t=1s: mutation with RTU (1200ms duration, data persisted at 840ms = 70%)
   await vi.advanceTimersByTimeAsync(1000);
-  env.performClientUpdateAction(1, {
+  void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     duration: 1200,
     triggerRTU: true,

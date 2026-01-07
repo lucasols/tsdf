@@ -55,7 +55,7 @@ export type DocumentStoreOptions<
   disableRefetchOnMount?: boolean;
   errorNormalizer: (exception: Error) => NError;
   lowPriorityThrottleMs: number;
-  mediumPriorityThrottleMs: number;
+  baseCoalescingWindowMs: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (
@@ -80,7 +80,7 @@ export function createDocumentStore<
   disableRefetchOnMount: globalDisableRefetchOnMount,
   errorNormalizer,
   lowPriorityThrottleMs,
-  mediumPriorityThrottleMs,
+  baseCoalescingWindowMs,
   dynamicRealtimeThrottleMs,
   onSchedulerEvent,
   onMutationError,
@@ -160,7 +160,7 @@ export function createDocumentStore<
   const scheduler = new RequestScheduler<null>({
     fetchFn: executeFetch,
     lowPriorityThrottleMs,
-    mediumPriorityThrottleMs,
+    baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
     on: onSchedulerEvent,
   });
@@ -413,7 +413,7 @@ export function createDocumentStore<
         .ifSelector((state) => state.status)
         .change.then(({ current }) => {
           if (current === 'success' || current === 'error') {
-            emitIsLoadedEvt('isLoaded', true);
+            emitIsLoadedEvt();
           }
         });
     });

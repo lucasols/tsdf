@@ -18,9 +18,11 @@ export function createDocumentStoreTestEnv<D>(
   {
     forceInitialDataInvalidation,
     dynamicRealtimeThrottleMs,
+    baseCoalescingWindowMs = 10,
   }: {
     forceInitialDataInvalidation?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+    baseCoalescingWindowMs?: number;
   } = {},
 ) {
   const actionsHistory: Action[] = [];
@@ -97,7 +99,7 @@ export function createDocumentStoreTestEnv<D>(
       return { error: exception.message };
     },
     lowPriorityThrottleMs: 200,
-    mediumPriorityThrottleMs: 10,
+    baseCoalescingWindowMs,
     fetchFn: async (signal) => {
       const fetchId = getFetchEmoji();
       addAction(`>fetch-started`, { id: fetchId });
@@ -144,6 +146,51 @@ export function createDocumentStoreTestEnv<D>(
     documentStore.invalidateData('realtimeUpdate');
   });
 
+  function addTimelineComments(
+    reference:
+      | Pick<Action, 'id' | 'action' | 'actionValue'>
+      | 'afterLastAction',
+    comments: (string | { comment: string; deltaMs?: number })[],
+  ): void {
+    if (reference === 'afterLastAction') {
+      const time = actionsHistory.at(-1)?.time ?? 0;
+
+      for (const comment of comments) {
+        if (typeof comment === 'string') {
+          addAction(`-- ${comment}`, { time });
+        } else {
+          addAction(`-- ${comment.comment}`, {
+            time: time + (comment.deltaMs ?? 0),
+          });
+        }
+      }
+      return;
+    }
+
+    const matchingAction = actionsHistory.findLast(
+      (a) =>
+        a.id === reference.id
+        && a.action === reference.action
+        && a.actionValue === reference.actionValue,
+    );
+
+    if (!matchingAction) {
+      throw new Error(
+        `No action matching ${JSON.stringify(reference)} found in actions history`,
+      );
+    }
+
+    for (const comment of comments) {
+      if (typeof comment === 'string') {
+        addAction(`-- ${comment}`, { time: matchingAction.time });
+      } else {
+        addAction(`-- ${comment.comment}`, {
+          time: matchingAction.time + (comment.deltaMs ?? 0),
+        });
+      }
+    }
+  }
+
   return {
     useDocument: documentStore.useDocument,
     get numOfFinishedFetches() {
@@ -182,20 +229,7 @@ export function createDocumentStoreTestEnv<D>(
         }
       }
     },
-    addTimelineComment: (
-      comment: string,
-      time?: number | `+${number}` | `-${number}`,
-    ) => {
-      let resolvedTime: number;
-      if (time === undefined) {
-        resolvedTime = getRelativeTime();
-      } else if (typeof time === 'string') {
-        resolvedTime = getRelativeTime() + parseInt(time, 10);
-      } else {
-        resolvedTime = time;
-      }
-      addAction(`-- ${comment}`, { time: resolvedTime });
-    },
+    addTimelineComments,
     scheduleFetch: (fetchType: FetchType) => {
       const result = documentStore.scheduleFetch(fetchType);
 
@@ -211,6 +245,12 @@ export function createDocumentStoreTestEnv<D>(
           break;
         case 'rt-scheduled':
           addAction('rt-fetch-scheduled');
+          break;
+        case 'triggered':
+          addAction('scheduled-fetch-triggered');
+          break;
+        case 'coalesced':
+          addAction('scheduled-fetch-coalesced');
           break;
       }
 

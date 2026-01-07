@@ -46,7 +46,7 @@ export function useEnsureIsLoaded(
 
   return [
     useModifyResult,
-    (isLoaded: boolean) => isLoadedEvtEmitter.emit('isLoaded', isLoaded),
+    () => isLoadedEvtEmitter.emit('isLoaded', true),
   ] as const;
 }
 

@@ -14,7 +14,9 @@ export type ScheduleFetchResults =
   | 'skipped'
   | 'started'
   | 'scheduled'
-  | 'rt-scheduled';
+  | 'rt-scheduled'
+  | 'triggered'
+  | 'coalesced';
 
 type ScheduledState<T> = {
   params: T;
@@ -22,6 +24,12 @@ type ScheduledState<T> = {
 
 type RealtimeScheduledState = {
   timeoutId: ReturnType<typeof setTimeout>;
+};
+
+type CoalescingState<T> = {
+  timeoutId: ReturnType<typeof setTimeout>;
+  params: T;
+  onEnd: (() => void)[];
 };
 
 type InProgressState = {
@@ -34,13 +42,14 @@ type FetchState<T> = {
   inProgress: InProgressState | null;
   scheduled: ScheduledState<T> | null;
   realtimeScheduled: RealtimeScheduledState | null;
+  coalescing: CoalescingState<T> | null;
 };
 
 export type RequestSchedulerOptions<T> = {
   fetchFn: (fetchContext: FetchContext, params: T) => Promise<boolean>;
   on?: (event: RequestSchedulerEvents) => void;
   lowPriorityThrottleMs: number;
-  mediumPriorityThrottleMs: number;
+  baseCoalescingWindowMs: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
 };
 
@@ -58,7 +67,7 @@ export class RequestScheduler<T> {
     | ((event: RequestSchedulerEvents) => void)
     | undefined;
   private readonly lowPriorityThrottleMs: number;
-  private readonly mediumPriorityThrottleMs: number;
+  private readonly baseCoalescingWindowMs: number;
   private readonly dynamicRealtimeThrottleMs:
     | ((lastFetchDuration: number) => number)
     | undefined;
@@ -78,13 +87,14 @@ export class RequestScheduler<T> {
     this.fetchFn = options.fetchFn;
     this.onEvent = options.on;
     this.lowPriorityThrottleMs = options.lowPriorityThrottleMs;
-    this.mediumPriorityThrottleMs = options.mediumPriorityThrottleMs;
+    this.baseCoalescingWindowMs = options.baseCoalescingWindowMs;
     this.dynamicRealtimeThrottleMs = options.dynamicRealtimeThrottleMs;
 
     this.fetchState = {
       inProgress: null,
       scheduled: null,
       realtimeScheduled: null,
+      coalescing: null,
     };
   }
 
@@ -93,6 +103,7 @@ export class RequestScheduler<T> {
       this.fetchState.inProgress !== null
       || this.fetchState.scheduled !== null
       || this.fetchState.realtimeScheduled !== null
+      || this.fetchState.coalescing !== null
     );
   }
 
@@ -119,29 +130,73 @@ export class RequestScheduler<T> {
   scheduleFetch(fetchType: FetchType, params: T): ScheduleFetchResults {
     const startTime = Date.now();
 
-    const fetchTypeToUse =
-      this.lastFetchStartTime === 0 ? 'highPriority' : fetchType;
-
-    if (this.dynamicRealtimeThrottleMs && fetchTypeToUse === 'realtimeUpdate') {
+    if (this.dynamicRealtimeThrottleMs && fetchType === 'realtimeUpdate') {
       if (this.scheduleRTU(startTime, params)) return 'rt-scheduled';
     }
 
-    if (this.shouldSkipFetch(fetchTypeToUse, startTime)) {
+    if (this.shouldSkipFetch(fetchType, startTime)) {
       return 'skipped';
     }
 
-    if (this.shouldScheduleFetch(fetchTypeToUse, params)) {
+    if (this.shouldScheduleFetch(fetchType, params)) {
       return 'scheduled';
     }
 
-    void this.startFetch(params, startTime);
+    // If coalescing window is active, update params and coalesce
+    if (this.fetchState.coalescing) {
+      this.fetchState.coalescing.params = params;
+      return 'coalesced';
+    }
 
-    return 'started';
+    // Start coalescing window
+    this.startCoalescingWindow(params);
+
+    return 'triggered';
+  }
+
+  private startCoalescingWindow(params: T): void {
+    this.fetchState.coalescing = {
+      timeoutId: setTimeout(() => {
+        const coalescing = this.fetchState.coalescing;
+        if (!coalescing) return;
+
+        const coalescedParams = coalescing.params;
+        const onEnd = coalescing.onEnd;
+        this.fetchState.coalescing = null;
+
+        // Call all onEnd callbacks
+        for (const cb of onEnd) cb();
+
+        // If a fetch is already in progress (e.g., from RTU) or mutation in progress, schedule instead
+        if (this.fetchState.inProgress || this.mutationInProgress) {
+          this.fetchState.scheduled = { params: coalescedParams };
+          return;
+        }
+
+        void this.startFetch(coalescedParams, Date.now());
+      }, this.baseCoalescingWindowMs),
+      params,
+      onEnd: [],
+    };
+  }
+
+  private addOnCoalescingEnd(cb: () => void): void {
+    if (this.fetchState.coalescing) {
+      this.fetchState.coalescing.onEnd.push(cb);
+    }
   }
 
   async awaitFetch(params: T): Promise<boolean> {
     this.scheduleFetch('highPriority', params);
 
+    // Wait for coalescing window to complete first
+    if (this.fetchState.coalescing) {
+      await new Promise<true>((resolve) => {
+        this.addOnCoalescingEnd(() => resolve(true));
+      });
+    }
+
+    // Then wait for the fetch to complete
     if (this.fetchState.inProgress) {
       await new Promise<true>((resolve) => {
         this.addOnFetchEnd(() => resolve(true));
@@ -156,6 +211,12 @@ export class RequestScheduler<T> {
     this.abortFetchesBeforeOrEqual = this.lastFetchIdStarted;
     this.fetchState.inProgress = null;
 
+    // Clear coalescing state when mutation starts
+    if (this.fetchState.coalescing) {
+      clearTimeout(this.fetchState.coalescing.timeoutId);
+      this.fetchState.coalescing = null;
+    }
+
     if (this.currentAbortController) {
       this.currentAbortController.abort();
       this.currentAbortController = null;
@@ -168,9 +229,13 @@ export class RequestScheduler<T> {
   }
 
   reset(): void {
+    if (this.fetchState.coalescing) {
+      clearTimeout(this.fetchState.coalescing.timeoutId);
+    }
     this.fetchState.inProgress = null;
     this.fetchState.scheduled = null;
     this.fetchState.realtimeScheduled = null;
+    this.fetchState.coalescing = null;
     this.lastFetchStartTime = 0;
     this.lastFetchDuration = 0;
     this.lastFetchIdStarted = 0;
@@ -186,6 +251,14 @@ export class RequestScheduler<T> {
       this.onEvent?.('scheduled-fetch-started');
       const params = this.fetchState.scheduled.params;
       this.fetchState.scheduled = null;
+
+      // Clear any active coalescing window to prevent it from
+      // scheduling another fetch while this one is in progress
+      if (this.fetchState.coalescing) {
+        clearTimeout(this.fetchState.coalescing.timeoutId);
+        this.fetchState.coalescing = null;
+      }
+
       void this.startFetch(params, Date.now());
     }
   }
@@ -295,21 +368,11 @@ export class RequestScheduler<T> {
   }
 
   private shouldSkipFetch(fetchType: FetchType, startTime: number): boolean {
-    if (fetchType === 'highPriority') {
-      if (this.fetchState.inProgress) {
-        const timeSinceLastFetch =
-          startTime - this.fetchState.inProgress.startTime;
-
-        if (timeSinceLastFetch < this.mediumPriorityThrottleMs) {
-          return true;
-        }
-      }
-    }
-
     if (fetchType === 'lowPriority') {
       if (
         this.fetchState.inProgress
         || this.fetchState.scheduled
+        || this.fetchState.coalescing
         || this.mutationInProgress
       ) {
         return true;
@@ -359,7 +422,7 @@ export class RequestScheduler<T> {
       timeoutId: setTimeout(() => {
         this.fetchState.realtimeScheduled = null;
         this.onEvent?.('scheduled-rt-fetch-started');
-        void this.startFetch(params, Date.now());
+        this.scheduleFetch('highPriority', params);
       }, delay),
     };
 

@@ -40,8 +40,8 @@ test('simple mutation with revalidation and optimistic update', async () => {
     .     | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 1  | 🔴 >fetch-started
-    2s    | 1  | 🔴 <fetch-finished (value: 1)
+    1.21s | 1  | 🔴 >fetch-started
+    2.01s | 1  | 🔴 <fetch-finished (value: 1)
     "
   `);
 });
@@ -99,8 +99,8 @@ test('simple mutation without optimistic update', async () => {
     0     | 0  | ui-initialized
     .     | 0  | ⬜ >mutation-started (value: 1)
     840ms | 0  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 0  | 🔴 >fetch-started
-    2s    | 0  | 🔴 <fetch-finished (value: 1)
+    1.21s | 0  | 🔴 >fetch-started
+    2.01s | 0  | 🔴 <fetch-finished (value: 1)
     .     | 1  | ui-changed
     "
   `);
@@ -138,12 +138,13 @@ test('prevent overfetch of low priority fetches', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    10ms  | 0  | -- All fetches started after this point should be skipped
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | 🔴 >fetch-started
+    .     | 0  | -- All fetches started after this point should be skipped
     .     | 0  | scheduled-fetch-skipped
     20ms  | 0  | scheduled-fetch-skipped
     30ms  | 0  | scheduled-fetch-skipped
-    800ms | 0  | 🔴 <fetch-finished (value: 0)
+    810ms | 0  | 🔴 <fetch-finished (value: 0)
     "
   `);
 });
@@ -182,13 +183,13 @@ test('multiple mutations with revalidation in sequence', async () => {
     .     | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 1  | 🔴 >fetch-started
-    2s    | 1  | 🔴 <fetch-finished (value: 1)
+    1.21s | 1  | 🔴 >fetch-started
+    2.01s | 1  | 🔴 <fetch-finished (value: 1)
     2.05s | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
     2.89s | 2  | ⬛ <mutation-data-persisted (value: 2)
-    3.25s | 2  | 🟠 >fetch-started
-    4.05s | 2  | 🟠 <fetch-finished (value: 2)
+    3.26s | 2  | 🟠 >fetch-started
+    4.06s | 2  | 🟠 <fetch-finished (value: 2)
     "
   `);
 });
@@ -236,14 +237,14 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
     .     | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 1  | 🔴 >fetch-started
+    1.21s | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2s    | 2  | 🔴 <fetch-aborted 🚫
+    2.01s | 2  | 🔴 <fetch-aborted 🚫
     2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
-    2.45s | 2  | 🟠 >fetch-started
-    3.25s | 2  | 🟠 <fetch-finished (value: 2)
+    2.46s | 2  | 🟠 >fetch-started
+    3.26s | 2  | 🟠 <fetch-finished (value: 2)
     "
   `);
 });
@@ -314,34 +315,35 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | 🔴 >fetch-started
     100ms | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
-    800ms | 1  | 🔴 <fetch-aborted 🚫
+    810ms | 1  | 🔴 <fetch-aborted 🚫
     940ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.3s  | 1  | 🟠 >fetch-started
+    1.31s | 1  | 🟠 >fetch-started
     1.35s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2.1s  | 2  | 🟠 <fetch-aborted 🚫
+    2.11s | 2  | 🟠 <fetch-aborted 🚫
     2.19s | 2  | ⬛ <mutation-data-persisted (value: 2)
-    2.55s | 2  | 🟡 >fetch-started
+    2.56s | 2  | 🟡 >fetch-started
     2.6s  | 3  | 🟫 optimistic-ui-commit
     .     | 3  | 🟫 >mutation-started (value: 3)
-    3.35s | 3  | 🟡 <fetch-aborted 🚫
+    3.36s | 3  | 🟡 <fetch-aborted 🚫
     3.44s | 3  | 🟫 <mutation-data-persisted (value: 3)
-    3.8s  | 3  | 🟢 >fetch-started
+    3.81s | 3  | 🟢 >fetch-started
     3.85s | 4  | 🟪 optimistic-ui-commit
     .     | 4  | 🟪 >mutation-started (value: 4)
-    4.6s  | 4  | 🟢 <fetch-aborted 🚫
+    4.61s | 4  | 🟢 <fetch-aborted 🚫
     4.69s | 4  | 🟪 <mutation-data-persisted (value: 4)
-    5.05s | 4  | 🔵 >fetch-started
+    5.06s | 4  | 🔵 >fetch-started
     5.1s  | 4  | 🟦 optimistic-ui-commit
     .     | 4  | 🟦 >mutation-started (value: 4)
-    5.85s | 4  | 🔵 <fetch-aborted 🚫
+    5.86s | 4  | 🔵 <fetch-aborted 🚫
     5.94s | 4  | 🟦 <mutation-data-persisted (value: 4)
-    6.3s  | 4  | 🟣 >fetch-started
-    7.1s  | 4  | 🟣 <fetch-finished (value: 4)
+    6.31s | 4  | 🟣 >fetch-started
+    7.11s | 4  | 🟣 <fetch-finished (value: 4)
     "
   `);
 
@@ -405,29 +407,29 @@ test('multiple mutations with revalidation in sequence 3', async () => {
     .     | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 1  | 🔴 >fetch-started
+    1.21s | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2s    | 2  | 🔴 <fetch-aborted 🚫
+    2.01s | 2  | 🔴 <fetch-aborted 🚫
     2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
-    2.45s | 2  | 🟠 >fetch-started
+    2.46s | 2  | 🟠 >fetch-started
     2.5s  | 3  | 🟫 optimistic-ui-commit
     .     | 3  | 🟫 >mutation-started (value: 3)
-    3.25s | 3  | 🟠 <fetch-aborted 🚫
+    3.26s | 3  | 🟠 <fetch-aborted 🚫
     3.34s | 3  | 🟫 <mutation-data-persisted (value: 3)
-    3.7s  | 3  | 🟡 >fetch-started
+    3.71s | 3  | 🟡 >fetch-started
     3.75s | 4  | 🟪 optimistic-ui-commit
     .     | 4  | 🟪 >mutation-started (value: 4)
-    4.5s  | 4  | 🟡 <fetch-aborted 🚫
+    4.51s | 4  | 🟡 <fetch-aborted 🚫
     4.59s | 4  | 🟪 <mutation-data-persisted (value: 4)
-    4.95s | 4  | 🟢 >fetch-started
+    4.96s | 4  | 🟢 >fetch-started
     5s    | 4  | 🟦 optimistic-ui-commit
     .     | 4  | 🟦 >mutation-started (value: 4)
-    5.75s | 4  | 🟢 <fetch-aborted 🚫
+    5.76s | 4  | 🟢 <fetch-aborted 🚫
     5.84s | 4  | 🟦 <mutation-data-persisted (value: 4)
-    6.2s  | 4  | 🔵 >fetch-started
-    7s    | 4  | 🔵 <fetch-finished (value: 4)
+    6.21s | 4  | 🔵 >fetch-started
+    7.01s | 4  | 🔵 <fetch-finished (value: 4)
     "
   `);
 });
