@@ -171,10 +171,10 @@ export class RequestScheduler<T> {
   get hasPendingFetch(): boolean {
     const { phase, pending } = this.state;
     return (
-      phase.type !== 'idle' ||
-      pending.scheduled !== null ||
-      pending.rtuDelayed !== null ||
-      pending.mediumPriorityDelayed !== null
+      phase.type !== 'idle'
+      || pending.scheduled !== null
+      || pending.rtuDelayed !== null
+      || pending.mediumPriorityDelayed !== null
     );
   }
 
@@ -391,12 +391,14 @@ export class RequestScheduler<T> {
     this.cancelMediumPriority();
 
     // Create shouldAbort function that checks current state
-    const shouldAbort = function shouldAbort(this: RequestScheduler<T>): boolean {
+    const shouldAbort = function shouldAbort(
+      this: RequestScheduler<T>,
+    ): boolean {
       const { abort, pending } = this.state;
       const shouldAbortFetch =
-        fetchId !== abort.lastFetchId ||
-        pending.mutation !== null ||
-        fetchId <= abort.abortBoundary;
+        fetchId !== abort.lastFetchId
+        || pending.mutation !== null
+        || fetchId <= abort.abortBoundary;
 
       this.state.lastFetchWasAborted = shouldAbortFetch;
 
@@ -508,18 +510,16 @@ export class RequestScheduler<T> {
   // ==========================================================================
 
   private shouldSkipFetch(fetchType: FetchType, startTime: number): boolean {
-    if (fetchType !== 'lowPriority') {
-      return false;
-    }
+    if (fetchType !== 'lowPriority') return false;
 
     const { phase, pending, timing } = this.state;
 
     // Skip if fetch/coalescing in progress or scheduled
     // Note: mutation check is handled by shouldScheduleFetch, not here
     if (
-      phase.type === 'fetching' ||
-      phase.type === 'coalescing' ||
-      pending.scheduled !== null
+      phase.type === 'fetching'
+      || phase.type === 'coalescing'
+      || pending.scheduled !== null
     ) {
       return true;
     }
@@ -562,17 +562,15 @@ export class RequestScheduler<T> {
     const { timing, phase, pending } = this.state;
 
     if (
-      !timing.lastFetchDuration ||
-      !timing.lastFetchStartTime ||
-      !this.dynamicRealtimeThrottleMs
+      !timing.lastFetchDuration
+      || !timing.lastFetchStartTime
+      || !this.dynamicRealtimeThrottleMs
     ) {
       return false;
     }
 
     // If RTU is already scheduled, just return true
-    if (pending.rtuDelayed) {
-      return true;
-    }
+    if (pending.rtuDelayed) return true;
 
     // If fetching, register callback for when fetch completes
     if (phase.type === 'fetching') {
@@ -599,9 +597,7 @@ export class RequestScheduler<T> {
   }
 
   private scheduleDelayedRTU(startTime: number, params: T): boolean {
-    if (!this.dynamicRealtimeThrottleMs) {
-      return false;
-    }
+    if (!this.dynamicRealtimeThrottleMs) return false;
 
     const { timing } = this.state;
     const timeSinceLastFetch =
@@ -668,10 +664,7 @@ export class RequestScheduler<T> {
     const { phase, pending } = this.state;
 
     // If busy, schedule for later
-    if (
-      phase.type !== 'idle' ||
-      pending.mutation !== null
-    ) {
+    if (phase.type !== 'idle' || pending.mutation !== null) {
       pending.scheduled = { params };
       return;
     }
