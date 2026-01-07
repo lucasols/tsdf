@@ -259,7 +259,9 @@ export class RequestScheduler<T> {
         this.fetchState.coalescing = null;
       }
 
-      void this.startFetch(params, Date.now());
+      // Use coalescing window instead of starting fetch directly
+      // This allows subsequent scheduleFetch calls to coalesce
+      this.startCoalescingWindow(params);
     }
   }
 

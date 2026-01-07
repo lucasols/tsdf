@@ -49,6 +49,30 @@ export function createDocumentStoreTestEnv<D>(
     return Date.now() - initialTime;
   }
 
+  const pendingBeforeNextActionComments: (
+    | string
+    | { comment: string; deltaMs?: number }
+  )[] = [];
+
+  function flushPendingComments(time: number) {
+    for (const comment of pendingBeforeNextActionComments) {
+      if (typeof comment === 'string') {
+        actionsHistory.push({
+          action: `-- ${comment}`,
+          time,
+          uiValue: undefined,
+        });
+      } else {
+        actionsHistory.push({
+          action: `-- ${comment.comment}`,
+          time: time + (comment.deltaMs ?? 0),
+          uiValue: undefined,
+        });
+      }
+    }
+    pendingBeforeNextActionComments.length = 0;
+  }
+
   function addAction(
     action: string,
     {
@@ -74,6 +98,8 @@ export function createDocumentStoreTestEnv<D>(
         return;
       }
     }
+
+    flushPendingComments(time);
 
     actionsHistory.push({
       action,
@@ -149,9 +175,15 @@ export function createDocumentStoreTestEnv<D>(
   function addTimelineComments(
     reference:
       | Pick<Action, 'id' | 'action' | 'actionValue'>
-      | 'afterLastAction',
+      | 'afterLastAction'
+      | 'beforeNextAction',
     comments: (string | { comment: string; deltaMs?: number })[],
   ): void {
+    if (reference === 'beforeNextAction') {
+      pendingBeforeNextActionComments.push(...comments);
+      return;
+    }
+
     if (reference === 'afterLastAction') {
       const time = actionsHistory.at(-1)?.time ?? 0;
 
