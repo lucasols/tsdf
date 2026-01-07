@@ -25,38 +25,63 @@ export type ScheduleFetchResults =
   | 'coalesced'
   | 'medium-scheduled';
 
-type ScheduledState<T> = {
-  params: T;
+// ============================================================================
+// State Machine Types
+// ============================================================================
+
+type TimeoutId = ReturnType<typeof setTimeout>;
+
+/** Primary scheduler phase - exactly one is active at a time */
+type SchedulerPhase<T> =
+  | { type: 'idle' }
+  | {
+      type: 'coalescing';
+      timeoutId: TimeoutId;
+      params: T;
+      awaitCallbacks: (() => void)[];
+    }
+  | {
+      type: 'fetching';
+      fetchId: number;
+      startTime: number;
+      awaitCallbacks: (() => void)[];
+      rtuCallback: (() => void) | null;
+    };
+
+/** Pending states that can coexist with any phase */
+type PendingStates<T> = {
+  scheduled: { params: T } | null;
+  rtuDelayed: { timeoutId: TimeoutId; params: T } | null;
+  mediumPriorityDelayed: { timeoutId: TimeoutId; params: T } | null;
+  mutation: { id: number; onEnd: (() => void) | null } | null;
 };
 
-type RealtimeScheduledState = {
-  timeoutId: ReturnType<typeof setTimeout>;
+/** Timing data for throttling decisions */
+type TimingState = {
+  lastFetchStartTime: number;
+  lastFetchDuration: number;
 };
 
-type MediumPriorityState<T> = {
-  timeoutId: ReturnType<typeof setTimeout>;
-  params: T;
+/** Abort tracking state */
+type AbortState = {
+  lastFetchId: number;
+  lastMutationId: number;
+  abortBoundary: number;
+  controller: AbortController | null;
 };
 
-type CoalescingState<T> = {
-  timeoutId: ReturnType<typeof setTimeout>;
-  params: T;
-  onEnd: (() => void)[];
+/** Complete scheduler state */
+type SchedulerState<T> = {
+  phase: SchedulerPhase<T>;
+  pending: PendingStates<T>;
+  timing: TimingState;
+  abort: AbortState;
+  lastFetchWasAborted: boolean;
 };
 
-type InProgressState = {
-  startTime: number;
-  onEnd: (() => void)[];
-  rtuOnEnd: (() => void) | null;
-};
-
-type FetchState<T> = {
-  inProgress: InProgressState | null;
-  scheduled: ScheduledState<T> | null;
-  realtimeScheduled: RealtimeScheduledState | null;
-  coalescing: CoalescingState<T> | null;
-  mediumPriority: MediumPriorityState<T> | null;
-};
+// ============================================================================
+// Options and Configuration
+// ============================================================================
 
 export type RequestSchedulerOptions<T> = {
   fetchFn: (fetchContext: FetchContext, params: T) => Promise<boolean>;
@@ -71,10 +96,18 @@ export type ScheduleFetchOptions = {
   mediumPriorityDelayMs?: number;
 };
 
+// ============================================================================
+// ID Generation
+// ============================================================================
+
 let autoIncrementId = 0;
 export function getAutoIncrementId(): number {
   return ++autoIncrementId;
 }
+
+// ============================================================================
+// RequestScheduler Class
+// ============================================================================
 
 export class RequestScheduler<T> {
   private readonly fetchFn: (
@@ -91,16 +124,7 @@ export class RequestScheduler<T> {
     | undefined;
   private readonly mediumPriorityDelayMs: number | undefined;
 
-  private fetchState: FetchState<T>;
-  private lastMutationIdStarted: number = 0;
-  private lastFetchIdStarted: number = 0;
-  private mutationInProgress: boolean = false;
-  private lastFetchStartTime: number = 0;
-  private lastFetchDuration: number = 0;
-  private onMutationEnd: (() => void) | null = null;
-  private lastFetchWasAborted: boolean = false;
-  private abortFetchesBeforeOrEqual: number = 0;
-  private currentAbortController: AbortController | null = null;
+  private state: SchedulerState<T>;
 
   constructor(options: RequestSchedulerOptions<T>) {
     this.fetchFn = options.fetchFn;
@@ -110,44 +134,73 @@ export class RequestScheduler<T> {
     this.dynamicRealtimeThrottleMs = options.dynamicRealtimeThrottleMs;
     this.mediumPriorityDelayMs = options.mediumPriorityDelayMs;
 
-    this.fetchState = {
-      inProgress: null,
-      scheduled: null,
-      realtimeScheduled: null,
-      coalescing: null,
-      mediumPriority: null,
+    this.state = this.createInitialState();
+  }
+
+  // ==========================================================================
+  // State Factory
+  // ==========================================================================
+
+  private createInitialState(): SchedulerState<T> {
+    return {
+      phase: { type: 'idle' },
+      pending: {
+        scheduled: null,
+        rtuDelayed: null,
+        mediumPriorityDelayed: null,
+        mutation: null,
+      },
+      timing: {
+        lastFetchStartTime: 0,
+        lastFetchDuration: 0,
+      },
+      abort: {
+        lastFetchId: 0,
+        lastMutationId: 0,
+        abortBoundary: 0,
+        controller: null,
+      },
+      lastFetchWasAborted: false,
     };
   }
 
+  // ==========================================================================
+  // Public Getters (maintain backward compatibility)
+  // ==========================================================================
+
   get hasPendingFetch(): boolean {
+    const { phase, pending } = this.state;
     return (
-      this.fetchState.inProgress !== null
-      || this.fetchState.scheduled !== null
-      || this.fetchState.realtimeScheduled !== null
-      || this.fetchState.coalescing !== null
-      || this.fetchState.mediumPriority !== null
+      phase.type !== 'idle' ||
+      pending.scheduled !== null ||
+      pending.rtuDelayed !== null ||
+      pending.mediumPriorityDelayed !== null
     );
   }
 
   get fetchIsInProgress(): boolean {
-    return this.fetchState.inProgress !== null;
+    return this.state.phase.type === 'fetching';
   }
 
   get mutationIsInProgress(): boolean {
-    return this.mutationInProgress;
+    return this.state.pending.mutation !== null;
   }
 
   setLastFetchDuration(duration: number): void {
-    this.lastFetchDuration = duration;
+    this.state.timing.lastFetchDuration = duration;
   }
 
   setLastFetchStartTime(startTime: number): void {
-    this.lastFetchStartTime = startTime;
+    this.state.timing.lastFetchStartTime = startTime;
   }
 
-  private getFetchState(): FetchState<T> {
-    return this.fetchState;
+  getFetchIsInProgress(): boolean {
+    return this.state.phase.type === 'fetching';
   }
+
+  // ==========================================================================
+  // Core Public API
+  // ==========================================================================
 
   scheduleFetch(
     fetchType: FetchType,
@@ -158,210 +211,203 @@ export class RequestScheduler<T> {
 
     // Handle medium priority scheduling
     if (fetchType === 'mediumPriority') {
-      return this.scheduleMediumPriority(params, options?.mediumPriorityDelayMs);
+      return this.handleMediumPriority(params, options?.mediumPriorityDelayMs);
     }
 
+    // Handle realtime update scheduling
     if (this.dynamicRealtimeThrottleMs && fetchType === 'realtimeUpdate') {
-      if (this.scheduleRTU(startTime, params)) return 'rt-scheduled';
+      if (this.handleRealtimeUpdate(startTime, params)) {
+        return 'rt-scheduled';
+      }
     }
 
+    // Check if we should skip (low priority throttling)
     if (this.shouldSkipFetch(fetchType, startTime)) {
       return 'skipped';
     }
 
-    if (this.shouldScheduleFetch(fetchType, params)) {
-      return 'scheduled';
-    }
+    // Check if we should schedule (fetch/mutation in progress)
+    if (this.shouldScheduleFetch(params)) return 'scheduled';
 
-    // If coalescing window is active, update params and coalesce
-    if (this.fetchState.coalescing) {
-      this.fetchState.coalescing.params = params;
+    // If coalescing, update params
+    if (this.state.phase.type === 'coalescing') {
+      this.state.phase.params = params;
       return 'coalesced';
     }
 
     // Start coalescing window
-    this.startCoalescingWindow(params);
-
+    this.transitionToCoalescing(params);
     return 'triggered';
-  }
-
-  private startCoalescingWindow(params: T): void {
-    this.fetchState.coalescing = {
-      timeoutId: setTimeout(() => {
-        const coalescing = this.fetchState.coalescing;
-        if (!coalescing) return;
-
-        const coalescedParams = coalescing.params;
-        const onEnd = coalescing.onEnd;
-        this.fetchState.coalescing = null;
-
-        // Call all onEnd callbacks
-        for (const cb of onEnd) cb();
-
-        // If a fetch is already in progress (e.g., from RTU) or mutation in progress, schedule instead
-        if (this.fetchState.inProgress || this.mutationInProgress) {
-          this.fetchState.scheduled = { params: coalescedParams };
-          return;
-        }
-
-        void this.startFetch(coalescedParams, Date.now());
-      }, this.baseCoalescingWindowMs),
-      params,
-      onEnd: [],
-    };
-  }
-
-  private addOnCoalescingEnd(cb: () => void): void {
-    if (this.fetchState.coalescing) {
-      this.fetchState.coalescing.onEnd.push(cb);
-    }
   }
 
   async awaitFetch(params: T): Promise<boolean> {
     this.scheduleFetch('highPriority', params);
 
     // Wait for coalescing window to complete first
-    if (this.fetchState.coalescing) {
-      await new Promise<true>((resolve) => {
-        this.addOnCoalescingEnd(() => resolve(true));
+    if (this.state.phase.type === 'coalescing') {
+      await new Promise<void>((resolve) => {
+        if (this.state.phase.type === 'coalescing') {
+          this.state.phase.awaitCallbacks.push(resolve);
+        }
       });
     }
 
     // Then wait for the fetch to complete
-    if (this.fetchState.inProgress) {
-      await new Promise<true>((resolve) => {
-        this.addOnFetchEnd(() => resolve(true));
+    if (this.state.phase.type === 'fetching') {
+      await new Promise<void>((resolve) => {
+        if (this.state.phase.type === 'fetching') {
+          this.state.phase.awaitCallbacks.push(resolve);
+        }
       });
     }
 
-    return this.lastFetchWasAborted;
+    return this.state.lastFetchWasAborted;
   }
 
   startMutation(): () => boolean {
-    this.mutationInProgress = true;
-    this.abortFetchesBeforeOrEqual = this.lastFetchIdStarted;
-    this.fetchState.inProgress = null;
+    const { phase, pending, abort } = this.state;
 
-    // Clear coalescing state when mutation starts
-    if (this.fetchState.coalescing) {
-      clearTimeout(this.fetchState.coalescing.timeoutId);
-      this.fetchState.coalescing = null;
+    // Set mutation state
+    const mutationId = getAutoIncrementId();
+    pending.mutation = { id: mutationId, onEnd: null };
+
+    // Set abort boundary to current fetch id
+    abort.abortBoundary = abort.lastFetchId;
+
+    // Abort current fetch if in progress
+    if (abort.controller) {
+      abort.controller.abort();
+      abort.controller = null;
     }
 
-    // Note: Medium priority is NOT cancelled by mutations, only by other fetches
-    // When medium priority delay expires during a mutation, it will schedule itself
-
-    if (this.currentAbortController) {
-      this.currentAbortController.abort();
-      this.currentAbortController = null;
+    // Clear coalescing phase (but not medium priority - it survives mutations)
+    if (phase.type === 'coalescing') {
+      clearTimeout(phase.timeoutId);
+      this.state.phase = { type: 'idle' };
+    } else if (phase.type === 'fetching') {
+      // Clear fetching phase without calling callbacks (fetch was aborted)
+      this.state.phase = { type: 'idle' };
     }
 
-    const id = getAutoIncrementId();
-    this.lastMutationIdStarted = id;
-
-    return () => this.endMutation(id);
+    return () => this.endMutation(mutationId);
   }
 
   reset(): void {
-    if (this.fetchState.coalescing) {
-      clearTimeout(this.fetchState.coalescing.timeoutId);
+    const { phase, pending, abort } = this.state;
+
+    // Clear all timeouts
+    if (phase.type === 'coalescing') {
+      clearTimeout(phase.timeoutId);
     }
-    if (this.fetchState.mediumPriority) {
-      clearTimeout(this.fetchState.mediumPriority.timeoutId);
+    if (pending.rtuDelayed) {
+      clearTimeout(pending.rtuDelayed.timeoutId);
     }
-    this.fetchState.inProgress = null;
-    this.fetchState.scheduled = null;
-    this.fetchState.realtimeScheduled = null;
-    this.fetchState.coalescing = null;
-    this.fetchState.mediumPriority = null;
-    this.lastFetchStartTime = 0;
-    this.lastFetchDuration = 0;
-    this.lastFetchIdStarted = 0;
-    this.lastMutationIdStarted = 0;
-    this.mutationInProgress = false;
-    this.lastFetchWasAborted = false;
-    this.abortFetchesBeforeOrEqual = 0;
-    this.currentAbortController = null;
+    if (pending.mediumPriorityDelayed) {
+      clearTimeout(pending.mediumPriorityDelayed.timeoutId);
+    }
+
+    // Abort any in-progress fetch
+    if (abort.controller) {
+      abort.controller.abort();
+    }
+
+    // Reset to initial state
+    this.state = this.createInitialState();
   }
 
-  private flushScheduledFetch(): void {
-    if (this.fetchState.scheduled) {
-      this.onEvent?.('scheduled-fetch-started');
-      const params = this.fetchState.scheduled.params;
-      this.fetchState.scheduled = null;
+  // ==========================================================================
+  // Phase Transitions
+  // ==========================================================================
 
-      // Clear any active coalescing window to prevent it from
-      // scheduling another fetch while this one is in progress
-      if (this.fetchState.coalescing) {
-        clearTimeout(this.fetchState.coalescing.timeoutId);
-        this.fetchState.coalescing = null;
-      }
+  private transitionToCoalescing(params: T): void {
+    this.assertPhase('idle', 'transitionToCoalescing');
 
-      // Use coalescing window instead of starting fetch directly
-      // This allows subsequent scheduleFetch calls to coalesce
-      this.startCoalescingWindow(params);
-    }
+    const timeoutId = setTimeout(() => {
+      this.onCoalescingTimeout();
+    }, this.baseCoalescingWindowMs);
+
+    this.state.phase = {
+      type: 'coalescing',
+      timeoutId,
+      params,
+      awaitCallbacks: [],
+    };
   }
 
-  private endMutation(id: number): boolean {
-    if (id === this.lastMutationIdStarted) {
-      this.mutationInProgress = false;
+  private onCoalescingTimeout(): void {
+    const { phase, pending } = this.state;
 
-      if (this.onMutationEnd) {
-        this.onMutationEnd();
-        this.onMutationEnd = null;
-      }
+    if (phase.type !== 'coalescing') return;
 
-      this.flushScheduledFetch();
-      return true;
+    const { params, awaitCallbacks } = phase;
+
+    // Transition to idle first
+    this.state.phase = { type: 'idle' };
+
+    // Fire coalescing callbacks
+    for (const cb of awaitCallbacks) {
+      cb();
     }
 
-    return false;
-  }
-
-  getFetchIsInProgress(): boolean {
-    return this.fetchState.inProgress !== null;
-  }
-
-  private async startFetch(params: T, startTime: number): Promise<boolean> {
-    if (this.fetchState.inProgress) {
-      throw new Error('[tsdf] Fetch already in progress');
+    // If mutation in progress or scheduled fetch exists that should take priority
+    if (pending.mutation !== null) {
+      pending.scheduled = { params };
+      return;
     }
 
-    const id = getAutoIncrementId();
-    this.lastFetchIdStarted = id;
+    // Start the fetch
+    void this.transitionToFetching(params, Date.now());
+  }
 
-    this.lastFetchWasAborted = false;
-    this.fetchState.inProgress = { startTime, onEnd: [], rtuOnEnd: null };
-    const prevFetchStartTime = this.lastFetchStartTime;
-    this.lastFetchStartTime = startTime;
+  private async transitionToFetching(
+    params: T,
+    startTime: number,
+  ): Promise<boolean> {
+    this.assertPhase('idle', 'transitionToFetching');
 
+    const fetchId = getAutoIncrementId();
     const abortController = new AbortController();
-    this.currentAbortController = abortController;
 
-    const shouldAbort: () => boolean = () => {
-      const abort =
-        id !== this.lastFetchIdStarted
-        || this.mutationInProgress
-        || id <= this.abortFetchesBeforeOrEqual;
+    // Update state atomically
+    this.state.abort.lastFetchId = fetchId;
+    this.state.abort.controller = abortController;
+    this.state.lastFetchWasAborted = false;
 
-      this.lastFetchWasAborted = abort;
+    const prevFetchStartTime = this.state.timing.lastFetchStartTime;
+    this.state.timing.lastFetchStartTime = startTime;
 
-      if (abort) {
+    this.state.phase = {
+      type: 'fetching',
+      fetchId,
+      startTime,
+      awaitCallbacks: [],
+      rtuCallback: null,
+    };
+
+    // Clear RTU delayed if any (new fetch supersedes)
+    this.clearRtuDelayed();
+
+    // Cancel medium priority when fetch starts
+    this.cancelMediumPriority();
+
+    // Create shouldAbort function that checks current state
+    const shouldAbort = function shouldAbort(this: RequestScheduler<T>): boolean {
+      const { abort, pending } = this.state;
+      const shouldAbortFetch =
+        fetchId !== abort.lastFetchId ||
+        pending.mutation !== null ||
+        fetchId <= abort.abortBoundary;
+
+      this.state.lastFetchWasAborted = shouldAbortFetch;
+
+      if (shouldAbortFetch) {
         abortController.abort();
       }
 
-      return abort;
-    };
+      return shouldAbortFetch;
+    }.bind(this);
 
-    if (this.fetchState.realtimeScheduled) {
-      clearTimeout(this.fetchState.realtimeScheduled.timeoutId);
-      this.fetchState.realtimeScheduled = null;
-    }
-
-    // Cancel medium priority when any fetch starts
-    this.cancelMediumPriority();
-
+    // Execute the fetch
     const success = await this.fetchFn(
       {
         shouldAbort,
@@ -371,143 +417,223 @@ export class RequestScheduler<T> {
       params,
     );
 
-    this.currentAbortController = null;
+    // Clear abort controller
+    this.state.abort.controller = null;
 
-    if (!this.getFetchIsInProgress()) {
-      this.lastFetchStartTime = prevFetchStartTime;
+    // Check if we're still the current fetch phase (phase may have changed during await)
+    if (!this.isCurrentFetch(fetchId)) {
+      // Fetch was superseded, restore previous timing
+      this.state.timing.lastFetchStartTime = prevFetchStartTime;
       return false;
     }
 
+    // Update timing on success
     if (success) {
-      this.lastFetchDuration = Date.now() - startTime;
+      this.state.timing.lastFetchDuration = Date.now() - startTime;
     }
 
-    const fetchState = this.getFetchState();
-    const { realtimeScheduled, inProgress } = fetchState;
+    // Get callbacks before clearing phase
+    const { awaitCallbacks, rtuCallback } = this.state.phase;
 
-    if (realtimeScheduled) {
-      clearTimeout(realtimeScheduled.timeoutId);
-      fetchState.realtimeScheduled = null;
+    // Clear any pending RTU delayed (could have been scheduled during fetch)
+    this.clearRtuDelayed();
+
+    // Transition to idle
+    this.state.phase = { type: 'idle' };
+
+    // Fire callbacks
+    for (const cb of awaitCallbacks) {
+      cb();
     }
 
-    if (!inProgress) return false;
-
-    const onEnd = inProgress.onEnd;
-    const rtuOnEnd = inProgress.rtuOnEnd;
-
-    fetchState.inProgress = null;
-
-    if (onEnd.length > 0) {
-      for (const cb of onEnd) cb();
+    if (rtuCallback) {
+      rtuCallback();
     }
 
-    if (rtuOnEnd) {
-      rtuOnEnd();
-    }
-
+    // Flush any scheduled fetch
     this.flushScheduledFetch();
 
     return true;
   }
 
-  private shouldSkipFetch(fetchType: FetchType, startTime: number): boolean {
-    if (fetchType === 'lowPriority') {
-      if (
-        this.fetchState.inProgress
-        || this.fetchState.scheduled
-        || this.fetchState.coalescing
-      ) {
-        return true;
-      }
+  // ==========================================================================
+  // Mutation Handling
+  // ==========================================================================
 
-      if (this.lastFetchStartTime) {
-        const timeSinceLastFetch = startTime - this.lastFetchStartTime;
+  private endMutation(mutationId: number): boolean {
+    const { pending } = this.state;
 
-        if (timeSinceLastFetch < this.lowPriorityThrottleMs) {
-          return true;
-        }
-      }
+    if (pending.mutation?.id !== mutationId) return false;
+
+    const onEnd = pending.mutation.onEnd;
+    pending.mutation = null;
+
+    // Fire mutation end callback
+    if (onEnd) {
+      onEnd();
     }
 
-    return false;
-  }
-
-  private shouldScheduleFetch(priority: FetchType, params: T): boolean {
-    if (this.fetchState.inProgress !== null || this.mutationInProgress) {
-      this.fetchState.scheduled = { params };
-      return true;
-    }
-
-    return false;
-  }
-
-  private addDelayedRTU(startTime: number, params: T): boolean {
-    if (!this.dynamicRealtimeThrottleMs) return false;
-
-    const timeSinceLastFetch =
-      startTime - (this.lastFetchStartTime + this.lastFetchDuration);
-
-    const minimumRealtimeInterval = this.dynamicRealtimeThrottleMs(
-      this.lastFetchDuration,
-    );
-
-    if (timeSinceLastFetch >= minimumRealtimeInterval) return false;
-
-    const delay = minimumRealtimeInterval - timeSinceLastFetch;
-
-    this.fetchState.realtimeScheduled = {
-      timeoutId: setTimeout(() => {
-        this.fetchState.realtimeScheduled = null;
-        this.onEvent?.('scheduled-rt-fetch-started');
-        this.scheduleFetch('highPriority', params);
-      }, delay),
-    };
+    // Flush scheduled fetch
+    this.flushScheduledFetch();
 
     return true;
   }
 
-  private scheduleRTU(startTime: number, params: T): boolean {
+  // ==========================================================================
+  // Scheduled Fetch Handling
+  // ==========================================================================
+
+  private flushScheduledFetch(): void {
+    const { pending, phase } = this.state;
+
+    if (!pending.scheduled) return;
+
+    this.onEvent?.('scheduled-fetch-started');
+
+    const { params } = pending.scheduled;
+    pending.scheduled = null;
+
+    // Clear any active coalescing window
+    if (phase.type === 'coalescing') {
+      clearTimeout(phase.timeoutId);
+      this.state.phase = { type: 'idle' };
+    }
+
+    // Start coalescing window to allow subsequent calls to coalesce
+    this.transitionToCoalescing(params);
+  }
+
+  // ==========================================================================
+  // Low Priority Throttling
+  // ==========================================================================
+
+  private shouldSkipFetch(fetchType: FetchType, startTime: number): boolean {
+    if (fetchType !== 'lowPriority') {
+      return false;
+    }
+
+    const { phase, pending, timing } = this.state;
+
+    // Skip if fetch/coalescing in progress or scheduled
+    // Note: mutation check is handled by shouldScheduleFetch, not here
     if (
-      !this.lastFetchDuration
-      || !this.lastFetchStartTime
-      || !this.dynamicRealtimeThrottleMs
+      phase.type === 'fetching' ||
+      phase.type === 'coalescing' ||
+      pending.scheduled !== null
+    ) {
+      return true;
+    }
+
+    // Skip if within throttle window
+    if (timing.lastFetchStartTime) {
+      const timeSinceLastFetch = startTime - timing.lastFetchStartTime;
+      if (timeSinceLastFetch < this.lowPriorityThrottleMs) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private shouldScheduleFetch(params: T): boolean {
+    const { phase, pending } = this.state;
+
+    if (phase.type === 'fetching' || pending.mutation !== null) {
+      pending.scheduled = { params };
+      return true;
+    }
+
+    return false;
+  }
+
+  // ==========================================================================
+  // Realtime Update Handling
+  // ==========================================================================
+
+  private clearRtuDelayed(): void {
+    const rtu = this.state.pending.rtuDelayed;
+    if (rtu) {
+      clearTimeout(rtu.timeoutId);
+      this.state.pending.rtuDelayed = null;
+    }
+  }
+
+  private handleRealtimeUpdate(startTime: number, params: T): boolean {
+    const { timing, phase, pending } = this.state;
+
+    if (
+      !timing.lastFetchDuration ||
+      !timing.lastFetchStartTime ||
+      !this.dynamicRealtimeThrottleMs
     ) {
       return false;
     }
 
-    if (this.fetchState.realtimeScheduled) return true;
-
-    if (this.fetchState.inProgress) {
-      this.fetchState.inProgress.rtuOnEnd = () => {
-        this.addDelayedRTU(Date.now(), params);
-      };
-
+    // If RTU is already scheduled, just return true
+    if (pending.rtuDelayed) {
       return true;
-    } else if (this.mutationInProgress) {
-      this.onMutationEnd = () => {
-        const added = this.addDelayedRTU(Date.now(), params);
+    }
 
+    // If fetching, register callback for when fetch completes
+    if (phase.type === 'fetching') {
+      phase.rtuCallback = () => {
+        this.scheduleDelayedRTU(Date.now(), params);
+      };
+      return true;
+    }
+
+    // If mutation in progress, register callback for when mutation ends
+    if (pending.mutation !== null) {
+      pending.mutation.onEnd = () => {
+        const added = this.scheduleDelayedRTU(Date.now(), params);
         if (!added) {
           this.onEvent?.('scheduled-rt-fetch-started');
           this.scheduleFetch('highPriority', params);
         }
       };
-
       return true;
-    } else {
-      if (!this.addDelayedRTU(startTime, params)) return false;
     }
+
+    // Try to schedule delayed RTU
+    return this.scheduleDelayedRTU(startTime, params);
+  }
+
+  private scheduleDelayedRTU(startTime: number, params: T): boolean {
+    if (!this.dynamicRealtimeThrottleMs) {
+      return false;
+    }
+
+    const { timing } = this.state;
+    const timeSinceLastFetch =
+      startTime - (timing.lastFetchStartTime + timing.lastFetchDuration);
+
+    const minimumRealtimeInterval = this.dynamicRealtimeThrottleMs(
+      timing.lastFetchDuration,
+    );
+
+    if (timeSinceLastFetch >= minimumRealtimeInterval) {
+      return false;
+    }
+
+    const delay = minimumRealtimeInterval - timeSinceLastFetch;
+
+    this.state.pending.rtuDelayed = {
+      timeoutId: setTimeout(() => {
+        this.state.pending.rtuDelayed = null;
+        this.onEvent?.('scheduled-rt-fetch-started');
+        this.scheduleFetch('highPriority', params);
+      }, delay),
+      params,
+    };
 
     return true;
   }
 
-  private addOnFetchEnd(cb: () => void): void {
-    if (this.fetchState.inProgress) {
-      this.fetchState.inProgress.onEnd.push(cb);
-    }
-  }
+  // ==========================================================================
+  // Medium Priority Handling
+  // ==========================================================================
 
-  private scheduleMediumPriority(
+  private handleMediumPriority(
     params: T,
     customDelayMs?: number,
   ): ScheduleFetchResults {
@@ -519,12 +645,12 @@ export class RequestScheduler<T> {
       );
     }
 
-    // Cancel existing medium priority and create new one
-    if (this.fetchState.mediumPriority) {
-      clearTimeout(this.fetchState.mediumPriority.timeoutId);
+    // Cancel existing medium priority
+    if (this.state.pending.mediumPriorityDelayed) {
+      clearTimeout(this.state.pending.mediumPriorityDelayed.timeoutId);
     }
 
-    this.fetchState.mediumPriority = {
+    this.state.pending.mediumPriorityDelayed = {
       timeoutId: setTimeout(() => {
         this.executeMediumPriorityFetch(params);
       }, delayMs),
@@ -535,29 +661,55 @@ export class RequestScheduler<T> {
   }
 
   private executeMediumPriorityFetch(params: T): void {
-    this.fetchState.mediumPriority = null;
+    this.state.pending.mediumPriorityDelayed = null;
 
     this.onEvent?.('medium-priority-fetch-started');
 
-    // If a fetch is in progress, coalescing, or mutation in progress, schedule for later
+    const { phase, pending } = this.state;
+
+    // If busy, schedule for later
     if (
-      this.fetchState.inProgress
-      || this.fetchState.coalescing
-      || this.mutationInProgress
+      phase.type !== 'idle' ||
+      pending.mutation !== null
     ) {
-      this.fetchState.scheduled = { params };
+      pending.scheduled = { params };
       return;
     }
 
-    // Behave like high priority from here - use coalescing window
+    // Behave like high priority
     this.scheduleFetch('highPriority', params);
   }
 
   private cancelMediumPriority(): void {
-    if (this.fetchState.mediumPriority) {
-      clearTimeout(this.fetchState.mediumPriority.timeoutId);
-      this.fetchState.mediumPriority = null;
+    if (this.state.pending.mediumPriorityDelayed) {
+      clearTimeout(this.state.pending.mediumPriorityDelayed.timeoutId);
+      this.state.pending.mediumPriorityDelayed = null;
       this.onEvent?.('medium-priority-cancelled');
+    }
+  }
+
+  // ==========================================================================
+  // State Checks
+  // ==========================================================================
+
+  /** Check if the given fetchId matches the current in-progress fetch */
+  private isCurrentFetch(fetchId: number): boolean {
+    const { phase } = this.state;
+    return phase.type === 'fetching' && phase.fetchId === fetchId;
+  }
+
+  // ==========================================================================
+  // Invariant Assertions
+  // ==========================================================================
+
+  private assertPhase(
+    expected: SchedulerPhase<T>['type'],
+    operation: string,
+  ): void {
+    if (this.state.phase.type !== expected) {
+      throw new Error(
+        `[tsdf] Invalid phase for ${operation}: expected '${expected}', got '${this.state.phase.type}'`,
+      );
     }
   }
 }
