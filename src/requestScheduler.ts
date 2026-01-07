@@ -4,11 +4,17 @@ export type FetchContext = {
   signal: AbortSignal;
 };
 
-export type FetchType = 'lowPriority' | 'highPriority' | 'realtimeUpdate';
+export type FetchType =
+  | 'lowPriority'
+  | 'mediumPriority'
+  | 'highPriority'
+  | 'realtimeUpdate';
 
 export type RequestSchedulerEvents =
   | 'scheduled-fetch-started'
-  | 'scheduled-rt-fetch-started';
+  | 'scheduled-rt-fetch-started'
+  | 'medium-priority-fetch-started'
+  | 'medium-priority-cancelled';
 
 export type ScheduleFetchResults =
   | 'skipped'
@@ -16,7 +22,8 @@ export type ScheduleFetchResults =
   | 'scheduled'
   | 'rt-scheduled'
   | 'triggered'
-  | 'coalesced';
+  | 'coalesced'
+  | 'medium-scheduled';
 
 type ScheduledState<T> = {
   params: T;
@@ -24,6 +31,11 @@ type ScheduledState<T> = {
 
 type RealtimeScheduledState = {
   timeoutId: ReturnType<typeof setTimeout>;
+};
+
+type MediumPriorityState<T> = {
+  timeoutId: ReturnType<typeof setTimeout>;
+  params: T;
 };
 
 type CoalescingState<T> = {
@@ -43,6 +55,7 @@ type FetchState<T> = {
   scheduled: ScheduledState<T> | null;
   realtimeScheduled: RealtimeScheduledState | null;
   coalescing: CoalescingState<T> | null;
+  mediumPriority: MediumPriorityState<T> | null;
 };
 
 export type RequestSchedulerOptions<T> = {
@@ -51,6 +64,11 @@ export type RequestSchedulerOptions<T> = {
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  mediumPriorityDelayMs?: number;
+};
+
+export type ScheduleFetchOptions = {
+  mediumPriorityDelayMs?: number;
 };
 
 let autoIncrementId = 0;
@@ -71,6 +89,7 @@ export class RequestScheduler<T> {
   private readonly dynamicRealtimeThrottleMs:
     | ((lastFetchDuration: number) => number)
     | undefined;
+  private readonly mediumPriorityDelayMs: number | undefined;
 
   private fetchState: FetchState<T>;
   private lastMutationIdStarted: number = 0;
@@ -89,12 +108,14 @@ export class RequestScheduler<T> {
     this.lowPriorityThrottleMs = options.lowPriorityThrottleMs;
     this.baseCoalescingWindowMs = options.baseCoalescingWindowMs;
     this.dynamicRealtimeThrottleMs = options.dynamicRealtimeThrottleMs;
+    this.mediumPriorityDelayMs = options.mediumPriorityDelayMs;
 
     this.fetchState = {
       inProgress: null,
       scheduled: null,
       realtimeScheduled: null,
       coalescing: null,
+      mediumPriority: null,
     };
   }
 
@@ -104,6 +125,7 @@ export class RequestScheduler<T> {
       || this.fetchState.scheduled !== null
       || this.fetchState.realtimeScheduled !== null
       || this.fetchState.coalescing !== null
+      || this.fetchState.mediumPriority !== null
     );
   }
 
@@ -127,8 +149,17 @@ export class RequestScheduler<T> {
     return this.fetchState;
   }
 
-  scheduleFetch(fetchType: FetchType, params: T): ScheduleFetchResults {
+  scheduleFetch(
+    fetchType: FetchType,
+    params: T,
+    options?: ScheduleFetchOptions,
+  ): ScheduleFetchResults {
     const startTime = Date.now();
+
+    // Handle medium priority scheduling
+    if (fetchType === 'mediumPriority') {
+      return this.scheduleMediumPriority(params, options?.mediumPriorityDelayMs);
+    }
 
     if (this.dynamicRealtimeThrottleMs && fetchType === 'realtimeUpdate') {
       if (this.scheduleRTU(startTime, params)) return 'rt-scheduled';
@@ -217,6 +248,9 @@ export class RequestScheduler<T> {
       this.fetchState.coalescing = null;
     }
 
+    // Note: Medium priority is NOT cancelled by mutations, only by other fetches
+    // When medium priority delay expires during a mutation, it will schedule itself
+
     if (this.currentAbortController) {
       this.currentAbortController.abort();
       this.currentAbortController = null;
@@ -232,10 +266,14 @@ export class RequestScheduler<T> {
     if (this.fetchState.coalescing) {
       clearTimeout(this.fetchState.coalescing.timeoutId);
     }
+    if (this.fetchState.mediumPriority) {
+      clearTimeout(this.fetchState.mediumPriority.timeoutId);
+    }
     this.fetchState.inProgress = null;
     this.fetchState.scheduled = null;
     this.fetchState.realtimeScheduled = null;
     this.fetchState.coalescing = null;
+    this.fetchState.mediumPriority = null;
     this.lastFetchStartTime = 0;
     this.lastFetchDuration = 0;
     this.lastFetchIdStarted = 0;
@@ -320,6 +358,9 @@ export class RequestScheduler<T> {
       clearTimeout(this.fetchState.realtimeScheduled.timeoutId);
       this.fetchState.realtimeScheduled = null;
     }
+
+    // Cancel medium priority when any fetch starts
+    this.cancelMediumPriority();
 
     const success = await this.fetchFn(
       {
@@ -463,6 +504,60 @@ export class RequestScheduler<T> {
   private addOnFetchEnd(cb: () => void): void {
     if (this.fetchState.inProgress) {
       this.fetchState.inProgress.onEnd.push(cb);
+    }
+  }
+
+  private scheduleMediumPriority(
+    params: T,
+    customDelayMs?: number,
+  ): ScheduleFetchResults {
+    const delayMs = customDelayMs ?? this.mediumPriorityDelayMs;
+
+    if (delayMs === undefined) {
+      throw new Error(
+        '[tsdf] mediumPriorityDelayMs must be configured to use mediumPriority fetch type',
+      );
+    }
+
+    // Cancel existing medium priority and create new one
+    if (this.fetchState.mediumPriority) {
+      clearTimeout(this.fetchState.mediumPriority.timeoutId);
+    }
+
+    this.fetchState.mediumPriority = {
+      timeoutId: setTimeout(() => {
+        this.executeMediumPriorityFetch(params);
+      }, delayMs),
+      params,
+    };
+
+    return 'medium-scheduled';
+  }
+
+  private executeMediumPriorityFetch(params: T): void {
+    this.fetchState.mediumPriority = null;
+
+    this.onEvent?.('medium-priority-fetch-started');
+
+    // If a fetch is in progress, coalescing, or mutation in progress, schedule for later
+    if (
+      this.fetchState.inProgress
+      || this.fetchState.coalescing
+      || this.mutationInProgress
+    ) {
+      this.fetchState.scheduled = { params };
+      return;
+    }
+
+    // Behave like high priority from here - use coalescing window
+    this.scheduleFetch('highPriority', params);
+  }
+
+  private cancelMediumPriority(): void {
+    if (this.fetchState.mediumPriority) {
+      clearTimeout(this.fetchState.mediumPriority.timeoutId);
+      this.fetchState.mediumPriority = null;
+      this.onEvent?.('medium-priority-cancelled');
     }
   }
 }

@@ -8,6 +8,7 @@ export type ValidStoreState = Record<string, unknown> | unknown[];
 
 export const fetchTypePriority: Record<FetchType, number> = {
   lowPriority: 0,
-  realtimeUpdate: 1,
-  highPriority: 2,
+  mediumPriority: 1,
+  realtimeUpdate: 2,
+  highPriority: 3,
 };

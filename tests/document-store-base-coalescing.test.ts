@@ -297,3 +297,159 @@ test('delayed realtime update request also starts coalescing window', async () =
     "
   `);
 });
+
+test('medium priority triggers coalescing window after delay expires', async () => {
+  // Expected: medium priority triggers a coalescing window after its delay expires
+  const env = createDocumentStoreTestEnv(0, {
+    baseCoalescingWindowMs: 20,
+    mediumPriorityDelayMs: 100,
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // Medium priority fetch triggers delay
+  env.scheduleFetch('mediumPriority');
+
+  // High priority during coalescing window (after medium priority delay expires) gets coalesced
+  await vi.advanceTimersByTimeAsync(110);
+  env.scheduleFetch('highPriority');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.numOfStartedFetches).toBe(1);
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled
+    100ms | 0  | medium-priority-fetch-started
+    110ms | 0  | scheduled-fetch-coalesced
+    120ms | 0  | 🔴 >fetch-started
+    920ms | 0  | 🔴 <fetch-finished (value: 0)
+    "
+  `);
+});
+
+test('medium priority is cancelled when fetch starts from active coalescing window', async () => {
+  // Expected: medium priority uses delay mechanism but is cancelled when coalescing window's fetch starts
+  const env = createDocumentStoreTestEnv(0, {
+    baseCoalescingWindowMs: 50,
+    mediumPriorityDelayMs: 100,
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // High priority starts coalescing window
+  env.scheduleFetch('highPriority');
+
+  // Medium priority during coalescing uses delay mechanism (returns medium-scheduled)
+  await vi.advanceTimersByTimeAsync(10);
+  const result = env.scheduleFetch('mediumPriority');
+
+  expect(result).toBe('medium-scheduled');
+
+  await vi.runAllTimersAsync();
+
+  // Only 1 fetch - medium priority was cancelled when coalescing fetch started
+  expect(env.numOfStartedFetches).toBe(1);
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | medium-fetch-scheduled
+    50ms  | 0  | medium-priority-cancelled
+    .     | 0  | 🔴 >fetch-started
+    850ms | 0  | 🔴 <fetch-finished (value: 0)
+    "
+  `);
+});
+
+test('mixed medium and high priority fetches within coalescing window', async () => {
+  // Expected: medium priority (after delay) and high priority coalesce into single fetch
+  const env = createDocumentStoreTestEnv(0, {
+    baseCoalescingWindowMs: 50,
+    mediumPriorityDelayMs: 100,
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // Medium priority triggers delay
+  env.scheduleFetch('mediumPriority');
+
+  // Wait for delay, then add high priority during coalescing
+  await vi.advanceTimersByTimeAsync(100);
+  // Now medium priority's delay expired and started coalescing window
+
+  await vi.advanceTimersByTimeAsync(20);
+  env.scheduleFetch('highPriority');
+
+  await vi.runAllTimersAsync();
+
+  // Only one fetch because high priority coalesced
+  expect(env.numOfStartedFetches).toBe(1);
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled
+    100ms | 0  | medium-priority-fetch-started
+    120ms | 0  | scheduled-fetch-coalesced
+    150ms | 0  | 🔴 >fetch-started
+    950ms | 0  | 🔴 <fetch-finished (value: 0)
+    "
+  `);
+});
+
+test('medium priority with short delay is cancelled by fetch from coalescing window', async () => {
+  // Expected: medium priority with short delay is cancelled when coalescing window fetch starts
+  const env = createDocumentStoreTestEnv(0, {
+    baseCoalescingWindowMs: 20,
+    mediumPriorityDelayMs: 100,
+  });
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // High priority starts coalescing window
+  env.scheduleFetch('highPriority');
+
+  // Medium priority uses delay mechanism
+  await vi.advanceTimersByTimeAsync(5);
+  env.scheduleFetch('mediumPriority');
+
+  await vi.runAllTimersAsync();
+
+  // Only 1 fetch - medium priority was cancelled when fetch started
+  expect(env.numOfStartedFetches).toBe(1);
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | scheduled-fetch-triggered
+    5ms   | 0  | medium-fetch-scheduled
+    20ms  | 0  | medium-priority-cancelled
+    .     | 0  | 🔴 >fetch-started
+    820ms | 0  | 🔴 <fetch-finished (value: 0)
+    "
+  `);
+});

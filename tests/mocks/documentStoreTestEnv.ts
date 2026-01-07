@@ -19,10 +19,12 @@ export function createDocumentStoreTestEnv<D>(
     forceInitialDataInvalidation,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
+    mediumPriorityDelayMs,
   }: {
     forceInitialDataInvalidation?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
+    mediumPriorityDelayMs?: number;
   } = {},
 ) {
   const actionsHistory: Action[] = [];
@@ -163,10 +165,17 @@ export function createDocumentStoreTestEnv<D>(
       : undefined,
     disableRefetchOnMount: !forceInitialDataInvalidation,
     dynamicRealtimeThrottleMs,
+    mediumPriorityDelayMs,
     onSchedulerEvent: (event) => {
       switch (event) {
         case 'scheduled-rt-fetch-started':
           addAction('scheduled-rt-fetch-started');
+          break;
+        case 'medium-priority-fetch-started':
+          addAction('medium-priority-fetch-started');
+          break;
+        case 'medium-priority-cancelled':
+          addAction('medium-priority-cancelled');
           break;
       }
     },
@@ -264,8 +273,8 @@ export function createDocumentStoreTestEnv<D>(
       }
     },
     addTimelineComments,
-    scheduleFetch: (fetchType: FetchType) => {
-      const result = documentStore.scheduleFetch(fetchType);
+    scheduleFetch: (fetchType: FetchType, options?: { mediumPriorityDelayMs?: number }) => {
+      const result = documentStore.scheduleFetch(fetchType, options);
 
       switch (result) {
         case 'started':
@@ -285,6 +294,9 @@ export function createDocumentStoreTestEnv<D>(
           break;
         case 'coalesced':
           addAction('scheduled-fetch-coalesced');
+          break;
+        case 'medium-scheduled':
+          addAction('medium-fetch-scheduled');
           break;
       }
 

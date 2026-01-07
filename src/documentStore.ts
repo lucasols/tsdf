@@ -13,6 +13,7 @@ import {
   FetchType,
   RequestScheduler,
   RequestSchedulerEvents,
+  ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
 import { fetchTypePriority, TSDFStatus, ValidStoreState } from './storeShared';
@@ -57,6 +58,7 @@ export type DocumentStoreOptions<
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  mediumPriorityDelayMs?: number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (
     error: unknown,
@@ -82,6 +84,7 @@ export function createDocumentStore<
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   dynamicRealtimeThrottleMs,
+  mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
 }: DocumentStoreOptions<State, NError>) {
@@ -162,11 +165,15 @@ export function createDocumentStore<
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
+    mediumPriorityDelayMs,
     on: onSchedulerEvent,
   });
 
-  function scheduleFetch(fetchType: FetchType): ScheduleFetchResults {
-    return scheduler.scheduleFetch(fetchType, null);
+  function scheduleFetch(
+    fetchType: FetchType,
+    options?: ScheduleFetchOptions,
+  ): ScheduleFetchResults {
+    return scheduler.scheduleFetch(fetchType, null, options);
   }
 
   async function awaitFetch(): Promise<
