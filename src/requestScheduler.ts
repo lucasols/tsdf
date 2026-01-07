@@ -375,7 +375,6 @@ export class RequestScheduler<T> {
         this.fetchState.inProgress
         || this.fetchState.scheduled
         || this.fetchState.coalescing
-        || this.mutationInProgress
       ) {
         return true;
       }
@@ -393,17 +392,12 @@ export class RequestScheduler<T> {
   }
 
   private shouldScheduleFetch(priority: FetchType, params: T): boolean {
-    const shouldSchedule = (() => {
-      if (priority === 'lowPriority') return false;
-
-      return this.fetchState.inProgress !== null || this.mutationInProgress;
-    })();
-
-    if (shouldSchedule) {
+    if (this.fetchState.inProgress !== null || this.mutationInProgress) {
       this.fetchState.scheduled = { params };
+      return true;
     }
 
-    return shouldSchedule;
+    return false;
   }
 
   private addDelayedRTU(startTime: number, params: T): boolean {

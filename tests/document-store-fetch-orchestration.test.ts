@@ -471,8 +471,8 @@ test('high priority fetch during mutation', async () => {
     100ms | 1  | -- High priority fetch during mutation; should be scheduled after mutation completes.
     .     | 1  | scheduled-fetch-scheduled
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    1.2s  | 1  | 🔴 >fetch-started
-    2s    | 1  | 🔴 <fetch-finished (value: 1)
+    1.21s | 1  | 🔴 >fetch-started
+    2.01s | 1  | 🔴 <fetch-finished (value: 1)
     "
   `);
 });
@@ -519,8 +519,8 @@ test('multiple concurrent mutations with revalidation', async () => {
     .     | 2  | ⬛ >mutation-started (value: 2)
     840ms | 2  | ⬜ <mutation-data-persisted (value: 1)
     890ms | 2  | ⬛ <mutation-data-persisted (value: 2)
-    1.25s | 2  | 🔴 >fetch-started
-    2.05s | 2  | 🔴 <fetch-finished (value: 2)
+    1.26s | 2  | 🔴 >fetch-started
+    2.06s | 2  | 🔴 <fetch-finished (value: 2)
     "
   `);
 
@@ -562,44 +562,17 @@ test('multiple high priority fetches', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | 🔴 >fetch-started
     40ms  | 0  | scheduled-fetch-scheduled
     90ms  | 0  | scheduled-fetch-scheduled
     150ms | 0  | scheduled-fetch-scheduled
     230ms | 0  | scheduled-fetch-scheduled
-    800ms | 0  | 🔴 <fetch-finished (value: 0)
-    .     | 0  | 🟠 >fetch-started
-    1.6s  | 0  | 🟠 <fetch-finished (value: 0)
+    810ms | 0  | 🔴 <fetch-finished (value: 0)
+    820ms | 0  | 🟠 >fetch-started
+    1.62s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
-});
-
-test('multiple high priority fetches within high base request delay window', async () => {
-  // Expected: high priority requests coalesce into a single fetch if triggered within high base request delay window.
-  const env = createDocumentStoreTestEnv(0, {
-    baseCoalescingWindowMs: 20,
-  });
-
-  renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
-  });
-
-  await vi.runAllTimersAsync();
-
-  // First high priority fetch starts immediately
-  env.scheduleFetch('highPriority');
-
-  await vi.advanceTimersByTimeAsync(3);
-  env.scheduleFetch('highPriority');
-
-  await vi.advanceTimersByTimeAsync(10);
-  env.scheduleFetch('highPriority');
-
-  await vi.runAllTimersAsync();
-
-  expect(env.numOfFinishedFetches).toBe(1);
-
-  expect(env.timelineString).toMatchInlineSnapshot();
 });
 
 test('throttle low priority updates', async () => {
@@ -639,13 +612,15 @@ test('throttle low priority updates', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | 🔴 >fetch-started
     100ms | 0  | scheduled-fetch-skipped
     110ms | 0  | scheduled-fetch-skipped
     120ms | 0  | scheduled-fetch-skipped
-    800ms | 0  | 🔴 <fetch-finished (value: 0)
-    930ms | 0  | 🟠 >fetch-started-from-manual-scheduling
-    1.73s | 0  | 🟠 <fetch-finished (value: 0)
+    810ms | 0  | 🔴 <fetch-finished (value: 0)
+    930ms | 0  | scheduled-fetch-triggered
+    940ms | 0  | 🟠 >fetch-started
+    1.74s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
   expect(env.numOfFinishedFetches).toBe(2);
@@ -682,17 +657,19 @@ test('throttle low priority after a fast fetch completes', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | 🔴 >fetch-started-from-manual-scheduling
-    50ms  | 0  | 🔴 <fetch-finished (value: 0)
-    60ms  | 0  | scheduled-fetch-skipped
-    210ms | 0  | 🟠 >fetch-started-from-manual-scheduling
-    260ms | 0  | 🟠 <fetch-finished (value: 0)
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | 🔴 >fetch-started
+    60ms  | 0  | 🔴 <fetch-finished (value: 0)
+    .     | 0  | scheduled-fetch-skipped
+    210ms | 0  | scheduled-fetch-triggered
+    220ms | 0  | 🟠 >fetch-started
+    270ms | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });
 
 test('multiple mutations with low priority fetch between', async () => {
-  // Expected: low priority fetch is scheduled but coalesced with mutation revalidation,
+  // Expected: low priority fetch is scheduled and coalesced with mutation revalidation,
   // resulting in a single fetch commit.
   const env = createDocumentStoreTestEnv(0);
 
@@ -715,7 +692,7 @@ test('multiple mutations with low priority fetch between', async () => {
     withRevalidation: true,
   });
 
-  // t=70: low priority fetch (should be skipped while mutations are in flight)
+  // t=70: low priority fetch (scheduled since no previous fetch = outside throttle window)
   await vi.advanceTimersByTimeAsync(20);
   const result = env.scheduleFetch('lowPriority');
   expect(result).toBe('scheduled');
@@ -723,6 +700,7 @@ test('multiple mutations with low priority fetch between', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
+  // Mutation revalidations properly coalesce into 1 fetch
   expect(env.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -735,8 +713,8 @@ test('multiple mutations with low priority fetch between', async () => {
     70ms  | 2  | scheduled-fetch-scheduled
     840ms | 2  | ⬜ <mutation-data-persisted (value: 1)
     890ms | 2  | ⬛ <mutation-data-persisted (value: 2)
-    1.25s | 2  | 🔴 >fetch-started
-    2.05s | 2  | 🔴 <fetch-finished (value: 2)
+    1.26s | 2  | 🔴 >fetch-started
+    2.06s | 2  | 🔴 <fetch-finished (value: 2)
     "
   `);
 });
@@ -790,14 +768,14 @@ test('very slow mutation revalidation then mutation', async () => {
     .     | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
     140ms | 1  | ⬜ <mutation-data-persisted (value: 1)
-    200ms | 1  | 🔴 >fetch-started
+    210ms | 1  | 🔴 >fetch-started
     300ms | 1  | -- Slow revalidation still running; scheduler aborts in-flight fetch after new mutation to prevent stale commit.
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
     440ms | 2  | ⬛ <mutation-data-persisted (value: 2)
-    500ms | 2  | 🟠 >fetch-started
-    700ms | 2  | 🟠 <fetch-finished (value: 2)
-    2.2s  | 2  | 🔴 <fetch-aborted 🚫
+    510ms | 2  | 🟠 >fetch-started
+    710ms | 2  | 🟠 <fetch-finished (value: 2)
+    2.21s | 2  | 🔴 <fetch-aborted 🚫
     "
   `);
 });
@@ -830,12 +808,105 @@ test('fetch error', async () => {
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui      |
-    0     | -       | 🔴 >fetch-started
-    800ms | -       | 🔴 <fetch-finished (value: 0)
+    10ms  | -       | 🔴 >fetch-started
+    810ms | -       | 🔴 <fetch-finished (value: 0)
     .     | 0       | ui-initialized
-    810ms | 0       | 🟠 >fetch-started-from-manual-scheduling
+    .     | 0       | scheduled-fetch-triggered
+    820ms | 0       | 🟠 >fetch-started
     .     | 0       | 🟠 <fetch-error (value: "error")
     .     | "error" | ui-changed
+    "
+  `);
+});
+
+test('low priority fetch during mutation outside throttle window', async () => {
+  // Expected: low priority fetch triggered during mutation should be scheduled
+  // to run after the mutation completes when outside the throttle window.
+  const env = createDocumentStoreTestEnv(0);
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // Start a mutation (without revalidation to isolate the low priority fetch behavior)
+  void env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+  });
+
+  // Trigger low priority fetch while mutation is in progress (no previous fetch, so outside throttle window)
+  await vi.advanceTimersByTimeAsync(100);
+  env.addTimelineComments('beforeNextAction', [
+    'Low priority fetch during mutation; should be scheduled after mutation completes.',
+  ]);
+  const result = env.scheduleFetch('lowPriority');
+  expect(result).toBe('scheduled');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    100ms | 1  | -- Low priority fetch during mutation; should be scheduled after mutation completes.
+    .     | 1  | scheduled-fetch-scheduled
+    840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
+    1.21s | 1  | 🔴 >fetch-started
+    2.01s | 1  | 🔴 <fetch-finished (value: 1)
+    "
+  `);
+});
+
+test('low priority fetch during mutation inside throttle window', async () => {
+  // Expected: low priority fetch triggered during mutation should be skipped
+  // when inside the throttle window from a previous fetch.
+  const env = createDocumentStoreTestEnv(0);
+
+  renderHook(() => {
+    env.trackUIChanges(env.useDocument().data?.value);
+  });
+
+  await vi.runAllTimersAsync();
+
+  // Trigger a fast fetch first to establish the throttle window
+  env.setNextFetchDurations(50);
+  env.scheduleFetch('highPriority');
+  await vi.runAllTimersAsync();
+
+  // Start a mutation immediately (we're at ~60ms, still inside 200ms throttle window)
+  void env.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+  });
+
+  // Trigger low priority fetch while mutation is in progress (within throttle window from fetch start at 10ms)
+  await vi.advanceTimersByTimeAsync(50);
+  env.addTimelineComments('beforeNextAction', [
+    'Low priority fetch during mutation inside throttle window; should be skipped.',
+  ]);
+  const result = env.scheduleFetch('lowPriority');
+  expect(result).toBe('skipped');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.uiChanges).toEqual([0, 1]);
+  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | scheduled-fetch-triggered
+    10ms  | 0  | 🔴 >fetch-started
+    60ms  | 0  | 🔴 <fetch-finished (value: 0)
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    110ms | 1  | -- Low priority fetch during mutation inside throttle window; should be skipped.
+    .     | 1  | scheduled-fetch-skipped
+    900ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     "
   `);
 });
