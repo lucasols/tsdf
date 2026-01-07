@@ -7,7 +7,8 @@ import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useEffect } from 'react';
 import { Result, ResultValidErrors, unknownToError } from 't-result';
-import { deepEqual, Store, useSubscribeToStore } from 't-state';
+import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { Store, useSubscribeToStore } from 't-state';
 import {
   FetchContext,
   FetchType,

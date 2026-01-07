@@ -13,6 +13,19 @@ export default lsStackEslintCfg({
       rules: {
         'react-hooks/rules-of-hooks': 'error',
         'react-hooks/exhaustive-deps': 'warn',
+        'no-restricted-imports': [
+          'error',
+          {
+            paths: [
+              {
+                name: 't-state',
+                importNames: ['deepEqual'],
+                message:
+                  'Use deepEqual from @ls-stack/utils/deepEqual instead.',
+              },
+            ],
+          },
+        ],
       },
     },
   ],

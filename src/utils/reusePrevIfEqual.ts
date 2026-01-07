@@ -1,4 +1,4 @@
-import { deepEqual } from 't-state';
+import { deepEqual } from '@ls-stack/utils/deepEqual';
 
 export function reusePrevIfEqual<T>({
   prev,
@@ -11,9 +11,7 @@ export function reusePrevIfEqual<T>({
 }): T {
   if (prev === undefined) return current;
 
-  if (equalityFn_(prev, current)) {
-    return prev;
-  }
+  if (equalityFn_(prev, current)) return prev;
 
   return current;
 }

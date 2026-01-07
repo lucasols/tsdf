@@ -69,14 +69,22 @@ export function createServerMock<Data>(
       listenForActions?.('server-data-changed', value);
       serverDataHistory.push(value);
     },
-    get current() {
-      return serverDataHistory.at(-1)!;
+    get current(): Data {
+      const last = serverDataHistory.at(-1);
+      if (last === undefined) {
+        throw new Error('Server data history is empty');
+      }
+      return last;
     },
     history: serverDataHistory,
-    fetch: async (duration = DEFAULT_FETCH_DURATION_MS) => {
+    fetch: async (duration = DEFAULT_FETCH_DURATION_MS): Promise<Data> => {
       const actualDuration = customFetchDurations.shift() ?? duration;
       await sleep(actualDuration);
-      return serverDataHistory.at(-1)!;
+      const last = serverDataHistory.at(-1);
+      if (last === undefined) {
+        throw new Error('Server data history is empty');
+      }
+      return last;
     },
     setFetchDurations(...durations: number[]) {
       customFetchDurations.push(...durations);
