@@ -38,7 +38,7 @@ export function createDocumentStoreTestEnv<D>(
   let nextFetchError: string | null = null;
 
   const { uiChanges, trackUIChanges } = createUITracker<
-    number | 'error' | undefined
+    number | string | undefined
   >(addAction, getRelativeTime, actionsHistory);
 
   const serverMock = createServerMock<D>(
@@ -101,6 +101,9 @@ export function createDocumentStoreTestEnv<D>(
   });
 
   return {
+    store: documentStore.store,
+    invalidateData: documentStore.invalidateData,
+    awaitFetch: documentStore.awaitFetch,
     useDocument: documentStore.useDocument,
     get numOfFinishedFetches() {
       return fetchCounter.numOfFinishedFetches;
@@ -191,6 +194,9 @@ export function createDocumentStoreTestEnv<D>(
       }
 
       serverMock.wsEvents.emit('data_changed', undefined);
+    },
+    setServerData(value: D) {
+      serverMock.setData(value);
     },
   };
 }
