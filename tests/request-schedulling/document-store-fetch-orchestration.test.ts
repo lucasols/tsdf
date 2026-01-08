@@ -243,9 +243,9 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     1.21s | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
+    .     | 1  | 🔴 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2.01s | 2  | 🔴 <fetch-aborted 🚫
     2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
     2.46s | 2  | 🟠 >fetch-started
     3.26s | 2  | 🟠 <fetch-finished (value: 2)
@@ -321,30 +321,30 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
     10ms  | 0  | 🔴 >fetch-started
-    100ms | 1  | ⬜ optimistic-ui-commit
+    100ms | 0  | 🔴 <fetch-aborted 🚫
+    .     | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
-    810ms | 1  | 🔴 <fetch-aborted 🚫
     940ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     1.31s | 1  | 🟠 >fetch-started
     1.35s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
+    .     | 1  | 🟠 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2.11s | 2  | 🟠 <fetch-aborted 🚫
     2.19s | 2  | ⬛ <mutation-data-persisted (value: 2)
     2.56s | 2  | 🟡 >fetch-started
-    2.6s  | 3  | 🟫 optimistic-ui-commit
+    2.6s  | 2  | 🟡 <fetch-aborted 🚫
+    .     | 3  | 🟫 optimistic-ui-commit
     .     | 3  | 🟫 >mutation-started (value: 3)
-    3.36s | 3  | 🟡 <fetch-aborted 🚫
     3.44s | 3  | 🟫 <mutation-data-persisted (value: 3)
     3.81s | 3  | 🟢 >fetch-started
-    3.85s | 4  | 🟪 optimistic-ui-commit
+    3.85s | 3  | 🟢 <fetch-aborted 🚫
+    .     | 4  | 🟪 optimistic-ui-commit
     .     | 4  | 🟪 >mutation-started (value: 4)
-    4.61s | 4  | 🟢 <fetch-aborted 🚫
     4.69s | 4  | 🟪 <mutation-data-persisted (value: 4)
     5.06s | 4  | 🔵 >fetch-started
-    5.1s  | 4  | 🟦 optimistic-ui-commit
+    5.1s  | 4  | 🔵 <fetch-aborted 🚫
+    .     | 4  | 🟦 optimistic-ui-commit
     .     | 4  | 🟦 >mutation-started (value: 4)
-    5.86s | 4  | 🔵 <fetch-aborted 🚫
     5.94s | 4  | 🟦 <mutation-data-persisted (value: 4)
     6.31s | 4  | 🟣 >fetch-started
     7.11s | 4  | 🟣 <fetch-finished (value: 4)
@@ -413,24 +413,24 @@ test('multiple mutations with revalidation in sequence 3', async () => {
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     1.21s | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
+    .     | 1  | 🔴 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2.01s | 2  | 🔴 <fetch-aborted 🚫
     2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
     2.46s | 2  | 🟠 >fetch-started
-    2.5s  | 3  | 🟫 optimistic-ui-commit
+    2.5s  | 2  | 🟠 <fetch-aborted 🚫
+    .     | 3  | 🟫 optimistic-ui-commit
     .     | 3  | 🟫 >mutation-started (value: 3)
-    3.26s | 3  | 🟠 <fetch-aborted 🚫
     3.34s | 3  | 🟫 <mutation-data-persisted (value: 3)
     3.71s | 3  | 🟡 >fetch-started
-    3.75s | 4  | 🟪 optimistic-ui-commit
+    3.75s | 3  | 🟡 <fetch-aborted 🚫
+    .     | 4  | 🟪 optimistic-ui-commit
     .     | 4  | 🟪 >mutation-started (value: 4)
-    4.51s | 4  | 🟡 <fetch-aborted 🚫
     4.59s | 4  | 🟪 <mutation-data-persisted (value: 4)
     4.96s | 4  | 🟢 >fetch-started
-    5s    | 4  | 🟦 optimistic-ui-commit
+    5s    | 4  | 🟢 <fetch-aborted 🚫
+    .     | 4  | 🟦 optimistic-ui-commit
     .     | 4  | 🟦 >mutation-started (value: 4)
-    5.76s | 4  | 🟢 <fetch-aborted 🚫
     5.84s | 4  | 🟦 <mutation-data-persisted (value: 4)
     6.21s | 4  | 🔵 >fetch-started
     7.01s | 4  | 🔵 <fetch-finished (value: 4)
@@ -774,12 +774,12 @@ test('very slow mutation revalidation then mutation', async () => {
     140ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     210ms | 1  | 🔴 >fetch-started
     300ms | 1  | -- Slow revalidation still running; scheduler aborts in-flight fetch after new mutation to prevent stale commit.
+    .     | 1  | 🔴 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
     440ms | 2  | ⬛ <mutation-data-persisted (value: 2)
     510ms | 2  | 🟠 >fetch-started
     710ms | 2  | 🟠 <fetch-finished (value: 2)
-    2.21s | 2  | 🔴 <fetch-aborted 🚫
     "
   `);
 });
