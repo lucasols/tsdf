@@ -1,13 +1,10 @@
 import { createCollectionStore } from '../../src/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
-import type { StoreError } from '../../src/storeShared';
-import { createServerMock } from './serverMock';
+import { createServerTableMock } from './serverTableMock';
 import {
   createActionTracker,
   createEmojiCyclers,
-  createFetchCounter,
   createUITracker,
-  FetchError,
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
@@ -22,11 +19,17 @@ export function createCollectionStoreTestEnv<D>(
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
+    useBatchFetch,
+    maxBatchSize,
   }: {
     forceInitialDataInvalidation?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
     mediumPriorityDelayMs?: number;
+    /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
+    useBatchFetch?: boolean;
+    /** Max items per batch (only used when useBatchFetch is true) */
+    maxBatchSize?: number;
   } = {},
 ) {
   const {
@@ -37,48 +40,9 @@ export function createCollectionStoreTestEnv<D>(
     getRelativeTime,
   } = createActionTracker();
 
-  const { getFetchEmoji, getMutationEmoji } = createEmojiCyclers();
-  const fetchCounter = createFetchCounter();
+  const { getMutationEmoji } = createEmojiCyclers();
 
-  // Create server mocks for each item
-  const serverMocks = new Map<
-    string,
-    ReturnType<typeof createServerMock<D>>
-  >();
-
-  function getServerMock(itemId: string) {
-    let mock = serverMocks.get(itemId);
-    if (!mock) {
-      const initialData = serverInitialData[itemId];
-      if (initialData === undefined) {
-        throw new Error(`No initial data for item: ${itemId}`);
-      }
-      mock = createServerMock<D>(initialData, (action, data, id) => {
-        addAction(action, {
-          actionValue: data,
-          id,
-          itemId,
-        });
-      });
-      serverMocks.set(itemId, mock);
-    }
-    return mock;
-  }
-
-  // Initialize server mocks for all initial items
-  for (const itemId of Object.keys(serverInitialData)) {
-    getServerMock(itemId);
-  }
-
-  const nextFetchErrors = new Map<
-    string,
-    {
-      message: string;
-      path?: string;
-      method?: StoreError['method'];
-      code?: number;
-    }
-  >();
+  const serverTable = createServerTableMock<D>(serverInitialData, addAction);
 
   // Per-item UI tracking
   const itemUIValues: Record<string, unknown> = {};
@@ -97,10 +61,10 @@ export function createCollectionStoreTestEnv<D>(
     if (
       actionsHistory.some(
         (a) =>
-          a.action === 'optimistic-ui-commit' &&
-          a.time === time &&
-          a.uiValue === value &&
-          a.itemId === itemId,
+          a.action === 'optimistic-ui-commit'
+          && a.time === time
+          && a.uiValue === value
+          && a.itemId === itemId,
       )
     ) {
       return;
@@ -117,52 +81,33 @@ export function createCollectionStoreTestEnv<D>(
     Record<string, number | 'error' | undefined>
   >(addAction, getRelativeTime, actionsHistory);
 
+  // Batch fetch function - delegates to serverTable.list
+  const batchFetchFn = async (itemIds: string[], signal: AbortSignal) => {
+    const listResult = await serverTable.list({ itemIds }, signal);
+
+    // Convert list result to Map format expected by collection store
+    const results = new Map<string, CollectionTestItem<D> | Error>();
+    for (const { itemId, data } of listResult.items) {
+      if (data instanceof Error) {
+        results.set(itemId, data);
+      } else {
+        results.set(itemId, { value: data });
+      }
+    }
+
+    return results;
+  };
+
   const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,
-    fetchFn: async (itemId, signal) => {
-      const fetchId = getFetchEmoji();
-      addAction('>fetch-started', { id: fetchId, itemId });
-
-      fetchCounter.incrementStarted();
-
-      const errorConfig = nextFetchErrors.get(itemId);
-      if (errorConfig) {
-        fetchCounter.incrementFinished();
-        nextFetchErrors.delete(itemId);
-        addAction('<fetch-error', {
-          actionValue: 'error',
-          id: fetchId,
-          itemId,
-        });
-
-        if (errorConfig.path) {
-          throw new FetchError(errorConfig.message, {
-            path: errorConfig.path,
-            method: errorConfig.method,
-            code: errorConfig.code,
-          });
-        }
-        throw new Error(errorConfig.message);
-      }
-
-      const serverMock = getServerMock(itemId);
-      const value = await serverMock.fetch();
-
-      if (signal.aborted) {
-        addAction('<fetch-aborted 🚫', { id: fetchId, itemId });
-        throw new Error('Aborted');
-      }
-
-      fetchCounter.incrementFinished();
-      addAction('<fetch-finished', {
-        actionValue: value,
-        id: fetchId,
-        itemId,
-      });
+    maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
+    fetchFn: async (itemId: string, signal: AbortSignal) => {
+      const value = await serverTable.fetch(itemId, signal);
       return { value };
     },
+    batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
     disableInitialDataInvalidation: !forceInitialDataInvalidation,
     getInitialData:
       !forceInitialDataInvalidation ?
@@ -180,23 +125,17 @@ export function createCollectionStoreTestEnv<D>(
     },
   });
 
-  // Set up RTU listeners for all items
-  for (const [itemId, mock] of serverMocks) {
-    mock.wsEvents.on('data_changed', () => {
-      addAction('received-ws-data-change-event', { itemId });
-      collectionStore.invalidateItem(itemId, 'realtimeUpdate');
+  // Set up RTU listener
+  serverTable.wsEvents.on('data_changed', (event) => {
+    addAction('received-ws-data-change-event', {
+      itemId: event.payload.itemId,
     });
-  }
+    collectionStore.invalidateItem(event.payload.itemId, 'realtimeUpdate');
+  });
 
   return {
-    useItem: collectionStore.useItem,
-    useMultipleItems: collectionStore.useMultipleItems,
-    get numOfFinishedFetches() {
-      return fetchCounter.numOfFinishedFetches;
-    },
-    get numOfStartedFetches() {
-      return fetchCounter.numOfStartedFetches;
-    },
+    apiStore: collectionStore,
+    serverTable,
     get uiChanges() {
       return uiChanges;
     },
@@ -217,25 +156,6 @@ export function createCollectionStoreTestEnv<D>(
 
       return result;
     },
-    scheduleFetchMultiple: (
-      fetchType: FetchType,
-      itemIds: string[],
-      options?: { mediumPriorityDelayMs?: number },
-    ) => {
-      const results = collectionStore.scheduleFetch(fetchType, itemIds, options);
-
-      for (let i = 0; i < itemIds.length; i++) {
-        const itemId = itemIds[i];
-        const result = results[i];
-        if (itemId && result) {
-          logScheduleFetchResult(result, (action) =>
-            addAction(action, { itemId }),
-          );
-        }
-      }
-
-      return results;
-    },
     performClientUpdateAction: (
       itemId: string,
       newValue: D,
@@ -254,7 +174,6 @@ export function createCollectionStoreTestEnv<D>(
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
-      const serverMock = getServerMock(itemId);
 
       return collectionStore.performMutation(itemId, {
         optimisticUpdate:
@@ -271,71 +190,19 @@ export function createCollectionStoreTestEnv<D>(
             }
           : undefined,
         mutation: async () => {
-          return {
-            value: await serverMock.mutateData(newValue, {
-              duration,
-              triggerRTUEvent: triggerRTU,
-              addServerDataChangeAction,
-              mutationId,
-            }),
-          };
+          const result = await serverTable.mutateItem(itemId, newValue, {
+            duration,
+            triggerRTUEvent: triggerRTU,
+            addServerDataChangeAction,
+            mutationId,
+          });
+          return { value: result };
         },
         revalidateOnSuccess: withRevalidation,
       });
     },
     get timelineString() {
       return getTimelineString();
-    },
-    getServerHistory(itemId: string) {
-      return getServerMock(itemId).history;
-    },
-    errorInNextFetch(
-      itemId: string,
-      error:
-        | string
-        | {
-            message: string;
-            path?: string;
-            method?: StoreError['method'];
-            code?: number;
-          } = 'Fetch error',
-    ) {
-      nextFetchErrors.set(
-        itemId,
-        typeof error === 'string' ? { message: error } : error,
-      );
-    },
-    setNextFetchDurations(itemId: string, ...durations: number[]) {
-      getServerMock(itemId).setFetchDurations(...durations);
-    },
-    emulateExternalRTU(itemId: string, value: D, fetchDuration?: number) {
-      const serverMock = getServerMock(itemId);
-      serverMock.setData(value);
-
-      if (fetchDuration !== undefined) {
-        serverMock.setFetchDurations(fetchDuration);
-      }
-
-      serverMock.wsEvents.emit('data_changed', undefined);
-    },
-    invalidateItem: collectionStore.invalidateItem,
-    getItemState: collectionStore.getItemState,
-    addItemToState: collectionStore.addItemToState,
-    deleteItemState: collectionStore.deleteItemState,
-    updateItemState: collectionStore.updateItemState,
-    /**
-     * Add a new item to the server (for testing dynamic item creation)
-     */
-    addServerItem(itemId: string, value: D) {
-      if (serverMocks.has(itemId)) {
-        throw new Error(`Server item ${itemId} already exists`);
-      }
-      serverInitialData[itemId] = value;
-      const mock = getServerMock(itemId);
-      mock.wsEvents.on('data_changed', () => {
-        addAction('received-ws-data-change-event', { itemId });
-        collectionStore.invalidateItem(itemId, 'realtimeUpdate');
-      });
     },
   };
 }

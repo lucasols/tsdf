@@ -67,10 +67,8 @@ export function createDocumentStoreTestEnv<D>(
   });
 
   return {
+    apiStore: documentStore,
     store: documentStore.store,
-    invalidateData: documentStore.invalidateData,
-    awaitFetch: documentStore.awaitFetch,
-    useDocument: documentStore.useDocument,
     get numOfFinishedFetches() {
       return serverMock.numOfFinishedFetches;
     },
@@ -143,9 +141,7 @@ export function createDocumentStoreTestEnv<D>(
     get timelineString() {
       return getTimelineString();
     },
-    get serverHistory() {
-      return serverMock.history;
-    },
+    serverMock,
     errorInNextFetch(error: FetchErrorConfig | string = 'Fetch error') {
       serverMock.setNextFetchError(error);
     },

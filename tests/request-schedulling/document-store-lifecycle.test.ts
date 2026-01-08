@@ -212,10 +212,10 @@ describe('invalidateData priority', () => {
   test('lower priority invalidation should not override higher priority', () => {
     const env = createDocumentStoreTestEnv(42);
 
-    env.invalidateData('highPriority');
+    env.apiStore.invalidateData('highPriority');
     expect(env.store.state.refetchOnMount).toBe('highPriority');
 
-    env.invalidateData('lowPriority');
+    env.apiStore.invalidateData('lowPriority');
     // Should still be highPriority since lowPriority has lower precedence
     expect(env.store.state.refetchOnMount).toBe('highPriority');
   });
@@ -223,10 +223,10 @@ describe('invalidateData priority', () => {
   test('realtimeUpdate invalidation should not be overridden by lowPriority', () => {
     const env = createDocumentStoreTestEnv(42);
 
-    env.invalidateData('realtimeUpdate');
+    env.apiStore.invalidateData('realtimeUpdate');
     expect(env.store.state.refetchOnMount).toBe('realtimeUpdate');
 
-    env.invalidateData('lowPriority');
+    env.apiStore.invalidateData('lowPriority');
     // Should still be realtimeUpdate
     expect(env.store.state.refetchOnMount).toBe('realtimeUpdate');
   });
@@ -234,10 +234,10 @@ describe('invalidateData priority', () => {
   test('highPriority invalidation should not be overridden by realtimeUpdate', () => {
     const env = createDocumentStoreTestEnv(42);
 
-    env.invalidateData('highPriority');
+    env.apiStore.invalidateData('highPriority');
     expect(env.store.state.refetchOnMount).toBe('highPriority');
 
-    env.invalidateData('realtimeUpdate');
+    env.apiStore.invalidateData('realtimeUpdate');
     // Should still be highPriority since it has higher precedence than realtimeUpdate
     expect(env.store.state.refetchOnMount).toBe('highPriority');
   });
@@ -245,10 +245,10 @@ describe('invalidateData priority', () => {
   test('higher priority can override lower priority invalidation', () => {
     const env = createDocumentStoreTestEnv(42);
 
-    env.invalidateData('lowPriority');
+    env.apiStore.invalidateData('lowPriority');
     expect(env.store.state.refetchOnMount).toBe('lowPriority');
 
-    env.invalidateData('highPriority');
+    env.apiStore.invalidateData('highPriority');
     // Should now be highPriority
     expect(env.store.state.refetchOnMount).toBe('highPriority');
   });

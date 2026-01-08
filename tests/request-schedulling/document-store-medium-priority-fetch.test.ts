@@ -16,7 +16,7 @@ test('medium priority fetch runs after delay when no other fetch occurs', async 
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -45,7 +45,7 @@ test('medium priority fetch is cancelled when high priority fetch starts', async
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -78,7 +78,7 @@ test('medium priority fetch is cancelled when low priority fetch starts', async 
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -113,7 +113,7 @@ test('medium priority is NOT cancelled by mutation - schedules when delay expire
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -152,7 +152,7 @@ test('multiple medium priority calls reset the timer', async () => {
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -188,7 +188,7 @@ test('medium priority during in-progress fetch schedules when delay expires', as
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -233,7 +233,7 @@ test('medium priority with long delay runs normally after in-progress fetch comp
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -277,7 +277,7 @@ test('medium priority uses coalescing window after delay expires', async () => {
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -313,7 +313,7 @@ test('custom delay per call overrides global delay', async () => {
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -345,7 +345,7 @@ test('medium priority during coalescing window is cancelled when fetch starts', 
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
