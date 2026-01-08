@@ -192,7 +192,7 @@ describe('getInitialData option', () => {
 
     await vi.runAllTimersAsync();
 
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
     // Should now have server data
     expect(env.store.state).toMatchInlineSnapshot(`

@@ -33,7 +33,7 @@ test('multiple high priority fetches within the same request base coalescing win
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -77,7 +77,7 @@ test('mixed priority fetches within the same request base coalescing window', as
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -122,7 +122,7 @@ test('multiple low priority fetches within the same request base coalescing wind
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -160,7 +160,7 @@ test('realtime update fetches mixed with other priority fetches within the same 
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -196,7 +196,7 @@ test('realtime updates starts coalescing window', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -236,7 +236,7 @@ test('delayed realtime update fetches also are coalesced', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(2);
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -280,7 +280,7 @@ test('delayed realtime update request also starts coalescing window', async () =
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(2);
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -320,7 +320,7 @@ test('medium priority triggers coalescing window after delay expires', async () 
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -360,7 +360,7 @@ test('medium priority is cancelled when fetch starts from active coalescing wind
   await vi.runAllTimersAsync();
 
   // Only 1 fetch - medium priority was cancelled when coalescing fetch started
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -401,7 +401,7 @@ test('mixed medium and high priority fetches within coalescing window', async ()
   await vi.runAllTimersAsync();
 
   // Only one fetch because high priority coalesced
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -439,7 +439,7 @@ test('medium priority with short delay is cancelled by fetch from coalescing win
   await vi.runAllTimersAsync();
 
   // Only 1 fetch - medium priority was cancelled when fetch started
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "

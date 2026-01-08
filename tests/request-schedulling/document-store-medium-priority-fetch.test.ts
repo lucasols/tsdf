@@ -25,7 +25,7 @@ test('medium priority fetch runs after delay when no other fetch occurs', async 
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -57,7 +57,7 @@ test('medium priority fetch is cancelled when high priority fetch starts', async
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -90,7 +90,7 @@ test('medium priority fetch is cancelled when low priority fetch starts', async 
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -129,7 +129,7 @@ test('medium priority is NOT cancelled by mutation - schedules when delay expire
   await vi.runAllTimersAsync();
 
   // One fetch: medium priority schedules during mutation, then revalidation coalesces with it
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -166,7 +166,7 @@ test('multiple medium priority calls reset the timer', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   // Fetch should start at t=500 (200 + 300ms delay)
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -208,7 +208,7 @@ test('medium priority during in-progress fetch schedules when delay expires', as
 
   // 2 fetches - medium priority delay expired during first fetch, scheduled for later
   // (no fetch STARTED after medium priority was scheduled, so it wasn't cancelled)
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -253,7 +253,7 @@ test('medium priority with long delay runs normally after in-progress fetch comp
 
   // 2 fetches - medium priority delay expired after first fetch completed,
   // so it ran via normal coalescing path (not scheduled state)
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -292,7 +292,7 @@ test('medium priority uses coalescing window after delay expires', async () => {
   await vi.runAllTimersAsync();
 
   // Should result in single fetch due to coalescing
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -323,7 +323,7 @@ test('custom delay per call overrides global delay', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   // Fetch should start at t=500 (custom delay)
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -362,7 +362,7 @@ test('medium priority during coalescing window is cancelled when fetch starts', 
   await vi.runAllTimersAsync();
 
   // Only 1 fetch - medium priority was cancelled when coalescing window fetch started
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "

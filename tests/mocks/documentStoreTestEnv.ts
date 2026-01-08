@@ -69,12 +69,6 @@ export function createDocumentStoreTestEnv<D>(
   return {
     apiStore: documentStore,
     store: documentStore.store,
-    get numOfFinishedFetches() {
-      return serverMock.numOfFinishedFetches;
-    },
-    get numOfStartedFetches() {
-      return serverMock.numOfStartedFetches;
-    },
     get uiChanges() {
       return uiChanges;
     },

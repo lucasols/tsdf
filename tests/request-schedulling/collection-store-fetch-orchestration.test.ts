@@ -96,7 +96,7 @@ test('prevent overfetch of low priority fetches', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -276,6 +276,6 @@ test('coalesces multiple fetches for the same item', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
   expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
 });

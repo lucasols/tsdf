@@ -27,7 +27,7 @@ describe('awaitFetch basic behavior', () => {
       error: null,
     });
 
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
   test('returns error on failed fetch', async () => {
@@ -103,7 +103,7 @@ describe('awaitFetch coalescing behavior', () => {
     expect(result3).toEqual({ data: { value: 42 }, error: null });
 
     // Only one fetch should have been executed
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -134,7 +134,7 @@ describe('awaitFetch coalescing behavior', () => {
 
     expect(result1).toEqual({ data: { value: 42 }, error: null });
     expect(result2).toEqual({ data: { value: 42 }, error: null });
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -165,7 +165,7 @@ describe('awaitFetch coalescing behavior', () => {
     expect(result2).toEqual({ data: { value: 42 }, error: null });
 
     // Two fetches: first one completes, second one scheduled during first
-    expect(env.numOfFinishedFetches).toBe(2);
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -199,7 +199,7 @@ describe('awaitFetch edge cases', () => {
     const result2 = await promise2;
 
     expect(result2).toEqual({ data: { value: 2 }, error: null });
-    expect(env.numOfFinishedFetches).toBe(2);
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
   });
 
   test('awaitFetch returns latest data after server changes during fetch', async () => {
@@ -302,16 +302,16 @@ describe('awaitFetch timing', () => {
 
     // Before coalescing window ends - no fetch started yet
     await vi.advanceTimersByTimeAsync(30);
-    expect(env.numOfStartedFetches).toBe(0);
+    expect(env.serverMock.numOfStartedFetches).toBe(0);
 
     // After coalescing window ends - fetch should start
     await vi.advanceTimersByTimeAsync(25);
-    expect(env.numOfStartedFetches).toBe(1);
+    expect(env.serverMock.numOfStartedFetches).toBe(1);
 
     await vi.runAllTimersAsync();
     await fetchPromise;
 
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
   test('awaitFetch resolves only after fetch completes', async () => {
@@ -349,7 +349,7 @@ describe('awaitFetch timing', () => {
 
     // Wait for first coalescing window to end + a few ms
     await vi.advanceTimersByTimeAsync(55);
-    expect(env.numOfStartedFetches).toBe(1);
+    expect(env.serverMock.numOfStartedFetches).toBe(1);
 
     // Second awaitFetch - outside first coalescing window
     env.setServerData(2);
@@ -357,7 +357,7 @@ describe('awaitFetch timing', () => {
 
     // Wait for second coalescing window to end + a few ms
     await vi.advanceTimersByTimeAsync(55);
-    expect(env.numOfStartedFetches).toBe(1); // First fetch still in progress
+    expect(env.serverMock.numOfStartedFetches).toBe(1); // First fetch still in progress
 
     // Third awaitFetch - outside second coalescing window
     env.setServerData(3);
@@ -381,7 +381,7 @@ describe('awaitFetch timing', () => {
     expect(result3).toEqual({ data: { value: 3 }, error: null });
 
     // Two fetches: first one, then second+third coalesced during ongoing fetch
-    expect(env.numOfFinishedFetches).toBe(2);
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "

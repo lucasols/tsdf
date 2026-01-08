@@ -136,7 +136,7 @@ test('prevent overfetch of low priority fetches', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -232,8 +232,8 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -351,8 +351,8 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     "
   `);
 
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(6);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(6);
 });
 
 test('multiple mutations with revalidation in sequence 3', async () => {
@@ -402,8 +402,8 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(5);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(5);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -465,7 +465,7 @@ test('high priority fetch during mutation', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -528,8 +528,8 @@ test('multiple concurrent mutations with revalidation', async () => {
     "
   `);
 
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 });
 
 test('multiple high priority fetches', async () => {
@@ -561,7 +561,7 @@ test('multiple high priority fetches', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -627,7 +627,7 @@ test('throttle low priority updates', async () => {
     1.74s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
 });
 
 test('throttle low priority after a fast fetch completes', async () => {
@@ -656,7 +656,7 @@ test('throttle low priority after a fast fetch completes', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -705,7 +705,7 @@ test('multiple mutations with low priority fetch between', async () => {
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   // Mutation revalidations properly coalesce into 1 fetch
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -764,7 +764,7 @@ test('very slow mutation revalidation then mutation', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -807,7 +807,7 @@ test('fetch error', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 'error']);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toContain('fetch-error');
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -850,7 +850,7 @@ test('low priority fetch during mutation outside throttle window', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -898,7 +898,7 @@ test('low priority fetch during mutation inside throttle window', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
