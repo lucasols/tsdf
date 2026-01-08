@@ -339,6 +339,36 @@ describe('awaitFetch timing', () => {
     expect(resolved).toBe(true);
   });
 
+  test('awaitFetch waits for scheduled fetch after mutation completes', async () => {
+    const env = createDocumentStoreTestEnv(0);
+
+    const mutationPromise = env.performClientUpdateAction(1, {
+      duration: 1200,
+    });
+
+    let resolved = false;
+    const fetchPromise = env.apiStore.awaitFetch().then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    await Promise.resolve();
+
+    expect(resolved).toBe(false);
+    expect(env.serverMock.numOfStartedFetches).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(resolved).toBe(false);
+
+    await vi.runAllTimersAsync();
+
+    const result = await fetchPromise;
+    await mutationPromise;
+
+    expect(result).toEqual({ data: { value: 1 }, error: null });
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  });
+
   test('three awaitFetch calls triggered outside each coalescing window coalesce during ongoing fetch', async () => {
     const env = createDocumentStoreTestEnv(1, {
       baseCoalescingWindowMs: 50,

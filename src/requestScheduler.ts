@@ -61,7 +61,10 @@ type SchedulerPhase<T> =
       fetchId: number;
       startTime: number;
       /** Requests being fetched with their await callbacks */
-      fetchingRequests: Map<string, { awaitCallbacks: Array<(wasAborted: boolean) => void> }>;
+      fetchingRequests: Map<
+        string,
+        { awaitCallbacks: Array<(wasAborted: boolean) => void> }
+      >;
       rtuCallback: (() => void) | null;
     };
 
@@ -70,7 +73,11 @@ type PendingStates<T> = {
   /** Requests scheduled for after current fetch completes */
   scheduledRequests: Map<string, PendingRequest<T>>;
   rtuDelayed: { timeoutId: TimeoutId; requestId: string; payload: T } | null;
-  mediumPriorityDelayed: { timeoutId: TimeoutId; requestId: string; payload: T } | null;
+  mediumPriorityDelayed: {
+    timeoutId: TimeoutId;
+    requestId: string;
+    payload: T;
+  } | null;
   /** Request IDs with active mutations (value = count of active mutations) */
   mutationsInProgress: Map<string, number>;
 };
@@ -262,7 +269,11 @@ export class RequestScheduler<T> {
 
     // Handle medium priority scheduling
     if (fetchType === 'mediumPriority') {
-      return this.handleMediumPriority(requestId, payload, options?.mediumPriorityDelayMs);
+      return this.handleMediumPriority(
+        requestId,
+        payload,
+        options?.mediumPriorityDelayMs,
+      );
     }
 
     // Handle realtime update scheduling
@@ -299,7 +310,12 @@ export class RequestScheduler<T> {
 
     // If coalescing, add to batch
     if (this.state.phase.type === 'coalescing') {
-      return this.addToCoalescingBatch(requestId, payload, fetchType, startTime);
+      return this.addToCoalescingBatch(
+        requestId,
+        payload,
+        fetchType,
+        startTime,
+      );
     }
 
     // Start coalescing window with this request
@@ -326,7 +342,15 @@ export class RequestScheduler<T> {
   }
 
   private async waitForRequest(requestId: string): Promise<boolean> {
-    const { phase } = this.state;
+    const { phase, pending } = this.state;
+
+    // Check if request is scheduled for later
+    const scheduledRequest = pending.scheduledRequests.get(requestId);
+    if (scheduledRequest) {
+      await new Promise<void>((resolve) => {
+        scheduledRequest.awaitCallbacks.push(() => resolve());
+      });
+    }
 
     // Check if request is in coalescing phase
     if (phase.type === 'coalescing') {
@@ -562,7 +586,10 @@ export class RequestScheduler<T> {
     }
 
     // Build fetchingRequests map with await callbacks
-    const fetchingRequests = new Map<string, { awaitCallbacks: Array<(wasAborted: boolean) => void> }>();
+    const fetchingRequests = new Map<
+      string,
+      { awaitCallbacks: Array<(wasAborted: boolean) => void> }
+    >();
     for (const [requestId, request] of requests) {
       fetchingRequests.set(requestId, {
         awaitCallbacks: [...request.awaitCallbacks],
@@ -584,15 +611,16 @@ export class RequestScheduler<T> {
     this.cancelMediumPriority();
 
     // Create shouldAbort function that checks current state
-    const shouldAbort = function shouldAbort(this: RequestScheduler<T>): boolean {
+    const shouldAbort = function shouldAbort(
+      this: RequestScheduler<T>,
+    ): boolean {
       const { abort, pending } = this.state;
       const shouldAbortFetch =
-        fetchId !== abort.lastFetchId
-        || fetchId <= abort.abortBoundary;
+        fetchId !== abort.lastFetchId || fetchId <= abort.abortBoundary;
 
       // Check if any request in this batch has mutation started
-      const anyMutation = Array.from(requests.keys()).some(
-        (reqId) => pending.mutationsInProgress.has(reqId),
+      const anyMutation = Array.from(requests.keys()).some((reqId) =>
+        pending.mutationsInProgress.has(reqId),
       );
 
       const abort_ = shouldAbortFetch || anyMutation;
@@ -722,7 +750,10 @@ export class RequestScheduler<T> {
 
         // If this was an RTU request and dynamic throttle is configured,
         // route through the RTU delay mechanism
-        if (request.priority === 'realtimeUpdate' && this.dynamicRealtimeThrottleMs) {
+        if (
+          request.priority === 'realtimeUpdate'
+          && this.dynamicRealtimeThrottleMs
+        ) {
           rtuRequestsToFlush.push({ requestId, payload: request.payload });
         } else {
           requestsToFlush.set(requestId, request);
@@ -733,7 +764,11 @@ export class RequestScheduler<T> {
     // Handle RTU requests through delay mechanism
     for (const { requestId, payload } of rtuRequestsToFlush) {
       // Try to schedule delayed RTU
-      const wasDelayed = this.scheduleDelayedRTU(Date.now(), requestId, payload);
+      const wasDelayed = this.scheduleDelayedRTU(
+        Date.now(),
+        requestId,
+        payload,
+      );
       if (!wasDelayed) {
         // If no delay needed, emit event and schedule immediately
         this.onEvent?.('scheduled-rt-fetch-started');
@@ -776,7 +811,11 @@ export class RequestScheduler<T> {
   // Low Priority Throttling
   // ==========================================================================
 
-  private shouldSkipFetch(requestId: string, fetchType: FetchType, startTime: number): boolean {
+  private shouldSkipFetch(
+    requestId: string,
+    fetchType: FetchType,
+    startTime: number,
+  ): boolean {
     if (fetchType !== 'lowPriority') return false;
 
     const { phase, pending } = this.state;
@@ -791,7 +830,10 @@ export class RequestScheduler<T> {
     }
 
     // Check if within throttle window
-    const isWithinThrottleWindow = this.isWithinThrottleWindow(requestId, startTime);
+    const isWithinThrottleWindow = this.isWithinThrottleWindow(
+      requestId,
+      startTime,
+    );
 
     // If mutation in progress, only skip if also within throttle window
     if (pending.mutationsInProgress.has(requestId)) {
@@ -801,7 +843,10 @@ export class RequestScheduler<T> {
     return isWithinThrottleWindow;
   }
 
-  private isWithinThrottleWindow(requestId: string, startTime: number): boolean {
+  private isWithinThrottleWindow(
+    requestId: string,
+    startTime: number,
+  ): boolean {
     const { timing } = this.state;
 
     // Check per-request timing
@@ -836,7 +881,11 @@ export class RequestScheduler<T> {
     }
   }
 
-  private handleRealtimeUpdate(startTime: number, requestId: string, payload: T): boolean {
+  private handleRealtimeUpdate(
+    startTime: number,
+    requestId: string,
+    payload: T,
+  ): boolean {
     const { timing, phase, pending } = this.state;
 
     if (
@@ -848,7 +897,8 @@ export class RequestScheduler<T> {
     }
 
     // If RTU is already scheduled for this request, just return true
-    if (pending.rtuDelayed && pending.rtuDelayed.requestId === requestId) return true;
+    if (pending.rtuDelayed && pending.rtuDelayed.requestId === requestId)
+      return true;
 
     // If fetching, register callback for when fetch completes
     if (phase.type === 'fetching') {
@@ -860,7 +910,12 @@ export class RequestScheduler<T> {
 
     // If mutation in progress for this request, schedule for after
     if (pending.mutationsInProgress.has(requestId)) {
-      this.addToScheduledRequests(requestId, payload, 'realtimeUpdate', startTime);
+      this.addToScheduledRequests(
+        requestId,
+        payload,
+        'realtimeUpdate',
+        startTime,
+      );
       return true;
     }
 
@@ -868,7 +923,11 @@ export class RequestScheduler<T> {
     return this.scheduleDelayedRTU(startTime, requestId, payload);
   }
 
-  private scheduleDelayedRTU(startTime: number, requestId: string, payload: T): boolean {
+  private scheduleDelayedRTU(
+    startTime: number,
+    requestId: string,
+    payload: T,
+  ): boolean {
     if (!this.dynamicRealtimeThrottleMs) return false;
 
     const { timing } = this.state;
@@ -939,11 +998,13 @@ export class RequestScheduler<T> {
     const { phase, pending } = this.state;
 
     // If busy or mutation in progress for this request, schedule for later
-    if (
-      phase.type !== 'idle'
-      || pending.mutationsInProgress.has(requestId)
-    ) {
-      this.addToScheduledRequests(requestId, payload, 'mediumPriority', Date.now());
+    if (phase.type !== 'idle' || pending.mutationsInProgress.has(requestId)) {
+      this.addToScheduledRequests(
+        requestId,
+        payload,
+        'mediumPriority',
+        Date.now(),
+      );
       return;
     }
 
