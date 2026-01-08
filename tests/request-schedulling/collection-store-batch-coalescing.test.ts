@@ -329,6 +329,15 @@ describe('mutation handling', () => {
     // item2 should have been fetched separately since item1 was under mutation
     expect(env.apiStore.getItemState('item2')?.data?.value).toBe(2);
 
+    expect(
+      compactSnapshot(env.serverTable.fetchHistory),
+    ).toMatchInlineSnapshot(`
+      "
+      - { type: 'fetch', itemId: 'item2', result: 2 }
+      - { type: 'fetch', itemId: 'item1', result: 100 }
+      "
+    `);
+
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1 | item2 |
