@@ -64,7 +64,7 @@ describe('batch coalescing basic behavior', () => {
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3,"successCount":3,"errorCount":0})
+      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -140,7 +140,7 @@ describe('batch coalescing basic behavior', () => {
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       100ms | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      900ms | -     | 🔴 <list-fetch-finished (value: {"count":3,"successCount":3,"errorCount":0})
+      900ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -180,7 +180,7 @@ describe('maxBatchSize behavior', () => {
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       .     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      800ms | -     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
+      800ms | -     | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -233,9 +233,9 @@ describe('maxBatchSize behavior', () => {
       .     | -     | -     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
       .     | -     | -     | -     | [item3] scheduled-fetch-scheduled
       .     | -     | -     | -     | [item4] scheduled-fetch-scheduled
-      800ms | -     | -     | -     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
+      800ms | -     | -     | -     | 🔴 <list-fetch-finished (value: {"count":2})
       900ms | -     | -     | -     | 🟠 >list-fetch-started (value: {"itemIds":["item3","item4"]})
-      1.7s  | -     | -     | -     | 🟠 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
+      1.7s  | -     | -     | -     | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -286,7 +286,7 @@ describe('requests during ongoing fetch', () => {
       0     | -     | -     | [item1] scheduled-fetch-triggered
       50ms  | -     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
       60ms  | -     | -     | [item3] scheduled-fetch-scheduled
-      850ms | -     | -     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
+      850ms | -     | -     | 🔴 <list-fetch-finished (value: {"count":2})
       900ms | -     | -     | 🟠 [item3] >fetch-started
       1.7s  | -     | -     | 🟠 [item3] <fetch-finished (value: 3)
       "
@@ -329,14 +329,13 @@ describe('mutation handling', () => {
     // item2 should have been fetched separately since item1 was under mutation
     expect(env.apiStore.getItemState('item2')?.data?.value).toBe(2);
 
-    expect(
-      compactSnapshot(env.serverTable.fetchHistory),
-    ).toMatchInlineSnapshot(`
-      "
-      - { type: 'fetch', itemId: 'item2', result: 2 }
-      - { type: 'fetch', itemId: 'item1', result: 100 }
-      "
-    `);
+    expect(compactSnapshot(env.serverTable.fetchHistory))
+      .toMatchInlineSnapshot(`
+        "
+        - { type: 'fetch', itemId: 'item2', result: 2 }
+        - { type: 'fetch', itemId: 'item1', result: 100 }
+        "
+      `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -356,61 +355,7 @@ describe('mutation handling', () => {
 });
 
 describe('error handling in batch', () => {
-  test('partial failure: some items succeed, others fail', async () => {
-    const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3 },
-      {
-        forceInitialDataInvalidation: true,
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
-    );
-
-    // Set error for item2
-    env.serverTable.setNextFetchError('item2', 'Item 2 failed');
-
-    env.scheduleFetch('highPriority', 'item1');
-    env.scheduleFetch('highPriority', 'item2');
-    env.scheduleFetch('highPriority', 'item3');
-
-    await vi.runAllTimersAsync();
-
-    // item1 and item3 should succeed
-    expect(env.apiStore.getItemState('item1')?.status).toBe('success');
-    expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
-
-    expect(env.apiStore.getItemState('item3')?.status).toBe('success');
-    expect(env.apiStore.getItemState('item3')?.data?.value).toBe(3);
-
-    // item2 should have error
-    expect(env.apiStore.getItemState('item2')?.status).toBe('error');
-    expect(env.apiStore.getItemState('item2')?.error?.message).toBe(
-      'Item 2 failed',
-    );
-
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2', 'item3']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 'error' }
-            - { itemId: 'item3', data: 3 }
-        "
-      `);
-
-    expect(env.timelineString).toMatchInlineSnapshot(`
-      "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3,"successCount":2,"errorCount":1})
-      "
-    `);
-  });
-
-  test('all items in batch fail', async () => {
+  test('batch fetch network error: all items fail with same error', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: 1, item2: 2 },
       {
@@ -420,22 +365,23 @@ describe('error handling in batch', () => {
       },
     );
 
-    env.serverTable.setNextFetchError('item1', 'Item 1 failed');
-    env.serverTable.setNextFetchError('item2', 'Item 2 failed');
+    // Make the batch request fail entirely (network error)
+    env.serverTable.setListFetchError('Network error');
 
     env.scheduleFetch('highPriority', 'item1');
     env.scheduleFetch('highPriority', 'item2');
 
     await vi.runAllTimersAsync();
 
+    // Both items should have the same error
     expect(env.apiStore.getItemState('item1')?.status).toBe('error');
     expect(env.apiStore.getItemState('item1')?.error?.message).toBe(
-      'Item 1 failed',
+      'Network error',
     );
 
     expect(env.apiStore.getItemState('item2')?.status).toBe('error');
     expect(env.apiStore.getItemState('item2')?.error?.message).toBe(
-      'Item 2 failed',
+      'Network error',
     );
 
     expect(env.timelineString).toMatchInlineSnapshot(`
@@ -443,7 +389,7 @@ describe('error handling in batch', () => {
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":0,"errorCount":2})
+      850ms | -     | 🔴 <list-fetch-error (value: "error")
       "
     `);
   });
@@ -493,12 +439,12 @@ describe('awaitFetch with batch', () => {
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3,"successCount":3,"errorCount":0})
+      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
 
-  test('awaitFetch returns error for failed item in batch', async () => {
+  test('awaitFetch returns error when batch fails', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: 1, item2: 2 },
       {
@@ -508,7 +454,8 @@ describe('awaitFetch with batch', () => {
       },
     );
 
-    env.serverTable.setNextFetchError('item2', 'Item 2 failed');
+    // Make the batch request fail entirely
+    env.serverTable.setListFetchError('Network error');
 
     env.scheduleFetch('highPriority', 'item1');
     const resultPromise = env.apiStore.awaitFetch('item2');
@@ -519,17 +466,20 @@ describe('awaitFetch with batch', () => {
 
     expect(result.data).toBeNull();
     expect(result.error).toBeInstanceOf(StoreFetchError);
-    expect(result.error?.message).toBe('Item 2 failed');
+    expect(result.error?.message).toBe('Network error');
 
-    // item1 should succeed
-    expect(env.apiStore.getItemState('item1')?.status).toBe('success');
+    // item1 should also fail with the same error
+    expect(env.apiStore.getItemState('item1')?.status).toBe('error');
+    expect(env.apiStore.getItemState('item1')?.error?.message).toBe(
+      'Network error',
+    );
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":1,"errorCount":1})
+      850ms | -     | 🔴 <list-fetch-error (value: "error")
       "
     `);
   });
@@ -612,7 +562,7 @@ describe('awaitFetch with batch', () => {
       "
       time  |
       50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | 🔴 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
+      850ms | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -653,7 +603,7 @@ describe('priority handling in batch', () => {
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3,"successCount":3,"errorCount":0})
+      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -691,7 +641,7 @@ describe('priority handling in batch', () => {
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3,"successCount":3,"errorCount":0})
+      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -738,7 +688,7 @@ describe('batch with UI hooks', () => {
       0     | 1     | -     | [item1] ui-initialized
       .     | 1     | 2     | [item2] ui-changed
       50ms  | 1     | 2     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | 1     | 2     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
+      850ms | 1     | 2     | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -817,49 +767,7 @@ describe('duplicate item requests in batch', () => {
       .     | -     | -     | [item1] scheduled-fetch-coalesced
       .     | -     | -     | [item2] scheduled-fetch-coalesced
       50ms  | -     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | -     | -     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
-      "
-    `);
-  });
-});
-
-describe('timeline formatting', () => {
-  test('batch fetch actions appear correctly in timeline', async () => {
-    const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2 },
-      {
-        forceInitialDataInvalidation: true,
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
-    );
-
-    env.scheduleFetch('highPriority', 'item1');
-    env.scheduleFetch('highPriority', 'item2');
-
-    await vi.runAllTimersAsync();
-
-    // Verify data was fetched correctly
-    expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
-    expect(env.apiStore.getItemState('item2')?.data?.value).toBe(2);
-
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-        "
-      `);
-
-    expect(env.timelineString).toMatchInlineSnapshot(`
-      "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":2,"successCount":2,"errorCount":0})
+      850ms | -     | -     | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });

@@ -1,3 +1,4 @@
+import { notNullish } from '@ls-stack/utils/assertions';
 import { evtmitter } from 'evtmitter';
 import type { StoreError } from '../../src/storeShared';
 import { sleep } from '../../test-old/utils/sleep';
@@ -40,12 +41,12 @@ export type FetchErrorConfig = {
   code?: number;
 };
 
+const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
+
 export type AddActionFn = (
   action: string,
   options?: { id?: string | number; actionValue?: unknown; itemId?: string },
 ) => void;
-
-const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
 
 export function createServerTableMock<ItemData>(
   initialItems: Record<string, ItemData>,
@@ -55,6 +56,7 @@ export function createServerTableMock<ItemData>(
   const itemHistory = new Map<string, ItemData[]>();
   const customFetchDurations = new Map<string, number[]>();
   const nextFetchErrors = new Map<string, FetchErrorConfig>();
+  let nextListFetchError: FetchErrorConfig | null = null;
 
   // Fetch tracking state
   let numOfStartedFetches = 0;
@@ -74,13 +76,13 @@ export function createServerTableMock<ItemData>(
   const fetchHistory: FetchHistoryEntry[] = [];
 
   function getFetchId() {
-    return fetchEmojis[fetchIdCounter++ % fetchEmojis.length]!;
+    return notNullish(fetchEmojis[fetchIdCounter++ % fetchEmojis.length]);
   }
 
   function getNextFetchDuration(itemId: string): number {
     const durations = customFetchDurations.get(itemId);
     if (durations && durations.length > 0) {
-      return durations.shift()!;
+      return notNullish(durations.shift());
     }
     return DEFAULT_FETCH_DURATION_MS;
   }
@@ -218,6 +220,25 @@ export function createServerTableMock<ItemData>(
       throw new Error('Aborted');
     }
 
+    // Check for list-level fetch error (network failure)
+    if (nextListFetchError) {
+      const errorConfig = nextListFetchError;
+      nextListFetchError = null;
+      fetchHistory.push({
+        type: 'list',
+        itemIds: filterItemIds,
+        results: 'aborted',
+      });
+      if (addAction) {
+        numOfFinishedFetches++;
+        addAction('<list-fetch-error', {
+          id: listId,
+          actionValue: 'error',
+        });
+      }
+      throw new Error(errorConfig.message);
+    }
+
     let entries = Array.from(items.entries());
 
     // Filter by itemIds if provided
@@ -232,23 +253,14 @@ export function createServerTableMock<ItemData>(
     const paginatedEntries = entries.slice(startIndex, endIndex);
     const hasMore = endIndex < totalCount;
 
-    // Build result, checking for errors per item
-    const resultItems: Array<{ itemId: string; data: ItemData | Error }> = [];
-    for (const [itemId, data] of paginatedEntries) {
-      const errorConfig = nextFetchErrors.get(itemId);
-      if (errorConfig) {
-        nextFetchErrors.delete(itemId);
-        resultItems.push({
-          itemId,
-          data: new Error(errorConfig.message) as unknown as ItemData,
-        });
-      } else {
-        resultItems.push({ itemId, data });
-      }
-    }
+    // Build result
+    const resultItems = paginatedEntries.map(([itemId, data]) => ({
+      itemId,
+      data,
+    }));
 
     const result: ListQueryResult<ItemData> = {
-      items: resultItems as Array<{ itemId: string; data: ItemData }>,
+      items: resultItems,
       hasMore,
     };
 
@@ -257,21 +269,15 @@ export function createServerTableMock<ItemData>(
       itemIds: filterItemIds,
       results: resultItems.map(({ itemId, data }) => ({
         itemId,
-        data: data instanceof Error ? 'error' : data,
+        data,
       })),
     });
 
     if (addAction) {
       numOfFinishedFetches++;
-      const successCount = resultItems.filter(
-        (r) => !(r.data instanceof Error),
-      ).length;
-      const errorCount = resultItems.filter(
-        (r) => r.data instanceof Error,
-      ).length;
       addAction('<list-fetch-finished', {
         id: listId,
-        actionValue: { count: resultItems.length, successCount, errorCount },
+        actionValue: { count: resultItems.length },
       });
     }
 
@@ -481,6 +487,10 @@ export function createServerTableMock<ItemData>(
         itemId,
         typeof error === 'string' ? { message: error } : error,
       );
+    },
+    setListFetchError(error: FetchErrorConfig | string) {
+      nextListFetchError =
+        typeof error === 'string' ? { message: error } : error;
     },
     getNextFetchError(itemId: string): FetchErrorConfig | undefined {
       const error = nextFetchErrors.get(itemId);

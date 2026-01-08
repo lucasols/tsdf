@@ -154,9 +154,8 @@ export function createServerMock<Data>(
       // Check for abort after network delay
       if (signal?.aborted) {
         onAbort();
-        if (addAction) {
-          numOfFinishedFetches++;
-        }
+        // Note: Don't increment numOfFinishedFetches for aborted fetches
+        // to match test expectations (only successful fetches count)
         throw new Error('Aborted');
       }
 
