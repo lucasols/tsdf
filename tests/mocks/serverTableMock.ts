@@ -1,14 +1,17 @@
+import { notNullish } from '@ls-stack/utils/assertions';
 import { evtmitter } from 'evtmitter';
+import type { StoreError } from '../../src/storeShared';
 import { sleep } from '../../test-old/utils/sleep';
+import { FetchError } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
 export const DEFAULT_MUTATION_DURATION_MS = 1200;
 export const DEFAULT_RTU_DELAY_MS = 50;
 
-export type ListQueryOptions<ItemData> = {
+export type ListQueryOptions = {
   offset?: number;
   limit?: number;
-  filter?: (item: ItemData, itemId: string) => boolean;
+  itemIds?: string[];
 };
 
 export type ListQueryResult<ItemData> = {
@@ -31,19 +34,58 @@ export type MutationOptions = {
   mutationId?: string | number;
 };
 
-export type ActionListener<ItemData> = (
+export type FetchErrorConfig = {
+  message: string;
+  path?: string;
+  method?: StoreError['method'];
+  code?: number;
+};
+
+const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
+
+export type AddActionFn = (
   action: string,
-  data?: ItemData | Array<{ itemId: string; data: ItemData }>,
-  id?: string | number,
+  options?: { id?: string | number; actionValue?: unknown; itemId?: string },
 ) => void;
 
 export function createServerTableMock<ItemData>(
   initialItems: Record<string, ItemData>,
-  listenForActions?: ActionListener<ItemData>,
+  addAction?: AddActionFn,
 ) {
   const items = new Map<string, ItemData>(Object.entries(initialItems));
   const itemHistory = new Map<string, ItemData[]>();
-  const customFetchDurations: number[] = [];
+  const customFetchDurations = new Map<string, number[]>();
+  const nextFetchErrors = new Map<string, FetchErrorConfig>();
+  let nextListFetchError: FetchErrorConfig | null = null;
+
+  // Fetch tracking state
+  let numOfStartedFetches = 0;
+  let numOfFinishedFetches = 0;
+  let fetchIdCounter = 0;
+
+  // Fetch history tracking
+  type FetchHistoryEntry =
+    | { type: 'fetch'; itemId: string; result: ItemData | 'error' | 'aborted' }
+    | {
+        type: 'list';
+        itemIds: string[] | undefined;
+        results:
+          | Array<{ itemId: string; data: ItemData | 'error' }>
+          | 'aborted';
+      };
+  const fetchHistory: FetchHistoryEntry[] = [];
+
+  function getFetchId() {
+    return notNullish(fetchEmojis[fetchIdCounter++ % fetchEmojis.length]);
+  }
+
+  function getNextFetchDuration(itemId: string): number {
+    const durations = customFetchDurations.get(itemId);
+    if (durations && durations.length > 0) {
+      return notNullish(durations.shift());
+    }
+    return DEFAULT_FETCH_DURATION_MS;
+  }
 
   for (const [itemId, data] of items) {
     itemHistory.set(itemId, [data]);
@@ -51,40 +93,157 @@ export function createServerTableMock<ItemData>(
 
   const wsEvents = evtmitter<ServerTableEvents<ItemData>>();
 
-  async function fetch(itemId: string, duration?: number): Promise<ItemData> {
-    const actualDuration =
-      customFetchDurations.shift() ?? duration ?? DEFAULT_FETCH_DURATION_MS;
+  async function fetch(
+    itemId: string,
+    signal?: AbortSignal,
+  ): Promise<ItemData> {
+    const fetchId = addAction ? getFetchId() : undefined;
 
-    listenForActions?.('>fetch-item-started', undefined, itemId);
+    if (addAction) {
+      addAction('>fetch-started', { id: fetchId, itemId });
+      numOfStartedFetches++;
+    }
 
+    let abortLogged = false;
+    function onAbort() {
+      if (!addAction || abortLogged) return;
+      abortLogged = true;
+      addAction('<fetch-aborted 🚫', { id: fetchId, itemId });
+    }
+    signal?.addEventListener('abort', onAbort);
+
+    // Check for scheduled error first
+    const errorConfig = nextFetchErrors.get(itemId);
+    if (errorConfig) {
+      signal?.removeEventListener('abort', onAbort);
+      nextFetchErrors.delete(itemId);
+      fetchHistory.push({ type: 'fetch', itemId, result: 'error' });
+      if (addAction) {
+        numOfFinishedFetches++;
+        addAction('<fetch-error', {
+          actionValue: 'error',
+          id: fetchId,
+          itemId,
+        });
+      }
+
+      if (errorConfig.path) {
+        throw new FetchError(errorConfig.message, {
+          path: errorConfig.path,
+          method: errorConfig.method,
+          code: errorConfig.code,
+        });
+      }
+      throw new Error(errorConfig.message);
+    }
+
+    const actualDuration = getNextFetchDuration(itemId);
     await sleep(actualDuration);
+
+    signal?.removeEventListener('abort', onAbort);
+
+    // Check for abort after network delay
+    if (signal?.aborted) {
+      onAbort();
+      fetchHistory.push({ type: 'fetch', itemId, result: 'aborted' });
+      if (addAction) {
+        numOfFinishedFetches++;
+      }
+      throw new Error('Aborted');
+    }
 
     const item = items.get(itemId);
     if (item === undefined) {
-      listenForActions?.('<fetch-item-not-found', undefined, itemId);
+      fetchHistory.push({ type: 'fetch', itemId, result: 'error' });
+      if (addAction) {
+        numOfFinishedFetches++;
+      }
       throw new Error(`Item not found: ${itemId}`);
     }
 
-    listenForActions?.('<fetch-item-finished', item, itemId);
+    fetchHistory.push({ type: 'fetch', itemId, result: item });
+    if (addAction) {
+      numOfFinishedFetches++;
+      addAction('<fetch-finished', { actionValue: item, id: fetchId, itemId });
+    }
+
     return item;
   }
 
   async function list(
-    options?: ListQueryOptions<ItemData>,
+    options?: ListQueryOptions,
+    signal?: AbortSignal,
   ): Promise<ListQueryResult<ItemData>> {
-    const { offset = 0, limit, filter } = options ?? {};
+    const { offset = 0, limit, itemIds: filterItemIds } = options ?? {};
+    const listId = addAction ? getFetchId() : undefined;
 
-    const actualDuration =
-      customFetchDurations.shift() ?? DEFAULT_FETCH_DURATION_MS;
+    if (addAction) {
+      const filterInfo = filterItemIds ? { itemIds: filterItemIds } : undefined;
+      addAction('>list-fetch-started', {
+        id: listId,
+        actionValue: filterInfo,
+      });
+      numOfStartedFetches++;
+    }
 
-    listenForActions?.('>list-fetch-started');
+    let abortLogged = false;
+    function onAbort() {
+      if (!addAction || abortLogged) return;
+      abortLogged = true;
+      addAction('<list-fetch-aborted 🚫', { id: listId });
+    }
+    signal?.addEventListener('abort', onAbort);
 
-    await sleep(actualDuration);
+    // Calculate max duration from filtered items
+    let maxDuration = DEFAULT_FETCH_DURATION_MS;
+    if (filterItemIds) {
+      for (const itemId of filterItemIds) {
+        const duration = getNextFetchDuration(itemId);
+        if (duration > maxDuration) maxDuration = duration;
+      }
+    }
+
+    await sleep(maxDuration);
+
+    signal?.removeEventListener('abort', onAbort);
+
+    if (signal?.aborted) {
+      onAbort();
+      fetchHistory.push({
+        type: 'list',
+        itemIds: filterItemIds,
+        results: 'aborted',
+      });
+      if (addAction) {
+        numOfFinishedFetches++;
+      }
+      throw new Error('Aborted');
+    }
+
+    // Check for list-level fetch error (network failure)
+    if (nextListFetchError) {
+      const errorConfig = nextListFetchError;
+      nextListFetchError = null;
+      fetchHistory.push({
+        type: 'list',
+        itemIds: filterItemIds,
+        results: 'aborted',
+      });
+      if (addAction) {
+        numOfFinishedFetches++;
+        addAction('<list-fetch-error', {
+          id: listId,
+          actionValue: 'error',
+        });
+      }
+      throw new Error(errorConfig.message);
+    }
 
     let entries = Array.from(items.entries());
 
-    if (filter) {
-      entries = entries.filter(([itemId, data]) => filter(data, itemId));
+    // Filter by itemIds if provided
+    if (filterItemIds) {
+      entries = entries.filter(([itemId]) => filterItemIds.includes(itemId));
     }
 
     const totalCount = entries.length;
@@ -94,12 +253,33 @@ export function createServerTableMock<ItemData>(
     const paginatedEntries = entries.slice(startIndex, endIndex);
     const hasMore = endIndex < totalCount;
 
+    // Build result
+    const resultItems = paginatedEntries.map(([itemId, data]) => ({
+      itemId,
+      data,
+    }));
+
     const result: ListQueryResult<ItemData> = {
-      items: paginatedEntries.map(([itemId, data]) => ({ itemId, data })),
+      items: resultItems,
       hasMore,
     };
 
-    listenForActions?.('<list-fetch-finished', result.items);
+    fetchHistory.push({
+      type: 'list',
+      itemIds: filterItemIds,
+      results: resultItems.map(({ itemId, data }) => ({
+        itemId,
+        data,
+      })),
+    });
+
+    if (addAction) {
+      numOfFinishedFetches++;
+      addAction('<list-fetch-finished', {
+        id: listId,
+        actionValue: { count: resultItems.length },
+      });
+    }
 
     return result;
   }
@@ -122,12 +302,12 @@ export function createServerTableMock<ItemData>(
       itemHistory.set(itemId, [data]);
     }
 
-    listenForActions?.('server-data-changed', data, itemId);
+    addAction?.('server-data-changed', { actionValue: data, itemId });
   }
 
   function removeItem(itemId: string): void {
     items.delete(itemId);
-    listenForActions?.('server-item-removed', undefined, itemId);
+    addAction?.('server-item-removed', { itemId });
   }
 
   async function mutateItem(
@@ -148,7 +328,11 @@ export function createServerTableMock<ItemData>(
       throw new Error(`Item not found: ${itemId}`);
     }
 
-    listenForActions?.('>mutation-started', newData, mutationId);
+    addAction?.('>mutation-started', {
+      actionValue: newData,
+      id: mutationId,
+      itemId,
+    });
 
     await sleep(setDataAt);
 
@@ -162,10 +346,14 @@ export function createServerTableMock<ItemData>(
     }
 
     if (addServerDataChangeAction) {
-      listenForActions?.('server-data-changed', newData, itemId);
+      addAction?.('server-data-changed', { actionValue: newData, itemId });
     }
 
-    listenForActions?.('<mutation-data-persisted', newData, mutationId);
+    addAction?.('<mutation-data-persisted', {
+      actionValue: newData,
+      id: mutationId,
+      itemId,
+    });
 
     if (triggerRTUEvent) {
       void sleep(DEFAULT_RTU_DELAY_MS).then(() => {
@@ -178,7 +366,7 @@ export function createServerTableMock<ItemData>(
     return newData;
   }
 
-  async function addItem(
+  async function addItemToServer(
     itemId: string,
     data: ItemData,
     options: MutationOptions = {},
@@ -195,7 +383,11 @@ export function createServerTableMock<ItemData>(
       throw new Error(`Item already exists: ${itemId}`);
     }
 
-    listenForActions?.('>add-item-started', data, mutationId);
+    addAction?.('>add-item-started', {
+      actionValue: data,
+      id: mutationId,
+      itemId,
+    });
 
     await sleep(setDataAt);
 
@@ -203,10 +395,14 @@ export function createServerTableMock<ItemData>(
     itemHistory.set(itemId, [data]);
 
     if (addServerDataChangeAction) {
-      listenForActions?.('server-item-added', data, itemId);
+      addAction?.('server-item-added', { actionValue: data, itemId });
     }
 
-    listenForActions?.('<add-item-persisted', data, mutationId);
+    addAction?.('<add-item-persisted', {
+      actionValue: data,
+      id: mutationId,
+      itemId,
+    });
 
     if (triggerRTUEvent) {
       void sleep(DEFAULT_RTU_DELAY_MS).then(() => {
@@ -218,7 +414,7 @@ export function createServerTableMock<ItemData>(
     await sleep(duration - setDataAt);
   }
 
-  async function deleteItem(
+  async function deleteItemFromServer(
     itemId: string,
     options: MutationOptions = {},
   ): Promise<void> {
@@ -235,17 +431,25 @@ export function createServerTableMock<ItemData>(
       throw new Error(`Item not found: ${itemId}`);
     }
 
-    listenForActions?.('>delete-item-started', existingItem, mutationId);
+    addAction?.('>delete-item-started', {
+      actionValue: existingItem,
+      id: mutationId,
+      itemId,
+    });
 
     await sleep(setDataAt);
 
     items.delete(itemId);
 
     if (addServerDataChangeAction) {
-      listenForActions?.('server-item-deleted', existingItem, itemId);
+      addAction?.('server-item-deleted', { actionValue: existingItem, itemId });
     }
 
-    listenForActions?.('<delete-item-persisted', existingItem, mutationId);
+    addAction?.('<delete-item-persisted', {
+      actionValue: existingItem,
+      id: mutationId,
+      itemId,
+    });
 
     if (triggerRTUEvent) {
       void sleep(DEFAULT_RTU_DELAY_MS).then(() => {
@@ -261,10 +465,6 @@ export function createServerTableMock<ItemData>(
     return itemHistory.get(itemId) ?? [];
   }
 
-  function setFetchDurations(...durations: number[]): void {
-    customFetchDurations.push(...durations);
-  }
-
   return {
     fetch,
     list,
@@ -273,10 +473,40 @@ export function createServerTableMock<ItemData>(
     setItem,
     removeItem,
     mutateItem,
-    addItem,
-    deleteItem,
+    addItem: addItemToServer,
+    deleteItem: deleteItemFromServer,
     wsEvents,
     getItemHistory,
-    setFetchDurations,
+    setFetchDurations(itemId: string, ...durations: number[]) {
+      const existing = customFetchDurations.get(itemId) ?? [];
+      existing.push(...durations);
+      customFetchDurations.set(itemId, existing);
+    },
+    setNextFetchError(itemId: string, error: FetchErrorConfig | string) {
+      nextFetchErrors.set(
+        itemId,
+        typeof error === 'string' ? { message: error } : error,
+      );
+    },
+    setListFetchError(error: FetchErrorConfig | string) {
+      nextListFetchError =
+        typeof error === 'string' ? { message: error } : error;
+    },
+    getNextFetchError(itemId: string): FetchErrorConfig | undefined {
+      const error = nextFetchErrors.get(itemId);
+      if (error) {
+        nextFetchErrors.delete(itemId);
+      }
+      return error;
+    },
+    get numOfStartedFetches() {
+      return numOfStartedFetches;
+    },
+    get numOfFinishedFetches() {
+      return numOfFinishedFetches;
+    },
+    get fetchHistory() {
+      return fetchHistory;
+    },
   };
 }

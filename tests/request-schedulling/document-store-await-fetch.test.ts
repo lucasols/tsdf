@@ -16,7 +16,7 @@ describe('awaitFetch basic behavior', () => {
       forceInitialDataInvalidation: true,
     });
 
-    const resultPromise = env.awaitFetch();
+    const resultPromise = env.apiStore.awaitFetch();
 
     await vi.runAllTimersAsync();
 
@@ -27,7 +27,7 @@ describe('awaitFetch basic behavior', () => {
       error: null,
     });
 
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
   test('returns error on failed fetch', async () => {
@@ -42,7 +42,7 @@ describe('awaitFetch basic behavior', () => {
       code: 500,
     });
 
-    const resultPromise = env.awaitFetch();
+    const resultPromise = env.apiStore.awaitFetch();
 
     await vi.runAllTimersAsync();
 
@@ -66,7 +66,7 @@ describe('awaitFetch basic behavior', () => {
     // Change server data
     env.setServerData(999);
 
-    const resultPromise = env.awaitFetch();
+    const resultPromise = env.apiStore.awaitFetch();
 
     await vi.runAllTimersAsync();
 
@@ -85,9 +85,9 @@ describe('awaitFetch coalescing behavior', () => {
     const env = createDocumentStoreTestEnv(42);
 
     // Start multiple awaitFetch calls concurrently
-    const promise1 = env.awaitFetch();
-    const promise2 = env.awaitFetch();
-    const promise3 = env.awaitFetch();
+    const promise1 = env.apiStore.awaitFetch();
+    const promise2 = env.apiStore.awaitFetch();
+    const promise3 = env.apiStore.awaitFetch();
 
     await vi.runAllTimersAsync();
 
@@ -103,7 +103,7 @@ describe('awaitFetch coalescing behavior', () => {
     expect(result3).toEqual({ data: { value: 42 }, error: null });
 
     // Only one fetch should have been executed
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -120,13 +120,13 @@ describe('awaitFetch coalescing behavior', () => {
     });
 
     // First awaitFetch starts coalescing window
-    const promise1 = env.awaitFetch();
+    const promise1 = env.apiStore.awaitFetch();
 
     // Wait a bit but stay within coalescing window
     await vi.advanceTimersByTimeAsync(20);
 
     // Second awaitFetch should join the coalescing window
-    const promise2 = env.awaitFetch();
+    const promise2 = env.apiStore.awaitFetch();
 
     await vi.runAllTimersAsync();
 
@@ -134,7 +134,7 @@ describe('awaitFetch coalescing behavior', () => {
 
     expect(result1).toEqual({ data: { value: 42 }, error: null });
     expect(result2).toEqual({ data: { value: 42 }, error: null });
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -149,13 +149,13 @@ describe('awaitFetch coalescing behavior', () => {
     const env = createDocumentStoreTestEnv(42);
 
     // Start first awaitFetch
-    const promise1 = env.awaitFetch();
+    const promise1 = env.apiStore.awaitFetch();
 
     // Wait for coalescing to end and fetch to start
     await vi.advanceTimersByTimeAsync(15);
 
     // Second awaitFetch during ongoing fetch
-    const promise2 = env.awaitFetch();
+    const promise2 = env.apiStore.awaitFetch();
 
     await vi.runAllTimersAsync();
 
@@ -165,7 +165,7 @@ describe('awaitFetch coalescing behavior', () => {
     expect(result2).toEqual({ data: { value: 42 }, error: null });
 
     // Two fetches: first one completes, second one scheduled during first
-    expect(env.numOfFinishedFetches).toBe(2);
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -184,7 +184,7 @@ describe('awaitFetch edge cases', () => {
     const env = createDocumentStoreTestEnv(1);
 
     // First awaitFetch
-    const promise1 = env.awaitFetch();
+    const promise1 = env.apiStore.awaitFetch();
     await vi.runAllTimersAsync();
     const result1 = await promise1;
 
@@ -194,19 +194,19 @@ describe('awaitFetch edge cases', () => {
     env.setServerData(2);
 
     // Second awaitFetch - should trigger new fetch
-    const promise2 = env.awaitFetch();
+    const promise2 = env.apiStore.awaitFetch();
     await vi.runAllTimersAsync();
     const result2 = await promise2;
 
     expect(result2).toEqual({ data: { value: 2 }, error: null });
-    expect(env.numOfFinishedFetches).toBe(2);
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
   });
 
   test('awaitFetch returns latest data after server changes during fetch', async () => {
     const env = createDocumentStoreTestEnv(1);
 
     // Start awaitFetch
-    const fetchPromise = env.awaitFetch();
+    const fetchPromise = env.apiStore.awaitFetch();
 
     // Wait for coalescing window
     await vi.advanceTimersByTimeAsync(15);
@@ -235,7 +235,7 @@ describe('awaitFetch edge cases', () => {
       code: 400,
     });
 
-    const resultPromise = env.awaitFetch();
+    const resultPromise = env.apiStore.awaitFetch();
 
     await vi.runAllTimersAsync();
 
@@ -254,7 +254,7 @@ describe('awaitFetch edge cases', () => {
     const env = createDocumentStoreTestEnv(42);
 
     // First successful fetch
-    const result1 = env.awaitFetch();
+    const result1 = env.apiStore.awaitFetch();
     await vi.runAllTimersAsync();
     expect(await result1).toEqual({ data: { value: 42 }, error: null });
 
@@ -268,7 +268,7 @@ describe('awaitFetch edge cases', () => {
       method: 'GET',
       code: 404,
     });
-    const result2 = env.awaitFetch();
+    const result2 = env.apiStore.awaitFetch();
     await vi.runAllTimersAsync();
 
     // awaitFetch returns error
@@ -298,20 +298,20 @@ describe('awaitFetch timing', () => {
       baseCoalescingWindowMs: 50,
     });
 
-    const fetchPromise = env.awaitFetch();
+    const fetchPromise = env.apiStore.awaitFetch();
 
     // Before coalescing window ends - no fetch started yet
     await vi.advanceTimersByTimeAsync(30);
-    expect(env.numOfStartedFetches).toBe(0);
+    expect(env.serverMock.numOfStartedFetches).toBe(0);
 
     // After coalescing window ends - fetch should start
     await vi.advanceTimersByTimeAsync(25);
-    expect(env.numOfStartedFetches).toBe(1);
+    expect(env.serverMock.numOfStartedFetches).toBe(1);
 
     await vi.runAllTimersAsync();
     await fetchPromise;
 
-    expect(env.numOfFinishedFetches).toBe(1);
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
 
   test('awaitFetch resolves only after fetch completes', async () => {
@@ -320,7 +320,7 @@ describe('awaitFetch timing', () => {
 
     let resolved = false;
 
-    const fetchPromise = env.awaitFetch().then((result) => {
+    const fetchPromise = env.apiStore.awaitFetch().then((result) => {
       resolved = true;
       return result;
     });
@@ -339,29 +339,59 @@ describe('awaitFetch timing', () => {
     expect(resolved).toBe(true);
   });
 
+  test('awaitFetch waits for scheduled fetch after mutation completes', async () => {
+    const env = createDocumentStoreTestEnv(0);
+
+    const mutationPromise = env.performClientUpdateAction(1, {
+      duration: 1200,
+    });
+
+    let resolved = false;
+    const fetchPromise = env.apiStore.awaitFetch().then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    await Promise.resolve();
+
+    expect(resolved).toBe(false);
+    expect(env.serverMock.numOfStartedFetches).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(resolved).toBe(false);
+
+    await vi.runAllTimersAsync();
+
+    const result = await fetchPromise;
+    await mutationPromise;
+
+    expect(result).toEqual({ data: { value: 1 }, error: null });
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  });
+
   test('three awaitFetch calls triggered outside each coalescing window coalesce during ongoing fetch', async () => {
     const env = createDocumentStoreTestEnv(1, {
       baseCoalescingWindowMs: 50,
     });
 
     // First awaitFetch - starts first coalescing window
-    const promise1 = env.awaitFetch();
+    const promise1 = env.apiStore.awaitFetch();
 
     // Wait for first coalescing window to end + a few ms
     await vi.advanceTimersByTimeAsync(55);
-    expect(env.numOfStartedFetches).toBe(1);
+    expect(env.serverMock.numOfStartedFetches).toBe(1);
 
     // Second awaitFetch - outside first coalescing window
     env.setServerData(2);
-    const promise2 = env.awaitFetch();
+    const promise2 = env.apiStore.awaitFetch();
 
     // Wait for second coalescing window to end + a few ms
     await vi.advanceTimersByTimeAsync(55);
-    expect(env.numOfStartedFetches).toBe(1); // First fetch still in progress
+    expect(env.serverMock.numOfStartedFetches).toBe(1); // First fetch still in progress
 
     // Third awaitFetch - outside second coalescing window
     env.setServerData(3);
-    const promise3 = env.awaitFetch();
+    const promise3 = env.apiStore.awaitFetch();
 
     // Wait for third coalescing window to end + a few ms
     await vi.advanceTimersByTimeAsync(55);
@@ -381,7 +411,7 @@ describe('awaitFetch timing', () => {
     expect(result3).toEqual({ data: { value: 3 }, error: null });
 
     // Two fetches: first one, then second+third coalesced during ongoing fetch
-    expect(env.numOfFinishedFetches).toBe(2);
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -403,7 +433,7 @@ describe('awaitFetch timeout', () => {
     // Set a very long fetch duration
     env.setNextFetchDurations(60_000);
 
-    const resultPromise = env.awaitFetch();
+    const resultPromise = env.apiStore.awaitFetch();
 
     // Advance past the default 30 second timeout
     await vi.advanceTimersByTimeAsync(30_001);
@@ -422,7 +452,7 @@ describe('awaitFetch timeout', () => {
     // Set a fetch duration longer than custom timeout
     env.setNextFetchDurations(10_000);
 
-    const resultPromise = env.awaitFetch({ timeoutMs: 5_000 });
+    const resultPromise = env.apiStore.awaitFetch({ timeoutMs: 5_000 });
 
     // Advance past the custom 5 second timeout
     await vi.advanceTimersByTimeAsync(5_001);
@@ -439,7 +469,7 @@ describe('awaitFetch timeout', () => {
     const env = createDocumentStoreTestEnv(42);
     env.setNextFetchDurations(100);
 
-    const resultPromise = env.awaitFetch({ timeoutMs: 5_000 });
+    const resultPromise = env.apiStore.awaitFetch({ timeoutMs: 5_000 });
 
     await vi.runAllTimersAsync();
 
@@ -455,7 +485,7 @@ describe('awaitFetch timeout', () => {
   test('awaitFetch with zero timeout times out immediately', async () => {
     const env = createDocumentStoreTestEnv(42);
 
-    const resultPromise = env.awaitFetch({ timeoutMs: 0 });
+    const resultPromise = env.apiStore.awaitFetch({ timeoutMs: 0 });
 
     // Even with 0 timeout, we need to advance timers to let the Promise.race resolve
     await vi.advanceTimersByTimeAsync(1);
@@ -473,10 +503,10 @@ describe('awaitFetch timeout', () => {
     env.setNextFetchDurations(3_000);
 
     // First call with short timeout - should timeout
-    const promise1 = env.awaitFetch({ timeoutMs: 1_000 });
+    const promise1 = env.apiStore.awaitFetch({ timeoutMs: 1_000 });
 
     // Second call with long timeout - should succeed
-    const promise2 = env.awaitFetch({ timeoutMs: 10_000 });
+    const promise2 = env.apiStore.awaitFetch({ timeoutMs: 10_000 });
 
     // Advance past first timeout but before fetch completes
     await vi.advanceTimersByTimeAsync(1_001);

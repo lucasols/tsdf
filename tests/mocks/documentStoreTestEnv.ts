@@ -1,13 +1,10 @@
 import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
-import type { StoreError } from '../../src/storeShared';
-import { createServerMock } from './serverMock';
+import { createServerMock, type FetchErrorConfig } from './serverMock';
 import {
   createActionTracker,
   createEmojiCyclers,
-  createFetchCounter,
   createUITracker,
-  FetchError,
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
@@ -35,65 +32,20 @@ export function createDocumentStoreTestEnv<D>(
     getRelativeTime,
   } = createActionTracker();
 
-  const { getFetchEmoji, getMutationEmoji } = createEmojiCyclers();
-  const fetchCounter = createFetchCounter();
-
-  let nextFetchError: {
-    message: string;
-    path?: string;
-    method?: StoreError['method'];
-    code?: number;
-  } | null = null;
+  const { getMutationEmoji } = createEmojiCyclers();
 
   const { uiChanges, trackUIChanges } = createUITracker<
     number | string | undefined
   >(addAction, getRelativeTime, actionsHistory);
 
-  const serverMock = createServerMock<D>(
-    serverInitialData,
-    (action, data, id) => {
-      addAction(action, {
-        actionValue: data,
-        id,
-      });
-    },
-  );
+  const serverMock = createServerMock<D>(serverInitialData, addAction);
 
   const documentStore = createDocumentStore<{ value: D }>({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,
     fetchFn: async (signal) => {
-      const fetchId = getFetchEmoji();
-      addAction(`>fetch-started`, { id: fetchId });
-
-      fetchCounter.incrementStarted();
-
-      if (nextFetchError) {
-        fetchCounter.incrementFinished();
-        const errorConfig = nextFetchError;
-        nextFetchError = null;
-        addAction(`<fetch-error`, { actionValue: 'error', id: fetchId });
-
-        if (errorConfig.path) {
-          throw new FetchError(errorConfig.message, {
-            path: errorConfig.path,
-            method: errorConfig.method,
-            code: errorConfig.code,
-          });
-        }
-        throw new Error(errorConfig.message);
-      }
-
-      const value = await serverMock.fetch();
-
-      if (signal.aborted) {
-        addAction(`<fetch-aborted 🚫`, { id: fetchId });
-        throw new Error('Aborted');
-      }
-
-      fetchCounter.incrementFinished();
-      addAction(`<fetch-finished`, { actionValue: value, id: fetchId });
+      const value = await serverMock.fetch(signal);
       return { value };
     },
     disableInitialDataInvalidation: !forceInitialDataInvalidation,
@@ -115,16 +67,8 @@ export function createDocumentStoreTestEnv<D>(
   });
 
   return {
+    apiStore: documentStore,
     store: documentStore.store,
-    invalidateData: documentStore.invalidateData,
-    awaitFetch: documentStore.awaitFetch,
-    useDocument: documentStore.useDocument,
-    get numOfFinishedFetches() {
-      return fetchCounter.numOfFinishedFetches;
-    },
-    get numOfStartedFetches() {
-      return fetchCounter.numOfStartedFetches;
-    },
     get uiChanges() {
       return uiChanges;
     },
@@ -191,20 +135,9 @@ export function createDocumentStoreTestEnv<D>(
     get timelineString() {
       return getTimelineString();
     },
-    get serverHistory() {
-      return serverMock.history;
-    },
-    errorInNextFetch(
-      error:
-        | string
-        | {
-            message: string;
-            path?: string;
-            method?: StoreError['method'];
-            code?: number;
-          } = 'Fetch error',
-    ) {
-      nextFetchError = typeof error === 'string' ? { message: error } : error;
+    serverMock,
+    errorInNextFetch(error: FetchErrorConfig | string = 'Fetch error') {
+      serverMock.setNextFetchError(error);
     },
     setNextFetchDurations(...durations: number[]) {
       serverMock.setFetchDurations(...durations);

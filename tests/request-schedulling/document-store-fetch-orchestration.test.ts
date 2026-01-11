@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react';
-import { afterEach, beforeAll, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   DEFAULT_FETCH_DURATION_MS,
@@ -10,6 +10,10 @@ beforeAll(() => {
   vi.useFakeTimers();
 });
 
+beforeEach(() => {
+  vi.setSystemTime(0);
+});
+
 afterEach(() => {
   vi.runOnlyPendingTimers();
 });
@@ -18,7 +22,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   // Wait for initial fetch
@@ -50,7 +54,7 @@ test('simple mutation with optimistic update', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   // Wait for initial fetch
@@ -79,7 +83,7 @@ test('simple mutation without optimistic update', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   // Wait for initial fetch
@@ -110,7 +114,7 @@ test('prevent overfetch of low priority fetches', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   // Initial data is already loaded, no fetch needed
@@ -132,7 +136,7 @@ test('prevent overfetch of low priority fetches', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -153,7 +157,7 @@ test('multiple mutations with revalidation in sequence', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -199,7 +203,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -228,8 +232,8 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -239,9 +243,9 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     1.21s | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
+    .     | 1  | 🔴 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2.01s | 2  | 🔴 <fetch-aborted 🚫
     2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
     2.46s | 2  | 🟠 >fetch-started
     3.26s | 2  | 🟠 <fetch-finished (value: 2)
@@ -254,7 +258,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -317,38 +321,38 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
     10ms  | 0  | 🔴 >fetch-started
-    100ms | 1  | ⬜ optimistic-ui-commit
+    100ms | 0  | 🔴 <fetch-aborted 🚫
+    .     | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
-    810ms | 1  | 🔴 <fetch-aborted 🚫
     940ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     1.31s | 1  | 🟠 >fetch-started
     1.35s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
+    .     | 1  | 🟠 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2.11s | 2  | 🟠 <fetch-aborted 🚫
     2.19s | 2  | ⬛ <mutation-data-persisted (value: 2)
     2.56s | 2  | 🟡 >fetch-started
-    2.6s  | 3  | 🟫 optimistic-ui-commit
+    2.6s  | 2  | 🟡 <fetch-aborted 🚫
+    .     | 3  | 🟫 optimistic-ui-commit
     .     | 3  | 🟫 >mutation-started (value: 3)
-    3.36s | 3  | 🟡 <fetch-aborted 🚫
     3.44s | 3  | 🟫 <mutation-data-persisted (value: 3)
     3.81s | 3  | 🟢 >fetch-started
-    3.85s | 4  | 🟪 optimistic-ui-commit
+    3.85s | 3  | 🟢 <fetch-aborted 🚫
+    .     | 4  | 🟪 optimistic-ui-commit
     .     | 4  | 🟪 >mutation-started (value: 4)
-    4.61s | 4  | 🟢 <fetch-aborted 🚫
     4.69s | 4  | 🟪 <mutation-data-persisted (value: 4)
     5.06s | 4  | 🔵 >fetch-started
-    5.1s  | 4  | 🟦 optimistic-ui-commit
+    5.1s  | 4  | 🔵 <fetch-aborted 🚫
+    .     | 4  | 🟦 optimistic-ui-commit
     .     | 4  | 🟦 >mutation-started (value: 4)
-    5.86s | 4  | 🔵 <fetch-aborted 🚫
     5.94s | 4  | 🟦 <mutation-data-persisted (value: 4)
     6.31s | 4  | 🟣 >fetch-started
     7.11s | 4  | 🟣 <fetch-finished (value: 4)
     "
   `);
 
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(6);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(6);
 });
 
 test('multiple mutations with revalidation in sequence 3', async () => {
@@ -356,7 +360,7 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -398,8 +402,8 @@ test('multiple mutations with revalidation in sequence 3', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(5);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(5);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -409,24 +413,24 @@ test('multiple mutations with revalidation in sequence 3', async () => {
     840ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     1.21s | 1  | 🔴 >fetch-started
     1.25s | 1  | -- New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.
+    .     | 1  | 🔴 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    2.01s | 2  | 🔴 <fetch-aborted 🚫
     2.09s | 2  | ⬛ <mutation-data-persisted (value: 2)
     2.46s | 2  | 🟠 >fetch-started
-    2.5s  | 3  | 🟫 optimistic-ui-commit
+    2.5s  | 2  | 🟠 <fetch-aborted 🚫
+    .     | 3  | 🟫 optimistic-ui-commit
     .     | 3  | 🟫 >mutation-started (value: 3)
-    3.26s | 3  | 🟠 <fetch-aborted 🚫
     3.34s | 3  | 🟫 <mutation-data-persisted (value: 3)
     3.71s | 3  | 🟡 >fetch-started
-    3.75s | 4  | 🟪 optimistic-ui-commit
+    3.75s | 3  | 🟡 <fetch-aborted 🚫
+    .     | 4  | 🟪 optimistic-ui-commit
     .     | 4  | 🟪 >mutation-started (value: 4)
-    4.51s | 4  | 🟡 <fetch-aborted 🚫
     4.59s | 4  | 🟪 <mutation-data-persisted (value: 4)
     4.96s | 4  | 🟢 >fetch-started
-    5s    | 4  | 🟦 optimistic-ui-commit
+    5s    | 4  | 🟢 <fetch-aborted 🚫
+    .     | 4  | 🟦 optimistic-ui-commit
     .     | 4  | 🟦 >mutation-started (value: 4)
-    5.76s | 4  | 🟢 <fetch-aborted 🚫
     5.84s | 4  | 🟦 <mutation-data-persisted (value: 4)
     6.21s | 4  | 🔵 >fetch-started
     7.01s | 4  | 🔵 <fetch-finished (value: 4)
@@ -440,7 +444,7 @@ test('high priority fetch during mutation', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -461,7 +465,7 @@ test('high priority fetch during mutation', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -483,7 +487,7 @@ test('multiple concurrent mutations with revalidation', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -507,7 +511,7 @@ test('multiple concurrent mutations with revalidation', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.serverHistory).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toEqual([0, 1, 2]);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -524,8 +528,8 @@ test('multiple concurrent mutations with revalidation', async () => {
     "
   `);
 
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.numOfStartedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfStartedFetches).toBe(1);
 });
 
 test('multiple high priority fetches', async () => {
@@ -533,7 +537,7 @@ test('multiple high priority fetches', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -557,7 +561,7 @@ test('multiple high priority fetches', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -580,7 +584,7 @@ test('throttle low priority updates', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -623,7 +627,7 @@ test('throttle low priority updates', async () => {
     1.74s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
 });
 
 test('throttle low priority after a fast fetch completes', async () => {
@@ -631,7 +635,7 @@ test('throttle low priority after a fast fetch completes', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -652,7 +656,7 @@ test('throttle low priority after a fast fetch completes', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -674,7 +678,7 @@ test('multiple mutations with low priority fetch between', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -701,7 +705,7 @@ test('multiple mutations with low priority fetch between', async () => {
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   // Mutation revalidations properly coalesce into 1 fetch
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -726,7 +730,7 @@ test('very slow mutation revalidation then mutation', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -760,7 +764,7 @@ test('very slow mutation revalidation then mutation', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -770,12 +774,12 @@ test('very slow mutation revalidation then mutation', async () => {
     140ms | 1  | ⬜ <mutation-data-persisted (value: 1)
     210ms | 1  | 🔴 >fetch-started
     300ms | 1  | -- Slow revalidation still running; scheduler aborts in-flight fetch after new mutation to prevent stale commit.
+    .     | 1  | 🔴 <fetch-aborted 🚫
     .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
     440ms | 2  | ⬛ <mutation-data-persisted (value: 2)
     510ms | 2  | 🟠 >fetch-started
     710ms | 2  | 🟠 <fetch-finished (value: 2)
-    2.21s | 2  | 🔴 <fetch-aborted 🚫
     "
   `);
 });
@@ -787,7 +791,7 @@ test('fetch error', async () => {
   });
 
   renderHook(() => {
-    const { data, error } = env.useDocument();
+    const { data, error } = env.apiStore.useDocument();
     env.trackUIChanges(error ? 'error' : data?.value);
   });
 
@@ -803,7 +807,7 @@ test('fetch error', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 'error']);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toContain('fetch-error');
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -825,7 +829,7 @@ test('low priority fetch during mutation outside throttle window', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -846,7 +850,7 @@ test('low priority fetch during mutation outside throttle window', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -868,7 +872,7 @@ test('low priority fetch during mutation inside throttle window', async () => {
   const env = createDocumentStoreTestEnv(0);
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -894,7 +898,7 @@ test('low priority fetch during mutation inside throttle window', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |

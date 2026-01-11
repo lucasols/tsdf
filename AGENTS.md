@@ -76,3 +76,7 @@ Tests use Vitest with `happy-dom` environment. Test files follow the pattern `sr
 - Strict mode enabled with `noUncheckedIndexedAccess`
 - Target: ESNext
 - Uses `tsconfig.prod.json` for builds (emits declarations)
+
+## General Guidelines
+
+- Strive for simple solutions, avoid unnecessary complexity

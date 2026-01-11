@@ -10,6 +10,7 @@ import { useCallback, useEffect } from 'react';
 import { Result, unknownToError } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import {
+  BatchRequest,
   FetchContext,
   FetchType,
   RequestScheduler,
@@ -70,6 +71,9 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
 export type DocumentStore<State extends ValidStoreState> = ReturnType<
   typeof createDocumentStore<State>
 >;
+
+// Constant requestId for document store (single-item mode)
+const DOC_REQUEST_ID = '_doc';
 
 export function createDocumentStore<State extends ValidStoreState>({
   debugName,
@@ -157,8 +161,20 @@ export function createDocumentStore<State extends ValidStoreState>({
     }
   }
 
+  // Scheduler with batch-aware fetchFn (but we always use single item)
   const scheduler = new RequestScheduler<null>({
-    fetchFn: executeFetch,
+    fetchFn: async (
+      requests: BatchRequest<null>[],
+      fetchCtx: FetchContext,
+    ): Promise<Map<string, boolean>> => {
+      // Document store always has single request
+      const success = await executeFetch(fetchCtx);
+      const results = new Map<string, boolean>();
+      for (const { requestId } of requests) {
+        results.set(requestId, success);
+      }
+      return results;
+    },
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
@@ -170,7 +186,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     fetchType: FetchType,
     options?: ScheduleFetchOptions,
   ): ScheduleFetchResults {
-    return scheduler.scheduleFetch(fetchType, null, options);
+    return scheduler.scheduleFetch(DOC_REQUEST_ID, fetchType, null, options);
   }
 
   async function awaitFetch(
@@ -178,7 +194,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   ): Promise<
     { data: State; error: null } | { data: null; error: StoreFetchError }
   > {
-    const result = await scheduler.awaitFetch(null, options);
+    const result = await scheduler.awaitFetch(DOC_REQUEST_ID, null, options);
 
     if (result === 'timeout') {
       return {
@@ -264,7 +280,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   }
 
   function startMutation(): () => boolean {
-    return scheduler.startMutation();
+    return scheduler.startMutation(DOC_REQUEST_ID);
   }
 
   async function performMutation<T>({

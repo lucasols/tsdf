@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { Result, unknownToError } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import {
+  BatchRequest,
   FetchContext,
   FetchType,
   RequestScheduler,
@@ -97,6 +98,13 @@ export type CollectionStoreOptions<
 > = {
   debugName?: string;
   fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>;
+  /** Optional batch fetch function for fetching multiple items at once */
+  batchFetchFn?: (
+    payloads: ItemPayload[],
+    signal: AbortSignal,
+  ) => Promise<Map<ItemPayload, ItemState | Error>>;
+  /** Max items per batch - triggers immediate fetch when reached */
+  maxBatchSize?: number;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   errorNormalizer: (exception: Error) => StoreError;
   disableRefetchOnMount?: boolean;
@@ -131,6 +139,8 @@ export function createCollectionStore<
 >({
   debugName,
   fetchFn,
+  batchFetchFn,
+  maxBatchSize,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   errorNormalizer,
@@ -182,100 +192,231 @@ export function createCollectionStore<
 
   const events = evtmitter<CollectionStoreEvents>();
 
-  // Scheduler manager - one RequestScheduler per item key
-  const schedulers = new Map<string, RequestScheduler<ItemPayload>>();
+  // Map to track itemKey -> payload for batch fetch results
+  const itemKeyToPayload = new Map<string, ItemPayload>();
 
-  function getScheduler(itemKey: string): RequestScheduler<ItemPayload> {
-    let scheduler = schedulers.get(itemKey);
-    if (!scheduler) {
-      scheduler = new RequestScheduler<ItemPayload>({
-        fetchFn: (fetchCtx, params) => executeFetch(fetchCtx, params),
+  // Use single scheduler only when batchFetchFn is provided
+  // Otherwise, use per-item schedulers for backward compatibility
+  const useSingleScheduler = !!batchFetchFn;
+
+  // Single scheduler for batch coalescing (only used when batchFetchFn is provided)
+  const singleScheduler = useSingleScheduler
+    ? new RequestScheduler<ItemPayload>({
+        fetchFn: async (
+          requests: BatchRequest<ItemPayload>[],
+          fetchCtx: FetchContext,
+        ): Promise<Map<string, boolean>> => {
+          return executeBatchFetch(requests, fetchCtx);
+        },
+        lowPriorityThrottleMs,
+        baseCoalescingWindowMs,
+        dynamicRealtimeThrottleMs,
+        mediumPriorityDelayMs,
+        maxBatchSize,
+        on: onSchedulerEvent,
+      })
+    : null;
+
+  // Per-item schedulers for backward compatibility (when batchFetchFn is NOT provided)
+  const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+
+  function getOrCreateItemScheduler(itemKey: string): RequestScheduler<ItemPayload> {
+    let itemScheduler = perItemSchedulers.get(itemKey);
+    if (!itemScheduler) {
+      itemScheduler = new RequestScheduler<ItemPayload>({
+        fetchFn: async (
+          requests: BatchRequest<ItemPayload>[],
+          fetchCtx: FetchContext,
+        ): Promise<Map<string, boolean>> => {
+          return executeBatchFetch(requests, fetchCtx);
+        },
         lowPriorityThrottleMs,
         baseCoalescingWindowMs,
         dynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
       });
-      schedulers.set(itemKey, scheduler);
+      perItemSchedulers.set(itemKey, itemScheduler);
     }
-    return scheduler;
+    return itemScheduler;
   }
 
-  async function executeFetch(
+  function getScheduler(itemKey: string): RequestScheduler<ItemPayload> {
+    if (singleScheduler) return singleScheduler;
+    return getOrCreateItemScheduler(itemKey);
+  }
+
+  async function executeBatchFetch(
+    requests: BatchRequest<ItemPayload>[],
     fetchCtx: FetchContext,
-    itemPayload: ItemPayload,
-  ): Promise<boolean> {
-    const itemId = getItemKey(itemPayload);
-    const payload = klona(itemPayload);
+  ): Promise<Map<string, boolean>> {
+    const results = new Map<string, boolean>();
 
-    const itemState = store.state[itemId];
+    // Store payloads for later lookup
+    for (const { requestId, payload } of requests) {
+      itemKeyToPayload.set(requestId, payload);
+    }
 
+    // Set loading state for all items
     store.produceState(
       (draft) => {
-        const current = draft[itemId];
+        for (const { requestId: itemId, payload } of requests) {
+          const current = draft[itemId];
 
-        if (!current) {
-          draft[itemId] = {
-            data: null,
-            error: null,
-            status: 'loading',
-            payload,
-            refetchOnMount: false,
-            wasLoaded: false,
-          };
+          if (!current) {
+            draft[itemId] = {
+              data: null,
+              error: null,
+              status: 'loading',
+              payload: klona(payload),
+              refetchOnMount: false,
+              wasLoaded: false,
+            };
+          } else {
+            current.status = current.data !== null ? 'refetching' : 'loading';
+            current.payload = klona(payload);
+            current.error = null;
+            current.refetchOnMount = false;
+          }
+        }
+      },
+      { equalityCheck: deepEqual, action: 'batch-fetch-start' },
+    );
+
+    // Check for early abort
+    if (fetchCtx.shouldAbort()) {
+      for (const { requestId } of requests) {
+        results.set(requestId, false);
+      }
+      return results;
+    }
+
+    // If we have a batchFetchFn and multiple items, use batch fetch
+    if (batchFetchFn && requests.length > 1) {
+      try {
+        const payloads = requests.map((r) => r.payload);
+        const batchResults = await batchFetchFn(payloads, fetchCtx.signal);
+
+        if (fetchCtx.shouldAbort()) {
+          for (const { requestId } of requests) {
+            results.set(requestId, false);
+          }
+          return results;
+        }
+
+        // Process batch results
+        store.produceState(
+          (draft) => {
+            for (const { requestId: itemId, payload } of requests) {
+              const item = draft[itemId];
+              if (!item) continue;
+
+              const result = batchResults.get(payload);
+
+              if (result instanceof Error) {
+                item.error = errorNormalizer(result);
+                item.status = 'error';
+                results.set(itemId, false);
+              } else if (result !== undefined) {
+                item.data = reusePrevIfEqual({
+                  current: result,
+                  prev: item.data,
+                });
+                item.status = 'success';
+                item.wasLoaded = true;
+                results.set(itemId, true);
+              } else {
+                // No result for this item - mark as error
+                item.error = errorNormalizer(
+                  new Error(`No result for item ${itemId}`),
+                );
+                item.status = 'error';
+                results.set(itemId, false);
+              }
+            }
+          },
+          { action: 'batch-fetch-complete' },
+        );
+
+        return results;
+      } catch (exception) {
+        if (fetchCtx.shouldAbort()) {
+          for (const { requestId } of requests) {
+            results.set(requestId, false);
+          }
+          return results;
+        }
+
+        // All items fail with the same error
+        const error = errorNormalizer(unknownToError(exception));
+
+        store.produceState(
+          (draft) => {
+            for (const { requestId: itemId } of requests) {
+              const item = draft[itemId];
+              if (!item) continue;
+
+              item.error = error;
+              item.status = 'error';
+              results.set(itemId, false);
+            }
+          },
+          { action: 'batch-fetch-error' },
+        );
+
+        return results;
+      }
+    }
+
+    // Fall back to individual fetches (either single item or no batchFetchFn)
+    const fetchPromises = requests.map(async ({ requestId: itemId, payload }) => {
+      try {
+        const data = await fetchFn(klona(payload), fetchCtx.signal);
+
+        if (fetchCtx.shouldAbort()) {
+          results.set(itemId, false);
           return;
         }
 
-        current.status = current.data !== null ? 'refetching' : 'loading';
-        current.payload = payload;
-        current.error = null;
-        current.refetchOnMount = false;
-      },
-      {
-        equalityCheck: deepEqual,
-        action:
-          !itemState?.data ? 'fetch-start-loading' : 'fetch-start-refetching',
-      },
-    );
+        store.produceState(
+          (draft) => {
+            const item = draft[itemId];
+            if (!item) return;
 
-    try {
-      const data = await fetchFn(payload, fetchCtx.signal);
+            item.data = reusePrevIfEqual({ current: data, prev: item.data });
+            item.status = 'success';
+            item.wasLoaded = true;
+          },
+          { action: 'fetch-success' },
+        );
 
-      if (fetchCtx.shouldAbort()) return false;
+        results.set(itemId, true);
+      } catch (exception) {
+        if (fetchCtx.shouldAbort()) {
+          results.set(itemId, false);
+          return;
+        }
 
-      store.produceState(
-        (draft) => {
-          const item = draft[itemId];
+        const error = errorNormalizer(unknownToError(exception));
 
-          if (!item) return;
+        store.produceState(
+          (draft) => {
+            const item = draft[itemId];
+            if (!item) return;
 
-          item.data = reusePrevIfEqual({ current: data, prev: item.data });
-          item.status = 'success';
-          item.wasLoaded = true;
-        },
-        { action: 'fetch-success' },
-      );
+            item.error = error;
+            item.status = 'error';
+          },
+          { action: 'fetch-error' },
+        );
 
-      return true;
-    } catch (exception) {
-      if (fetchCtx.shouldAbort()) return false;
+        results.set(itemId, false);
+      }
+    });
 
-      const error = errorNormalizer(unknownToError(exception));
+    await Promise.all(fetchPromises);
 
-      store.produceState(
-        (draft) => {
-          const item = draft[itemId];
-
-          if (!item) return;
-
-          item.error = error;
-          item.status = 'error';
-        },
-        { action: 'fetch-error' },
-      );
-
-      return false;
-    }
+    return results;
   }
 
   type FilterItemsFn = (params: ItemPayload, data: ItemState | null) => boolean;
@@ -303,10 +444,8 @@ export function createCollectionStore<
 
     for (const param of payloads) {
       const itemKey = getItemKey(param);
-
-      results.push(
-        getScheduler(itemKey).scheduleFetch(fetchType, param, options),
-      );
+      const scheduler = getScheduler(itemKey);
+      results.push(scheduler.scheduleFetch(itemKey, fetchType, param, options));
     }
 
     if (multiplePayloads) return results;
@@ -325,8 +464,9 @@ export function createCollectionStore<
     { data: ItemState; error: null } | { data: null; error: StoreFetchError }
   > {
     const itemId = getItemKey(params);
+    const scheduler = getScheduler(itemId);
 
-    const result = await getScheduler(itemId).awaitFetch(params, options);
+    const result = await scheduler.awaitFetch(itemId, params, options);
 
     if (result === 'timeout') {
       return {
@@ -745,7 +885,8 @@ export function createCollectionStore<
     const endMutations: (() => boolean)[] = [];
 
     for (const itemKey of itemKeys) {
-      endMutations.push(getScheduler(itemKey).startMutation());
+      const scheduler = getScheduler(itemKey);
+      endMutations.push(scheduler.startMutation(itemKey));
     }
 
     return () => {
@@ -910,13 +1051,21 @@ export function createCollectionStore<
   }
 
   function reset() {
-    schedulers.clear();
+    if (singleScheduler) {
+      singleScheduler.reset();
+    } else {
+      for (const scheduler of perItemSchedulers.values()) {
+        scheduler.reset();
+      }
+      perItemSchedulers.clear();
+    }
     store.setState({});
   }
 
   return {
     store,
     events,
+    scheduler: singleScheduler,
     get invalidationWasTriggered() {
       return invalidationWasTriggered;
     },

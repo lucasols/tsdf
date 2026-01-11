@@ -1,9 +1,13 @@
 import { renderHook } from '@testing-library/react';
-import { afterEach, beforeAll, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 
 beforeAll(() => {
   vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(0);
 });
 
 afterEach(() => {
@@ -21,7 +25,7 @@ test('dynamically throttle realtime updates', async () => {
   const env = createDocumentStoreTestEnv(0, { dynamicRealtimeThrottleMs });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -52,7 +56,7 @@ test('dynamically throttle realtime updates', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([0, 1, 3, 4]);
-  expect(env.numOfFinishedFetches).toBe(3);
+  expect(env.serverMock.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -92,7 +96,7 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -126,7 +130,7 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   ]);
 
   expect(env.uiChanges).toEqual([0, 1, 3]);
-  expect(env.numOfFinishedFetches).toBe(3);
+  expect(env.serverMock.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time   | ui |
@@ -162,7 +166,7 @@ test('simple mutation that triggers a RTU', async () => {
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -182,9 +186,9 @@ test('simple mutation that triggers a RTU', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.serverHistory).toEqual([0, 1]);
+  expect(env.serverMock.history).toEqual([0, 1]);
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toContain('scheduled-rt-fetch-started');
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -214,7 +218,7 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -253,9 +257,9 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
     { comment: '^^^ throttle ends, follow-up fetch runs ^^^', deltaMs: 200 },
   ]);
 
-  expect(env.serverHistory).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.numOfFinishedFetches).toBe(3);
+  expect(env.serverMock.numOfFinishedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time   | ui |
@@ -294,7 +298,7 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -332,10 +336,10 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
     { comment: 'mutation 2 completes, new RTU fetch starts' },
   ]);
 
-  expect(env.serverHistory).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.numOfFinishedFetches).toBe(2);
-  expect(env.numOfStartedFetches).toBe(3);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfStartedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -350,9 +354,9 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
     1.89s | 1  | received-ws-data-change-event
     2.2s  | 1  | scheduled-rt-fetch-started
     2.21s | 1  | 🟠 >fetch-started
-    2.5s  | 2  | ⬛ optimistic-ui-commit
+    2.5s  | 1  | 🟠 <fetch-aborted 🚫
+    .     | 2  | ⬛ optimistic-ui-commit
     .     | 2  | ⬛ >mutation-started (value: 2)
-    3.01s | 2  | 🟠 <fetch-aborted 🚫
     .     | 2  | -- mutation 2 aborts in-flight RTU fetch
     3.34s | 2  | ⬛ <mutation-data-persisted (value: 2)
     .     | 2  | -- mutation 2 completes, new RTU fetch starts
@@ -373,7 +377,7 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -410,9 +414,9 @@ test('slow mutation then new mutation while prev mutation is running', async () 
     { comment: 'mutation 2 completes, RTU fetch can start', deltaMs: 360 },
   ]);
 
-  expect(env.serverHistory).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 1, 2]);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -446,7 +450,7 @@ test('rtu mutations without optimistic updates', async () => {
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -487,10 +491,10 @@ test('rtu mutations without optimistic updates', async () => {
     { comment: 'mutation 2 completes, RTU fetch updates UI' },
   ]);
 
-  expect(env.serverHistory).toEqual([0, 1, 2]);
+  expect(env.serverMock.history).toEqual([0, 1, 2]);
   expect(env.uiChanges).toEqual([0, 2]);
-  expect(env.numOfFinishedFetches).toBe(2);
-  expect(env.numOfStartedFetches).toBe(3);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfStartedFetches).toBe(3);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | ui |
@@ -505,8 +509,8 @@ test('rtu mutations without optimistic updates', async () => {
     1.89s | 0  | received-ws-data-change-event
     2.2s  | 0  | scheduled-rt-fetch-started
     2.21s | 0  | 🟠 >fetch-started
-    2.5s  | 0  | ⬛ >mutation-started (value: 2)
-    3.01s | 0  | 🟠 <fetch-aborted 🚫
+    2.5s  | 0  | 🟠 <fetch-aborted 🚫
+    .     | 0  | ⬛ >mutation-started (value: 2)
     .     | 0  | -- mutation 2 aborts in-flight RTU fetch
     3.34s | 0  | ⬛ <mutation-data-persisted (value: 2)
     .     | 0  | -- mutation 2 completes, RTU fetch updates UI
@@ -529,7 +533,7 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -562,9 +566,9 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
     },
   ]);
 
-  expect(env.serverHistory).toEqual([0, 1]);
+  expect(env.serverMock.history).toEqual([0, 1]);
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -597,7 +601,7 @@ test('mutation that triggers multiple rtu updates', async () => {
   });
 
   renderHook(() => {
-    env.trackUIChanges(env.useDocument().data?.value);
+    env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
   await vi.runAllTimersAsync();
@@ -638,7 +642,7 @@ test('mutation that triggers multiple rtu updates', async () => {
   ]);
 
   expect(env.uiChanges).toEqual([0, 1]);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "

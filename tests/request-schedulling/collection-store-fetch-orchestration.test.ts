@@ -14,7 +14,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
   const env = createCollectionStoreTestEnv({ item1: 0 });
 
   renderHook(() => {
-    const item = env.useItem('item1');
+    const item = env.apiStore.useItem('item1');
     env.trackItemUI('item1', item.data?.value);
   });
 
@@ -46,7 +46,7 @@ test('simple mutation with optimistic update', async () => {
   const env = createCollectionStoreTestEnv({ item1: 0 });
 
   renderHook(() => {
-    const item = env.useItem('item1');
+    const item = env.apiStore.useItem('item1');
     env.trackItemUI('item1', item.data?.value);
   });
 
@@ -75,7 +75,7 @@ test('prevent overfetch of low priority fetches', async () => {
   const env = createCollectionStoreTestEnv({ item1: 0 });
 
   renderHook(() => {
-    const item = env.useItem('item1');
+    const item = env.apiStore.useItem('item1');
     env.trackItemUI('item1', item.data?.value);
   });
 
@@ -96,7 +96,7 @@ test('prevent overfetch of low priority fetches', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -120,23 +120,20 @@ test('fetching one item does not interfere with another item', async () => {
   );
 
   renderHook(() => {
-    const item1 = env.useItem('item1');
-    const item2 = env.useItem('item2');
+    const item1 = env.apiStore.useItem('item1');
+    const item2 = env.apiStore.useItem('item2');
     env.trackItemUI('item1', item1.data?.value);
     env.trackItemUI('item2', item2.data?.value);
   });
 
   await vi.advanceTimersByTimeAsync(15);
 
-  expect(env.numOfStartedFetches).toBe(2);
+  expect(env.serverTable.numOfStartedFetches).toBe(2);
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(2);
-  expect(env.uiChanges).toEqual([
-    { item1: 1 },
-    { item1: 1, item2: 2 },
-  ]);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
+  expect(env.uiChanges).toEqual([{ item1: 1 }, { item1: 1, item2: 2 }]);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -155,8 +152,8 @@ test('mutation on one item does not affect fetch state of another item', async (
   const env = createCollectionStoreTestEnv({ item1: 0, item2: 0 });
 
   renderHook(() => {
-    const item1 = env.useItem('item1');
-    const item2 = env.useItem('item2');
+    const item1 = env.apiStore.useItem('item1');
+    const item2 = env.apiStore.useItem('item2');
     env.trackItemUI('item1', item1.data?.value);
     env.trackItemUI('item2', item2.data?.value);
   });
@@ -182,7 +179,7 @@ test('mutation on one item does not affect fetch state of another item', async (
     { item1: 0, item2: 0 },
     { item1: 1, item2: 0 },
   ]);
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -206,8 +203,8 @@ test('low priority fetch on one item is independent of another item fetch state'
   const env = createCollectionStoreTestEnv({ item1: 0, item2: 0 });
 
   renderHook(() => {
-    const item1 = env.useItem('item1');
-    const item2 = env.useItem('item2');
+    const item1 = env.apiStore.useItem('item1');
+    const item2 = env.apiStore.useItem('item2');
     env.trackItemUI('item1', item1.data?.value);
     env.trackItemUI('item2', item2.data?.value);
   });
@@ -226,7 +223,7 @@ test('low priority fetch on one item is independent of another item fetch state'
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -250,15 +247,15 @@ test('error on one item does not affect other items', async () => {
     { forceInitialDataInvalidation: true },
   );
 
-  env.errorInNextFetch('item1', 'Network error');
+  env.serverTable.setNextFetchError('item1', 'Network error');
 
   env.scheduleFetch('highPriority', 'item1');
   env.scheduleFetch('highPriority', 'item2');
 
   await vi.runAllTimersAsync();
 
-  const item1State = env.getItemState('item1');
-  const item2State = env.getItemState('item2');
+  const item1State = env.apiStore.getItemState('item1');
+  const item2State = env.apiStore.getItemState('item2');
 
   expect(item1State?.status).toBe('error');
   expect(item1State?.error?.message).toBe('Network error');
@@ -279,6 +276,6 @@ test('coalesces multiple fetches for the same item', async () => {
 
   await vi.runAllTimersAsync();
 
-  expect(env.numOfFinishedFetches).toBe(1);
-  expect(env.getItemState('item1')?.data?.value).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
 });
