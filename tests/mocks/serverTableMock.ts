@@ -1,6 +1,6 @@
 import { notNullish } from '@ls-stack/utils/assertions';
 import { evtmitter } from 'evtmitter';
-import type { StoreError } from '../../src/storeShared';
+import type { StoreError } from '../../src/utils/storeShared';
 import { sleep } from '../../test-old/utils/sleep';
 import { FetchError } from './testEnvUtils';
 

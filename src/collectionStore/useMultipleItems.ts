@@ -6,7 +6,7 @@ import { type Emitter } from 'evtmitter';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
 import { FetchType } from '../requestScheduler';
-import { ValidPayload, ValidStoreState } from '../storeShared';
+import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
   CollectionUseMultipleItemsQuery,
   TSFDCollectionItem,
@@ -18,7 +18,10 @@ type CollectionStoreEvents = {
   invalidateData: { priority: FetchType; itemKey: string };
 };
 
-export type UseMultipleItemsOptions<ItemState extends ValidStoreState, Selected> = {
+export type UseMultipleItemsOptions<
+  ItemState extends ValidStoreState,
+  Selected,
+> = {
   selector?: (data: ItemState | null) => Selected;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
@@ -51,8 +54,11 @@ export function useMultipleItems<
   scheduleFetch: (fetchType: FetchType, payload: ItemPayload) => void,
   invalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
-): readonly TSFDUseCollectionItemReturn<Selected, ItemPayload, QueryMetadata>[] {
-
+): readonly TSFDUseCollectionItemReturn<
+  Selected,
+  ItemPayload,
+  QueryMetadata
+>[] {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
 
   type QueryWithId = {
@@ -230,12 +236,7 @@ export function useMultipleItems<
     for (const itemId of removedQueries) {
       ignoreItemsInRefetchOnMount.delete(itemId);
     }
-  }, [
-    getItemState,
-    ignoreItemsInRefetchOnMount,
-    queriesWithId,
-    scheduleFetch,
-  ]);
+  }, [getItemState, ignoreItemsInRefetchOnMount, queriesWithId, scheduleFetch]);
 
   return storeState;
 }

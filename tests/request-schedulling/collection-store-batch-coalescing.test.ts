@@ -9,7 +9,7 @@ import {
   test,
   vi,
 } from 'vitest';
-import { StoreFetchError } from '../../src/storeShared';
+import { StoreFetchError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 
 beforeAll(() => {

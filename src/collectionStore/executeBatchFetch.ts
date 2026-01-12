@@ -3,8 +3,12 @@ import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import { BatchRequest, FetchContext } from '../requestScheduler';
-import { StoreError, ValidPayload, ValidStoreState } from '../storeShared';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
+import {
+  StoreError,
+  ValidPayload,
+  ValidStoreState,
+} from '../utils/storeShared';
 import type { TSFDCollectionState } from './collectionStore';
 
 export async function executeBatchFetch<
@@ -143,52 +147,50 @@ export async function executeBatchFetch<
   }
 
   // Fall back to individual fetches (either single item or no batchFetchFn)
-  const fetchPromises = requests.map(
-    async ({ requestId: itemId, payload }) => {
-      try {
-        const data = await fetchFn(klona(payload), fetchCtx.signal);
+  const fetchPromises = requests.map(async ({ requestId: itemId, payload }) => {
+    try {
+      const data = await fetchFn(klona(payload), fetchCtx.signal);
 
-        if (fetchCtx.shouldAbort()) {
-          results.set(itemId, false);
-          return;
-        }
-
-        store.produceState(
-          (draft) => {
-            const item = draft[itemId];
-            if (!item) return;
-
-            item.data = reusePrevIfEqual({ current: data, prev: item.data });
-            item.status = 'success';
-            item.wasLoaded = true;
-          },
-          { action: 'fetch-success' },
-        );
-
-        results.set(itemId, true);
-      } catch (exception) {
-        if (fetchCtx.shouldAbort()) {
-          results.set(itemId, false);
-          return;
-        }
-
-        const error = errorNormalizer(unknownToError(exception));
-
-        store.produceState(
-          (draft) => {
-            const item = draft[itemId];
-            if (!item) return;
-
-            item.error = error;
-            item.status = 'error';
-          },
-          { action: 'fetch-error' },
-        );
-
+      if (fetchCtx.shouldAbort()) {
         results.set(itemId, false);
+        return;
       }
-    },
-  );
+
+      store.produceState(
+        (draft) => {
+          const item = draft[itemId];
+          if (!item) return;
+
+          item.data = reusePrevIfEqual({ current: data, prev: item.data });
+          item.status = 'success';
+          item.wasLoaded = true;
+        },
+        { action: 'fetch-success' },
+      );
+
+      results.set(itemId, true);
+    } catch (exception) {
+      if (fetchCtx.shouldAbort()) {
+        results.set(itemId, false);
+        return;
+      }
+
+      const error = errorNormalizer(unknownToError(exception));
+
+      store.produceState(
+        (draft) => {
+          const item = draft[itemId];
+          if (!item) return;
+
+          item.error = error;
+          item.status = 'error';
+        },
+        { action: 'fetch-error' },
+      );
+
+      results.set(itemId, false);
+    }
+  });
 
   await Promise.all(fetchPromises);
 

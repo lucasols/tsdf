@@ -22,7 +22,7 @@ import {
   ValidPayload,
   ValidStoreState,
   type StoreError,
-} from '../storeShared';
+} from '../utils/storeShared';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {

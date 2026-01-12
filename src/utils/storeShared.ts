@@ -1,4 +1,4 @@
-import { FetchType } from './requestScheduler';
+import { FetchType } from '../requestScheduler';
 
 export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
 

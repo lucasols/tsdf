@@ -18,15 +18,15 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
+import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import {
   fetchTypePriority,
   StoreFetchError,
   TSDFStatus,
   ValidStoreState,
   type StoreError,
-} from './storeShared';
-import { useEnsureIsLoaded } from './useEnsureIsLoaded';
-import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
+} from './utils/storeShared';
+import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
 

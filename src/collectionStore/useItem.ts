@@ -2,8 +2,8 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType } from '../requestScheduler';
-import { ValidPayload, ValidStoreState } from '../storeShared';
-import { useEnsureIsLoaded } from '../useEnsureIsLoaded';
+import { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
 import type {
   CollectionUseMultipleItemsQuery,
   TSFDCollectionState,

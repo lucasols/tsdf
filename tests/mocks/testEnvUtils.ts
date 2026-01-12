@@ -1,5 +1,5 @@
 import type { ScheduleFetchResults } from '../../src/requestScheduler';
-import type { StoreError } from '../../src/storeShared';
+import type { StoreError } from '../../src/utils/storeShared';
 
 /**
  * Custom error class that carries path and method information for testing
@@ -145,7 +145,8 @@ export function createActionTracker() {
       );
 
       if (relatedFetchStartAction) {
-        relatedFetchStartAction.action = '>fetch-started-from-manual-scheduling';
+        relatedFetchStartAction.action =
+          '>fetch-started-from-manual-scheduling';
         return;
       }
     }
@@ -278,9 +279,9 @@ export function createUITracker<T>(
         if (
           actionsHistory.some(
             (action) =>
-              action.action === 'optimistic-ui-commit' &&
-              action.time === time &&
-              action.uiValue === value,
+              action.action === 'optimistic-ui-commit'
+              && action.time === time
+              && action.uiValue === value,
           )
         ) {
           return;
@@ -419,7 +420,10 @@ export function formatTimelineString(actionsHistory: Action[]): string {
   const hasItemIds = itemIds.size > 0;
 
   if (hasItemIds) {
-    return formatMultiItemTimelineString(sortedActions, Array.from(itemIds).sort());
+    return formatMultiItemTimelineString(
+      sortedActions,
+      Array.from(itemIds).sort(),
+    );
   }
 
   // Check if any action has UI values
@@ -469,7 +473,14 @@ function formatMultiItemTimelineString(
 
   const rows: Array<{ cols: string[] }> = [{ cols: ['time', ...itemIds, ''] }];
 
-  for (const { action, time, uiValue, actionValue, id, itemId } of sortedActions) {
+  for (const {
+    action,
+    time,
+    uiValue,
+    actionValue,
+    id,
+    itemId,
+  } of sortedActions) {
     // Update UI value for the specific item
     if (uiValue !== undefined && itemId !== undefined) {
       currentUIPerItem[itemId] = uiValue;
@@ -481,7 +492,8 @@ function formatMultiItemTimelineString(
     const uiCols = itemIds.map((colItemId) => {
       const val = currentUIPerItem[colItemId];
       if (val === undefined) return '-';
-      if (typeof val === 'number' || typeof val === 'string') return String(val);
+      if (typeof val === 'number' || typeof val === 'string')
+        return String(val);
       return JSON.stringify(val);
     });
 
