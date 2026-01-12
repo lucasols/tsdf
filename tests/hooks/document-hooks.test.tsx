@@ -75,54 +75,34 @@ test('invalidate data', async () => {
   });
 });
 
-  const { getByTestId } = render(
-    <>
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component store={documentStore} />
-      <Component
-        store={documentStore}
-        testIdPrefix="check-"
-      />
-    </>,
+test('revalidation with multiple components do not trigger multiple fetches', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    {
+      disableInitialInvalidation: true,
+      initialStateData: 'sameAsServer',
+    },
   );
+
+  for (let i = 0; i < 27; i += 1) {
+    renderHook(() => env.apiStore.useDocument());
+  }
+
+  const { result } = renderHook(() => env.apiStore.useDocument());
 
   act(() => {
-    serverMock.mutateData({ hello: 'was invalidated' });
-    documentStore.invalidateData();
+    env.setServerData({ hello: 'was invalidated' });
+    env.apiStore.invalidateData();
   });
 
-  await sleep(300);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(getByTestId('check-data').textContent).toBe(
-    '{"hello":"was invalidated"}',
-  );
-
-  expect(serverMock.fetchsCount).toBe(1);
+  expect(result.current.data?.value).toEqual({
+    hello: 'was invalidated',
+  });
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 });
 
 test('data selector', () => {
