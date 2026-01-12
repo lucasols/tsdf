@@ -101,12 +101,12 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'loading'
-      wasLoaded: '❌'
-      payload: { tableId: 'users' }
-      refetchOnMount: '❌'
       hasMore: '❌'
       items: []
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'loading'
+      wasLoaded: '❌'
     `);
     expect(env.store.state.items).toEqual({});
 
@@ -114,12 +114,12 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'success'
-      wasLoaded: '✅'
-      payload: { tableId: 'users' }
-      refetchOnMount: '❌'
       hasMore: '❌'
       items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
       `);
     expect(env.store.state.items).toMatchInlineSnapshot(`
       "users||1: { id: 1, name: 'User 1' }
@@ -146,12 +146,12 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'refetching'
-      refetchOnMount: '❌'
-      wasLoaded: '✅'
-      payload: { tableId: 'users' }
-      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
       hasMore: '❌'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'refetching'
+      wasLoaded: '✅'
       `);
     expect(env.store.state.items).toMatchInlineSnapshot(`
       "users||1: { id: 1, name: 'User 1' }
@@ -165,12 +165,12 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'success'
-      refetchOnMount: '❌'
-      wasLoaded: '✅'
-      payload: { tableId: 'users' }
-      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
       hasMore: '❌'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
     `);
 
     expect(env.store.state.items).toMatchInlineSnapshot(`
@@ -197,12 +197,12 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: { code: 500, id: 'fetch-error', message: 'error' }
-      status: 'error'
-      refetchOnMount: '❌'
-      wasLoaded: '✅'
-      payload: { tableId: 'users' }
-      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
       hasMore: '❌'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'error'
+      wasLoaded: '✅'
       `);
 
     // refetch with success
@@ -213,24 +213,24 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'refetching'
-      refetchOnMount: '❌'
-      wasLoaded: '✅'
-      payload: { tableId: 'users' }
-      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
       hasMore: '❌'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'refetching'
+      wasLoaded: '✅'
       `);
 
     await vi.runAllTimersAsync();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'success'
-      refetchOnMount: '❌'
-      wasLoaded: '✅'
-      payload: { tableId: 'users' }
-      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
       hasMore: '❌'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
       `);
   });
 
@@ -247,12 +247,12 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: { code: 500, id: 'fetch-error', message: 'error' }
-      status: 'error'
-      wasLoaded: '❌'
-      payload: { tableId: 'users' }
-      refetchOnMount: '❌'
       hasMore: '❌'
       items: []
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'error'
+      wasLoaded: '❌'
       `);
 
     // refetch with success
@@ -263,24 +263,24 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'loading'
-      wasLoaded: '❌'
-      payload: { tableId: 'users' }
-      refetchOnMount: '❌'
       hasMore: '❌'
       items: []
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'loading'
+      wasLoaded: '❌'
       `);
 
     await vi.runAllTimersAsync();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
-      status: 'success'
-      wasLoaded: '✅'
-      payload: { tableId: 'users' }
-      refetchOnMount: '❌'
       hasMore: '❌'
       items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
       `);
   });
 
@@ -298,12 +298,12 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
       error: null
-      status: 'success'
-      wasLoaded: '✅'
-      payload: { tableId: 'products' }
-      refetchOnMount: '❌'
       hasMore: '✅'
       items: ['"products||1', '"products||2', '"products||3', '"products||4', '"products||5']
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
     `);
     expect(env.store.state.items).toMatchInlineSnapshot(`
       "products||1: { id: 1, name: 'Product 1' }
@@ -323,22 +323,18 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
       error: null
-      status: 'loadingMore'
-      wasLoaded: '✅'
-      payload: { tableId: 'products' }
-      refetchOnMount: '❌'
       hasMore: '✅'
       items: ['"products||1', '"products||2', '"products||3', '"products||4', '"products||5']
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      status: 'loadingMore'
+      wasLoaded: '✅'
     `);
 
     await vi.runAllTimersAsync();
 
     expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
       error: null
-      status: 'success'
-      wasLoaded: '✅'
-      payload: { tableId: 'products' }
-      refetchOnMount: '❌'
       hasMore: '✅'
       items:
         - '"products||1'
@@ -351,9 +347,14 @@ describe('fetch query', () => {
         - '"products||8'
         - '"products||9'
         - '"products||10'
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
     `);
     expect(env.store.state.items).toMatchInlineSnapshot(`
       "products||1: { id: 1, name: 'Product 1' }
+      "products||10: { id: 10, name: 'Product 10' }
       "products||2: { id: 2, name: 'Product 2' }
       "products||3: { id: 3, name: 'Product 3' }
       "products||4: { id: 4, name: 'Product 4' }
@@ -362,7 +363,6 @@ describe('fetch query', () => {
       "products||7: { id: 7, name: 'Product 7' }
       "products||8: { id: 8, name: 'Product 8' }
       "products||9: { id: 9, name: 'Product 9' }
-      "products||10: { id: 10, name: 'Product 10' }
     `);
 
     // refetch keep size
@@ -372,10 +372,6 @@ describe('fetch query', () => {
 
     expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
       error: null
-      status: 'success'
-      wasLoaded: '✅'
-      payload: { tableId: 'products' }
-      refetchOnMount: '❌'
       hasMore: '✅'
       items:
         - '"products||1'
@@ -388,6 +384,10 @@ describe('fetch query', () => {
         - '"products||8'
         - '"products||9'
         - '"products||10'
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
     `);
   });
 
@@ -556,7 +556,9 @@ describe('fetch item', () => {
       disableInitialInvalidation: false,
     });
 
-    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`undefined`);
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(
+      `undefined`,
+    );
 
     env.scheduleItemFetch('lowPriority', 'users||1');
 
@@ -564,11 +566,11 @@ describe('fetch item', () => {
     await vi.advanceTimersByTimeAsync(15);
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
-      status: 'loading'
       error: null
-      wasLoaded: '❌'
-      refetchOnMount: '❌'
       payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'loading'
+      wasLoaded: '❌'
     `);
     expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(
       `undefined`,
@@ -577,11 +579,11 @@ describe('fetch item', () => {
     await vi.runAllTimersAsync();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
-      status: 'success'
       error: null
-      wasLoaded: '✅'
-      refetchOnMount: '❌'
       payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
     `);
     expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
       id: 1
