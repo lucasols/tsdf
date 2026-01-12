@@ -260,40 +260,32 @@ test('disableRefetchOnMount', async () => {
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
 });
 
-test('do not return refetchin status by default', async () => {
-  const { serverMock, store: documentStore } = createDefaultDocumentStore({
-    useLoadedSnapshot: true,
-  });
-
-  const renders: any[] = [];
-
-  render(
-    <Component
-      store={documentStore}
-      onRender={({ data, status }) => {
-        renders.push([data.hello, status]);
-      }}
-    />,
+test('do not return refetching status by default', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    { useLoadedSnapshot: true },
   );
 
-  act(() => {
-    serverMock.mutateData({ hello: 'was invalidated' });
-    documentStore.invalidateData();
+  const renders: Array<[string | null, DocumentStatus]> = [];
+
+  renderHook(() => {
+    const { data, status } = env.apiStore.useDocument();
+
+    renders.push([data?.value.hello ?? null, status]);
   });
 
-  await sleep(200);
+  act(() => {
+    env.setServerData({ hello: 'was invalidated' });
+    env.apiStore.invalidateData();
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
   expect(renders).toMatchInlineSnapshot(`
-    [
-      [
-        "world",
-        "success",
-      ],
-      [
-        "was invalidated",
-        "success",
-      ],
-    ]
+    - ['world', 'success']
+    - ['was invalidated', 'success']
   `);
 });
 
