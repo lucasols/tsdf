@@ -52,26 +52,28 @@ test('load data', async () => {
 });
 
 test('invalidate data', async () => {
-  const { serverMock, store: documentStore } = createDefaultDocumentStore({
-    useLoadedSnapshot: true,
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    { useLoadedSnapshot: true },
+  );
+
+  const { result } = renderHook(() => env.apiStore.useDocument());
+
+  expect(result.current.data?.value).toEqual({ hello: 'world' });
+
+  act(() => {
+    env.setServerData({ hello: 'was invalidated' });
+    env.apiStore.invalidateData();
   });
 
-  const { getByTestId } = render(<Component store={documentStore} />);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(getByTestId('data').textContent).toBe('{"hello":"world"}');
-
-  serverMock.mutateData({ hello: 'was invalidated' });
-  documentStore.invalidateData();
-
-  await sleep(serverMock.fetchDuration + 5);
-
-  expect(getByTestId('data').textContent).toBe('{"hello":"was invalidated"}');
+  expect(result.current.data?.value).toEqual({
+    hello: 'was invalidated',
+  });
 });
-
-test('revalidation with multiple components do not trigger multiple fetchs', async () => {
-  const { serverMock, store: documentStore } = createDefaultDocumentStore({
-    useLoadedSnapshot: true,
-  });
 
   const { getByTestId } = render(
     <>

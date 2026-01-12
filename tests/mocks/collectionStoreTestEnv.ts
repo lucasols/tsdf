@@ -111,7 +111,8 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       return { value };
     },
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
-    disableInitialDataInvalidation: !forceInitialDataInvalidation || useLoadedSnapshot,
+    disableInitialDataInvalidation:
+      !forceInitialDataInvalidation || useLoadedSnapshot,
     getInitialData:
       !forceInitialDataInvalidation || useLoadedSnapshot ?
         () =>
