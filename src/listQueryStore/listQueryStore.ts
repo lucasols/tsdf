@@ -14,8 +14,8 @@ import {
 } from '../requestScheduler';
 import {
   fetchTypePriority,
-  StoreFetchError,
   StoreError,
+  StoreFetchError,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -35,7 +35,12 @@ import type {
   TSFDUseListItemReturn,
   TSFDUseListQueryReturn,
 } from './types';
+import { useFindItem as useFindItemHook } from './useFindItem';
 import { useItem as useItemHook, UseItemOptions } from './useItem';
+import {
+  useListQuery as useListQueryHook,
+  UseListQueryOptions,
+} from './useListQuery';
 import {
   useMultipleItems as useMultipleItemsHook,
   UseMultipleItemsOptions,
@@ -44,11 +49,6 @@ import {
   useMultipleListQueries as useMultipleListQueriesHook,
   UseMultipleListQueriesOptions,
 } from './useMultipleListQueries';
-import {
-  useListQuery as useListQueryHook,
-  UseListQueryOptions,
-} from './useListQuery';
-import { useFindItem as useFindItemHook } from './useFindItem';
 
 export type ListQueryStoreEvents = {
   invalidateQuery: { priority: FetchType; queryKey: string };
@@ -260,6 +260,7 @@ export function createListQueryStore<
     : null;
 
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+  const itemInitialFetchStartTime = new Map<string, number>();
 
   function getOrCreateItemScheduler(
     itemKey: string,
@@ -271,6 +272,12 @@ export function createListQueryStore<
       if (!fetchItemFn) {
         throw new Error(noFetchItemFnError);
       }
+
+      const initialLastFetchStartTime = itemInitialFetchStartTime.get(itemKey);
+      if (initialLastFetchStartTime !== undefined) {
+        itemInitialFetchStartTime.delete(itemKey);
+      }
+
       scheduler = new RequestScheduler<ItemPayload>({
         fetchFn: async (
           requests: BatchRequest<ItemPayload>[],
@@ -291,6 +298,7 @@ export function createListQueryStore<
         dynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
+        initialLastFetchStartTime,
       });
       perItemSchedulers.set(itemKey, scheduler);
     }
@@ -298,13 +306,18 @@ export function createListQueryStore<
   }
 
   function updateItemSchedulerTiming(itemKey: string, startTime: number) {
+    if (!fetchItemFn) return;
+
     if (singleItemScheduler) {
       singleItemScheduler.setLastFetchStartTime(startTime);
+      return;
+    }
+
+    const existingScheduler = perItemSchedulers.get(itemKey);
+    if (existingScheduler) {
+      existingScheduler.setLastFetchStartTime(startTime);
     } else {
-      const scheduler = perItemSchedulers.get(itemKey);
-      if (scheduler) {
-        scheduler.setLastFetchStartTime(startTime);
-      }
+      itemInitialFetchStartTime.set(itemKey, startTime);
     }
   }
 

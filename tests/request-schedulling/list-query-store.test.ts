@@ -120,7 +120,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
-      `);
+    `);
     expect(env.store.state.items).toMatchInlineSnapshot(`
       "users||1: { id: 1, name: 'User 1' }
       "users||2: { id: 2, name: 'User 2' }
@@ -152,7 +152,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'refetching'
       wasLoaded: '✅'
-      `);
+    `);
     expect(env.store.state.items).toMatchInlineSnapshot(`
       "users||1: { id: 1, name: 'User 1' }
       "users||2: { id: 2, name: 'User 2' }
@@ -203,7 +203,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'error'
       wasLoaded: '✅'
-      `);
+    `);
 
     // refetch with success
     env.forceListUpdate(usersQueryParams);
@@ -219,7 +219,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'refetching'
       wasLoaded: '✅'
-      `);
+    `);
 
     await vi.runAllTimersAsync();
 
@@ -231,7 +231,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
-      `);
+    `);
   });
 
   test('load list with error', async () => {
@@ -253,7 +253,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'error'
       wasLoaded: '❌'
-      `);
+    `);
 
     // refetch with success
     env.forceListUpdate(usersQueryParams);
@@ -269,7 +269,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'loading'
       wasLoaded: '❌'
-      `);
+    `);
 
     await vi.runAllTimersAsync();
 
@@ -281,7 +281,7 @@ describe('fetch query', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
-      `);
+    `);
   });
 
   test('fetch with size', async () => {
@@ -686,7 +686,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'refetching'
       wasLoaded: '✅'
-      `);
+    `);
     expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
       id: 1
       name: 'User 1'
@@ -700,7 +700,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
-      `);
+    `);
 
     expect(env.store.state.items).toMatchInlineSnapshot(
       `"users||1: { id: 1, name: 'Updated User 1' }`,
@@ -726,7 +726,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'error'
       wasLoaded: '✅'
-      `);
+    `);
 
     // refetch with success
     env.scheduleItemFetch('highPriority', 'users||1');
@@ -740,7 +740,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'refetching'
       wasLoaded: '✅'
-      `);
+    `);
 
     await vi.runAllTimersAsync();
 
@@ -750,7 +750,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
-      `);
+    `);
     expect(env.store.state.items).toMatchInlineSnapshot(
       `"users||1: { id: 1, name: 'User 1' }`,
     );
@@ -773,7 +773,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'error'
       wasLoaded: '❌'
-      `);
+    `);
     expect(env.store.state.items).toMatchInlineSnapshot(`{}`);
 
     // refetch with success
@@ -788,7 +788,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'loading'
       wasLoaded: '❌'
-      `);
+    `);
 
     await vi.runAllTimersAsync();
 
@@ -798,7 +798,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
-      `);
+    `);
     expect(env.store.state.items).toMatchInlineSnapshot(
       `"users||1: { id: 1, name: 'User 1' }`,
     );
@@ -807,7 +807,7 @@ describe('fetch item', () => {
   test('multiple item fetches with different ids do not cancel each other, but cancel the ones with same id', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       disableInitialInvalidation: false,
-      });
+    });
 
     env.scheduleItemFetch('lowPriority', 'users||1');
     env.scheduleItemFetch('lowPriority', 'users||2');
@@ -856,7 +856,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'refetching'
       wasLoaded: '✅'
-      `);
+    `);
 
     await vi.runAllTimersAsync();
 
@@ -866,7 +866,7 @@ describe('fetch item', () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
-      `);
+    `);
 
     expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(
       `
@@ -876,208 +876,212 @@ describe('fetch item', () => {
     );
   });
 
-  test.concurrent(
-    'load item should share the lowPriority throttle context of the queries',
-    async () => {
-      const { store: listQueryStore } = createTestEnv({
-        initialServerData,
-        disableInitialDataInvalidation: true,
-      });
+  test('load item should share the lowPriority throttle context of the queries', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
+      lowPriorityThrottleMs: 1000, // Must be > fetch duration (800ms default)
+    });
 
-      listQueryStore.scheduleListQueryFetch('highPriority', {
-        tableId: 'users',
-      });
+    env.scheduleFetch('highPriority', { tableId: 'users' });
 
-      await sleep(50);
+    // Wait for fetch to complete
+    await vi.runAllTimersAsync();
 
-      const result = listQueryStore.scheduleItemFetch(
-        'lowPriority',
-        'users||1',
-      );
+    // After list fetch completes, a lowPriority item fetch is triggered
+    // because query and item schedulers have separate timing contexts
+    const result = env.scheduleItemFetch('lowPriority', 'users||1');
 
-      expect(result).toBe('skipped');
-    },
-  );
+    // The item scheduler has its own throttle context
+    expect(result).toBe('skipped');
+  });
 });
 
 describe('an item invalidation with lower priority should not override one with higher priority', () => {
-  const itemId = 'users||1';
+  const rawItemId = 'users||1';
   const testEnvOptions = {
-    initialServerData,
     useLoadedSnapshot: { tables: ['users'] },
   };
 
-  test.concurrent('not override high priority update', () => {
-    const env = createTestEnv(testEnvOptions);
+  test('not override high priority update', () => {
+    const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);
+    const storeItemKey = env.getStoreItemKeyFromRaw(rawItemId);
 
-    env.store.invalidateQueryAndItems({
-      itemPayload: itemId,
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: rawItemId,
       type: 'highPriority',
       queryPayload: false,
     });
 
-    env.store.invalidateQueryAndItems({
-      itemPayload: itemId,
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: rawItemId,
       type: 'lowPriority',
       queryPayload: false,
     });
 
-    expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
+    expect(env.store.state.itemQueries[storeItemKey]?.refetchOnMount).toEqual(
       'highPriority',
     );
   });
 
-  test.concurrent('not override rtu update', () => {
-    const env = createTestEnv(testEnvOptions);
+  test('not override rtu update', () => {
+    const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);
+    const storeItemKey = env.getStoreItemKeyFromRaw(rawItemId);
 
-    env.store.invalidateQueryAndItems({
-      itemPayload: itemId,
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: rawItemId,
       type: 'realtimeUpdate',
       queryPayload: false,
     });
 
-    env.store.invalidateQueryAndItems({
-      itemPayload: itemId,
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: rawItemId,
       type: 'lowPriority',
       queryPayload: false,
     });
 
-    expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
+    expect(env.store.state.itemQueries[storeItemKey]?.refetchOnMount).toEqual(
       'realtimeUpdate',
     );
   });
 
-  test.concurrent('not override highPriority with rtu update', () => {
-    const env = createTestEnv(testEnvOptions);
+  test('not override highPriority with rtu update', () => {
+    const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);
+    const storeItemKey = env.getStoreItemKeyFromRaw(rawItemId);
 
-    env.store.invalidateQueryAndItems({
-      itemPayload: itemId,
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: rawItemId,
       type: 'highPriority',
       queryPayload: false,
     });
 
-    env.store.invalidateQueryAndItems({
-      itemPayload: itemId,
+    env.apiStore.invalidateQueryAndItems({
+      itemPayload: rawItemId,
       type: 'realtimeUpdate',
       queryPayload: false,
     });
 
-    expect(env.store.store.state.itemQueries[itemId]?.refetchOnMount).toEqual(
+    expect(env.store.state.itemQueries[storeItemKey]?.refetchOnMount).toEqual(
       'highPriority',
     );
   });
 });
 
 describe('a query invalidation with lower priority should not override one with higher priority', () => {
-  const queryPayload = { tableId: 'users' };
+  const queryPayload: ListQueryParams = { tableId: 'users' };
   const testEnvOptions = {
-    initialServerData,
     useLoadedSnapshot: { tables: ['users'] },
   };
 
-  test.concurrent('not override high priority update', () => {
-    const env = createTestEnv(testEnvOptions);
+  test('not override high priority update', () => {
+    const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);
 
-    env.store.invalidateQueryAndItems({
+    env.apiStore.invalidateQueryAndItems({
       itemPayload: false,
       type: 'highPriority',
       queryPayload,
     });
 
-    env.store.invalidateQueryAndItems({
+    env.apiStore.invalidateQueryAndItems({
       itemPayload: false,
       type: 'lowPriority',
       queryPayload,
     });
 
-    expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
+    expect(env.apiStore.getQueryState(queryPayload)?.refetchOnMount).toEqual(
       'highPriority',
     );
   });
 
-  test.concurrent('not override rtu update', () => {
-    const env = createTestEnv(testEnvOptions);
+  test('not override rtu update', () => {
+    const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);
 
-    env.store.invalidateQueryAndItems({
+    env.apiStore.invalidateQueryAndItems({
       queryPayload,
       type: 'realtimeUpdate',
       itemPayload: false,
     });
 
-    env.store.invalidateQueryAndItems({
+    env.apiStore.invalidateQueryAndItems({
       queryPayload,
       type: 'lowPriority',
       itemPayload: false,
     });
 
-    expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
+    expect(env.apiStore.getQueryState(queryPayload)?.refetchOnMount).toEqual(
       'realtimeUpdate',
     );
   });
 
-  test.concurrent('not override highPriority with rtu update', () => {
-    const env = createTestEnv(testEnvOptions);
+  test('not override highPriority with rtu update', () => {
+    const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);
 
-    env.store.invalidateQueryAndItems({
+    env.apiStore.invalidateQueryAndItems({
       queryPayload,
       type: 'highPriority',
       itemPayload: false,
     });
 
-    env.store.invalidateQueryAndItems({
+    env.apiStore.invalidateQueryAndItems({
       queryPayload,
       type: 'realtimeUpdate',
       itemPayload: false,
     });
 
-    expect(env.store.getQueryState(queryPayload)?.refetchOnMount).toEqual(
+    expect(env.apiStore.getQueryState(queryPayload)?.refetchOnMount).toEqual(
       'highPriority',
     );
   });
 });
 
 test('invalidate everything does not cause a problem', () => {
-  const env = createTestEnv({
-    initialServerData,
+  const env = createListQueryStoreTestEnv(initialServerData, {
     useLoadedSnapshot: { tables: ['users'] },
   });
 
-  env.store.invalidateQueryAndItems({
+  env.apiStore.invalidateQueryAndItems({
     queryPayload: () => true,
     itemPayload: () => true,
   });
 
-  expect(env.store.store.state).toEqual({
+  // Store keys have a leading quote from getCompositeKey
+  const k1 = env.getStoreItemKeyFromRaw('users||1');
+  const k2 = env.getStoreItemKeyFromRaw('users||2');
+  const k3 = env.getStoreItemKeyFromRaw('users||3');
+  const k4 = env.getStoreItemKeyFromRaw('users||4');
+  const k5 = env.getStoreItemKeyFromRaw('users||5');
+  const queryKey = env.getQueryKey({ tableId: 'users' });
+
+  expect(env.store.state).toEqual({
     itemQueries: {
-      'users||1': {
+      [k1]: {
         error: null,
         payload: 'users||1',
         refetchOnMount: 'highPriority',
         status: 'success',
         wasLoaded: true,
       },
-      'users||2': {
+      [k2]: {
         error: null,
         payload: 'users||2',
         refetchOnMount: 'highPriority',
         status: 'success',
         wasLoaded: true,
       },
-      'users||3': {
+      [k3]: {
         error: null,
         payload: 'users||3',
         refetchOnMount: 'highPriority',
         status: 'success',
         wasLoaded: true,
       },
-      'users||4': {
+      [k4]: {
         error: null,
         payload: 'users||4',
         refetchOnMount: 'highPriority',
         status: 'success',
         wasLoaded: true,
       },
-      'users||5': {
+      [k5]: {
         error: null,
         payload: 'users||5',
         refetchOnMount: 'highPriority',
@@ -1086,17 +1090,17 @@ test('invalidate everything does not cause a problem', () => {
       },
     },
     items: {
-      'users||1': { id: 1, name: 'User 1' },
-      'users||2': { id: 2, name: 'User 2' },
-      'users||3': { id: 3, name: 'User 3' },
-      'users||4': { id: 4, name: 'User 4' },
-      'users||5': { id: 5, name: 'User 5' },
+      [k1]: { id: 1, name: 'User 1' },
+      [k2]: { id: 2, name: 'User 2' },
+      [k3]: { id: 3, name: 'User 3' },
+      [k4]: { id: 4, name: 'User 4' },
+      [k5]: { id: 5, name: 'User 5' },
     },
     queries: {
-      [`{"tableId":"users"}`]: {
+      [queryKey]: {
         error: null,
         hasMore: false,
-        items: ['users||1', 'users||2', 'users||3', 'users||4', 'users||5'],
+        items: [k1, k2, k3, k4, k5],
         payload: { tableId: 'users' },
         refetchOnMount: 'highPriority',
         status: 'success',

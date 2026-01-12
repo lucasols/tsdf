@@ -125,6 +125,8 @@ export type RequestSchedulerOptions<T> = {
   mediumPriorityDelayMs?: number;
   /** Max batch size - triggers immediate fetch when reached */
   maxBatchSize?: number;
+  /** Initial last fetch start time for throttling (e.g., from a query that already loaded this item) */
+  initialLastFetchStartTime?: number;
 };
 
 export type ScheduleFetchOptions = {
@@ -172,6 +174,10 @@ export class RequestScheduler<T> {
     this.maxBatchSize = options.maxBatchSize;
 
     this.state = this.createInitialState();
+
+    if (options.initialLastFetchStartTime !== undefined) {
+      this.state.timing.lastFetchStartTime = options.initialLastFetchStartTime;
+    }
   }
 
   // ==========================================================================
