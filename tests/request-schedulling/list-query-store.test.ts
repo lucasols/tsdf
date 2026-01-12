@@ -82,7 +82,7 @@ describe('test helpers', () => {
   });
 });
 
-describe.concurrent('fetch query', () => {
+describe('fetch query', () => {
   test('fetch query', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       disableInitialInvalidation: false,
@@ -132,72 +132,56 @@ describe.concurrent('fetch query', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test('refetch list with updated data', async ({ expect }) => {
-    const { serverMock, store: listQueryStore } = createTestEnv({
-      initialServerData,
+  test('refetch list with updated data', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    serverMock.produceData((draft) => {
-      draft['users']![0]!.name = 'Updated User 1';
-    });
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
-    listQueryStore.scheduleListQueryFetch('highPriority', usersQueryParams);
+    env.scheduleFetch('highPriority', usersQueryParams);
 
-    expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "hasMore": false,
-          "items": [
-            "users||1",
-            "users||2",
-            "users||3",
-            "users||4",
-            "users||5",
-          ],
-          "payload": {
-            "tableId": "users",
-          },
-          "refetchOnMount": false,
-          "status": "refetching",
-          "wasLoaded": true,
-        }
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
+
+    expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
+      error: null
+      status: 'refetching'
+      refetchOnMount: '❌'
+      wasLoaded: '✅'
+      payload: { tableId: 'users' }
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      hasMore: '❌'
       `);
-    expect(listQueryStore.store.state.items).toMatchSnapshot();
-
-    await serverMock.waitFetchIdle();
-
-    expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "hasMore": false,
-          "items": [
-            "users||1",
-            "users||2",
-            "users||3",
-            "users||4",
-            "users||5",
-          ],
-          "payload": {
-            "tableId": "users",
-          },
-          "refetchOnMount": false,
-          "status": "success",
-          "wasLoaded": true,
-        }
-      `);
-    expect(listQueryStore.getItemState('users||1'))
-      .toMatchInlineSnapshotString(`
-      {
-        "id": 1,
-        "name": "Updated User 1",
-      }
+    expect(env.store.state.items).toMatchInlineSnapshot(`
+      "users||1: { id: 1, name: 'User 1' }
+      "users||2: { id: 2, name: 'User 2' }
+      "users||3: { id: 3, name: 'User 3' }
+      "users||4: { id: 4, name: 'User 4' }
+      "users||5: { id: 5, name: 'User 5' }
     `);
-    expect(listQueryStore.store.state.items).toMatchSnapshot();
 
-    expect(serverMock.fetchsCount).toBe(1);
+    await vi.runAllTimersAsync();
+
+    expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
+      error: null
+      status: 'success'
+      refetchOnMount: '❌'
+      wasLoaded: '✅'
+      payload: { tableId: 'users' }
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      hasMore: '❌'
+    `);
+
+    expect(env.store.state.items).toMatchInlineSnapshot(`
+      "users||1: { id: 1, name: 'Updated User 1' }
+      "users||2: { id: 2, name: 'User 2' }
+      "users||3: { id: 3, name: 'User 3' }
+      "users||4: { id: 4, name: 'User 4' }
+      "users||5: { id: 5, name: 'User 5' }
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
   test('refetch list with error', async () => {
