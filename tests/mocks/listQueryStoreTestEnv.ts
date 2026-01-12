@@ -235,6 +235,8 @@ export function createListQueryStoreTestEnv(
       getStoreItemKey(tableId, id),
     getStoreItemKeyFromRaw: (rawKey: string) => getCompositeKey(rawKey),
     getQueryKey: (params: ListQueryParams) => getCompositeKey(params),
+    getItemQueryState: (rawItemKey: string) =>
+      listQueryStore.store.state.itemQueries[getCompositeKey(rawItemKey)],
     scheduleFetch: (
       fetchType: FetchType,
       params: ListQueryParams,

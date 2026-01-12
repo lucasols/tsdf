@@ -502,23 +502,24 @@ test('ignore multiple load more made in sequence', async () => {
   `);
 });
 
-test.concurrent('await fetch', async () => {
-  const { serverMock, store: listQueryStore } = createTestEnv({
-    initialServerData,
+test('await fetch', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
     useLoadedSnapshot: { tables: ['users'] },
   });
 
-  serverMock.produceData((draft) => {
-    draft['users']![0]!.name = 'Updated User 1';
-  });
+  env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
-  expect(listQueryStore.getItemState('users||1')).toMatchObject({
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({
     name: 'User 1',
   });
 
-  expect(
-    await listQueryStore.awaitListQueryFetch({ tableId: 'users' }),
-  ).toEqual({
+  const fetchPromise = env.apiStore.awaitListQueryFetch({ tableId: 'users' });
+
+  await vi.runAllTimersAsync();
+
+  const fetchResult = await fetchPromise;
+
+  expect(fetchResult).toEqual({
     items: [
       { itemPayload: 'users||1', data: { id: 1, name: 'Updated User 1' } },
       { itemPayload: 'users||2', data: { id: 2, name: 'User 2' } },
@@ -530,17 +531,23 @@ test.concurrent('await fetch', async () => {
     hasMore: false,
   });
 
-  serverMock.setFetchError('error');
+  env.serverTable.setNextListFetchError('error');
 
-  expect(
-    await listQueryStore.awaitListQueryFetch({ tableId: 'users' }, 2),
-  ).toEqual({
-    items: [],
-    error: { message: 'error' },
-    hasMore: false,
-  });
+  const errorFetchPromise = env.apiStore.awaitListQueryFetch(
+    { tableId: 'users' },
+    { size: 2 },
+  );
 
-  expect(serverMock.fetchsCount).toEqual(2);
+  await vi.runAllTimersAsync();
+
+  const errorResult = await errorFetchPromise;
+
+  expect(errorResult.items).toEqual([]);
+  expect(errorResult.error).toBeDefined();
+  expect(errorResult.error?.message).toBe('error');
+  expect(errorResult.hasMore).toBe(false);
+
+  expect(env.serverTable.numOfFinishedFetches).toEqual(2);
 });
 
 describe.concurrent('fetch item', () => {
