@@ -22,6 +22,8 @@ export type DocumentStoreTestEnvOptions<D> = {
       }
     | null;
   disableInitialInvalidation?: boolean;
+  /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
+  useLoadedSnapshot?: boolean;
 };
 
 export function createDocumentStoreTestEnv<D>(
@@ -33,6 +35,7 @@ export function createDocumentStoreTestEnv<D>(
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = 200,
     mediumPriorityDelayMs,
+    useLoadedSnapshot = false,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
   const {
@@ -52,7 +55,7 @@ export function createDocumentStoreTestEnv<D>(
   const serverMock = createServerMock<D>(serverInitialData, addAction);
 
   const resolvedInitialState =
-    initialStateData === 'sameAsServer' ?
+    initialStateData === 'sameAsServer' || useLoadedSnapshot ?
       { value: serverInitialData }
     : initialStateData;
 
@@ -64,10 +67,10 @@ export function createDocumentStoreTestEnv<D>(
       const value = await serverMock.fetch(signal);
       return { value };
     },
-    disableInitialInvalidation,
+    disableInitialInvalidation: disableInitialInvalidation || useLoadedSnapshot,
     getInitialData:
       resolvedInitialState ? () => resolvedInitialState : undefined,
-    disableRefetchOnMount: disableInitialInvalidation,
+    disableRefetchOnMount: disableInitialInvalidation || useLoadedSnapshot,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     onSchedulerEvent: (event) => {

@@ -53,6 +53,7 @@ export function createListQueryStoreTestEnv(
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
     lowPriorityThrottleMs?: number;
+    /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
     useLoadedSnapshot?: {
       tables?: string[];
       items?: string[];
@@ -174,8 +175,9 @@ export function createListQueryStoreTestEnv(
     mediumPriorityDelayMs,
     defaultQuerySize,
     getInitialData: () => initialData,
-    disableInitialDataInvalidation: disableInitialInvalidation,
-    disableRefetchOnMount,
+    disableInitialDataInvalidation:
+      disableInitialInvalidation || !!useLoadedSnapshot,
+    disableRefetchOnMount: disableRefetchOnMount || !!useLoadedSnapshot,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },

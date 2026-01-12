@@ -32,19 +32,21 @@ type StoreValue = {
 };
 
 test('load data', async () => {
-  const { serverMock, store: documentStore } = createDefaultDocumentStore();
+  const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
-  const { getByTestId, unmount } = render(<Component store={documentStore} />);
+  const { result, unmount } = renderHook(() => env.apiStore.useDocument());
 
-  expect(getByTestId('status').textContent).toBe('loading');
-  expect(getByTestId('isLoading').textContent).toBe('true');
-  expect(getByTestId('data').textContent).toBe('null');
+  expect(result.current.status).toBe('loading');
+  expect(result.current.isLoading).toBe(true);
+  expect(result.current.data).toBeNull();
 
-  await sleep(serverMock.fetchDuration + 5);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(getByTestId('status').textContent).toBe('success');
-  expect(getByTestId('isLoading').textContent).toBe('false');
-  expect(getByTestId('data').textContent).toBe('{"hello":"world"}');
+  expect(result.current.status).toBe('success');
+  expect(result.current.isLoading).toBe(false);
+  expect(result.current.data?.value).toEqual({ hello: 'world' });
 
   unmount();
 });

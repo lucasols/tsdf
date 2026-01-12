@@ -21,6 +21,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
+    useLoadedSnapshot = false,
   }: {
     forceInitialDataInvalidation?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -30,6 +31,8 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     useBatchFetch?: boolean;
     /** Max items per batch (only used when useBatchFetch is true) */
     maxBatchSize?: number;
+    /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
+    useLoadedSnapshot?: boolean;
   } = {},
 ) {
   const {
@@ -108,16 +111,16 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       return { value };
     },
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
-    disableInitialDataInvalidation: !forceInitialDataInvalidation,
+    disableInitialDataInvalidation: !forceInitialDataInvalidation || useLoadedSnapshot,
     getInitialData:
-      !forceInitialDataInvalidation ?
+      !forceInitialDataInvalidation || useLoadedSnapshot ?
         () =>
           Object.entries(serverInitialData).map(([itemId, value]) => ({
             payload: itemId,
             data: { value },
           }))
       : undefined,
-    disableRefetchOnMount: !forceInitialDataInvalidation,
+    disableRefetchOnMount: !forceInitialDataInvalidation || useLoadedSnapshot,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     onSchedulerEvent: (event) => {
