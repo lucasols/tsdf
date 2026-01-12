@@ -397,49 +397,40 @@ describe('action types', () => {
     `);
   });
 
-  test('action with revalition and without optimistic update', async () => {
-    const { serverMock, store: documentStore } = createDefaultDocumentStore({
-      useLoadedSnapshot: true,
-      disableInitialDataInvalidation: true,
-    });
-
-    const renders: any[] = [];
-
-    render(
-      <Component
-        store={documentStore}
-        returnRefetchingStatus
-        onRender={({ data, status }) => {
-          renders.push([data.hello, status]);
-        }}
-      />,
+  test('action with revalidation and without optimistic update', async () => {
+    const env = createDocumentStoreTestEnv<StoreValue>(
+      { hello: 'world' },
+      { useLoadedSnapshot: true },
     );
 
+    const renders: Array<[string | null, DocumentStatus]> = [];
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+      });
+
+      renders.push([data?.value.hello ?? null, status]);
+    });
+
     act(() => {
-      actionWithRevalidationAndWithoutOptimisticUpdate(
-        serverMock,
-        documentStore,
-        'was updated',
+      void env.performClientUpdateAction(
+        { hello: 'was updated' },
+        {
+          withOptimisticUpdate: false,
+          withRevalidation: true,
+        },
       );
     });
 
-    await sleep(150);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders).toMatchInlineSnapshot(`
-      [
-        [
-          "world",
-          "success",
-        ],
-        [
-          "world",
-          "refetching",
-        ],
-        [
-          "was updated",
-          "success",
-        ],
-      ]
+      - ['world', 'success']
+      - ['world', 'refetching']
+      - ['was updated', 'success']
     `);
   });
 });
