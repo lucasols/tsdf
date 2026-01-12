@@ -8,16 +8,19 @@ import {
 } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
-import { TSDFDocumentStore, TSDFUseDocumentReturn } from '../src/documentStore';
-import { ServerMock } from './mocks/fetchMock';
-import { pick } from './utils/objectUtils';
-import { sleep } from './utils/sleep';
+import {
+  TSDFDocumentStore,
+  TSDFUseDocumentReturn,
+} from '../../src/documentStore';
+import { ServerMock } from '../../test-old/mocks/fetchMock';
+import { pick } from '../../test-old/utils/objectUtils';
+import { sleep } from '../../test-old/utils/sleep';
 import {
   createDefaultDocumentStore,
   createRenderStore,
   createValueStore,
   DefaultDocStoreData as DefaultDocumentStoreData,
-} from './utils/storeUtils';
+} from '../../test-old/utils/storeUtils';
 
 const createTestEnv = createDefaultDocumentStore;
 
@@ -232,7 +235,10 @@ test('revalidation with multiple components do not trigger multiple fetchs', asy
       <Component store={documentStore} />
       <Component store={documentStore} />
       <Component store={documentStore} />
-      <Component store={documentStore} testIdPrefix="check-" />
+      <Component
+        store={documentStore}
+        testIdPrefix="check-"
+      />
     </>,
   );
 
