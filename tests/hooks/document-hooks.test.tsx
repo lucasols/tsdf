@@ -122,28 +122,22 @@ test('data selector', () => {
 
 describe('disable', () => {
   test('disable initial fetch', async () => {
-    const { serverMock, store: documentStore } = createDefaultDocumentStore();
+    const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
-    const Comp = () => {
-      const data = documentStore.useDocument({
+    const { result } = renderHook(() =>
+      env.apiStore.useDocument({
         disabled: true,
-      });
+      }),
+    );
 
-      return (
-        <div>
-          <div data-testid="data">{data.data?.hello}</div>
-          <div data-testid="status">{data.status}</div>
-        </div>
-      );
-    };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000 * 60 * 3);
+      await vi.runAllTimersAsync();
+    });
 
-    const { getByTestId } = render(<Comp />);
-
-    await sleep(200);
-
-    expect(getByTestId('data').textContent).toBe('');
-    expect(getByTestId('status').textContent).toBe('idle');
-    expect(serverMock.fetchsCount).toBe(0);
+    expect(result.current.data).toBeNull();
+    expect(result.current.status).toBe('idle');
+    expect(env.serverMock.numOfFinishedFetches).toBe(0);
   });
 
   test('disable then enable fetch', async () => {
