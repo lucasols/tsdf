@@ -106,21 +106,18 @@ test('revalidation with multiple components do not trigger multiple fetches', as
 });
 
 test('data selector', () => {
-  const { store: documentStore } = createDefaultDocumentStore({
-    useLoadedSnapshot: true,
-  });
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    { useLoadedSnapshot: true },
+  );
 
-  const Comp = () => {
-    const data = documentStore.useDocument({
-      selector: (data) => data?.hello,
-    });
+  const { result } = renderHook(() =>
+    env.apiStore.useDocument({
+      selector: (data) => data?.value.hello,
+    }),
+  );
 
-    return <div data-testid="selector-data">{data.data}</div>;
-  };
-
-  const { getByTestId } = render(<Comp />);
-
-  expect(getByTestId('selector-data').textContent).toBe('world');
+  expect(result.current.data).toBe('world');
 });
 
 describe('disable', () => {
