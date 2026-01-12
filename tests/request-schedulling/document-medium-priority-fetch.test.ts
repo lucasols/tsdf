@@ -1,6 +1,29 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
-import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
+  type DocumentStoreTestEnvOptions,
+} from '../mocks/documentStoreTestEnv';
+
+function createDocumentStoreTestEnv<D>(
+  serverInitialData: D,
+  options: DocumentStoreTestEnvOptions<D> = {},
+) {
+  const resolvedInitialStateData =
+    options.initialStateData === undefined ?
+      'sameAsServer'
+    : options.initialStateData;
+  const resolvedDisableInitialInvalidation =
+    options.disableInitialInvalidation === undefined ?
+      true
+    : options.disableInitialInvalidation;
+
+  return createDocumentStoreTestEnvBase(serverInitialData, {
+    initialStateData: resolvedInitialStateData,
+    disableInitialInvalidation: resolvedDisableInitialInvalidation,
+    ...options,
+  });
+}
 
 beforeAll(() => {
   vi.useFakeTimers();

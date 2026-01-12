@@ -1,5 +1,28 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
+  type DocumentStoreTestEnvOptions,
+} from '../mocks/documentStoreTestEnv';
+
+function createDocumentStoreTestEnv<D>(
+  serverInitialData: D,
+  options: DocumentStoreTestEnvOptions<D> = {},
+) {
+  const resolvedInitialStateData =
+    options.initialStateData === undefined ?
+      'sameAsServer'
+    : options.initialStateData;
+  const resolvedDisableInitialInvalidation =
+    options.disableInitialInvalidation === undefined ?
+      true
+    : options.disableInitialInvalidation;
+
+  return createDocumentStoreTestEnvBase(serverInitialData, {
+    initialStateData: resolvedInitialStateData,
+    disableInitialInvalidation: resolvedDisableInitialInvalidation,
+    ...options,
+  });
+}
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -12,7 +35,7 @@ afterEach(() => {
 describe('basic fetch lifecycle', () => {
   test('idle -> loading -> success state transitions', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      forceInitialDataInvalidation: true,
+      initialStateData: null,
     });
 
     // Initial state should be idle
@@ -138,7 +161,7 @@ describe('getInitialData option', () => {
 
   test('initial data triggers refetch on mount when invalidation enabled', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      forceInitialDataInvalidation: true,
+      initialStateData: null,
     });
 
     // Should start with no data and idle status

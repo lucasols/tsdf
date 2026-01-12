@@ -10,19 +10,30 @@ import {
   normalizeError,
 } from './testEnvUtils';
 
+export type DocumentStoreTestEnvOptions<D> = {
+  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  baseCoalescingWindowMs?: number;
+  lowPriorityThrottleMs?: number;
+  mediumPriorityDelayMs?: number;
+  initialStateData?:
+    | 'sameAsServer'
+    | {
+        value: D;
+      }
+    | null;
+  disableInitialInvalidation?: boolean;
+};
+
 export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
-    forceInitialDataInvalidation,
+    initialStateData = null,
+    disableInitialInvalidation = false,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
+    lowPriorityThrottleMs = 200,
     mediumPriorityDelayMs,
-  }: {
-    forceInitialDataInvalidation?: boolean;
-    dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-    baseCoalescingWindowMs?: number;
-    mediumPriorityDelayMs?: number;
-  } = {},
+  }: DocumentStoreTestEnvOptions<D> = {},
 ) {
   const {
     actionsHistory,
@@ -40,20 +51,23 @@ export function createDocumentStoreTestEnv<D>(
 
   const serverMock = createServerMock<D>(serverInitialData, addAction);
 
+  const resolvedInitialState =
+    initialStateData === 'sameAsServer' ?
+      { value: serverInitialData }
+    : initialStateData;
+
   const documentStore = createDocumentStore<{ value: D }>({
     errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 200,
+    lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     fetchFn: async (signal) => {
       const value = await serverMock.fetch(signal);
       return { value };
     },
-    disableInitialDataInvalidation: !forceInitialDataInvalidation,
+    disableInitialDataInvalidation: disableInitialInvalidation,
     getInitialData:
-      !forceInitialDataInvalidation ?
-        () => ({ value: serverInitialData })
-      : undefined,
-    disableRefetchOnMount: !forceInitialDataInvalidation,
+      resolvedInitialState ? () => resolvedInitialState : undefined,
+    disableRefetchOnMount: disableInitialInvalidation,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     onSchedulerEvent: (event) => {

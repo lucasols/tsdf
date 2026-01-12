@@ -1,6 +1,29 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { StoreFetchError } from '../../src/utils/storeShared';
-import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
+  type DocumentStoreTestEnvOptions,
+} from '../mocks/documentStoreTestEnv';
+
+function createDocumentStoreTestEnv<D>(
+  serverInitialData: D,
+  options: DocumentStoreTestEnvOptions<D> = {},
+) {
+  const resolvedInitialStateData =
+    options.initialStateData === undefined ?
+      'sameAsServer'
+    : options.initialStateData;
+  const resolvedDisableInitialInvalidation =
+    options.disableInitialInvalidation === undefined ?
+      true
+    : options.disableInitialInvalidation;
+
+  return createDocumentStoreTestEnvBase(serverInitialData, {
+    initialStateData: resolvedInitialStateData,
+    disableInitialInvalidation: resolvedDisableInitialInvalidation,
+    ...options,
+  });
+}
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -13,7 +36,7 @@ afterEach(() => {
 describe('awaitFetch basic behavior', () => {
   test('returns data on successful fetch', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      forceInitialDataInvalidation: true,
+      initialStateData: null,
     });
 
     const resultPromise = env.apiStore.awaitFetch();
@@ -32,7 +55,7 @@ describe('awaitFetch basic behavior', () => {
 
   test('returns error on failed fetch', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      forceInitialDataInvalidation: true,
+      initialStateData: null,
     });
 
     env.errorInNextFetch({

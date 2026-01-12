@@ -1,4 +1,5 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
+import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import {
   __LEGIT_CAST__,
@@ -54,7 +55,7 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   debugName?: string;
   fetchFn: (signal: AbortSignal) => Promise<State>;
   getInitialData?: () => State | undefined;
-  disableInitialDataInvalidation?: boolean;
+  disableInitialInvalidation?: boolean;
   disableRefetchOnMount?: boolean;
   errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
@@ -79,7 +80,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   debugName,
   fetchFn,
   getInitialData,
-  disableInitialDataInvalidation,
+  disableInitialInvalidation,
   disableRefetchOnMount: globalDisableRefetchOnMount,
   errorNormalizer,
   lowPriorityThrottleMs,
@@ -100,7 +101,7 @@ export function createDocumentStore<State extends ValidStoreState>({
       error: null,
       status: initialData !== undefined ? 'success' : 'idle',
       refetchOnMount:
-        initialData !== undefined && !disableInitialDataInvalidation ?
+        initialData !== undefined && !disableInitialInvalidation ?
           'lowPriority'
         : false,
     }),
@@ -314,18 +315,15 @@ export function createDocumentStore<State extends ValidStoreState>({
       if (debounce) {
         unblockWindowClose = blockWindowClose().unblock;
 
-        return Result.err(true);
+        const debounceResult = await awaitDebounce({
+          callId: [debounce.context, debounce.payload],
+          debounce: debounce.ms,
+        });
 
-        // FIX: Implement debounce
-        // const debounceResult = await awaitDebouce({
-        //   callId: [debounce.context, debounce.payload],
-        //   debounce: debounce.ms,
-        // });
-
-        // if (debounceResult === 'skip') {
-        //   endMutation();
-        //   return Result.err(true);
-        // }
+        if (debounceResult === 'skip') {
+          endMutation();
+          return Result.err(true);
+        }
       }
 
       const result = await mutation({

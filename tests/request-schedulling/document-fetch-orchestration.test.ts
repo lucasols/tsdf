@@ -1,10 +1,33 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
-import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
+  type DocumentStoreTestEnvOptions,
+} from '../mocks/documentStoreTestEnv';
 import {
   DEFAULT_FETCH_DURATION_MS,
   DEFAULT_MUTATION_DURATION_MS,
 } from '../mocks/serverMock';
+
+function createDocumentStoreTestEnv<D>(
+  serverInitialData: D,
+  options: DocumentStoreTestEnvOptions<D> = {},
+) {
+  const resolvedInitialStateData =
+    options.initialStateData === undefined ?
+      'sameAsServer'
+    : options.initialStateData;
+  const resolvedDisableInitialInvalidation =
+    options.disableInitialInvalidation === undefined ?
+      true
+    : options.disableInitialInvalidation;
+
+  return createDocumentStoreTestEnvBase(serverInitialData, {
+    initialStateData: resolvedInitialStateData,
+    disableInitialInvalidation: resolvedDisableInitialInvalidation,
+    ...options,
+  });
+}
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -787,7 +810,7 @@ test('very slow mutation revalidation then mutation', async () => {
 test('fetch error', async () => {
   // Expected: first fetch succeeds, second fetch errors and UI enters error state.
   const env = createDocumentStoreTestEnv(0, {
-    forceInitialDataInvalidation: true,
+    initialStateData: null,
   });
 
   renderHook(() => {
@@ -795,7 +818,7 @@ test('fetch error', async () => {
     env.trackUIChanges(error ? 'error' : data?.value);
   });
 
-  // First fetch starts automatically due to forceInitialDataInvalidation
+  // First fetch starts automatically with no initial state
   await vi.advanceTimersByTimeAsync(DEFAULT_FETCH_DURATION_MS + 10);
 
   // Mark next fetch as error (helper also mutates server data for timeline)
