@@ -193,31 +193,35 @@ describe('disable', () => {
 });
 
 test('disableRefetchOnMount', async () => {
-  const { serverMock, store: documentStore } = createDefaultDocumentStore({
-    useLoadedSnapshot: false,
-  });
+  const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
-  const renders: any[] = [];
-  const comp2Renders: any[] = [];
+  const renders: Array<{
+    data: StoreValue | null;
+    status: DocumentStatus;
+  }> = [];
+  const comp2Renders: Array<{
+    data: StoreValue | null;
+    status: DocumentStatus;
+  }> = [];
 
-  const Comp2 = () => {
-    const data = documentStore.useDocument({
+  function Comp2() {
+    const data = env.apiStore.useDocument({
       disableRefetchOnMount: true,
     });
 
-    comp2Renders.push({ data: data.data, status: data.status });
+    comp2Renders.push({ data: data.data?.value ?? null, status: data.status });
 
     return <div />;
-  };
+  }
 
-  const Comp = () => {
+  function Comp() {
     const [mountComp2, setMountComp2] = useState(false);
 
-    const data = documentStore.useDocument({
+    const data = env.apiStore.useDocument({
       disableRefetchOnMount: true,
     });
 
-    renders.push({ data: data.data, status: data.status });
+    renders.push({ data: data.data?.value ?? null, status: data.status });
 
     useEffect(() => {
       if (data.status === 'success') {
@@ -226,51 +230,34 @@ test('disableRefetchOnMount', async () => {
     }, [data.status]);
 
     return <>{mountComp2 && <Comp2 />}</>;
-  };
+  }
 
   render(<Comp />);
 
-  await sleep(200);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  // loads the initial data
   expect(renders).toMatchInlineSnapshot(`
-    [
-      {
-        "data": null,
-        "status": "loading",
-      },
-      {
-        "data": {
-          "hello": "world",
-        },
-        "status": "success",
-      },
-      {
-        "data": {
-          "hello": "world",
-        },
-        "status": "success",
-      },
-    ]
+    - { data: null, status: 'loading' }
+    - data: { hello: 'world' }
+      status: 'success'
+    - data: { hello: 'world' }
+      status: 'success'
   `);
 
-  expect(serverMock.fetchsCount).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
-  await sleep(200);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
   expect(comp2Renders).toMatchInlineSnapshot(`
-    [
-      {
-        "data": {
-          "hello": "world",
-        },
-        "status": "success",
-      },
-    ]
+    - data: { hello: 'world' }
+      status: 'success'
   `);
 
-  // does not refetch on mount
-  expect(serverMock.fetchsCount).toBe(1);
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
 });
 
 test('do not return refetchin status by default', async () => {
