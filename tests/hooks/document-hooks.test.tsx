@@ -290,39 +290,37 @@ test('do not return refetching status by default', async () => {
 });
 
 describe('action types', () => {
-  test('action with optmistic update', async () => {
-    const { serverMock, store: documentStore } = createDefaultDocumentStore({
-      useLoadedSnapshot: true,
-    });
-
-    const renders: any[] = [];
-
-    render(
-      <Component
-        store={documentStore}
-        onRender={({ data, status }) => {
-          renders.push([data.hello, status]);
-        }}
-      />,
+  test('action with optimistic update', async () => {
+    const env = createDocumentStoreTestEnv<StoreValue>(
+      { hello: 'world' },
+      { useLoadedSnapshot: true },
     );
 
-    act(() => {
-      actionWithOptimisticUpdate(serverMock, documentStore, 'was updated');
+    const renders: Array<[string | null, DocumentStatus]> = [];
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument();
+
+      renders.push([data?.value.hello ?? null, status]);
     });
 
-    await sleep(150);
+    act(() => {
+      void env.performClientUpdateAction(
+        { hello: 'was updated' },
+        {
+          withOptimisticUpdate: true,
+          withRevalidation: false,
+        },
+      );
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders).toMatchInlineSnapshot(`
-      [
-        [
-          "world",
-          "success",
-        ],
-        [
-          "was updated",
-          "success",
-        ],
-      ]
+      - ['world', 'success']
+      - ['was updated', 'success']
     `);
   });
 
