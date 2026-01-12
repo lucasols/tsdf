@@ -1,4 +1,4 @@
-import { createCollectionStore } from '../../src/collectionStore';
+import { createCollectionStore } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
 import { createServerTableMock } from './serverTableMock';
 import {

@@ -1,14 +1,11 @@
-import { useOnEvtmitterEvent } from '@evtmitter/react';
-import { useConst } from '@ls-stack/react-utils/useConst';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
-import { deepEqual } from '@ls-stack/utils/deepEqual';
+import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { useCallback, useEffect, useMemo } from 'react';
 import { Result, unknownToError } from 't-result';
-import { Store, useSubscribeToStore } from 't-state';
+import { Store } from 't-state';
 import {
   BatchRequest,
   FetchContext,
@@ -17,7 +14,7 @@ import {
   RequestSchedulerEvents,
   ScheduleFetchOptions,
   ScheduleFetchResults,
-} from './requestScheduler';
+} from '../requestScheduler';
 import {
   fetchTypePriority,
   StoreFetchError,
@@ -25,9 +22,13 @@ import {
   ValidPayload,
   ValidStoreState,
   type StoreError,
-} from './storeShared';
-import { useEnsureIsLoaded } from './useEnsureIsLoaded';
-import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
+} from '../storeShared';
+import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
+import { useItem as useItemBase, UseItemOptions } from './useItem';
+import {
+  useMultipleItems as useMultipleItemsBase,
+  UseMultipleItemsOptions,
+} from './useMultipleItems';
 
 export type CollectionItemStatus = TSDFStatus;
 
@@ -62,23 +63,6 @@ export type TSFDUseCollectionItemReturn<
   queryMetadata: QueryMetadata;
 };
 
-export type CollectionInitialStateItem<
-  ItemPayload extends ValidPayload,
-  ItemState extends ValidStoreState,
-> = {
-  payload: ItemPayload;
-  data: ItemState;
-};
-
-export type OnCollectionItemInvalidate<
-  ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload,
-> = (props: {
-  itemState: ItemState;
-  payload: ItemPayload;
-  priority: FetchType;
-}) => void;
-
 export type CollectionUseMultipleItemsQuery<
   ItemPayload extends ValidPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -90,6 +74,23 @@ export type CollectionUseMultipleItemsQuery<
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
   isOffScreen?: boolean;
+};
+
+export type OnCollectionItemInvalidate<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = (props: {
+  itemState: ItemState;
+  payload: ItemPayload;
+  priority: FetchType;
+}) => void;
+
+export type CollectionInitialStateItem<
+  ItemPayload extends ValidPayload,
+  ItemState extends ValidStoreState,
+> = {
+  payload: ItemPayload;
+  data: ItemState;
 };
 
 export type CollectionStoreOptions<
@@ -200,8 +201,9 @@ export function createCollectionStore<
   const useSingleScheduler = !!batchFetchFn;
 
   // Single scheduler for batch coalescing (only used when batchFetchFn is provided)
-  const singleScheduler = useSingleScheduler
-    ? new RequestScheduler<ItemPayload>({
+  const singleScheduler =
+    useSingleScheduler ?
+      new RequestScheduler<ItemPayload>({
         fetchFn: async (
           requests: BatchRequest<ItemPayload>[],
           fetchCtx: FetchContext,
@@ -220,7 +222,9 @@ export function createCollectionStore<
   // Per-item schedulers for backward compatibility (when batchFetchFn is NOT provided)
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
 
-  function getOrCreateItemScheduler(itemKey: string): RequestScheduler<ItemPayload> {
+  function getOrCreateItemScheduler(
+    itemKey: string,
+  ): RequestScheduler<ItemPayload> {
     let itemScheduler = perItemSchedulers.get(itemKey);
     if (!itemScheduler) {
       itemScheduler = new RequestScheduler<ItemPayload>({
@@ -250,173 +254,15 @@ export function createCollectionStore<
     requests: BatchRequest<ItemPayload>[],
     fetchCtx: FetchContext,
   ): Promise<Map<string, boolean>> {
-    const results = new Map<string, boolean>();
-
-    // Store payloads for later lookup
-    for (const { requestId, payload } of requests) {
-      itemKeyToPayload.set(requestId, payload);
-    }
-
-    // Set loading state for all items
-    store.produceState(
-      (draft) => {
-        for (const { requestId: itemId, payload } of requests) {
-          const current = draft[itemId];
-
-          if (!current) {
-            draft[itemId] = {
-              data: null,
-              error: null,
-              status: 'loading',
-              payload: klona(payload),
-              refetchOnMount: false,
-              wasLoaded: false,
-            };
-          } else {
-            current.status = current.data !== null ? 'refetching' : 'loading';
-            current.payload = klona(payload);
-            current.error = null;
-            current.refetchOnMount = false;
-          }
-        }
-      },
-      { equalityCheck: deepEqual, action: 'batch-fetch-start' },
+    return executeBatchFetchBase(
+      requests,
+      fetchCtx,
+      store,
+      itemKeyToPayload,
+      fetchFn,
+      batchFetchFn,
+      errorNormalizer,
     );
-
-    // Check for early abort
-    if (fetchCtx.shouldAbort()) {
-      for (const { requestId } of requests) {
-        results.set(requestId, false);
-      }
-      return results;
-    }
-
-    // If we have a batchFetchFn and multiple items, use batch fetch
-    if (batchFetchFn && requests.length > 1) {
-      try {
-        const payloads = requests.map((r) => r.payload);
-        const batchResults = await batchFetchFn(payloads, fetchCtx.signal);
-
-        if (fetchCtx.shouldAbort()) {
-          for (const { requestId } of requests) {
-            results.set(requestId, false);
-          }
-          return results;
-        }
-
-        // Process batch results
-        store.produceState(
-          (draft) => {
-            for (const { requestId: itemId, payload } of requests) {
-              const item = draft[itemId];
-              if (!item) continue;
-
-              const result = batchResults.get(payload);
-
-              if (result instanceof Error) {
-                item.error = errorNormalizer(result);
-                item.status = 'error';
-                results.set(itemId, false);
-              } else if (result !== undefined) {
-                item.data = reusePrevIfEqual({
-                  current: result,
-                  prev: item.data,
-                });
-                item.status = 'success';
-                item.wasLoaded = true;
-                results.set(itemId, true);
-              } else {
-                // No result for this item - mark as error
-                item.error = errorNormalizer(
-                  new Error(`No result for item ${itemId}`),
-                );
-                item.status = 'error';
-                results.set(itemId, false);
-              }
-            }
-          },
-          { action: 'batch-fetch-complete' },
-        );
-
-        return results;
-      } catch (exception) {
-        if (fetchCtx.shouldAbort()) {
-          for (const { requestId } of requests) {
-            results.set(requestId, false);
-          }
-          return results;
-        }
-
-        // All items fail with the same error
-        const error = errorNormalizer(unknownToError(exception));
-
-        store.produceState(
-          (draft) => {
-            for (const { requestId: itemId } of requests) {
-              const item = draft[itemId];
-              if (!item) continue;
-
-              item.error = error;
-              item.status = 'error';
-              results.set(itemId, false);
-            }
-          },
-          { action: 'batch-fetch-error' },
-        );
-
-        return results;
-      }
-    }
-
-    // Fall back to individual fetches (either single item or no batchFetchFn)
-    const fetchPromises = requests.map(async ({ requestId: itemId, payload }) => {
-      try {
-        const data = await fetchFn(klona(payload), fetchCtx.signal);
-
-        if (fetchCtx.shouldAbort()) {
-          results.set(itemId, false);
-          return;
-        }
-
-        store.produceState(
-          (draft) => {
-            const item = draft[itemId];
-            if (!item) return;
-
-            item.data = reusePrevIfEqual({ current: data, prev: item.data });
-            item.status = 'success';
-            item.wasLoaded = true;
-          },
-          { action: 'fetch-success' },
-        );
-
-        results.set(itemId, true);
-      } catch (exception) {
-        if (fetchCtx.shouldAbort()) {
-          results.set(itemId, false);
-          return;
-        }
-
-        const error = errorNormalizer(unknownToError(exception));
-
-        store.produceState(
-          (draft) => {
-            const item = draft[itemId];
-            if (!item) return;
-
-            item.error = error;
-            item.status = 'error';
-          },
-          { action: 'fetch-error' },
-        );
-
-        results.set(itemId, false);
-      }
-    });
-
-    await Promise.all(fetchPromises);
-
-    return results;
   }
 
   type FilterItemsFn = (params: ItemPayload, data: ItemState | null) => boolean;
@@ -593,286 +439,37 @@ export function createCollectionStore<
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
   >(
     items: CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
-    {
-      selector,
-      returnIdleStatus: allItemsReturnIdleStatus,
-      returnRefetchingStatus: allItemsReturnRefetchingStatus,
-      omitPayload: allItemsOmitPayload,
-      disableRefetchOnMount: allItemsDisableRefetchOnMount,
-      isOffScreen: allItemsIsOffScreen,
-    }: {
-      selector?: (data: ItemState | null) => Selected;
-      returnIdleStatus?: boolean;
-      returnRefetchingStatus?: boolean;
-      omitPayload?: boolean;
-      disableRefetchOnMount?: boolean;
-      isOffScreen?: boolean;
-    } = {},
+    options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ) {
-    type QueryWithId = {
-      itemKey: string;
-      payload: ItemPayload;
-      disableRefetchOnMount: boolean;
-      returnIdleStatus: boolean;
-      returnRefetchingStatus: boolean;
-      omitPayload: boolean;
-      isOffScreen: boolean;
-      queryMetadata: QueryMetadata | undefined;
-    };
-
-    const queriesWithId = useMemo((): QueryWithId[] => {
-      const newQueries = items.map((queryProps) => ({
-        itemKey: getItemKey(queryProps.payload),
-        payload: queryProps.payload,
-        disableRefetchOnMount:
-          queryProps.disableRefetchOnMount
-          ?? allItemsDisableRefetchOnMount
-          ?? globalDisableRefetchOnMount
-          ?? false,
-        returnIdleStatus:
-          queryProps.returnIdleStatus ?? allItemsReturnIdleStatus ?? false,
-        returnRefetchingStatus:
-          queryProps.returnRefetchingStatus
-          ?? allItemsReturnRefetchingStatus
-          ?? false,
-        omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
-        isOffScreen: queryProps.isOffScreen ?? allItemsIsOffScreen ?? false,
-        queryMetadata: queryProps.queryMetadata,
-      }));
-
-      return newQueries;
-    }, [
+    return useMultipleItemsBase<
+      ItemState,
+      ItemPayload,
+      Selected,
+      QueryMetadata
+    >(
       items,
-      allItemsDisableRefetchOnMount,
-      allItemsIsOffScreen,
-      allItemsOmitPayload,
-      allItemsReturnIdleStatus,
-      allItemsReturnRefetchingStatus,
-    ]);
-
-    const resultSelector = useCallback(
-      (state: CollectionState) => {
-        return queriesWithId.map(
-          ({
-            itemKey,
-            payload,
-            omitPayload,
-            returnIdleStatus,
-            returnRefetchingStatus,
-            queryMetadata,
-          }): TSFDUseCollectionItemReturn<
-            Selected,
-            ItemPayload,
-            QueryMetadata
-          > => {
-            const item = state[itemKey];
-
-            const data =
-              selector ?
-                selector(item?.data ?? null)
-              : __LEGIT_CAST__<Selected>(item?.data ?? null);
-
-            if (item === null) {
-              return {
-                itemStateKey: itemKey,
-                status: 'deleted',
-                data,
-                error: null,
-                payload: omitPayload ? undefined : payload,
-                isLoading: false,
-                queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
-              };
-            }
-
-            if (!item) {
-              return {
-                itemStateKey: itemKey,
-                status: returnIdleStatus ? 'idle' : 'loading',
-                data,
-                error: null,
-                payload: omitPayload ? undefined : payload,
-                isLoading: !returnIdleStatus,
-                queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
-              };
-            }
-
-            let status = item.status;
-
-            if (!returnRefetchingStatus && item.status === 'refetching') {
-              status = 'success';
-            }
-
-            return {
-              itemStateKey: itemKey,
-              status,
-              data,
-              error: item.error,
-              isLoading: status === 'loading',
-              payload: omitPayload ? undefined : item.payload,
-              queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
-            };
-          },
-        );
-      },
-      [queriesWithId, selector],
+      options,
+      store,
+      events,
+      getItemKey,
+      getItemState,
+      scheduleFetch,
+      invalidationWasTriggered,
+      globalDisableRefetchOnMount,
     );
-
-    const storeState = store.useSelectorRC(resultSelector, {
-      equalityFn: deepEqual,
-    });
-
-    useOnEvtmitterEvent(events, 'invalidateData', ({ payload: event }) => {
-      for (const { itemKey, payload, isOffScreen } of queriesWithId) {
-        if (isOffScreen) continue;
-
-        if (itemKey !== event.itemKey) continue;
-
-        if (!invalidationWasTriggered.has(itemKey)) {
-          store.produceState((draft) => {
-            const item = draft[itemKey];
-            if (!item) return;
-
-            item.refetchOnMount = false;
-          });
-
-          scheduleFetch(event.priority, payload);
-          invalidationWasTriggered.add(itemKey);
-        }
-      }
-    });
-
-    const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
-
-    useEffect(() => {
-      const removedQueries = new Set(ignoreItemsInRefetchOnMount);
-
-      for (const {
-        itemKey: itemId,
-        payload,
-        isOffScreen,
-        disableRefetchOnMount,
-      } of queriesWithId) {
-        removedQueries.delete(itemId);
-
-        if (isOffScreen) continue;
-
-        if (itemId) {
-          const itemState = getItemState(payload);
-          const fetchType = itemState?.refetchOnMount || 'lowPriority';
-
-          const shouldFetch = !itemState?.wasLoaded || itemState.refetchOnMount;
-
-          if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemId)) {
-            continue;
-          }
-
-          ignoreItemsInRefetchOnMount.add(itemId);
-
-          if (disableRefetchOnMount) {
-            if (shouldFetch) {
-              scheduleFetch(fetchType, payload);
-              continue;
-            }
-          } else {
-            scheduleFetch(fetchType, payload);
-          }
-        }
-      }
-
-      for (const itemId of removedQueries) {
-        ignoreItemsInRefetchOnMount.delete(itemId);
-      }
-    }, [ignoreItemsInRefetchOnMount, queriesWithId]);
-
-    return storeState;
   }
 
   function useItem<Selected = ItemState | null>(
     payload: ItemPayload | undefined | false | null,
-    {
-      omitPayload,
-      selector,
-      ensureIsLoaded,
-      returnRefetchingStatus,
-      disableRefetchOnMount,
-      returnIdleStatus,
-      isOffScreen,
-    }: {
-      selector?: (data: ItemState | null) => Selected;
-      omitPayload?: boolean;
-      returnRefetchingStatus?: boolean;
-      disableRefetchOnMount?: boolean;
-      ensureIsLoaded?: boolean;
-      returnIdleStatus?: boolean;
-      isOffScreen?: boolean;
-    } = {},
+    options: UseItemOptions<ItemState, Selected> = {},
   ) {
-    // FIX: throw error if payload is empty string (in all stores)
-    const query = useMemo(
-      () =>
-        payload === false || payload === null || payload === undefined ?
-          []
-        : [
-            {
-              payload,
-              omitPayload,
-              returnRefetchingStatus,
-              disableRefetchOnMount,
-              returnIdleStatus,
-              isOffScreen,
-            },
-          ],
-      [
-        disableRefetchOnMount,
-        isOffScreen,
-        omitPayload,
-        returnIdleStatus,
-        returnRefetchingStatus,
-        payload,
-      ],
+    return useItemBase<ItemState, ItemPayload, Selected>(
+      payload,
+      options,
+      store,
+      scheduleFetch,
+      useMultipleItems,
     );
-
-    const item = useMultipleItems(query, {
-      selector,
-    });
-
-    const result = useMemo(
-      (): TSFDUseCollectionItemReturn<Selected, ItemPayload> =>
-        item[0] ?? {
-          payload: undefined,
-          data: selector ? selector(null) : __LEGIT_CAST__<Selected>(null),
-          error: null,
-          status: 'idle',
-          itemStateKey: '',
-          isLoading: false,
-          queryMetadata: undefined,
-        },
-      [item, selector],
-    );
-
-    const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
-      ensureIsLoaded,
-      !!payload,
-      () => {
-        if (payload) {
-          scheduleFetch('highPriority', payload);
-        }
-      },
-    );
-
-    useSubscribeToStore(store, ({ observe }) => {
-      if (!ensureIsLoaded) return;
-
-      observe
-        .ifSelector((state) => state[result.itemStateKey]?.status)
-        .change.then(({ current }) => {
-          if (current === 'success' || current === 'error') {
-            emitIsLoadedEvt();
-          }
-        });
-    });
-
-    return useModifyResult(result);
   }
 
   type EndMutation = () => void;
@@ -1006,18 +603,15 @@ export function createCollectionStore<
       if (_debounce) {
         unblockWindowClose = blockWindowClose().unblock;
 
-        return Result.err(true);
+        const debounceResult = await awaitDebounce({
+          callId: [_debounce.context, _debounce.payload],
+          debounce: _debounce.ms,
+        });
 
-        // FIX: Implement debounce
-        // const debounceResult = await awaitDebounce({
-        //   callId: [_debounce.context, _debounce.payload],
-        //   debounce: _debounce.ms,
-        // });
-
-        // if (debounceResult === 'skip') {
-        //   endMutation();
-        //   return Result.err(true);
-        // }
+        if (debounceResult === 'skip') {
+          endMutation();
+          return Result.err(true);
+        }
       }
 
       const result = await mutation(payload);
