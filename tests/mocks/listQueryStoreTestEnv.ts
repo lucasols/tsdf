@@ -279,9 +279,6 @@ export function createListQueryStoreTestEnv(
 
       return result;
     },
-    loadMore: (params: ListQueryParams, size?: number) => {
-      return listQueryStore.loadMore(params, size);
-    },
     performClientUpdateAction: (
       itemId: string,
       newValue: Row,

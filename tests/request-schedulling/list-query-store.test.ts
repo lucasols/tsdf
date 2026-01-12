@@ -316,7 +316,7 @@ describe('fetch query', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
     // load more
-    env.loadMore(query);
+    env.apiStore.loadMore(query);
 
     // Wait for coalescing window
     await vi.advanceTimersByTimeAsync(15);
@@ -392,132 +392,113 @@ describe('fetch query', () => {
   });
 
   test('do not load more if the query not exists or hasMore === false', () => {
-    const { store: listQueryStore } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    expect(listQueryStore.loadMore(usersQueryParams, 10)).toBe('skipped');
-    expect(listQueryStore.loadMore({ tableId: 'not found' }, 10)).toBe(
-      'skipped',
-    );
+    expect(env.apiStore.loadMore(usersQueryParams, 10)).toBe('skipped');
+    expect(env.apiStore.loadMore({ tableId: 'not found' }, 10)).toBe('skipped');
   });
 
-  test.concurrent(
-    'multiple fetchs with different payloads not cancel each other, but cancel same payload fetchs',
-    async () => {
-      const { serverMock, store: listQueryStore } = createTestEnv({
-        initialServerData,
-      });
+  test('multiple fetches with different payloads not cancel each other, but cancel same payload fetches', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
+    });
 
-      const fetch = listQueryStore.scheduleListQueryFetch;
+    env.scheduleFetch('lowPriority', { tableId: 'users' });
+    env.scheduleFetch('lowPriority', { tableId: 'products' });
+    env.scheduleFetch('lowPriority', { tableId: 'orders' });
 
-      fetch('lowPriority', { tableId: 'users' });
-      fetch('lowPriority', { tableId: 'products' });
-      fetch('lowPriority', { tableId: 'orders' });
+    env.scheduleFetch('lowPriority', { tableId: 'users' });
+    env.scheduleFetch('highPriority', { tableId: 'products' });
+    env.scheduleFetch('lowPriority', { tableId: 'orders' });
 
-      fetch('lowPriority', { tableId: 'users' });
-      fetch('highPriority', { tableId: 'products' });
-      fetch('lowPriority', { tableId: 'orders' });
+    await vi.advanceTimersByTimeAsync(10);
 
-      await sleep(10);
+    env.scheduleFetch('lowPriority', { tableId: 'users' });
+    env.scheduleFetch('lowPriority', { tableId: 'products' });
+    env.scheduleFetch('lowPriority', { tableId: 'orders' });
 
-      fetch('lowPriority', { tableId: 'users' });
-      fetch('lowPriority', { tableId: 'products' });
-      fetch('lowPriority', { tableId: 'orders' });
+    await vi.runAllTimersAsync();
 
-      await serverMock.waitFetchIdle(40);
+    expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-      expect(serverMock.fetchsCount).toBe(3);
+    env.scheduleFetch('lowPriority', { tableId: 'users' });
+    env.scheduleFetch('lowPriority', { tableId: 'products' });
+    env.scheduleFetch('lowPriority', { tableId: 'orders' });
 
-      fetch('lowPriority', { tableId: 'users' });
-      fetch('lowPriority', { tableId: 'products' });
-      fetch('lowPriority', { tableId: 'orders' });
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+    env.scheduleFetch('highPriority', { tableId: 'products' });
+    env.scheduleFetch('highPriority', { tableId: 'orders' });
 
-      fetch('highPriority', { tableId: 'users' });
-      fetch('highPriority', { tableId: 'products' });
-      fetch('highPriority', { tableId: 'orders' });
+    await vi.runAllTimersAsync();
 
-      await serverMock.waitFetchIdle(40);
-
-      expect(serverMock.fetchsCount).toBe(6);
-    },
-  );
+    expect(env.serverTable.numOfFinishedFetches).toBe(6);
+  });
 });
 
-test.concurrent('ignore multiple load more made in sequence', async () => {
-  const { store: listQueryStore, serverMock } = createTestEnv({
-    initialServerData,
+test('ignore multiple load more made in sequence', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    disableInitialInvalidation: false,
     defaultQuerySize: 5,
   });
 
-  const query = { tableId: 'products' as const };
+  const query: ListQueryParams = { tableId: 'products' };
 
-  listQueryStore.scheduleListQueryFetch('highPriority', query, 5);
+  env.scheduleFetch('highPriority', query, 5);
 
-  await serverMock.waitFetchIdle();
+  await vi.runAllTimersAsync();
 
-  expect(listQueryStore.getQueryState(query)?.items).toMatchInlineSnapshot(`
-    [
-      "products||1",
-      "products||2",
-      "products||3",
-      "products||4",
-      "products||5",
-    ]
+  expect(env.apiStore.getQueryState(query)?.items).toMatchInlineSnapshot(
+    `['"products||1', '"products||2', '"products||3', '"products||4', '"products||5']`,
+  );
+
+  expect(env.apiStore.loadMore(query)).toBe('triggered');
+  expect(env.apiStore.loadMore(query)).toBe('coalesced');
+  expect(env.apiStore.loadMore(query)).toBe('coalesced');
+  expect(env.apiStore.loadMore(query)).toBe('coalesced');
+
+  await vi.advanceTimersByTimeAsync(15);
+
+  expect(env.apiStore.loadMore(query)).toBe('skipped');
+  expect(env.apiStore.loadMore(query)).toBe('skipped');
+
+  await vi.runAllTimersAsync();
+
+  expect(env.apiStore.getQueryState(query)?.items).toMatchInlineSnapshot(`
+    - '"products||1'
+    - '"products||2'
+    - '"products||3'
+    - '"products||4'
+    - '"products||5'
+    - '"products||6'
+    - '"products||7'
+    - '"products||8'
+    - '"products||9'
+    - '"products||10'
   `);
 
-  expect(listQueryStore.loadMore(query)).toBe('started');
-  expect(listQueryStore.loadMore(query)).toBe('skipped');
-  expect(listQueryStore.loadMore(query)).toBe('skipped');
+  expect(env.apiStore.loadMore(query)).toBe('triggered');
+  expect(env.apiStore.loadMore(query)).toBe('coalesced');
 
-  await sleep(10);
+  await vi.runAllTimersAsync();
 
-  expect(listQueryStore.loadMore(query)).toBe('skipped');
-  expect(listQueryStore.loadMore(query)).toBe('skipped');
-
-  await serverMock.waitFetchIdle();
-
-  expect(listQueryStore.getQueryState(query)?.items)
-    .toMatchInlineSnapshotString(`
-    [
-      "products||1",
-      "products||2",
-      "products||3",
-      "products||4",
-      "products||5",
-      "products||6",
-      "products||7",
-      "products||8",
-      "products||9",
-      "products||10",
-    ]
-  `);
-
-  expect(listQueryStore.loadMore(query)).toBe('started');
-  expect(listQueryStore.loadMore(query)).toBe('skipped');
-
-  await serverMock.waitFetchIdle();
-
-  expect(listQueryStore.getQueryState(query)?.items)
-    .toMatchInlineSnapshotString(`
-    [
-      "products||1",
-      "products||2",
-      "products||3",
-      "products||4",
-      "products||5",
-      "products||6",
-      "products||7",
-      "products||8",
-      "products||9",
-      "products||10",
-      "products||11",
-      "products||12",
-      "products||13",
-      "products||14",
-      "products||15",
-    ]
+  expect(env.apiStore.getQueryState(query)?.items).toMatchInlineSnapshot(`
+    - '"products||1'
+    - '"products||2'
+    - '"products||3'
+    - '"products||4'
+    - '"products||5'
+    - '"products||6'
+    - '"products||7'
+    - '"products||8'
+    - '"products||9'
+    - '"products||10'
+    - '"products||11'
+    - '"products||12'
+    - '"products||13'
+    - '"products||14'
+    - '"products||15'
   `);
 });
 
