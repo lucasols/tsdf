@@ -114,7 +114,7 @@ export function createDocumentStoreTestEnv<D>(
         triggerRTU,
         addServerDataChangeAction,
         error,
-        updateStateAfterMutation,
+        updateStateWithMutationResult,
       }: {
         withRevalidation?: boolean;
         withOptimisticUpdate?: boolean;
@@ -122,7 +122,7 @@ export function createDocumentStoreTestEnv<D>(
         triggerRTU?: boolean;
         addServerDataChangeAction?: boolean;
         error?: string;
-        updateStateAfterMutation?: boolean;
+        updateStateWithMutationResult?: boolean;
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
@@ -152,7 +152,7 @@ export function createDocumentStoreTestEnv<D>(
             mutationId,
           });
 
-          if (updateStateAfterMutation) {
+          if (updateStateWithMutationResult) {
             updateState((draft) => {
               draft.value = newValue;
             });
