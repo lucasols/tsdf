@@ -141,75 +141,53 @@ describe('disable', () => {
   });
 
   test('disable then enable fetch', async () => {
-    const { serverMock, store: documentStore } = createDefaultDocumentStore();
+    const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
-    const renders: any[] = [];
+    const renders: Array<{
+      data: StoreValue | null;
+      disabled: boolean;
+      status: DocumentStatus;
+    }> = [];
 
-    const Comp = () => {
-      const [disabled, setDisabled] = useState(true);
-
-      const data = documentStore.useDocument({
+    const { rerender } = renderHook(
+      ({ disabled }: { disabled: boolean }) => {
+        const data = env.apiStore.useDocument({
         disabled,
       });
 
-      renders.push({ data: data.data, status: data.status, disabled });
+        renders.push({
+          data: data.data?.value ?? null,
+          status: data.status,
+          disabled,
+        });
+      },
+      { initialProps: { disabled: true } },
+    );
 
-      return (
-        <div>
-          <div data-testid="data">{data.data?.hello}</div>
-          <div data-testid="status">{data.status}</div>
-          <button
-            data-testid="toggle-disabled"
-            onClick={() => setDisabled(!disabled)}
-          >
-            btn
-          </button>
-        </div>
-      );
-    };
-
-    const { getByTestId } = render(<Comp />);
-
-    await sleep(40);
-
-    expect(serverMock.fetchsCount).toBe(0);
-    expect(renders).toMatchInlineSnapshot(`
-      [
-        {
-          "data": null,
-          "disabled": true,
-          "status": "idle",
-        },
-      ]
-    `);
-
-    act(() => {
-      fireEvent.click(getByTestId('toggle-disabled'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000 * 60 * 3);
     });
 
-    await sleep(100);
+    expect(env.serverMock.numOfFinishedFetches).toBe(0);
+    expect(renders).toMatchInlineSnapshot(
+      `- { data: null, disabled: '✅', status: 'idle' }`,
+    );
 
-    expect(serverMock.fetchsCount).toBe(1);
+    act(() => {
+      rerender({ disabled: false });
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
     expect(renders).toMatchInlineSnapshot(`
-      [
-        {
-          "data": null,
-          "disabled": true,
-          "status": "idle",
-        },
-        {
-          "data": null,
-          "disabled": false,
-          "status": "loading",
-        },
-        {
-          "data": {
-            "hello": "world",
-          },
-          "disabled": false,
-          "status": "success",
-        },
-      ]
+      - { data: null, disabled: '✅', status: 'idle' }
+      - { data: null, disabled: '❌', status: 'loading' }
+      - data: { hello: 'world' }
+        disabled: '❌'
+        status: 'success'
     `);
   });
 });
