@@ -550,128 +550,120 @@ test('await fetch', async () => {
   expect(env.serverTable.numOfFinishedFetches).toEqual(2);
 });
 
-describe.concurrent('fetch item', () => {
-  test.concurrent('fetch item', async () => {
-    const { serverMock, store: listQueryStore } = createTestEnv({
-      initialServerData,
+describe('fetch item', () => {
+  test('fetch item', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
     });
 
-    expect(
-      listQueryStore.store.state.itemQueries['users||1'],
-    ).toMatchInlineSnapshotString('undefined');
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`undefined`);
 
-    listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
+    env.scheduleItemFetch('lowPriority', 'users||1');
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-      {
-        "error": null,
-        "payload": "users||1",
-        "refetchOnMount": false,
-        "status": "loading",
-        "wasLoaded": false,
-      }
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
+
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      status: 'loading'
+      error: null
+      wasLoaded: '❌'
+      refetchOnMount: '❌'
+      payload: 'users||1'
     `);
-    expect(listQueryStore.getItemState('users||1')).toMatchInlineSnapshotString(
-      'undefined',
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(
+      `undefined`,
     );
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-      {
-        "error": null,
-        "payload": "users||1",
-        "refetchOnMount": false,
-        "status": "success",
-        "wasLoaded": true,
-      }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      status: 'success'
+      error: null
+      wasLoaded: '✅'
+      refetchOnMount: '❌'
+      payload: 'users||1'
     `);
-    expect(listQueryStore.getItemState('users||1'))
-      .toMatchInlineSnapshotString(`
-      {
-        "id": 1,
-        "name": "User 1",
-      }
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
     `);
 
-    expect(serverMock.fetchsCount).toBe(1);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test.concurrent('await fetch item', async () => {
-    const { serverMock, store: listQueryStore } = createTestEnv({
-      initialServerData,
+  test('await fetch item', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
-      disableInitialDataInvalidation: true,
     });
 
-    serverMock.produceData((draft) => {
-      draft['users']![0]!.name = 'Updated User 1';
-    });
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
-    expect(listQueryStore.getItemState('users||1')).toMatchObject({
+    expect(env.apiStore.getItemState('users||1')).toMatchObject({
       name: 'User 1',
     });
 
-    expect(await listQueryStore.awaitItemFetch('users||1')).toEqual({
+    const fetchPromise = env.apiStore.awaitItemFetch('users||1');
+
+    await vi.runAllTimersAsync();
+
+    const fetchResult = await fetchPromise;
+
+    expect(fetchResult).toEqual({
       data: { id: 1, name: 'Updated User 1' },
       error: null,
     });
 
-    serverMock.setFetchError('error');
+    env.serverTable.setNextFetchError('users||1', 'error');
 
-    expect(await listQueryStore.awaitItemFetch('users||1')).toEqual({
+    const errorFetchPromise = env.apiStore.awaitItemFetch('users||1');
+
+    await vi.runAllTimersAsync();
+
+    const errorResult = await errorFetchPromise;
+
+    expect(errorResult).toMatchObject({
       data: null,
       error: { message: 'error' },
     });
 
-    expect(serverMock.fetchsCount).toEqual(2);
+    expect(env.serverTable.numOfFinishedFetches).toEqual(2);
   });
 
-  test.concurrent('test helpers inital snapshot', async () => {
-    const loaded = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+  test('test helpers initial snapshot', async () => {
+    const loaded = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
     });
 
-    loaded.store.scheduleItemFetch('lowPriority', 'users||1');
+    loaded.scheduleItemFetch('lowPriority', 'users||1');
 
-    await loaded.serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    const withStateSnapshot = createTestEnv({
-      initialServerData,
+    const withStateSnapshot = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: true,
+      disableRefetchOnMount: true,
       useLoadedSnapshot: { items: ['users||1'] },
-      disableInitialDataInvalidation: true,
     });
 
-    expect(withStateSnapshot.store.store.state).toEqual(
-      loaded.store.store.state,
-    );
+    expect(withStateSnapshot.store.state).toEqual(loaded.store.state);
   });
 
-  test.concurrent('test helpers inital snapshot 2', async () => {
-    const loaded = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+  test('test helpers initial snapshot 2', async () => {
+    const loaded = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
     });
 
-    loaded.store.scheduleItemFetch('lowPriority', 'users||1');
-    loaded.store.scheduleListQueryFetch('lowPriority', {
-      tableId: 'users',
-    });
+    loaded.scheduleItemFetch('lowPriority', 'users||1');
+    loaded.scheduleFetch('lowPriority', { tableId: 'users' });
 
-    await loaded.serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    const withStateSnapshot = createTestEnv({
-      initialServerData,
+    const withStateSnapshot = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: true,
+      disableRefetchOnMount: true,
       useLoadedSnapshot: { tables: ['users'], items: ['users||1'] },
-      disableInitialDataInvalidation: true,
     });
 
-    expect(withStateSnapshot.store.store.state).toEqual(
-      loaded.store.store.state,
-    );
+    expect(withStateSnapshot.store.state).toEqual(loaded.store.state);
   });
 
   test('refetch item with updated data', async () => {
