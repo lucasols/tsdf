@@ -1,10 +1,21 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import {
-  createDefaultListQueryStore,
-  Tables,
-} from '../../test-old/utils/createDefaultListQueryStore';
-import { range } from '../../test-old/utils/range';
-import { sleep } from '../../test-old/utils/sleep';
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
+
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
+
+function range(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -12,68 +23,62 @@ const initialServerData: Tables = {
   orders: range(1, 50).map((id) => ({ id, name: `Order ${id}` })),
 };
 
-const createTestEnv = createDefaultListQueryStore;
+const usersQueryParams: ListQueryParams = { tableId: 'users' };
 
-const usersQueryParams = { tableId: 'users' };
-
-describe.concurrent('test helpers', () => {
+describe('test helpers', () => {
   test('snapshot is equal to loaded state', async () => {
-    const loaded = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+    const loaded = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
     });
 
     loaded.forceListUpdate(usersQueryParams);
 
-    await loaded.serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    const withUserSnapshot = createTestEnv({
-      initialServerData,
+    const withUserSnapshot = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: true,
+      disableRefetchOnMount: true,
       useLoadedSnapshot: { tables: ['users'] },
-      disableInitialDataInvalidation: true,
     });
 
-    expect(loaded.store.store.state).toEqual(
-      withUserSnapshot.store.store.state,
-    );
+    expect(loaded.store.state).toEqual(withUserSnapshot.store.state);
 
     loaded.forceListUpdate({ tableId: 'products' });
 
-    await loaded.serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    const withSnapshot = createTestEnv({
-      initialServerData,
+    const withSnapshot = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: true,
+      disableRefetchOnMount: true,
       useLoadedSnapshot: { tables: ['users', 'products'] },
-      disableInitialDataInvalidation: true,
     });
 
-    expect(loaded.store.store.state).toEqual(withSnapshot.store.store.state);
+    expect(loaded.store.state).toEqual(withSnapshot.store.state);
   });
 
   test('snapshot with filter is equal to loaded state', async () => {
-    const loaded = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+    const loaded = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
     });
 
     loaded.forceListUpdate({
       tableId: 'users',
-      filters: { idIsGreaterThan: 2 },
+      filters: [{ op: 'gt', field: 'id', value: 2 }],
     });
 
-    await loaded.serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    const withUserSnapshot = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+    const withUserSnapshot = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: true,
+      disableRefetchOnMount: true,
       useLoadedSnapshot: {
-        queries: [{ tableId: 'users', filters: { idIsGreaterThan: 2 } }],
+        queries: [
+          { tableId: 'users', filters: [{ op: 'gt', field: 'id', value: 2 }] },
+        ],
       },
     });
 
-    expect(loaded.store.store.state).toEqual(
-      withUserSnapshot.store.store.state,
-    );
+    expect(loaded.store.state).toEqual(withUserSnapshot.store.state);
   });
 });
 

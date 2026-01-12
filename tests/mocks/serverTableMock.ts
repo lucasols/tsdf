@@ -8,11 +8,61 @@ export const DEFAULT_FETCH_DURATION_MS = 800;
 export const DEFAULT_MUTATION_DURATION_MS = 1200;
 export const DEFAULT_RTU_DELAY_MS = 50;
 
+export type FilterOperator =
+  | { op: 'eq'; field: string; value: unknown }
+  | { op: 'neq'; field: string; value: unknown }
+  | { op: 'gt'; field: string; value: number }
+  | { op: 'gte'; field: string; value: number }
+  | { op: 'lt'; field: string; value: number }
+  | { op: 'lte'; field: string; value: number }
+  | { op: 'range'; field: string; min: number; max: number }
+  | { op: 'in'; field: string; values: unknown[] }
+  | { op: 'startsWith'; field: string; value: string };
+
 export type ListQueryOptions = {
   offset?: number;
   limit?: number;
   itemIds?: string[];
+  filters?: FilterOperator[];
+  tableId?: string;
 };
+
+function applyFilter<T extends Record<string, unknown>>(
+  item: T,
+  filter: FilterOperator,
+): boolean {
+  const value = item[filter.field];
+
+  switch (filter.op) {
+    case 'eq':
+      return value === filter.value;
+    case 'neq':
+      return value !== filter.value;
+    case 'gt':
+      return typeof value === 'number' && value > filter.value;
+    case 'gte':
+      return typeof value === 'number' && value >= filter.value;
+    case 'lt':
+      return typeof value === 'number' && value < filter.value;
+    case 'lte':
+      return typeof value === 'number' && value <= filter.value;
+    case 'range':
+      return (
+        typeof value === 'number' && value >= filter.min && value <= filter.max
+      );
+    case 'in':
+      return filter.values.includes(value);
+    case 'startsWith':
+      return typeof value === 'string' && value.startsWith(filter.value);
+  }
+}
+
+function applyFilters<T extends Record<string, unknown>>(
+  item: T,
+  filters: FilterOperator[],
+): boolean {
+  return filters.every((filter) => applyFilter(item, filter));
+}
 
 export type ListQueryResult<ItemData> = {
   items: Array<{ itemId: string; data: ItemData }>;
@@ -48,7 +98,7 @@ export type AddActionFn = (
   options?: { id?: string | number; actionValue?: unknown; itemId?: string },
 ) => void;
 
-export function createServerTableMock<ItemData>(
+export function createServerTableMock<ItemData extends Record<string, unknown>>(
   initialItems: Record<string, ItemData>,
   addAction?: AddActionFn,
 ) {
@@ -174,7 +224,13 @@ export function createServerTableMock<ItemData>(
     options?: ListQueryOptions,
     signal?: AbortSignal,
   ): Promise<ListQueryResult<ItemData>> {
-    const { offset = 0, limit, itemIds: filterItemIds } = options ?? {};
+    const {
+      offset = 0,
+      limit,
+      itemIds: filterItemIds,
+      filters,
+      tableId,
+    } = options ?? {};
     const listId = addAction ? getFetchId() : undefined;
 
     if (addAction) {
@@ -239,18 +295,35 @@ export function createServerTableMock<ItemData>(
       throw new Error(errorConfig.message);
     }
 
-    let entries = Array.from(items.entries());
+    let resultEntries = Array.from(items.entries());
+
+    // Filter by tableId if provided (items are keyed as "tableId||id")
+    if (tableId) {
+      const prefix = `${tableId}||`;
+      resultEntries = resultEntries.filter(([itemId]) =>
+        itemId.startsWith(prefix),
+      );
+    }
 
     // Filter by itemIds if provided
     if (filterItemIds) {
-      entries = entries.filter(([itemId]) => filterItemIds.includes(itemId));
+      resultEntries = resultEntries.filter(([itemId]) =>
+        filterItemIds.includes(itemId),
+      );
     }
 
-    const totalCount = entries.length;
+    // Apply filters
+    if (filters && filters.length > 0) {
+      resultEntries = resultEntries.filter(([, data]) =>
+        applyFilters(data, filters),
+      );
+    }
+
+    const totalCount = resultEntries.length;
     const startIndex = offset;
     const endIndex = limit !== undefined ? offset + limit : totalCount;
 
-    const paginatedEntries = entries.slice(startIndex, endIndex);
+    const paginatedEntries = resultEntries.slice(startIndex, endIndex);
     const hasMore = endIndex < totalCount;
 
     // Build result
@@ -305,12 +378,22 @@ export function createServerTableMock<ItemData>(
     addAction?.('server-data-changed', { actionValue: data, itemId });
   }
 
+  function updateItem(itemId: string, data: Partial<ItemData>): void {
+    const existingItem = items.get(itemId);
+    if (existingItem === undefined) {
+      throw new Error(`Item not found: ${itemId}`);
+    }
+    items.set(itemId, { ...existingItem, ...data });
+
+    addAction?.('server-data-changed', { actionValue: data, itemId });
+  }
+
   function removeItem(itemId: string): void {
     items.delete(itemId);
     addAction?.('server-item-removed', { itemId });
   }
 
-  async function mutateItem(
+  async function emulateClientMutation(
     itemId: string,
     newData: ItemData,
     options: MutationOptions = {},
@@ -465,14 +548,75 @@ export function createServerTableMock<ItemData>(
     return itemHistory.get(itemId) ?? [];
   }
 
+  // Utility methods for synchronous data retrieval (useful for test setup)
+  function getByPrefix(
+    prefix: string,
+  ): Array<{ itemId: string; data: ItemData }> {
+    const result: Array<{ itemId: string; data: ItemData }> = [];
+    for (const [itemId, data] of items) {
+      if (itemId.startsWith(prefix)) {
+        result.push({ itemId, data });
+      }
+    }
+    return result;
+  }
+
+  function entries(): Array<[string, ItemData]> {
+    return Array.from(items.entries());
+  }
+
+  /** Synchronous version of list() for test setup (no network delay) */
+  function listSync(options?: ListQueryOptions): ListQueryResult<ItemData> {
+    const {
+      offset = 0,
+      limit,
+      itemIds: filterItemIds,
+      filters,
+      tableId,
+    } = options ?? {};
+
+    let entriesArr = Array.from(items.entries());
+
+    if (tableId) {
+      const prefix = `${tableId}||`;
+      entriesArr = entriesArr.filter(([itemId]) => itemId.startsWith(prefix));
+    }
+
+    if (filterItemIds) {
+      entriesArr = entriesArr.filter(([itemId]) =>
+        filterItemIds.includes(itemId),
+      );
+    }
+
+    if (filters && filters.length > 0) {
+      entriesArr = entriesArr.filter(([, data]) => applyFilters(data, filters));
+    }
+
+    const totalCount = entriesArr.length;
+    const startIndex = offset;
+    const endIndex = limit !== undefined ? offset + limit : totalCount;
+
+    const paginatedEntries = entriesArr.slice(startIndex, endIndex);
+    const hasMore = endIndex < totalCount;
+
+    return {
+      items: paginatedEntries.map(([itemId, data]) => ({ itemId, data })),
+      hasMore,
+    };
+  }
+
   return {
     fetch,
     list,
+    listSync,
     get,
     getAll,
+    getByPrefix,
+    entries,
     setItem,
     removeItem,
-    mutateItem,
+    updateItem,
+    emulateClientMutation,
     addItem: addItemToServer,
     deleteItem: deleteItemFromServer,
     wsEvents,

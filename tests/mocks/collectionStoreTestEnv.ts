@@ -12,7 +12,7 @@ import {
 
 export type CollectionTestItem<D> = { value: D };
 
-export function createCollectionStoreTestEnv<D>(
+export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
     forceInitialDataInvalidation,
@@ -190,12 +190,16 @@ export function createCollectionStoreTestEnv<D>(
             }
           : undefined,
         mutation: async () => {
-          const result = await serverTable.mutateItem(itemId, newValue, {
-            duration,
-            triggerRTUEvent: triggerRTU,
-            addServerDataChangeAction,
-            mutationId,
-          });
+          const result = await serverTable.emulateClientMutation(
+            itemId,
+            newValue,
+            {
+              duration,
+              triggerRTUEvent: triggerRTU,
+              addServerDataChangeAction,
+              mutationId,
+            },
+          );
           return { value: result };
         },
         revalidateOnSuccess: withRevalidation,

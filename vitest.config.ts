@@ -8,5 +8,6 @@ export default defineConfig({
     testTimeout: 5_000,
     environment: 'happy-dom',
     allowOnly: isDev,
+    setupFiles: ['./vitest.setup.ts'],
   },
 });

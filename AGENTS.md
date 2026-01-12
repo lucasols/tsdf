@@ -71,6 +71,8 @@ pnpm vitest run src/yourFile.test.ts
 
 Tests use Vitest with `happy-dom` environment. Test files follow the pattern `src/*.test.{ts,tsx}`.
 
+- Tests use a YAML snapshot serializer instead of the default vitest snapshot serializer. Using `compactSnapshot` from `@ls-stack/utils/testUtils` to serialize the snapshot. Boolean values are serialized as `❌` or `✅` instead of `true` or `false`.
+
 ## TypeScript Configuration
 
 - Strict mode enabled with `noUncheckedIndexedAccess`

@@ -17,12 +17,10 @@ describe('basic fetch lifecycle', () => {
 
     // Initial state should be idle
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": null,
-        "error": null,
-        "refetchOnMount": false,
-        "status": "idle",
-      }
+      data: null
+      error: null
+      status: 'idle'
+      refetchOnMount: '❌'
     `);
 
     // Trigger fetch
@@ -33,12 +31,10 @@ describe('basic fetch lifecycle', () => {
 
     // Should transition to loading
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": null,
-        "error": null,
-        "refetchOnMount": false,
-        "status": "loading",
-      }
+      data: null
+      error: null
+      status: 'loading'
+      refetchOnMount: '❌'
     `);
 
     // Wait for fetch to complete
@@ -46,14 +42,10 @@ describe('basic fetch lifecycle', () => {
 
     // Should transition to success
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 42,
-        },
-        "error": null,
-        "refetchOnMount": false,
-        "status": "success",
-      }
+      data: { value: 42 }
+      error: null
+      status: 'success'
+      refetchOnMount: '❌'
     `);
   });
 
@@ -62,14 +54,10 @@ describe('basic fetch lifecycle', () => {
 
     // Initial state - has data from getInitialData (serverInitialData = 42)
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 42,
-        },
-        "error": null,
-        "refetchOnMount": false,
-        "status": "success",
-      }
+      data: { value: 42 }
+      error: null
+      status: 'success'
+      refetchOnMount: '❌'
     `);
 
     // Change server data before refetch
@@ -83,14 +71,10 @@ describe('basic fetch lifecycle', () => {
 
     // Should show refetching status (previous data preserved during fetch)
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 42,
-        },
-        "error": null,
-        "refetchOnMount": false,
-        "status": "refetching",
-      }
+      data: { value: 42 }
+      error: null
+      status: 'refetching'
+      refetchOnMount: '❌'
     `);
 
     // Wait for fetch to complete
@@ -98,14 +82,10 @@ describe('basic fetch lifecycle', () => {
 
     // Should transition to success with new data
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 100,
-        },
-        "error": null,
-        "refetchOnMount": false,
-        "status": "success",
-      }
+      data: { value: 100 }
+      error: null
+      status: 'success'
+      refetchOnMount: '❌'
     `);
   });
 
@@ -118,14 +98,10 @@ describe('basic fetch lifecycle', () => {
     await vi.runAllTimersAsync();
 
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 100,
-        },
-        "error": null,
-        "refetchOnMount": false,
-        "status": "success",
-      }
+      data: { value: 100 }
+      error: null
+      status: 'success'
+      refetchOnMount: '❌'
     `);
 
     // Set next fetch to fail
@@ -139,18 +115,10 @@ describe('basic fetch lifecycle', () => {
 
     // Should have error but preserve previous data
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 100,
-        },
-        "error": {
-          "code": 500,
-          "id": "fetch-error",
-          "message": "Network error",
-        },
-        "refetchOnMount": false,
-        "status": "error",
-      }
+      data: { value: 100 }
+      error: { code: 500, id: 'fetch-error', message: 'Network error' }
+      status: 'error'
+      refetchOnMount: '❌'
     `);
   });
 });
@@ -161,14 +129,10 @@ describe('getInitialData option', () => {
 
     // Should start with initial data and success status
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 42,
-        },
-        "error": null,
-        "refetchOnMount": false,
-        "status": "success",
-      }
+      data: { value: 42 }
+      error: null
+      status: 'success'
+      refetchOnMount: '❌'
     `);
   });
 
@@ -179,12 +143,10 @@ describe('getInitialData option', () => {
 
     // Should start with no data and idle status
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": null,
-        "error": null,
-        "refetchOnMount": false,
-        "status": "idle",
-      }
+      data: null
+      error: null
+      status: 'idle'
+      refetchOnMount: '❌'
     `);
 
     // Trigger a fetch (simulating what useDocument would do on mount)
@@ -196,14 +158,10 @@ describe('getInitialData option', () => {
 
     // Should now have server data
     expect(env.store.state).toMatchInlineSnapshot(`
-      {
-        "data": {
-          "value": 42,
-        },
-        "error": null,
-        "refetchOnMount": false,
-        "status": "success",
-      }
+      data: { value: 42 }
+      error: null
+      status: 'success'
+      refetchOnMount: '❌'
     `);
   });
 });
