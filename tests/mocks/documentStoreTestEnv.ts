@@ -110,12 +110,16 @@ export function createDocumentStoreTestEnv<D>(
         duration,
         triggerRTU,
         addServerDataChangeAction,
+        error,
+        updateStateAfterMutation,
       }: {
         withRevalidation?: boolean;
         withOptimisticUpdate?: boolean;
         duration?: number;
         triggerRTU?: boolean;
         addServerDataChangeAction?: boolean;
+        error?: string;
+        updateStateAfterMutation?: boolean;
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
@@ -133,14 +137,26 @@ export function createDocumentStoreTestEnv<D>(
               });
             }
           : undefined,
-        mutation: async () => {
+        mutation: async ({ updateState }) => {
+          if (error) {
+            throw new Error(error);
+          }
+
+          await serverMock.mutateData(newValue, {
+            duration,
+            triggerRTUEvent: triggerRTU,
+            addServerDataChangeAction,
+            mutationId,
+          });
+
+          if (updateStateAfterMutation) {
+            updateState((draft) => {
+              draft.value = newValue;
+            });
+          }
+
           return {
-            value: await serverMock.mutateData(newValue, {
-              duration,
-              triggerRTUEvent: triggerRTU,
-              addServerDataChangeAction,
-              mutationId,
-            }),
+            value: newValue,
           };
         },
         revalidateOnSuccess: withRevalidation,
