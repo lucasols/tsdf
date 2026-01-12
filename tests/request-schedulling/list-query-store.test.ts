@@ -235,199 +235,159 @@ describe('fetch query', () => {
   });
 
   test('load list with error', async () => {
-    const {
-      serverMock,
-      store: listQueryStore,
-      forceListUpdate,
-    } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
     });
 
-    serverMock.setFetchError('error');
+    env.serverTable.setNextListFetchError('error');
 
-    forceListUpdate(usersQueryParams);
+    env.forceListUpdate(usersQueryParams);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchInlineSnapshotString(`
-        {
-          "error": {
-            "message": "error",
-          },
-          "hasMore": false,
-          "items": [],
-          "payload": {
-            "tableId": "users",
-          },
-          "refetchOnMount": false,
-          "status": "error",
-          "wasLoaded": false,
-        }
+    expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'error' }
+      status: 'error'
+      wasLoaded: '❌'
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      hasMore: '❌'
+      items: []
       `);
 
     // refetch with success
-    serverMock.setFetchError(null);
+    env.forceListUpdate(usersQueryParams);
 
-    forceListUpdate(usersQueryParams);
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
 
-    expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "hasMore": false,
-          "items": [],
-          "payload": {
-            "tableId": "users",
-          },
-          "refetchOnMount": false,
-          "status": "loading",
-          "wasLoaded": false,
-        }
+    expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
+      error: null
+      status: 'loading'
+      wasLoaded: '❌'
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      hasMore: '❌'
+      items: []
       `);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.getQueryState(usersQueryParams))
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "hasMore": false,
-          "items": [
-            "users||1",
-            "users||2",
-            "users||3",
-            "users||4",
-            "users||5",
-          ],
-          "payload": {
-            "tableId": "users",
-          },
-          "refetchOnMount": false,
-          "status": "success",
-          "wasLoaded": true,
-        }
+    expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
+      error: null
+      status: 'success'
+      wasLoaded: '✅'
+      payload: { tableId: 'users' }
+      refetchOnMount: '❌'
+      hasMore: '❌'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
       `);
   });
 
-  test('fetch with size', async ({ expect }) => {
-    const query = { tableId: 'products' as const };
+  test('fetch with size', async () => {
+    const query: ListQueryParams = { tableId: 'products' };
 
-    const {
-      serverMock,
-      store: listQueryStore,
-      forceListUpdate,
-    } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
       defaultQuerySize: 5,
     });
 
-    listQueryStore.scheduleListQueryFetch('highPriority', query, 5);
+    env.scheduleFetch('highPriority', query, 5);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
-      {
-        "error": null,
-        "hasMore": true,
-        "items": [
-          "products||1",
-          "products||2",
-          "products||3",
-          "products||4",
-          "products||5",
-        ],
-        "payload": {
-          "tableId": "products",
-        },
-        "refetchOnMount": false,
-        "status": "success",
-        "wasLoaded": true,
-      }
+    expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
+      error: null
+      status: 'success'
+      wasLoaded: '✅'
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      hasMore: '✅'
+      items: ['"products||1', '"products||2', '"products||3', '"products||4', '"products||5']
     `);
-    expect(listQueryStore.store.state.items).toMatchSnapshot();
+    expect(env.store.state.items).toMatchInlineSnapshot(`
+      "products||1: { id: 1, name: 'Product 1' }
+      "products||2: { id: 2, name: 'Product 2' }
+      "products||3: { id: 3, name: 'Product 3' }
+      "products||4: { id: 4, name: 'Product 4' }
+      "products||5: { id: 5, name: 'Product 5' }
+    `);
 
-    expect(serverMock.fetchsCount).toBe(1);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
     // load more
-    listQueryStore.loadMore(query);
+    env.loadMore(query);
 
-    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
-      {
-        "error": null,
-        "hasMore": true,
-        "items": [
-          "products||1",
-          "products||2",
-          "products||3",
-          "products||4",
-          "products||5",
-        ],
-        "payload": {
-          "tableId": "products",
-        },
-        "refetchOnMount": false,
-        "status": "loadingMore",
-        "wasLoaded": true,
-      }
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
+
+    expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
+      error: null
+      status: 'loadingMore'
+      wasLoaded: '✅'
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      hasMore: '✅'
+      items: ['"products||1', '"products||2', '"products||3', '"products||4', '"products||5']
     `);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
-      {
-        "error": null,
-        "hasMore": true,
-        "items": [
-          "products||1",
-          "products||2",
-          "products||3",
-          "products||4",
-          "products||5",
-          "products||6",
-          "products||7",
-          "products||8",
-          "products||9",
-          "products||10",
-        ],
-        "payload": {
-          "tableId": "products",
-        },
-        "refetchOnMount": false,
-        "status": "success",
-        "wasLoaded": true,
-      }
+    expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
+      error: null
+      status: 'success'
+      wasLoaded: '✅'
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      hasMore: '✅'
+      items:
+        - '"products||1'
+        - '"products||2'
+        - '"products||3'
+        - '"products||4'
+        - '"products||5'
+        - '"products||6'
+        - '"products||7'
+        - '"products||8'
+        - '"products||9'
+        - '"products||10'
     `);
-    expect(listQueryStore.store.state.items).toMatchSnapshot();
+    expect(env.store.state.items).toMatchInlineSnapshot(`
+      "products||1: { id: 1, name: 'Product 1' }
+      "products||2: { id: 2, name: 'Product 2' }
+      "products||3: { id: 3, name: 'Product 3' }
+      "products||4: { id: 4, name: 'Product 4' }
+      "products||5: { id: 5, name: 'Product 5' }
+      "products||6: { id: 6, name: 'Product 6' }
+      "products||7: { id: 7, name: 'Product 7' }
+      "products||8: { id: 8, name: 'Product 8' }
+      "products||9: { id: 9, name: 'Product 9' }
+      "products||10: { id: 10, name: 'Product 10' }
+    `);
 
     // refetch keep size
-    forceListUpdate(query);
+    env.forceListUpdate(query);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.getQueryState(query)).toMatchInlineSnapshotString(`
-      {
-        "error": null,
-        "hasMore": true,
-        "items": [
-          "products||1",
-          "products||2",
-          "products||3",
-          "products||4",
-          "products||5",
-          "products||6",
-          "products||7",
-          "products||8",
-          "products||9",
-          "products||10",
-        ],
-        "payload": {
-          "tableId": "products",
-        },
-        "refetchOnMount": false,
-        "status": "success",
-        "wasLoaded": true,
-      }
+    expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
+      error: null
+      status: 'success'
+      wasLoaded: '✅'
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      hasMore: '✅'
+      items:
+        - '"products||1'
+        - '"products||2'
+        - '"products||3'
+        - '"products||4'
+        - '"products||5'
+        - '"products||6'
+        - '"products||7'
+        - '"products||8'
+        - '"products||9'
+        - '"products||10'
     `);
   });
 
