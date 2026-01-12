@@ -1,38 +1,52 @@
-import { describe, test } from 'vitest';
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import {
+  createListQueryStoreTestEnv,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
+
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
+
+function range(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
+
+const initialServerData: Tables = {
+  users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
+};
 
 describe('update state functions', () => {
   test('update state of one item', () => {
-    const { store } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    expect(store.getItemState('users||1')).toMatchInlineSnapshot(`
-      {
-        "id": 1,
-        "name": "User 1",
-      }
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
     `);
 
-    store.updateItemState('users||1', (data) => {
+    env.apiStore.updateItemState('users||1', (data) => {
       data.name = 'User 1 updated';
     });
 
-    expect(store.getItemState('users||1')).toMatchInlineSnapshot(`
-      {
-        "id": 1,
-        "name": "User 1 updated",
-      }
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1 updated'
     `);
   });
 
   test('update multiple itens state', () => {
-    const { store } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    store.updateItemState(['users||1', 'users||2'], () => {
+    env.apiStore.updateItemState(['users||1', 'users||2'], () => {
       return {
         name: 'new name',
         id: 1,
@@ -40,62 +54,61 @@ describe('update state functions', () => {
     });
 
     expect(
-      simplifyArraySnapshot(
-        store.getItemState(['users||1', 'users||2', 'users||3']),
-      ),
+      env.apiStore.getItemState(['users||1', 'users||2', 'users||3']),
     ).toMatchInlineSnapshot(`
-      "
-      payload: users||1, data: {name: new name, id: 1}
-      payload: users||2, data: {name: new name, id: 1}
-      payload: users||3, data: {id: 3, name: User 3}
-      "
+      - data: { id: 1, name: 'new name' }
+        payload: 'users||1'
+      - data: { id: 1, name: 'new name' }
+        payload: 'users||2'
+      - data: { id: 3, name: 'User 3' }
+        payload: 'users||3'
     `);
   });
 
   test('update multiple itens state with filter fn', () => {
-    const { store } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    store.updateItemState(
+    env.apiStore.updateItemState(
       (_, state) => state.id > 2,
       (data) => {
         data.name = 'modified';
       },
     );
 
-    expect(simplifyArraySnapshot(store.getItemState(() => true)))
-      .toMatchInlineSnapshot(`
-      "
-      payload: users||1, data: {id: 1, name: User 1}
-      payload: users||2, data: {id: 2, name: User 2}
-      payload: users||3, data: {id: 3, name: modified}
-      payload: users||4, data: {id: 4, name: modified}
-      payload: users||5, data: {id: 5, name: modified}
-      "
+    expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`
+      - data: { id: 1, name: 'User 1' }
+        payload: 'users||1'
+      - data: { id: 2, name: 'User 2' }
+        payload: 'users||2'
+      - data: { id: 3, name: 'modified' }
+        payload: 'users||3'
+      - data: { id: 4, name: 'modified' }
+        payload: 'users||4'
+      - data: { id: 5, name: 'modified' }
+        payload: 'users||5'
     `);
   });
 
   test('create if not exist', () => {
-    const { store } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
     let storeUpdates = 0;
-    store.store.subscribe(() => {
+    env.store.subscribe(() => {
       storeUpdates++;
     });
 
-    store.updateItemState(
+    env.apiStore.updateItemState(
       '20',
       (data) => {
         data.name = 'item 20';
       },
       {
         ifNothingWasUpdated: () => {
-          store.addItemToState('users||20', {
+          env.apiStore.addItemToState('users||20', {
             name: 'item 20',
             id: 20,
           });
@@ -105,59 +118,59 @@ describe('update state functions', () => {
 
     expect(storeUpdates).toEqual(1);
 
-    expect(simplifyArraySnapshot(store.getItemState(() => true)))
-      .toMatchInlineSnapshot(`
-      "
-      payload: users||1, data: {id: 1, name: User 1}
-      payload: users||2, data: {id: 2, name: User 2}
-      payload: users||3, data: {id: 3, name: User 3}
-      payload: users||4, data: {id: 4, name: User 4}
-      payload: users||5, data: {id: 5, name: User 5}
-      payload: users||20, data: {name: item 20, id: 20}
-      "
+    expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`
+      - data: { id: 1, name: 'User 1' }
+        payload: 'users||1'
+      - data: { id: 2, name: 'User 2' }
+        payload: 'users||2'
+      - data: { id: 3, name: 'User 3' }
+        payload: 'users||3'
+      - data: { id: 4, name: 'User 4' }
+        payload: 'users||4'
+      - data: { id: 5, name: 'User 5' }
+        payload: 'users||5'
+      - data: { id: 20, name: 'item 20' }
+        payload: 'users||20'
     `);
   });
 
   test('addItemToState', () => {
-    const { store } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    expect(store.getItemState('users||20')).toBeUndefined();
+    expect(env.apiStore.getItemState('users||20')).toBeUndefined();
 
-    store.addItemToState('users||20', {
+    env.apiStore.addItemToState('users||20', {
       name: 'item users||20',
       id: 20,
     });
 
-    expect(store.getItemState('users||20')).toMatchInlineSnapshot(`
-      {
-        "id": 20,
-        "name": "item users||20",
-      }
+    expect(env.apiStore.getItemState('users||20')).toMatchInlineSnapshot(`
+      id: 20
+      name: 'item users||20'
     `);
-    expect(store.store.state.itemQueries['users||20']).toMatchInlineSnapshot(`
-      {
-        "error": null,
-        "payload": "users||20",
-        "refetchOnMount": false,
-        "status": "success",
-        "wasLoaded": true,
-      }
+
+    expect(
+      env.store.state.itemQueries[env.getStoreItemKeyFromRaw('users||20')],
+    ).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||20'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
     `);
   });
 
   test('addItemToState with addItemToQueries', () => {
-    const { store } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
-      disableInitialDataInvalidation: true,
+      disableInitialInvalidation: true,
     });
 
-    expect(store.getItemState('users||20')).toBeUndefined();
+    expect(env.apiStore.getItemState('users||20')).toBeUndefined();
 
-    store.addItemToState(
+    env.apiStore.addItemToState(
       'users||20',
       {
         name: 'item users||20',
@@ -171,44 +184,52 @@ describe('update state functions', () => {
       },
     );
 
-    expect(store.store.state).toEqual({
+    const k1 = env.getStoreItemKeyFromRaw('users||1');
+    const k2 = env.getStoreItemKeyFromRaw('users||2');
+    const k3 = env.getStoreItemKeyFromRaw('users||3');
+    const k4 = env.getStoreItemKeyFromRaw('users||4');
+    const k5 = env.getStoreItemKeyFromRaw('users||5');
+    const k20 = env.getStoreItemKeyFromRaw('users||20');
+    const queryKey = env.getQueryKey({ tableId: 'users' });
+
+    expect(env.store.state).toEqual({
       itemQueries: {
-        'users||1': {
+        [k1]: {
           error: null,
           payload: 'users||1',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||2': {
+        [k2]: {
           error: null,
           payload: 'users||2',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||20': {
+        [k20]: {
           error: null,
           payload: 'users||20',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||3': {
+        [k3]: {
           error: null,
           payload: 'users||3',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||4': {
+        [k4]: {
           error: null,
           payload: 'users||4',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||5': {
+        [k5]: {
           error: null,
           payload: 'users||5',
           refetchOnMount: false,
@@ -217,25 +238,18 @@ describe('update state functions', () => {
         },
       },
       items: {
-        'users||1': { id: 1, name: 'User 1' },
-        'users||2': { id: 2, name: 'User 2' },
-        'users||20': { id: 20, name: 'item users||20' },
-        'users||3': { id: 3, name: 'User 3' },
-        'users||4': { id: 4, name: 'User 4' },
-        'users||5': { id: 5, name: 'User 5' },
+        [k1]: { id: 1, name: 'User 1' },
+        [k2]: { id: 2, name: 'User 2' },
+        [k20]: { id: 20, name: 'item users||20' },
+        [k3]: { id: 3, name: 'User 3' },
+        [k4]: { id: 4, name: 'User 4' },
+        [k5]: { id: 5, name: 'User 5' },
       },
       queries: {
-        [`{"tableId":"users"}`]: {
+        [queryKey]: {
           error: null,
           hasMore: false,
-          items: [
-            'users||20',
-            'users||1',
-            'users||2',
-            'users||3',
-            'users||4',
-            'users||5',
-          ],
+          items: [k20, k1, k2, k3, k4, k5],
           payload: { tableId: 'users' },
           refetchOnMount: false,
           status: 'success',
@@ -246,15 +260,14 @@ describe('update state functions', () => {
   });
 
   test('addItemToState with existing items and addItemToQueries', () => {
-    const { store } = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: true,
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    expect(store.getItemState('users||1')).not.toBeUndefined();
+    expect(env.apiStore.getItemState('users||1')).not.toBeUndefined();
 
-    store.addItemToState(
+    env.apiStore.addItemToState(
       'users||1',
       {
         name: 'item users||20',
@@ -268,37 +281,44 @@ describe('update state functions', () => {
       },
     );
 
-    expect(store.store.state).toEqual({
+    const k1 = env.getStoreItemKeyFromRaw('users||1');
+    const k2 = env.getStoreItemKeyFromRaw('users||2');
+    const k3 = env.getStoreItemKeyFromRaw('users||3');
+    const k4 = env.getStoreItemKeyFromRaw('users||4');
+    const k5 = env.getStoreItemKeyFromRaw('users||5');
+    const queryKey = env.getQueryKey({ tableId: 'users' });
+
+    expect(env.store.state).toEqual({
       itemQueries: {
-        'users||1': {
+        [k1]: {
           error: null,
           payload: 'users||1',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||2': {
+        [k2]: {
           error: null,
           payload: 'users||2',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||3': {
+        [k3]: {
           error: null,
           payload: 'users||3',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||4': {
+        [k4]: {
           error: null,
           payload: 'users||4',
           refetchOnMount: false,
           status: 'success',
           wasLoaded: true,
         },
-        'users||5': {
+        [k5]: {
           error: null,
           payload: 'users||5',
           refetchOnMount: false,
@@ -307,17 +327,17 @@ describe('update state functions', () => {
         },
       },
       items: {
-        'users||1': { id: 20, name: 'item users||20' },
-        'users||2': { id: 2, name: 'User 2' },
-        'users||3': { id: 3, name: 'User 3' },
-        'users||4': { id: 4, name: 'User 4' },
-        'users||5': { id: 5, name: 'User 5' },
+        [k1]: { id: 20, name: 'item users||20' },
+        [k2]: { id: 2, name: 'User 2' },
+        [k3]: { id: 3, name: 'User 3' },
+        [k4]: { id: 4, name: 'User 4' },
+        [k5]: { id: 5, name: 'User 5' },
       },
       queries: {
-        [`{"tableId":"users"}`]: {
+        [queryKey]: {
           error: null,
           hasMore: false,
-          items: ['users||1', 'users||2', 'users||3', 'users||4', 'users||5'],
+          items: [k1, k2, k3, k4, k5],
           payload: { tableId: 'users' },
           refetchOnMount: false,
           status: 'success',
@@ -327,53 +347,62 @@ describe('update state functions', () => {
     });
   });
 
-  test('delete item state', () => {
-    const { store } = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+  test('delete item state', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: true,
       useLoadedSnapshot: { tables: ['users'] },
     });
 
-    expect(store.getItemState('users||1')).toBeDefined();
+    expect(env.apiStore.getItemState('users||1')).toBeDefined();
 
-    store.deleteItemState('users||1');
+    env.apiStore.deleteItemState('users||1');
 
-    expect(store.getItemState('users||1')).toBeNull();
+    expect(env.apiStore.getItemState('users||1')).toBeNull();
 
-    expect(store.scheduleItemFetch('highPriority', 'users||1')).toBe('started');
+    expect(env.scheduleItemFetch('highPriority', 'users||1')).toBe('triggered');
 
-    const defaulItemQueryProps = {
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
+
+    const k1 = env.getStoreItemKeyFromRaw('users||1');
+    const k2 = env.getStoreItemKeyFromRaw('users||2');
+    const k3 = env.getStoreItemKeyFromRaw('users||3');
+    const k4 = env.getStoreItemKeyFromRaw('users||4');
+    const k5 = env.getStoreItemKeyFromRaw('users||5');
+    const queryKey = env.getQueryKey({ tableId: 'users' });
+
+    const defaultItemQueryProps = {
       error: null,
       refetchOnMount: false,
       status: 'success',
       wasLoaded: true,
     };
-    expect(store.store.state).toEqual({
+    expect(env.store.state).toEqual({
       itemQueries: {
-        'users||1': {
+        [k1]: {
           error: null,
           payload: 'users||1',
           refetchOnMount: false,
           status: 'loading',
           wasLoaded: false,
         },
-        'users||2': { ...defaulItemQueryProps, payload: 'users||2' },
-        'users||3': { ...defaulItemQueryProps, payload: 'users||3' },
-        'users||4': { ...defaulItemQueryProps, payload: 'users||4' },
-        'users||5': { ...defaulItemQueryProps, payload: 'users||5' },
+        [k2]: { ...defaultItemQueryProps, payload: 'users||2' },
+        [k3]: { ...defaultItemQueryProps, payload: 'users||3' },
+        [k4]: { ...defaultItemQueryProps, payload: 'users||4' },
+        [k5]: { ...defaultItemQueryProps, payload: 'users||5' },
       },
       items: {
-        'users||1': null,
-        'users||2': { id: 2, name: 'User 2' },
-        'users||3': { id: 3, name: 'User 3' },
-        'users||4': { id: 4, name: 'User 4' },
-        'users||5': { id: 5, name: 'User 5' },
+        [k1]: null,
+        [k2]: { id: 2, name: 'User 2' },
+        [k3]: { id: 3, name: 'User 3' },
+        [k4]: { id: 4, name: 'User 4' },
+        [k5]: { id: 5, name: 'User 5' },
       },
       queries: {
-        '{"tableId":"users"}': {
+        [queryKey]: {
           error: null,
           hasMore: false,
-          items: ['users||2', 'users||3', 'users||4', 'users||5'],
+          items: [k2, k3, k4, k5],
           payload: { tableId: 'users' },
           refetchOnMount: false,
           status: 'success',
