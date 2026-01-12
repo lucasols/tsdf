@@ -64,7 +64,7 @@ export function createDocumentStoreTestEnv<D>(
       const value = await serverMock.fetch(signal);
       return { value };
     },
-    disableInitialDataInvalidation: disableInitialInvalidation,
+    disableInitialInvalidation,
     getInitialData:
       resolvedInitialState ? () => resolvedInitialState : undefined,
     disableRefetchOnMount: disableInitialInvalidation,

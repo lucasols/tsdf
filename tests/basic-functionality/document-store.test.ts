@@ -6,21 +6,14 @@ import {
 
 function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
-  options: DocumentStoreTestEnvOptions<D> = {},
+  {
+    initialStateData = 'sameAsServer',
+    disableInitialInvalidation = true,
+  }: DocumentStoreTestEnvOptions<D> = {},
 ) {
-  const resolvedInitialStateData =
-    options.initialStateData === undefined ?
-      'sameAsServer'
-    : options.initialStateData;
-  const resolvedDisableInitialInvalidation =
-    options.disableInitialInvalidation === undefined ?
-      true
-    : options.disableInitialInvalidation;
-
   return createDocumentStoreTestEnvBase(serverInitialData, {
-    initialStateData: resolvedInitialStateData,
-    disableInitialInvalidation: resolvedDisableInitialInvalidation,
-    ...options,
+    initialStateData,
+    disableInitialInvalidation,
   });
 }
 
