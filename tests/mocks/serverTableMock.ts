@@ -632,7 +632,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         typeof error === 'string' ? { message: error } : error,
       );
     },
-    setListFetchError(error: FetchErrorConfig | string) {
+    setNextListFetchError(error: FetchErrorConfig | string) {
       nextListFetchError =
         typeof error === 'string' ? { message: error } : error;
     },

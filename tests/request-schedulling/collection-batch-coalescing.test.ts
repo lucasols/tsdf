@@ -366,7 +366,7 @@ describe('error handling in batch', () => {
     );
 
     // Make the batch request fail entirely (network error)
-    env.serverTable.setListFetchError('Network error');
+    env.serverTable.setNextListFetchError('Network error');
 
     env.scheduleFetch('highPriority', 'item1');
     env.scheduleFetch('highPriority', 'item2');
@@ -455,7 +455,7 @@ describe('awaitFetch with batch', () => {
     );
 
     // Make the batch request fail entirely
-    env.serverTable.setListFetchError('Network error');
+    env.serverTable.setNextListFetchError('Network error');
 
     env.scheduleFetch('highPriority', 'item1');
     const resultPromise = env.apiStore.awaitFetch('item2');
