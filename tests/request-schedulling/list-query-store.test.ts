@@ -804,86 +804,76 @@ describe('fetch item', () => {
     );
   });
 
-  test.concurrent(
-    'multiple item fetchs with different ids do not cancel each other, but cancel the ones with same id',
-    async () => {
-      const { serverMock, store: listQueryStore } = createTestEnv({
-        initialServerData,
-        disableInitialDataInvalidation: true,
+  test('multiple item fetches with different ids do not cancel each other, but cancel the ones with same id', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
       });
 
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||2');
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||3');
+    env.scheduleItemFetch('lowPriority', 'users||1');
+    env.scheduleItemFetch('lowPriority', 'users||2');
+    env.scheduleItemFetch('lowPriority', 'users||3');
 
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
-      listQueryStore.scheduleItemFetch('highPriority', 'users||2');
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||3');
+    env.scheduleItemFetch('lowPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||2');
+    env.scheduleItemFetch('lowPriority', 'users||3');
 
-      await sleep(10);
+    await vi.advanceTimersByTimeAsync(10);
 
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||2');
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||3');
+    env.scheduleItemFetch('lowPriority', 'users||1');
+    env.scheduleItemFetch('lowPriority', 'users||2');
+    env.scheduleItemFetch('lowPriority', 'users||3');
 
-      await serverMock.waitFetchIdle(40);
+    await vi.runAllTimersAsync();
 
-      expect(serverMock.fetchsCount).toBe(3);
+    expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||1');
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||2');
-      listQueryStore.scheduleItemFetch('lowPriority', 'users||3');
+    env.scheduleItemFetch('lowPriority', 'users||1');
+    env.scheduleItemFetch('lowPriority', 'users||2');
+    env.scheduleItemFetch('lowPriority', 'users||3');
 
-      listQueryStore.scheduleItemFetch('highPriority', 'users||1');
-      listQueryStore.scheduleItemFetch('highPriority', 'users||2');
-      listQueryStore.scheduleItemFetch('highPriority', 'users||3');
+    env.scheduleItemFetch('highPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||2');
+    env.scheduleItemFetch('highPriority', 'users||3');
 
-      await serverMock.waitFetchIdle(40);
+    await vi.runAllTimersAsync();
 
-      expect(serverMock.fetchsCount).toBe(6);
-    },
-  );
+    expect(env.serverTable.numOfFinishedFetches).toBe(6);
+  });
 
   test('load a item that was previously loaded by a query', async () => {
-    const { serverMock, store: listQueryStore } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { tables: ['users'] },
-      disableInitialDataInvalidation: true,
     });
 
-    listQueryStore.scheduleItemFetch('highPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||1');
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "refetching",
-          "wasLoaded": true,
-        }
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
+
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'refetching'
+      wasLoaded: '✅'
       `);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "success",
-          "wasLoaded": true,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
       `);
 
-    expect(listQueryStore.store.state.items['users||1'])
-      .toMatchInlineSnapshotString(`
-      {
-        "id": 1,
-        "name": "User 1",
-      }
-    `);
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(
+      `
+        id: 1
+        name: 'User 1'
+      `,
+    );
   });
 
   test.concurrent(
