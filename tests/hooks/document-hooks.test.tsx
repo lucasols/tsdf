@@ -1,170 +1,35 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  renderHook,
-} from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { useEffect, useState } from 'react';
-import { afterEach, describe, expect, test } from 'vitest';
 import {
-  TSDFDocumentStore,
-  TSDFUseDocumentReturn,
-} from '../../src/documentStore';
-import { ServerMock } from '../../test-old/mocks/fetchMock';
-import { pick } from '../../test-old/utils/objectUtils';
-import { sleep } from '../../test-old/utils/sleep';
-import {
-  createDefaultDocumentStore,
-  createRenderStore,
-  createValueStore,
-  DefaultDocStoreData as DefaultDocumentStoreData,
-} from '../../test-old/utils/storeUtils';
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
+import type { DocumentStatus } from '../../src/documentStore';
+import type { StoreError } from '../../src/utils/storeShared';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { trackChangedValues } from '../utils/trackChangedValues';
 
-const createTestEnv = createDefaultDocumentStore;
+beforeAll(() => {
+  vi.useFakeTimers();
+});
 
-async function actionWithOptimisticUpdate(
-  serverMock: ServerMock<DefaultDocumentStoreData>,
-  documentStore: TSDFDocumentStore<DefaultDocumentStoreData, any>,
-  newText: string,
-  error?: string,
-) {
-  const endMutation = documentStore.startMutation();
-
-  documentStore.updateState((draftData) => {
-    draftData.hello = newText;
-  });
-
-  try {
-    const result = await serverMock.emulateMutation(
-      { hello: newText },
-      { emulateError: error },
-    );
-
-    endMutation();
-
-    return result;
-  } catch (e) {
-    endMutation();
-
-    documentStore.invalidateData();
-    return false;
-  }
-}
-
-async function actionWithOptimisticUpdateAndRevalidation(
-  serverMock: ServerMock<DefaultDocumentStoreData>,
-  documentStore: TSDFDocumentStore<DefaultDocumentStoreData, any>,
-  newText: string,
-) {
-  const endMutation = documentStore.startMutation();
-
-  documentStore.updateState((draftData) => {
-    draftData.hello = newText;
-  });
-
-  try {
-    const result = await serverMock.emulateMutation({ hello: newText });
-
-    endMutation();
-
-    return result;
-  } catch (e) {
-    endMutation();
-
-    return false;
-  } finally {
-    documentStore.invalidateData();
-  }
-}
-
-async function actionWithoutOptimisticUpdate(
-  serverMock: ServerMock<DefaultDocumentStoreData>,
-  documentStore: TSDFDocumentStore<DefaultDocumentStoreData, any>,
-  newText: string,
-) {
-  const endMutation = documentStore.startMutation();
-
-  try {
-    const result = await serverMock.emulateMutation({ hello: newText });
-
-    documentStore.updateState((draftData) => {
-      draftData.hello = result.hello;
-    });
-
-    endMutation();
-
-    return result;
-  } catch (e) {
-    endMutation();
-
-    documentStore.invalidateData();
-    return false;
-  }
-}
-
-async function actionWithRevalidationAndWithoutOptimisticUpdate(
-  serverMock: ServerMock<DefaultDocumentStoreData>,
-  documentStore: TSDFDocumentStore<DefaultDocumentStoreData, any>,
-  newText: string,
-) {
-  const endMutation = documentStore.startMutation();
-
-  try {
-    const result = await serverMock.emulateMutation({ hello: newText });
-
-    endMutation();
-
-    return result;
-  } catch (e) {
-    endMutation();
-
-    return false;
-  } finally {
-    documentStore.invalidateData();
-  }
-}
-
-const Component = ({
-  store,
-  testIdPrefix = '',
-  onRender,
-  returnRefetchingStatus,
-  enableRefetchOnMount,
-}: {
-  store: TSDFDocumentStore<any, any>;
-  testIdPrefix?: string;
-  returnRefetchingStatus?: boolean;
-  enableRefetchOnMount?: boolean;
-  onRender?: (renderResult: Readonly<TSDFUseDocumentReturn<any, any>>) => void;
-}) => {
-  const selectionResult = store.useDocument({
-    returnRefetchingStatus,
-    disableRefetchOnMount: !enableRefetchOnMount,
-  });
-
-  onRender?.(selectionResult);
-
-  return (
-    <div>
-      <div data-testid={`${testIdPrefix}status`}>{selectionResult.status}</div>
-      <div data-testid={`${testIdPrefix}isLoading`}>
-        {selectionResult.isLoading ? 'true' : 'false'}
-      </div>
-      <div data-testid={`${testIdPrefix}data`}>
-        {JSON.stringify(selectionResult.data)}
-      </div>
-      <div data-testid={`${testIdPrefix}error`}>
-        {selectionResult.error?.message}
-      </div>
-    </div>
-  );
-};
+beforeEach(() => {
+  vi.setSystemTime(0);
+});
 
 afterEach(() => {
   cleanup();
+  vi.runOnlyPendingTimers();
 });
+
+type StoreValue = {
+  hello: string;
+};
 
 test('load data', async () => {
   const { serverMock, store: documentStore } = createDefaultDocumentStore();
