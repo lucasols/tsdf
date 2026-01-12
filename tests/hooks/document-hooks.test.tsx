@@ -479,44 +479,56 @@ test('rollback on error', async () => {
 
 describe('isolated tests', () => {
   test('use ensureIsLoaded prop', async () => {
-    const { serverMock, store: documentStore } = createDefaultDocumentStore({
-      useLoadedSnapshot: false,
-    });
+    const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
-    const renders = createRenderStore();
+    // trigger a load before the hook is rendered
+    env.apiStore.scheduleFetch('highPriority');
+
+    await vi.runAllTimersAsync();
+
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+    const renders = createLoggerStore();
 
     renderHook(() => {
-      const selectionResult = documentStore.useDocument({
+      const selectionResult = env.apiStore.useDocument({
         ensureIsLoaded: true,
       });
 
-      renders.add(
-        pick(selectionResult, ['status', 'isLoading', 'data'], {
-          isLoading: 'L',
-        }),
-      );
+      renders.add({
+        status: selectionResult.status,
+        isLoading: selectionResult.isLoading,
+        data: selectionResult.data?.value ?? null,
+      });
     });
 
-    await serverMock.waitFetchIdle();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- L: true -- data: null
-      status: loading -- L: true -- data: {hello:world}
-      status: success -- L: false -- data: {hello:world}
+      -> status: loading ⋅ isLoading: ✅ ⋅ data: {hello:world}
+      -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
       "
     `);
 
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
+
     renders.reset();
 
-    expect(documentStore.scheduleFetch('highPriority')).toBe('started');
+    expect(env.apiStore.scheduleFetch('highPriority')).toBe('triggered');
 
-    await serverMock.waitFetchIdle();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(env.serverMock.numOfFinishedFetches).toBe(3);
 
     // ignore refetching status
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- L: false -- data: {hello:world}
+      -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
       "
     `);
   });
