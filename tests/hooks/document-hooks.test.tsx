@@ -534,43 +534,60 @@ describe('isolated tests', () => {
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {
-    const { serverMock, store: documentStore } = createDefaultDocumentStore({
-      useLoadedSnapshot: false,
-    });
+    const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
-    const renders = createRenderStore();
+    // trigger a load before the hook is rendered
+    env.apiStore.scheduleFetch('highPriority');
 
-    const disabled = createValueStore<boolean>(true);
+    await vi.runAllTimersAsync();
 
-    renderHook(() => {
-      const res = documentStore.useDocument({
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ disabled }: { disabled: boolean }) => {
+        const res = env.apiStore.useDocument({
         ensureIsLoaded: true,
-        disabled: disabled.useValue(),
+          disabled,
       });
 
-      renders.add(
-        pick(res, ['status', 'isLoading', 'data'], { isLoading: 'L' }),
+        renders.add({
+          status: res.status,
+          isLoading: res.isLoading,
+          data: res.data?.value ?? null,
+        });
+      },
+      { initialProps: { disabled: true } },
       );
+
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+    expect(renders.snapshot).toMatchInlineSnapshot(
+      `
+      "
+        -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
+      "
+      `,
+    );
+
+    act(() => {
+    // enable loading
+      rerender({ disabled: false });
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: idle -- L: false -- data: null
-      "
-    `);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
-    // enable loading
-    disabled.set(false);
-
-    await serverMock.waitFetchIdle();
+    expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- L: false -- data: null
-      ---
-      status: loading -- L: true -- data: null
-      status: loading -- L: true -- data: {hello:world}
-      status: success -- L: false -- data: {hello:world}
+      -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
+      ⋅⋅⋅
+      -> status: loading ⋅ isLoading: ✅ ⋅ data: {hello:world}
+      -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
       "
     `);
   });
