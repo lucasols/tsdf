@@ -669,186 +669,139 @@ describe('fetch item', () => {
   });
 
   test('refetch item with updated data', async () => {
-    const { serverMock, store: listQueryStore } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { items: ['users||1'] },
-      disableInitialDataInvalidation: true,
     });
 
-    serverMock.produceData((draft) => {
-      draft['users']![0]!.name = 'Updated User 1';
-    });
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
-    listQueryStore.scheduleItemFetch('highPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||1');
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "refetching",
-          "wasLoaded": true,
-        }
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
+
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'refetching'
+      wasLoaded: '✅'
       `);
-    expect(listQueryStore.getItemState('users||1'))
-      .toMatchInlineSnapshotString(`
-      {
-        "id": 1,
-        "name": "User 1",
-      }
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'User 1'
     `);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "success",
-          "wasLoaded": true,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
       `);
 
-    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`
-      {
-        "users||1": {
-          "id": 1,
-          "name": "Updated User 1",
-        },
-      }
-    `);
+    expect(env.store.state.items).toMatchInlineSnapshot(
+      `"users||1: { id: 1, name: 'Updated User 1' }`,
+    );
 
-    expect(serverMock.fetchsCount).toBe(1);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
   test('refetch item with error', async () => {
-    const { serverMock, store: listQueryStore } = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
       useLoadedSnapshot: { items: ['users||1'] },
     });
 
-    serverMock.setFetchError('error');
+    env.serverTable.setNextFetchError('users||1', 'error');
 
-    listQueryStore.scheduleItemFetch('highPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||1');
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": {
-            "message": "error",
-          },
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "error",
-          "wasLoaded": true,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'error' }
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'error'
+      wasLoaded: '✅'
       `);
 
     // refetch with success
-    serverMock.setFetchError(null);
+    env.scheduleItemFetch('highPriority', 'users||1');
 
-    listQueryStore.scheduleItemFetch('highPriority', 'users||1');
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "refetching",
-          "wasLoaded": true,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'refetching'
+      wasLoaded: '✅'
       `);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "success",
-          "wasLoaded": true,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
       `);
-    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`
-      {
-        "users||1": {
-          "id": 1,
-          "name": "User 1",
-        },
-      }
-    `);
+    expect(env.store.state.items).toMatchInlineSnapshot(
+      `"users||1: { id: 1, name: 'User 1' }`,
+    );
   });
 
   test('load item with error', async () => {
-    const { serverMock, store: listQueryStore } = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      disableInitialInvalidation: false,
     });
 
-    serverMock.setFetchError('error');
+    env.serverTable.setNextFetchError('users||1', 'error');
 
-    listQueryStore.scheduleItemFetch('highPriority', 'users||1');
+    env.scheduleItemFetch('highPriority', 'users||1');
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": {
-            "message": "error",
-          },
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "error",
-          "wasLoaded": false,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: { code: 500, id: 'fetch-error', message: 'error' }
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'error'
+      wasLoaded: '❌'
       `);
-    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`{}`);
+    expect(env.store.state.items).toMatchInlineSnapshot(`{}`);
 
     // refetch with success
-    serverMock.setFetchError(null);
+    env.scheduleItemFetch('highPriority', 'users||1');
 
-    listQueryStore.scheduleItemFetch('highPriority', 'users||1');
+    // Wait for coalescing window
+    await vi.advanceTimersByTimeAsync(15);
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "loading",
-          "wasLoaded": false,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'loading'
+      wasLoaded: '❌'
       `);
 
-    await serverMock.waitFetchIdle();
+    await vi.runAllTimersAsync();
 
-    expect(listQueryStore.store.state.itemQueries['users||1'])
-      .toMatchInlineSnapshotString(`
-        {
-          "error": null,
-          "payload": "users||1",
-          "refetchOnMount": false,
-          "status": "success",
-          "wasLoaded": true,
-        }
+    expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
+      error: null
+      payload: 'users||1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
       `);
-    expect(listQueryStore.store.state.items).toMatchInlineSnapshotString(`
-      {
-        "users||1": {
-          "id": 1,
-          "name": "User 1",
-        },
-      }
-    `);
+    expect(env.store.state.items).toMatchInlineSnapshot(
+      `"users||1: { id: 1, name: 'User 1' }`,
+    );
   });
 
   test.concurrent(
