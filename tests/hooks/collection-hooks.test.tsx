@@ -1,16 +1,16 @@
 import { act, cleanup, render, renderHook } from '@testing-library/react';
+import { evtmitter } from 'evtmitter';
+import { useEffect, useState } from 'react';
 import { Store } from 't-state';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { pick } from './utils/objectUtils';
-import { sleep } from './utils/sleep';
+import { pick } from '../../test-old/utils/objectUtils';
+import { sleep } from '../../test-old/utils/sleep';
 import {
   createDefaultCollectionStore,
   createRenderStore,
   createValueStore,
   shouldNotSkip,
-} from './utils/storeUtils';
-import { useEffect, useState } from 'react';
-import { evtmitter } from 'evtmitter';
+} from '../../test-old/utils/storeUtils';
 
 const createTestEnv = createDefaultCollectionStore;
 
