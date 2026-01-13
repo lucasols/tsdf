@@ -1,4 +1,5 @@
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, cleanup, render, renderHook } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import {
   afterEach,
@@ -12,7 +13,6 @@ import {
 import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { trackChangedValues } from '../utils/trackChangedValues';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -152,8 +152,8 @@ describe('disable', () => {
     const { rerender } = renderHook(
       ({ disabled }: { disabled: boolean }) => {
         const data = env.apiStore.useDocument({
-        disabled,
-      });
+          disabled,
+        });
 
         renders.push({
           data: data.data?.value ?? null,
@@ -439,7 +439,7 @@ test('rollback on error', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
     {
-    useLoadedSnapshot: true,
+      useLoadedSnapshot: true,
       disableInitialInvalidation: true,
     },
   );
@@ -548,9 +548,9 @@ describe('isolated tests', () => {
     const { rerender } = renderHook(
       ({ disabled }: { disabled: boolean }) => {
         const res = env.apiStore.useDocument({
-        ensureIsLoaded: true,
+          ensureIsLoaded: true,
           disabled,
-      });
+        });
 
         renders.add({
           status: res.status,
@@ -559,20 +559,20 @@ describe('isolated tests', () => {
         });
       },
       { initialProps: { disabled: true } },
-      );
+    );
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
     expect(renders.snapshot).toMatchInlineSnapshot(
       `
-      "
+        "
         -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
-      "
+        "
       `,
     );
 
     act(() => {
-    // enable loading
+      // enable loading
       rerender({ disabled: false });
     });
 
@@ -593,96 +593,103 @@ describe('isolated tests', () => {
   });
 });
 
-test.concurrent('RTU update works', async () => {
-  const env = createTestEnv({
-    initialServerData: 'lucas',
-    useLoadedSnapshot: true,
-    emulateRTU: true,
-    dynamicRTUThrottleMs() {
-      return 300;
-    },
-  });
-
-  const renders = createRenderStore();
-
-  env.serverMock.produceData((draft) => {
-    draft.hello = 'RTU Update';
-  });
-
-  await sleep(100);
-
-  expect(env.store.store.state).toMatchInlineSnapshotString(`
+test('RTU update works', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'lucas' },
     {
-      "data": {
-        "hello": "world",
+      useLoadedSnapshot: true,
+      dynamicRealtimeThrottleMs() {
+        return 300;
       },
-      "error": null,
-      "refetchOnMount": "realtimeUpdate",
-      "status": "success",
-    }
+    },
+  );
+
+  const renders = createLoggerStore();
+
+  env.emulateExternalRTU({ hello: 'RTU Update' });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(env.store.state).toMatchInlineSnapshot(`
+    data:
+      value: { hello: 'lucas' }
+
+    error: null
+    refetchOnMount: 'realtimeUpdate'
+    status: 'success'
   `);
 
   renderHook(() => {
-    const { data, status } = env.store.useDocument({
+    const { data, status } = env.apiStore.useDocument({
       returnRefetchingStatus: true,
       disableRefetchOnMount: true,
     });
 
-    renders.add({ status, data });
+    renders.add({ status, data: data?.value ?? null });
   });
 
-  await env.serverMock.waitFetchIdle(0, 1500);
-
-  env.serverMock.produceData((draft) => {
-    draft.hello = 'Throttle update';
+  await act(async () => {
+    await vi.runAllTimersAsync();
   });
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+  const rtuTriggeredAt = Date.now();
+  env.emulateExternalRTU({ hello: 'Throttle update' });
 
-  expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {hello:world}
-    status: refetching -- data: {hello:world}
-    status: success -- data: {hello:RTU Update}
-    status: refetching -- data: {hello:RTU Update}
-    status: success -- data: {hello:Throttle update}
+    -> status: success ⋅ data: {hello:lucas}
+    -> status: refetching ⋅ data: {hello:lucas}
+    -> status: success ⋅ data: {hello:RTU Update}
+    -> status: refetching ⋅ data: {hello:RTU Update}
+    -> status: success ⋅ data: {hello:Throttle update}
     "
   `);
 
+  const secondFetch = env.serverMock.fetches[1];
+
+  expect(secondFetch).toBeDefined();
   expect(
-    env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
+    secondFetch ? secondFetch.startTime - rtuTriggeredAt : 0,
   ).toBeGreaterThanOrEqual(300);
 });
 
-test.concurrent('initial data is invalidated on first load', async () => {
-  const env = createTestEnv({
-    initialServerData: 'lucas',
-    useLoadedSnapshot: true,
-    disableInitialDataInvalidation: false,
-  });
+test('initial data is invalidated on first load', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    {
+      initialStateData: 'sameAsServer',
+      disableInitialInvalidation: false,
+    },
+  );
 
-  env.serverMock.produceData((draft) => {
-    draft.hello = 'update';
-  });
+  env.setServerData({ hello: 'update' });
 
-  const renders = createRenderStore();
+  const renders = createLoggerStore();
 
   renderHook(() => {
-    const { data, status } = env.store.useDocument({
+    const { data, status } = env.apiStore.useDocument({
       returnRefetchingStatus: true,
       disableRefetchOnMount: true,
     });
 
-    renders.add({ status, data });
+    renders.add({ status, data: data?.value ?? null });
   });
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {hello:world}
-    status: refetching -- data: {hello:world}
-    status: success -- data: {hello:update}
+    -> status: success ⋅ data: {hello:world}
+    -> status: refetching ⋅ data: {hello:world}
+    -> status: success ⋅ data: {hello:update}
     "
   `);
 });

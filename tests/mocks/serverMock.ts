@@ -17,6 +17,16 @@ export type FetchErrorConfig = {
 
 const fetchEmojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪'];
 
+export type FetchHistoryEntry<Data> = {
+  id: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  result: 'success' | 'error' | 'aborted';
+  data?: Data;
+  error?: Error;
+};
+
 export type AddActionFn = (
   action: string,
   options?: { id?: string | number; actionValue?: unknown },
@@ -35,6 +45,7 @@ export function createServerMock<Data>(
   let numOfStartedFetches = 0;
   let numOfFinishedFetches = 0;
   let fetchIdCounter = 0;
+  const fetches: FetchHistoryEntry<Data>[] = [];
 
   function getFetchId() {
     return notNullish(fetchEmojis[fetchIdCounter++ % fetchEmojis.length]);
@@ -110,7 +121,8 @@ export function createServerMock<Data>(
       signal?: AbortSignal,
       duration = DEFAULT_FETCH_DURATION_MS,
     ): Promise<Data> => {
-      const fetchId = addAction ? getFetchId() : undefined;
+      const fetchId = getFetchId();
+      const startTime = Date.now();
 
       if (addAction) {
         addAction('>fetch-started', { id: fetchId });
@@ -128,22 +140,32 @@ export function createServerMock<Data>(
       // Check for scheduled error first (simulates immediate request failure)
       if (nextFetchError) {
         signal?.removeEventListener('abort', onAbort);
+        const endTime = Date.now();
+        const error =
+          nextFetchError.path ?
+            new FetchError(nextFetchError.message, {
+              path: nextFetchError.path,
+              method: nextFetchError.method,
+              code: nextFetchError.code,
+            })
+          : new Error(nextFetchError.message);
+
+        fetches.push({
+          id: fetchId,
+          startTime,
+          endTime,
+          duration: endTime - startTime,
+          result: 'error',
+          error,
+        });
+
         if (addAction) {
           numOfFinishedFetches++;
           addAction('<fetch-error', { actionValue: 'error', id: fetchId });
         }
 
-        const errorConfig = nextFetchError;
         nextFetchError = null;
-
-        if (errorConfig.path) {
-          throw new FetchError(errorConfig.message, {
-            path: errorConfig.path,
-            method: errorConfig.method,
-            code: errorConfig.code,
-          });
-        }
-        throw new Error(errorConfig.message);
+        throw error;
       }
 
       const actualDuration = customFetchDurations.shift() ?? duration;
@@ -154,6 +176,14 @@ export function createServerMock<Data>(
       // Check for abort after network delay
       if (signal?.aborted) {
         onAbort();
+        const endTime = Date.now();
+        fetches.push({
+          id: fetchId,
+          startTime,
+          endTime,
+          duration: endTime - startTime,
+          result: 'aborted',
+        });
         // Note: Don't increment numOfFinishedFetches for aborted fetches
         // to match test expectations (only successful fetches count)
         throw new Error('Aborted');
@@ -163,6 +193,16 @@ export function createServerMock<Data>(
       if (last === undefined) {
         throw new Error('Server data history is empty');
       }
+
+      const endTime = Date.now();
+      fetches.push({
+        id: fetchId,
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+        result: 'success',
+        data: last,
+      });
 
       if (addAction) {
         numOfFinishedFetches++;
@@ -183,5 +223,6 @@ export function createServerMock<Data>(
     get numOfFinishedFetches() {
       return numOfFinishedFetches;
     },
+    fetches,
   };
 }
