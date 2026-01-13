@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { describe, expect, test } from 'vitest';
-import { sleep } from './utils/sleep';
+import { sleep } from '../../test-old/utils/sleep';
 import {
   createDefaultCollectionStore,
   DefaultCollectionState,
-} from './utils/storeUtils';
+} from '../../test-old/utils/storeUtils';
 
 const createTestEnv = createDefaultCollectionStore;
 
