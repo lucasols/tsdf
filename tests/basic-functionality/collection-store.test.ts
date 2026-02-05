@@ -196,32 +196,39 @@ test('initialization fetch', async () => {
   `);
 });
 
-test.concurrent('await fetch', async () => {
-  const { serverMock, store: collectionStore } = createTestEnv();
+test('await fetch', async () => {
+  const { apiStore, serverTable } = createCollectionStoreTestEnv(
+    { '1': defaultTodo },
+    { useLoadedSnapshot: true },
+  );
 
-  await waitInitializationFetch(collectionStore);
+  serverTable.setItem('1', { title: 'new title', completed: false });
 
-  serverMock.mutateData({ '1': { title: 'new title', completed: false } });
-
-  expect(collectionStore.getItemState('1')).toMatchObject({
-    data: { title: 'todo', completed: false },
+  expect(apiStore.getItemState('1')).toMatchObject({
+    data: { value: { title: 'todo', completed: false } },
   });
 
-  expect(await collectionStore.awaitFetch('1')).toEqual({
-    data: { title: 'new title', completed: false },
+  const fetchPromise = apiStore.awaitFetch('1');
+  await vi.runAllTimersAsync();
+  const result = await fetchPromise;
+
+  expect(result).toEqual({
+    data: { value: { title: 'new title', completed: false } },
     error: null,
   });
 
-  serverMock.setFetchError('error');
+  serverTable.setNextFetchError('1', 'error');
 
-  expect(await collectionStore.awaitFetch('1')).toEqual({
-    data: null,
-    error: {
-      message: 'error',
-    },
-  });
+  const errorFetchPromise = apiStore.awaitFetch('1');
+  await vi.runAllTimersAsync();
+  const errorResult = await errorFetchPromise;
 
-  expect(serverMock.fetchsCount).toEqual(3);
+  expect(errorResult).toMatchInlineSnapshot(`
+    data: null
+    error{Error}: { message: 'error', name: 'StoreFetchError' }
+  `);
+
+  expect(serverTable.numOfFinishedFetches).toBe(2);
 });
 
 test.concurrent(
