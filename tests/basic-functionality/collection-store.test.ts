@@ -177,21 +177,23 @@ test('multiple low priority fetches at same time trigger only one fetch', async 
   `);
 });
 
-test.concurrent('initialization fetch', async () => {
-  const { store: collectionStore } = createTestEnv();
+test('initialization fetch', async () => {
+  const env = createCollectionStoreTestEnv({ '1': defaultTodo });
 
-  await waitInitializationFetch(collectionStore);
+  env.scheduleFetch('lowPriority', '1');
 
-  expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-    '1': {
-      data: { title: 'todo', completed: false },
-      error: null,
-      refetchOnMount: false,
-      status: 'success',
-      payload: '1',
-      wasLoaded: true,
-    },
-  });
+  await vi.runAllTimersAsync();
+
+  expect(env.store.state).toMatchInlineSnapshot(`
+    "1:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+  `);
 });
 
 test.concurrent('await fetch', async () => {
