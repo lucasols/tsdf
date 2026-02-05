@@ -140,43 +140,42 @@ describe('fetch lifecycle', () => {
   });
 });
 
-test.concurrent(
-  'multiple low priority fetchs at same time trigger only one fetch',
-  async () => {
-    const { serverMock, store: collectionStore } = createTestEnv();
+test('multiple low priority fetches at same time trigger only one fetch', async () => {
+  const env = createCollectionStoreTestEnv({ '1': defaultTodo });
 
-    collectionStore.scheduleFetch('lowPriority', '1');
-    collectionStore.scheduleFetch('lowPriority', '1');
-    collectionStore.scheduleFetch('lowPriority', '1');
-    collectionStore.scheduleFetch('lowPriority', '1');
+  env.scheduleFetch('lowPriority', '1');
+  env.scheduleFetch('lowPriority', '1');
+  env.scheduleFetch('lowPriority', '1');
+  env.scheduleFetch('lowPriority', '1');
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': {
-        data: null,
-        error: null,
-        payload: '1',
-        refetchOnMount: false,
-        status: 'loading',
-        wasLoaded: false,
-      },
-    });
+  // Wait for coalescing window
+  await vi.advanceTimersByTimeAsync(15);
 
-    await sleep(serverMock.fetchDuration + 5);
+  expect(env.store.state).toMatchInlineSnapshot(`
+    "1:
+      data: null
+      error: null
+      payload: '1'
+      refetchOnMount: '❌'
+      status: 'loading'
+      wasLoaded: '❌'
+  `);
 
-    expect(serverMock.fetchsCount).toEqual(1);
+  await vi.runAllTimersAsync();
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': {
-        data: { title: 'todo', completed: false },
-        error: null,
-        refetchOnMount: false,
-        status: 'success',
-        payload: '1',
-        wasLoaded: true,
-      },
-    });
-  },
-);
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+  expect(env.store.state).toMatchInlineSnapshot(`
+    "1:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+  `);
+});
 
 test.concurrent('initialization fetch', async () => {
   const { store: collectionStore } = createTestEnv();
