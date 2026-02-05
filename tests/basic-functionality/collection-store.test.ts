@@ -46,95 +46,97 @@ describe('test helpers', () => {
   });
 });
 
-describe('fetch lifecicle', () => {
-  const { serverMock, store: collectionStore } = createTestEnv();
+describe('fetch lifecycle', () => {
+  const env = createCollectionStoreTestEnv({});
 
   test('fetch resource', async () => {
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({});
+    env.serverTable.setItem('1', defaultTodo);
 
-    collectionStore.scheduleFetch('lowPriority', '1');
+    expect(env.store.state).toMatchInlineSnapshot(`{}`);
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': {
-        data: null,
-        error: null,
-        refetchOnMount: false,
-        status: 'loading',
-        payload: '1',
-        wasLoaded: false,
-      },
-    });
+    env.scheduleFetch('lowPriority', '1');
 
-    await sleep(serverMock.fetchDuration + 5);
+    await vi.advanceTimersByTimeAsync(15);
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': {
-        data: { title: 'todo', completed: false },
-        error: null,
-        refetchOnMount: false,
-        status: 'success',
-        payload: '1',
-        wasLoaded: true,
-      },
-    });
+    expect(env.store.state).toMatchInlineSnapshot(
+      `
+        "1:
+          data: null
+          error: null
+          payload: '1'
+          refetchOnMount: '❌'
+          status: 'loading'
+          wasLoaded: '❌'
+      `,
+    );
 
-    expect(serverMock.fetchsCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(DEFAULT_FETCH_DURATION_MS);
+
+    expect(env.store.state).toMatchInlineSnapshot(`
+      "1:
+        data:
+          value: { completed: '❌', title: 'todo' }
+        error: null
+        payload: '1'
+        refetchOnMount: '❌'
+        status: 'success'
+        wasLoaded: '✅'
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
   test('refetch resource with new data', async () => {
-    serverMock.mutateData({
-      '1': {
-        title: 'new title',
-        completed: false,
-      },
-    });
+    env.serverTable.setItem('1', { title: 'new title', completed: false });
 
-    collectionStore.scheduleFetch('highPriority', '1');
+    env.scheduleFetch('highPriority', '1');
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': {
-        data: { title: 'todo', completed: false },
-        error: null,
-        refetchOnMount: false,
-        status: 'refetching',
-        payload: '1',
-        wasLoaded: true,
-      },
-    });
+    await vi.advanceTimersByTimeAsync(15);
 
-    await sleep(serverMock.fetchDuration + 5);
+    expect(env.store.state).toMatchInlineSnapshot(`
+      "1:
+        data:
+          value: { completed: '❌', title: 'todo' }
+        error: null
+        payload: '1'
+        refetchOnMount: '❌'
+        status: 'refetching'
+        wasLoaded: '✅'
+    `);
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': {
-        data: { title: 'new title', completed: false },
-        error: null,
-        refetchOnMount: false,
-        status: 'success',
-        payload: '1',
-        wasLoaded: true,
-      },
-    });
+    await vi.runAllTimersAsync();
 
-    expect(serverMock.fetchsCount).toBe(2);
+    expect(env.store.state).toMatchInlineSnapshot(`
+      "1:
+        data:
+          value: { completed: '❌', title: 'new title' }
+        error: null
+        payload: '1'
+        refetchOnMount: '❌'
+        status: 'success'
+        wasLoaded: '✅'
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
   });
 
   test('refetch resource with error', async () => {
-    serverMock.setFetchError('error');
+    env.serverTable.setNextFetchError('1', 'error');
 
-    collectionStore.scheduleFetch('highPriority', '1');
+    env.scheduleFetch('highPriority', '1');
 
-    await sleep(serverMock.fetchDuration + 5);
+    await vi.runAllTimersAsync();
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': {
-        data: { title: 'new title', completed: false },
-        error: { message: 'error' },
-        refetchOnMount: false,
-        status: 'error',
-        payload: '1',
-        wasLoaded: true,
-      },
-    });
+    expect(env.store.state).toMatchInlineSnapshot(`
+      "1:
+        data:
+          value: { completed: '❌', title: 'new title' }
+        error: { code: 500, id: 'fetch-error', message: 'error' }
+        payload: '1'
+        refetchOnMount: '❌'
+        status: 'error'
+        wasLoaded: '✅'
+    `);
   });
 });
 
