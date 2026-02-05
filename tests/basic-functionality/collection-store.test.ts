@@ -1,47 +1,48 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { describe, expect, test } from 'vitest';
-import { sleep } from '../../test-old/utils/sleep';
-import {
-  createDefaultCollectionStore,
-  DefaultCollectionState,
-} from '../../test-old/utils/storeUtils';
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 
-const createTestEnv = createDefaultCollectionStore;
+type TodoItem = { title: string; completed: boolean };
 
-async function waitInitializationFetch(store: any) {
-  store.scheduleFetch('lowPriority', '1');
-  await sleep(35);
-}
+const defaultTodo: TodoItem = { title: 'todo', completed: false };
 
-const defaultTodo = { title: 'todo', completed: false };
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
 
 describe('test helpers', () => {
   test('start with store initialized state', () => {
-    const { store: collectionStore } = createTestEnv({
-      initialServerData: { '1': defaultTodo, '2': defaultTodo },
+    const { store } = createCollectionStoreTestEnv(
+      { '1': defaultTodo, '2': defaultTodo },
+      {
       useLoadedSnapshot: true,
-      disableInitialDataInvalidation: true,
-    });
+        disableDataInvalidation: true,
+      },
+    );
 
-    expect(collectionStore.store.state).toEqual({
-      '1': {
-        data: { completed: false, title: 'todo' },
-        error: null,
-        payload: '1',
-        refetchOnMount: false,
-        status: 'success',
-        wasLoaded: true,
-      },
-      '2': {
-        data: { completed: false, title: 'todo' },
-        error: null,
-        payload: '2',
-        refetchOnMount: false,
-        status: 'success',
-        wasLoaded: true,
-      },
-    });
+    expect(store.state).toMatchInlineSnapshot(`
+      "1:
+        data:
+          value: { completed: '❌', title: 'todo' }
+        error: null
+        payload: '1'
+        refetchOnMount: '❌'
+        status: 'success'
+        wasLoaded: '✅'
+
+      "2:
+        data:
+          value: { completed: '❌', title: 'todo' }
+        error: null
+        payload: '2'
+        refetchOnMount: '❌'
+        status: 'success'
+        wasLoaded: '✅'
+    `);
   });
 });
 

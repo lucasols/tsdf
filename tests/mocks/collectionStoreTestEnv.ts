@@ -12,28 +12,31 @@ import {
 
 export type CollectionTestItem<D> = { value: D };
 
+export type CollectionStoreTestEnvOptions = {
+  /** When true, disables initial data invalidation (default: false) */
+  disableDataInvalidation?: boolean;
+  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  baseCoalescingWindowMs?: number;
+  mediumPriorityDelayMs?: number;
+  /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
+  useBatchFetch?: boolean;
+  /** Max items per batch (only used when useBatchFetch is true) */
+  maxBatchSize?: number;
+  /** Simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
+  useLoadedSnapshot?: boolean;
+};
+
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
-    forceInitialDataInvalidation,
+    disableDataInvalidation = false,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
     useLoadedSnapshot = false,
-  }: {
-    forceInitialDataInvalidation?: boolean;
-    dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-    baseCoalescingWindowMs?: number;
-    mediumPriorityDelayMs?: number;
-    /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
-    useBatchFetch?: boolean;
-    /** Max items per batch (only used when useBatchFetch is true) */
-    maxBatchSize?: number;
-    /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
-    useLoadedSnapshot?: boolean;
-  } = {},
+  }: CollectionStoreTestEnvOptions = {},
 ) {
   const {
     actionsHistory,
@@ -101,6 +104,8 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     return results;
   };
 
+  const shouldProvideInitialData = disableDataInvalidation || useLoadedSnapshot;
+
   const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
@@ -112,16 +117,16 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     },
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
     disableInitialDataInvalidation:
-      !forceInitialDataInvalidation || useLoadedSnapshot,
+      disableDataInvalidation || useLoadedSnapshot,
     getInitialData:
-      !forceInitialDataInvalidation || useLoadedSnapshot ?
+      shouldProvideInitialData ?
         () =>
           Object.entries(serverInitialData).map(([itemId, value]) => ({
             payload: itemId,
             data: { value },
           }))
       : undefined,
-    disableRefetchOnMount: !forceInitialDataInvalidation || useLoadedSnapshot,
+    disableRefetchOnMount: disableDataInvalidation || useLoadedSnapshot,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     onSchedulerEvent: (event) => {
@@ -139,6 +144,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   return {
     apiStore: collectionStore,
+    store: collectionStore.store,
     serverTable,
     get uiChanges() {
       return uiChanges;
