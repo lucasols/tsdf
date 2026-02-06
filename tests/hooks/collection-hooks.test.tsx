@@ -10,7 +10,6 @@ import {
   test,
   vi,
 } from 'vitest';
-import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 
 beforeAll(() => {
@@ -218,24 +217,62 @@ describe('useMultipleItems', () => {
     expect(result.current[0]?.data).toBe('todo');
     expect(result.current[1]?.data).toBe('todo');
   });
+
+  test('rerender when item payload changes', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': { title: 'todo 1', completed: true }, '2': defaultTodo },
+      { useLoadedSnapshot: true },
+    );
+
+    const renders1 = createLoggerStore();
+    const renders2 = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ items }) => {
+        const selectionResult = env.apiStore.useMultipleItems(
+          items.map((item) => ({
+            payload: item,
+          })),
+          {
+            returnRefetchingStatus: true,
+          },
+        );
+
+        const [item1, item2] = selectionResult;
+
+        renders1.add({
+          status: item1?.status,
+          payload: item1?.payload,
+          data: item1?.data?.value ?? null,
+        });
+        renders2.add({
+          status: item2?.status,
+          payload: item2?.payload,
+          data: item2?.data?.value ?? null,
+        });
+      },
+      { initialProps: { items: ['1', '2'] satisfies string[] } },
+    );
+
     renders1.reset();
     renders2.reset();
 
-    act(() => {
-      state.setKey('itemsToUse', ['1', '3']);
-    });
+    rerender({ items: ['1', '3'] });
 
-    await sleep(120);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: 1 -- data: {title:todo 1, completed:true}
+      -> status: success ⋅ payload: 1 ⋅ data: {title:todo 1, completed:✅}
       "
     `);
+
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 3 -- data: null
-      status: error -- payload: 3 -- data: null
+      -> status: loading ⋅ payload: 3 ⋅ data: null
+      -> status: error ⋅ payload: 3 ⋅ data: null
       "
     `);
   });
