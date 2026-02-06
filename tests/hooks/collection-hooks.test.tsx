@@ -160,13 +160,47 @@ describe('useMultipleItems', () => {
     `);
   });
 
-  test('data selector', () => {
-    expect(renders3.changesSnapshot).toMatchInlineSnapshot(`
+  test('revalidation with multiple components do not trigger multiple fetches', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { useLoadedSnapshot: true },
+    );
+
+    for (let i = 0; i < 27; i += 1) {
+      renderHook(() => env.apiStore.useMultipleItems([{ payload: '1' }]));
+    }
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const [item] = env.apiStore.useMultipleItems([{ payload: '1' }]);
+      renders.add({
+        status: item?.status,
+        data: item?.data?.value ?? null,
+      });
+    });
+
+    act(() => {
+      env.serverTable.setItem('1', {
+        title: 'was invalidated',
+        completed: true,
+      });
+      env.apiStore.invalidateItem('1');
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: 1 -- data: todo
-      status: success -- payload: 1 -- data: todo 1
+      -> status: success ⋅ data: {title:todo, completed:❌}
+      -> status: success ⋅ data: {title:was invalidated, completed:✅}
       "
     `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  });
   });
 
   test('rerender when item payload changes', async () => {
