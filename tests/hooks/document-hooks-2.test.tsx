@@ -117,6 +117,103 @@ test('disable should keep the selected data and not be affected by invalidation'
   `);
 });
 
+test('isOffScreen should keep the selected data and not be affected by invalidation', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    {
+      useLoadedSnapshot: true,
+      disableInitialInvalidation: true,
+    },
+  );
+
+  const renders = createLoggerStore();
+
+  const { rerender } = renderHook(
+    ({ isOffScreen }: { isOffScreen: boolean }) => {
+      const result = env.apiStore.useDocument({
+        isOffScreen,
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({
+        data: result.data?.value ?? null,
+        error: result.error,
+        status: result.status,
+        isLoading: result.isLoading,
+      });
+    },
+    { initialProps: { isOffScreen: false } },
+  );
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('first update (✅)');
+
+  act(() => {
+    env.emulateExternalRTU({ hello: '✅' });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('set disabled');
+
+  act(() => {
+    rerender({ isOffScreen: true });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('ignored update (❌)');
+
+  act(() => {
+    env.emulateExternalRTU({ hello: '❌' });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('enabled again');
+
+  act(() => {
+    rerender({ isOffScreen: false });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    -> data: {hello:world} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+
+    >>> first update (✅)
+
+    -> data: {hello:world} ⋅ error: null ⋅ status: refetching ⋅ isLoading: ❌
+    -> data: {hello:✅} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+
+    >>> set disabled
+
+    -> data: {hello:✅} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+
+    >>> ignored update (❌)
+
+    >>> enabled again
+
+    -> data: {hello:✅} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+    -> data: {hello:✅} ⋅ error: null ⋅ status: refetching ⋅ isLoading: ❌
+    -> data: {hello:❌} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+    "
+  `);
+});
+
 test('useDocument selector result should remain stable across rerenders', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
