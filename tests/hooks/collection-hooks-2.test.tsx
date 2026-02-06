@@ -1,12 +1,12 @@
 import { renderHook } from '@testing-library/react';
 import { useCallback } from 'react';
 import { expect, test } from 'vitest';
-import { sleep } from './utils/sleep';
+import { sleep } from '../../test-old/utils/sleep';
 import {
   Todo,
   createDefaultCollectionStore,
   createRenderStore,
-} from './utils/storeUtils';
+} from '../../test-old/utils/storeUtils';
 
 const createTestEnv = createDefaultCollectionStore;
 
@@ -400,7 +400,6 @@ test.concurrent(
     status: success -- changed: true
 
     >>> Rerenders
-
     status: success -- changed: false
     status: success -- changed: false
     status: success -- changed: false
