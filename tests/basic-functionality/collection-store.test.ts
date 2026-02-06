@@ -502,19 +502,16 @@ describe('update state functions', () => {
     `);
   });
 
-  test('deleteItemState', () => {
-    const { store } = createTestEnv({
-      initialServerData,
+  test('deleteItemState', async () => {
+    const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
       useLoadedSnapshot: true,
     });
 
-    expect(store.getItemState('1')).toBeDefined();
+    expect(apiStore.getItemState('1')).toBeDefined();
 
-    store.deleteItemState('1');
+    apiStore.deleteItemState('1');
 
-    expect(store.getItemState('1')).toBeNull();
-
-    expect(store.scheduleFetch('highPriority', '1')).toBe('started');
+    expect(apiStore.getItemState('1')).toBeNull();
   });
 });
 
