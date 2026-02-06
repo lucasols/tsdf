@@ -201,9 +201,22 @@ describe('useMultipleItems', () => {
 
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
-  });
 
-  test('rerender when item payload changes', async () => {
+  test('data selector', () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { useLoadedSnapshot: true },
+    );
+
+    const { result } = renderHook(() =>
+      env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
+        selector: (data) => data?.value.title,
+      }),
+    );
+
+    expect(result.current[0]?.data).toBe('todo');
+    expect(result.current[1]?.data).toBe('todo');
+  });
     renders1.reset();
     renders2.reset();
 
