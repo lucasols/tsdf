@@ -335,19 +335,19 @@ describe('useMultipleItems isolated tests', () => {
     `);
   });
 
-  test('with disableRefetchOnMount', async () => {
-    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
-      {
-        initialServerData: serverInitialData,
-        disableInitialDataInvalidation: false,
-      },
+  test('disableRefetchOnMount does not disable the initial fetch', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { forceInitialDataInvalidation: true },
     );
 
-    const renders1 = createRenderStore();
-    const renders2 = createRenderStore();
+    const renders1 = createLoggerStore();
+    const renders2 = createLoggerStore();
+
+    expect(env.apiStore.store.state).toMatchInlineSnapshot(`{}`);
 
     renderHook(() => {
-      const [item1, item2] = collectionStore.useMultipleItems(
+      const [item1, item2] = env.apiStore.useMultipleItems(
         ['1', '2'].map((item) => ({
           payload: item,
           returnRefetchingStatus: true,
@@ -355,24 +355,33 @@ describe('useMultipleItems isolated tests', () => {
         })),
       );
 
-      renders1.add(pick(item1, ['status', 'payload', 'data']));
-      renders2.add(pick(item2, ['status', 'payload', 'data']));
+      renders1.add({
+        status: item1?.status,
+        payload: item1?.payload,
+        data: item1?.data?.value ?? null,
+      });
+      renders2.add({
+        status: item2?.status,
+        payload: item2?.payload,
+        data: item2?.data?.value ?? null,
+      });
     });
 
-    await serverMock.waitFetchIdle();
-
-    expect(renders1.renderCount()).toBeGreaterThan(0);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 1 -- data: null
-      status: success -- payload: 1 -- data: {title:todo, completed:false}
+      -> status: loading ⋅ payload: 1 ⋅ data: null
+      -> status: success ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
       "
     `);
+
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 2 -- data: null
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      -> status: loading ⋅ payload: 2 ⋅ data: null
+      -> status: success ⋅ payload: 2 ⋅ data: {title:todo, completed:❌}
       "
     `);
   });
