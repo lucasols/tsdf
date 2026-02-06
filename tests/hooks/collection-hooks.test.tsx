@@ -900,48 +900,57 @@ test('RTU update works', async () => {
   expect(fetchHistory.length).toBeGreaterThanOrEqual(2);
 });
 
+test('fetch error then mount component without error', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    { forceInitialDataInvalidation: true },
+  );
 
-  const renders = createRenderStore();
+  const renders = createLoggerStore();
 
-  env.serverMock.setFetchError('error');
+  env.serverTable.setNextFetchError('1', 'error');
 
-  env.store.scheduleFetch('highPriority', '1');
+  act(() => {
+    env.scheduleFetch('highPriority', '1');
+  });
 
-  await env.serverMock.waitFetchIdle(200);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(env.store.store.state).toMatchInlineSnapshotString(`
-      {
-        "1": {
-          "data": null,
-          "error": {
-            "message": "error",
+  expect(env.apiStore.getItemState('1')).toMatchObject({
+    data: null,
+    error: {
+      message: 'error',
           },
-          "payload": "1",
-          "refetchOnMount": false,
-          "status": "error",
-          "wasLoaded": false,
-        },
-      }
-    `);
+    payload: '1',
+    refetchOnMount: false,
+    status: 'error',
+    wasLoaded: false,
+  });
 
-  env.serverMock.setFetchError(null);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(300);
+  });
 
   renderHook(() => {
-    const { data, status } = env.store.useItem('1', {
+    const { data, status } = env.apiStore.useItem('1', {
       returnRefetchingStatus: true,
       disableRefetchOnMount: true,
     });
 
-    renders.add({ status, data });
+    renders.add({ status, data: data?.value ?? null });
   });
 
-  await env.serverMock.waitFetchIdle();
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: error -- data: null
-      status: loading -- data: null
-      status: success -- data: {title:todo, completed:false}
+    -> status: error ⋅ data: null
+    -> status: loading ⋅ data: null
+    -> status: success ⋅ data: {title:todo, completed:❌}
       "
     `);
 });
