@@ -154,6 +154,7 @@ describe('useMultipleItems', () => {
 
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
+      -> status: success ⋅ payload: 2 ⋅ data: {title:todo, completed:❌}
       -> status: refetching ⋅ payload: 2 ⋅ data: {title:todo, completed:❌}
       -> status: success ⋅ payload: 2 ⋅ data: {title:todo 2, completed:✅}
       "
