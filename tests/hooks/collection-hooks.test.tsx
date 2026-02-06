@@ -1,43 +1,52 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
-import { evtmitter } from 'evtmitter';
-import { useEffect, useState } from 'react';
 import { Store } from 't-state';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { pick } from '../../test-old/utils/objectUtils';
-import { sleep } from '../../test-old/utils/sleep';
 import {
-  createDefaultCollectionStore,
-  createRenderStore,
-  createValueStore,
-  shouldNotSkip,
-} from '../../test-old/utils/storeUtils';
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
+import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 
-const createTestEnv = createDefaultCollectionStore;
+beforeAll(() => {
+  vi.useFakeTimers();
+});
 
-const defaultTodo = { title: 'todo', completed: false };
+beforeEach(() => {
+  vi.setSystemTime(0);
+});
+
+afterEach(() => {
+    cleanup();
+  vi.runOnlyPendingTimers();
+});
+
+type Todo = {
+  title: string;
+  completed: boolean;
+};
+
+const defaultTodo: Todo = { title: 'todo', completed: false };
 
 describe('useMultipleItems', () => {
-  afterAll(() => {
-    cleanup();
-  });
+  test('load the items', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { forceInitialDataInvalidation: true },
+    );
 
-  const { serverMock, store: collectionStore } = createDefaultCollectionStore({
-    randomTimeout: true,
-    initialServerData: { '1': defaultTodo, '2': defaultTodo },
-    disableInitialDataInvalidation: false,
-  });
-  const renders1 = createRenderStore();
-  const renders2 = createRenderStore();
+    const renders1 = createLoggerStore();
+    const renders2 = createLoggerStore();
 
-  const itemsToUse = ['1', '2'];
-
-  const state = new Store({
-    state: { itemsToUse },
-  });
-
-  renderHook(() => {
-    const selectionResult = collectionStore.useMultipleItems(
-      state.useKey('itemsToUse').map((item) => ({
+    renderHook(
+      ({ items }) => {
+        const selectionResult = env.apiStore.useMultipleItems(
+          items.map((item) => ({
         payload: item,
       })),
       {
@@ -50,33 +59,36 @@ describe('useMultipleItems', () => {
     renders1.add({
       status: item1?.status,
       payload: item1?.payload,
-      data: item1?.data,
+          data: item1?.data?.value ?? null,
     });
     renders2.add({
       status: item2?.status,
       payload: item2?.payload,
-      data: item2?.data,
+          data: item2?.data?.value ?? null,
     });
-  });
+      },
+      { initialProps: { items: ['1', '2'] } },
+    );
 
-  test('load the items', async () => {
-    await sleep(120);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 1 -- data: null
-      status: success -- payload: 1 -- data: {title:todo, completed:false}
+      -> status: loading ⋅ payload: 1 ⋅ data: null
+      -> status: success ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
       "
     `);
 
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 2 -- data: null
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
+      -> status: loading ⋅ payload: 2 ⋅ data: null
+      -> status: success ⋅ payload: 2 ⋅ data: {title:todo, completed:❌}
       "
     `);
 
-    expect(serverMock.fetchsCount).toBe(2);
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
   });
 
   const renders3 = createRenderStore();
