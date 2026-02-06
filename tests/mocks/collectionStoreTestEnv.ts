@@ -22,6 +22,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     useBatchFetch,
     maxBatchSize,
     useLoadedSnapshot = false,
+    initialData,
   }: {
     forceInitialDataInvalidation?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -33,6 +34,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     maxBatchSize?: number;
     /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
     useLoadedSnapshot?: boolean;
+    initialData?: Record<string, D> | 'fromServer';
   } = {},
 ) {
   const {
@@ -101,6 +103,13 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     return results;
   };
 
+  function getDataFromServer(sever: Record<string, D>) {
+    return Object.entries(sever).map(([itemId, value]) => ({
+      payload: itemId,
+      data: { value },
+    }));
+  }
+
   const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
@@ -115,11 +124,10 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       !forceInitialDataInvalidation || useLoadedSnapshot,
     getInitialData:
       !forceInitialDataInvalidation || useLoadedSnapshot ?
-        () =>
-          Object.entries(serverInitialData).map(([itemId, value]) => ({
-            payload: itemId,
-            data: { value },
-          }))
+        () => getDataFromServer(serverInitialData)
+      : initialData === 'fromServer' ?
+        () => getDataFromServer(serverInitialData)
+      : initialData ? () => getDataFromServer(initialData)
       : undefined,
     disableRefetchOnMount: !forceInitialDataInvalidation || useLoadedSnapshot,
     dynamicRealtimeThrottleMs,
