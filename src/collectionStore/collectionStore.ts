@@ -564,13 +564,13 @@ export function createCollectionStore<
               item.data = __LEGIT_CAST__(result);
             }
           }
-
-          if (ifNothingWasUpdated && !someItemWasUpdated) {
-            ifNothingWasUpdated();
-          }
         },
         { action: 'update-item-state' },
       );
+
+      if (ifNothingWasUpdated && !someItemWasUpdated) {
+        ifNothingWasUpdated();
+      }
     });
 
     return someItemWasUpdated;
