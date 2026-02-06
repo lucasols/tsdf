@@ -639,46 +639,55 @@ describe('useItem', () => {
 
 describe('useItem isolated tests', () => {
   test('use deleted item', async () => {
-    const { serverMock, store } = createDefaultCollectionStore({
-      initialServerData: serverInitialData,
-      useLoadedSnapshot: true,
-      disableInitialDataInvalidation: true,
-    });
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { useLoadedSnapshot: true },
+    );
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
     renderHook(() => {
-      const selectionResult = store.useItem('2', {
+      const selectionResult = env.apiStore.useItem('2', {
         returnRefetchingStatus: true,
         disableRefetchOnMount: true,
       });
 
-      renders.add(pick(selectionResult, ['status', 'payload', 'data']));
+      renders.add({
+        status: selectionResult.status,
+        payload: selectionResult.payload,
+        data: selectionResult.data?.value ?? null,
+      });
     });
 
-    store.deleteItemState('2');
-    serverMock.mutateData({ '2': null });
+    act(() => {
+      env.apiStore.deleteItemState('2');
+      env.serverTable.removeItem('2');
+    });
 
-    await renders.waitNextRender();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
-      status: deleted -- payload: 2 -- data: null
+      -> status: success ⋅ payload: 2 ⋅ data: {title:todo, completed:❌}
+      -> status: deleted ⋅ payload: 2 ⋅ data: null
       "
     `);
 
-    shouldNotSkip(store.scheduleFetch('highPriority', '2'));
+    act(() => {
+      env.scheduleFetch('highPriority', '2');
+    });
 
-    await serverMock.waitFetchIdle();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
       "
-      status: success -- payload: 2 -- data: {title:todo, completed:false}
-      status: deleted -- payload: 2 -- data: null
-      ---
-      status: loading -- payload: 2 -- data: null
-      status: error -- payload: 2 -- data: null
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: 2 ⋅ data: null
+      -> status: error ⋅ payload: 2 ⋅ data: null
       "
     `);
   });
