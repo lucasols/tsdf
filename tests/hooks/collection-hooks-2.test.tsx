@@ -34,16 +34,16 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
   );
 
   const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+    rejectKeys: ['queryMetadata'],
+  });
 
-    const { rerender } = renderHook(
-      ({ isOffScreen }: { isOffScreen: boolean }) => {
+  const { rerender } = renderHook(
+    ({ isOffScreen }: { isOffScreen: boolean }) => {
       const result = env.apiStore.useItem('1', {
-          isOffScreen,
-          returnRefetchingStatus: true,
-          disableRefetchOnMount: true,
-        });
+        isOffScreen,
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
 
       renders.add({
         status: result.status,
@@ -52,25 +52,29 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
         isLoading: result.isLoading,
         payload: result.payload,
       });
-      },
-      { initialProps: { isOffScreen: false } },
-    );
+    },
+    { initialProps: { isOffScreen: false } },
+  );
 
   await act(async () => {
     await vi.runAllTimersAsync();
   });
 
-    renders.addMark('first update (✅)');
+  renders.addMark('first update (✅)');
 
   act(() => {
-    env.serverTable.setItem('1', { title: '✅', completed: true }, { triggerRTUEvent: true });
+    env.serverTable.setItem(
+      '1',
+      { title: '✅', completed: true },
+      { triggerRTUEvent: true },
+    );
   });
 
   await act(async () => {
     await vi.runAllTimersAsync();
   });
 
-    renders.addMark('set disabled');
+  renders.addMark('set disabled');
 
   act(() => {
     rerender({ isOffScreen: true });
@@ -80,17 +84,21 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     await vi.runAllTimersAsync();
   });
 
-    renders.addMark('ignored update (❌)');
+  renders.addMark('ignored update (❌)');
 
   act(() => {
-    env.serverTable.setItem('1', { title: '❌', completed: true }, { triggerRTUEvent: true });
+    env.serverTable.setItem(
+      '1',
+      { title: '❌', completed: true },
+      { triggerRTUEvent: true },
+    );
   });
 
   await act(async () => {
     await vi.runAllTimersAsync();
   });
 
-    renders.addMark('enabled again');
+  renders.addMark('enabled again');
 
   act(() => {
     rerender({ isOffScreen: false });
@@ -101,7 +109,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
   });
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
+    "
     ┌─
     ⋅ status: success
     ⋅ data: {title:todo, completed:❌}
@@ -110,7 +118,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     ⋅ payload: 1
     └─
 
-      >>> first update (✅)
+    >>> first update (✅)
 
     ┌─
     ⋅ status: refetching
@@ -127,7 +135,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     ⋅ payload: 1
     └─
 
-      >>> set disabled
+    >>> set disabled
 
     ┌─
     ⋅ status: success
@@ -137,9 +145,9 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     ⋅ payload: 1
     └─
 
-      >>> ignored update (❌)
+    >>> ignored update (❌)
 
-      >>> enabled again
+    >>> enabled again
 
     ┌─
     ⋅ status: success
@@ -162,328 +170,408 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     ⋅ isLoading: ❌
     ⋅ payload: 1
     └─
-      "
-    `);
+    "
+  `);
 });
 
 test('disable then enable isOffScreen', async () => {
-  const env = createTestEnv({
-    initialServerData: { '1': defaultTodo, '2': defaultTodo },
-    useLoadedSnapshot: true,
-    emulateRTU: true,
-    disableInitialDataInvalidation: true,
-    lowPriorityThrottleMs: 10,
-  });
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    {
+      initialData: 'fromServer',
+    },
+  );
 
-  const renders = createRenderStore({
+  const renders = createLoggerStore({
     filterKeys: ['status', 'data', 'payload'],
   });
 
   const { rerender } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
-      const result = env.store.useItem('1', {
+      const result = env.apiStore.useItem('1', {
         isOffScreen,
         returnRefetchingStatus: true,
       });
 
-      renders.add(result);
+      renders.add({
+        status: result.status,
+        data: result.data?.value ?? null,
+        payload: result.payload,
+      });
     },
     { initialProps: { isOffScreen: false } },
   );
 
-  await sleep(120);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
   renders.addMark('set disabled');
 
-  rerender({ isOffScreen: true });
+  act(() => {
+    rerender({ isOffScreen: true });
+  });
 
-  await sleep(120);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
   renders.addMark('enabled again');
 
-  rerender({ isOffScreen: false });
+  act(() => {
+    rerender({ isOffScreen: false });
+  });
 
-  await sleep(200);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {title:todo, completed:false} -- payload: 1
-    status: refetching -- data: {title:todo, completed:false} -- payload: 1
-    status: success -- data: {title:todo, completed:false} -- payload: 1
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
+    -> status: refetching ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
 
     >>> set disabled
 
-    status: success -- data: {title:todo, completed:false} -- payload: 1
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
 
     >>> enabled again
 
-    status: success -- data: {title:todo, completed:false} -- payload: 1
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
     "
   `);
-
-  expect(env.serverMock.fetchsCount).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
 });
 
-test.concurrent(
-  'useMultipleItems should not trigger a mount refetch when some option changes',
-  async () => {
-    const env = createTestEnv({
-      initialServerData: { '1': defaultTodo, '2': defaultTodo },
-      useLoadedSnapshot: true,
-      lowPriorityThrottleMs: 10,
-    });
+test('useMultipleItems should not trigger a mount refetch when some option changes', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    {
+      initialData: 'fromServer',
+    },
+  );
 
-    const filterKeys = ['status', 'data', 'payload', 'rrfs'];
-    const renders1 = createRenderStore({ filterKeys });
-    const renders2 = createRenderStore({ filterKeys });
+  const filterKeys = ['status', 'data', 'payload', 'rrfs'];
+  const renders1 = createLoggerStore({ filterKeys });
+  const renders2 = createLoggerStore({ filterKeys });
 
-    const { rerender } = renderHook(
-      ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
-        const result = env.store.useMultipleItems(
-          ['1', '2'].map((payload) => ({
-            payload,
-            returnRefetchingStatus,
-          })),
-        );
+  const { rerender } = renderHook(
+    ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
+      const result = env.apiStore.useMultipleItems(
+        ['1', '2'].map((payload) => ({
+          payload,
+          returnRefetchingStatus,
+        })),
+      );
 
-        renders1.add({ ...result[0]!, rrfs: returnRefetchingStatus });
-        renders2.add({ ...result[1]!, rrfs: returnRefetchingStatus });
-      },
-      { initialProps: { returnRefetchingStatus: false } },
-    );
+      const [item1, item2] = result;
 
-    await env.serverMock.waitFetchIdle();
+      renders1.add({
+        status: item1?.status,
+        data: item1?.data?.value ?? null,
+        payload: item1?.payload,
+        rrfs: returnRefetchingStatus,
+      });
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+      renders2.add({
+        status: item2?.status,
+        data: item2?.data?.value ?? null,
+        payload: item2?.payload,
+        rrfs: returnRefetchingStatus,
+      });
+    },
+    { initialProps: { returnRefetchingStatus: false } },
+  );
 
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
+
+  act(() => {
     rerender({ returnRefetchingStatus: true });
+  });
 
-    await sleep(200);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    expect(renders1.snapshot).toMatchInlineSnapshotString(`
+  expect(renders1.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {title:todo, completed:false} -- payload: 1 -- rrfs: false
-    status: success -- data: {title:todo, completed:false} -- payload: 1 -- rrfs: true
-    "
-  `);
-    expect(renders2.snapshot).toMatchInlineSnapshotString(`
-    "
-    status: success -- data: {title:todo, completed:false} -- payload: 2 -- rrfs: false
-    status: success -- data: {title:todo, completed:false} -- payload: 2 -- rrfs: true
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1 ⋅ rrfs: ❌
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1 ⋅ rrfs: ✅
     "
   `);
-  },
-);
+  expect(renders2.snapshot).toMatchInlineSnapshot(`
+    "
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2 ⋅ rrfs: ❌
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2 ⋅ rrfs: ✅
+    "
+  `);
+});
 
-test.concurrent(
-  'useMultipleItems should not trigger a mount refetch for unchanged items',
-  async () => {
-    const env = createTestEnv({
-      initialServerData: {
-        '1': defaultTodo,
-        '2': defaultTodo,
-        '3': defaultTodo,
-        '4': defaultTodo,
-        '5': defaultTodo,
-      },
-      useLoadedSnapshot: true,
-      lowPriorityThrottleMs: 10,
-    });
+test('useMultipleItems should not trigger a mount refetch for unchanged items', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    {
+      '1': defaultTodo,
+      '2': defaultTodo,
+      '3': defaultTodo,
+      '4': defaultTodo,
+      '5': defaultTodo,
+    },
+    {
+      initialData: 'fromServer',
+    },
+  );
 
-    const renders = createRenderStore({
-      filterKeys: ['i', 'status', 'data', 'payload'],
-    });
+  const renders = createLoggerStore({
+    filterKeys: ['i', 'status', 'data', 'payload'],
+  });
 
-    const { rerender } = renderHook(
-      ({ items }: { items: string[] }) => {
-        const result = env.store.useMultipleItems(
-          items.map((payload) => ({ payload })),
-        );
+  const { rerender } = renderHook(
+    ({ items }: { items: string[] }) => {
+      const result = env.apiStore.useMultipleItems(
+        items.map((payload) => ({ payload })),
+      );
 
-        renders.add(result);
-      },
-      { initialProps: { items: ['1', '2'] } },
-    );
+      renders.add(
+        result.map((item) => ({
+          status: item.status,
+          data: item.data?.value ?? null,
+          payload: item.payload,
+        })),
+      );
+    },
+    { initialProps: { items: ['1', '2'] } },
+  );
 
-    await env.serverMock.waitFetchIdle();
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    renders.addMark('add item');
+  renders.addMark('add item');
+
+  act(() => {
     rerender({ items: ['1', '2', '3'] });
+  });
 
-    await env.serverMock.waitFetchIdle();
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    expect(env.serverMock.fetchsCount).toBe(3);
+  expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-    renders.addMark('remove item');
+  renders.addMark('remove item');
+
+  act(() => {
     rerender({ items: ['2', '3'] });
+  });
 
-    await sleep(200);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    expect(env.serverMock.fetchsCount).toBe(3);
+  expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-    renders.addMark('add removed item back');
+  renders.addMark('add removed item back');
 
-    env.serverMock.produceData((draft) => {
-      draft['1']!.title = 'changed';
-    });
-
+  act(() => {
+    env.serverTable.setItem('1', { title: 'changed', completed: false });
     rerender({ items: ['2', '3', '1'] });
+  });
 
-    await env.serverMock.waitFetchIdle();
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    expect(env.serverMock.fetchsCount).toBe(4);
+  expect(env.serverTable.numOfFinishedFetches).toBe(4);
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    i: 1 -- status: success -- data: {title:todo, completed:false} -- payload: 1
-    i: 2 -- status: success -- data: {title:todo, completed:false} -- payload: 2
+    -> i: 1 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
+    -> i: 2 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2
 
     >>> add item
 
-    i: 1 -- status: success -- data: {title:todo, completed:false} -- payload: 1
-    i: 2 -- status: success -- data: {title:todo, completed:false} -- payload: 2
-    i: 3 -- status: success -- data: {title:todo, completed:false} -- payload: 3
+    -> i: 1 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
+    -> i: 2 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2
+    -> i: 3 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 3
 
     >>> remove item
 
-    i: 1 -- status: success -- data: {title:todo, completed:false} -- payload: 2
-    i: 2 -- status: success -- data: {title:todo, completed:false} -- payload: 3
+    -> i: 1 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2
+    -> i: 2 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 3
 
     >>> add removed item back
 
-    i: 1 -- status: success -- data: {title:todo, completed:false} -- payload: 2
-    i: 2 -- status: success -- data: {title:todo, completed:false} -- payload: 3
-    i: 3 -- status: success -- data: {title:todo, completed:false} -- payload: 1
-    i: 1 -- status: success -- data: {title:todo, completed:false} -- payload: 2
-    i: 2 -- status: success -- data: {title:todo, completed:false} -- payload: 3
-    i: 3 -- status: success -- data: {title:changed, completed:false} -- payload: 1
+    -> i: 1 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2
+    -> i: 2 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 3
+    -> i: 3 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
+    -> i: 1 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2
+    -> i: 2 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 3
+    -> i: 3 ⋅ status: success ⋅ data: {title:changed, completed:❌} ⋅ payload: 1
     "
   `);
-  },
-);
+});
 
-test.concurrent(
-  'Selected value should update when selectorUsesExternalDeps is true',
-  async () => {
-    const env = createTestEnv({
-      initialServerData: { '1': defaultTodo, '2': defaultTodo },
-      useLoadedSnapshot: true,
-    });
+test('Selected value should update when selectorUsesExternalDeps is true', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    {
+      initialData: 'fromServer',
+    },
+  );
 
-    const renders = createRenderStore({
-      filterKeys: ['status', 'data', 'payload'],
-    });
+  const renders = createLoggerStore({
+    filterKeys: ['status', 'data', 'payload'],
+  });
 
-    const { rerender } = renderHook(
-      ({
-        externalDep,
-        selectorUsesExternalDeps,
-      }: {
-        externalDep: string;
-        selectorUsesExternalDeps: boolean;
-      }) => {
-        const selector = useCallback(
-          (data: Todo | null) => {
-            return `${data?.title}/${externalDep}`;
-          },
-          [externalDep],
-        );
+  const { rerender } = renderHook(
+    ({
+      externalDep,
+      selectorUsesExternalDeps,
+    }: {
+      externalDep: string;
+      selectorUsesExternalDeps: boolean;
+    }) => {
+      const initialExternalDepRef = useRef(externalDep);
 
-        const result = env.store.useItem('1', {
-          selector,
-          selectorUsesExternalDeps,
-        });
+      const selectorWithoutExternalDeps = useCallback(
+        (data: { value: Todo } | null) => {
+          return `${data?.value.title}/${initialExternalDepRef.current}`;
+        },
+        [],
+      );
 
-        renders.add(result);
-      },
-      { initialProps: { externalDep: 'ok', selectorUsesExternalDeps: false } },
-    );
+      const selectorWithExternalDeps = useCallback(
+        (data: { value: Todo } | null) => {
+          return `${data?.value.title}/${externalDep}`;
+        },
+        [externalDep],
+      );
 
-    await env.serverMock.waitFetchIdle();
-
-    expect(env.serverMock.fetchsCount).toBe(1);
-
-    renders.addMark('change external dep (selectorUsesExternalDeps: false)');
-    rerender({ externalDep: 'changed', selectorUsesExternalDeps: false });
-
-    await sleep(200);
-
-    renders.addMark('change external dep');
-    rerender({ externalDep: 'changed', selectorUsesExternalDeps: true });
-
-    await sleep(200);
-
-    expect(env.serverMock.fetchsCount).toBe(1);
-
-    renders.addMark('change external dep again');
-    rerender({ externalDep: 'changed again', selectorUsesExternalDeps: true });
-
-    expect(env.serverMock.fetchsCount).toBe(1);
-
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
-      "
-      status: success -- data: todo/ok -- payload: 1
-
-      >>> change external dep (selectorUsesExternalDeps: false)
-
-      status: success -- data: todo/ok -- payload: 1
-
-      >>> change external dep
-
-      status: success -- data: todo/changed -- payload: 1
-
-      >>> change external dep again
-
-      status: success -- data: todo/changed again -- payload: 1
-      "
-    `);
-  },
-);
-
-test.concurrent(
-  'useItem with selector should not trigger a rerender',
-  async () => {
-    const env = createTestEnv({
-      initialServerData: { '1': defaultTodo, '2': defaultTodo },
-      useLoadedSnapshot: true,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-    });
-
-    const renders = createRenderStore();
-
-    let prevData: any;
-
-    const { rerender } = renderHook(() => {
-      const { data, status } = env.store.useItem('1', {
-        selector: () => ({}),
+      const result = env.apiStore.useItem('1', {
+        selector:
+          selectorUsesExternalDeps ?
+            selectorWithExternalDeps
+          : selectorWithoutExternalDeps,
       });
 
-      renders.add({ status, changed: prevData !== data });
-      prevData = data;
-    });
+      renders.add({
+        status: result.status,
+        data: result.data,
+        payload: result.payload,
+      });
+    },
+    { initialProps: { externalDep: 'ok', selectorUsesExternalDeps: false } },
+  );
 
-    await env.serverMock.waitFetchIdle();
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    renders.addMark('Rerenders');
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
-    rerender();
-    rerender();
-    rerender();
+  renders.addMark('change external dep (selectorUsesExternalDeps: false)');
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  act(() => {
+    rerender({ externalDep: 'changed', selectorUsesExternalDeps: false });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('change external dep');
+
+  act(() => {
+    rerender({ externalDep: 'changed', selectorUsesExternalDeps: true });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+  renders.addMark('change external dep again');
+
+  act(() => {
+    rerender({ externalDep: 'changed again', selectorUsesExternalDeps: true });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- changed: true
+    -> status: success ⋅ data: todo/ok ⋅ payload: 1
 
-    >>> Rerenders
-    status: success -- changed: false
-    status: success -- changed: false
-    status: success -- changed: false
+    >>> change external dep (selectorUsesExternalDeps: false)
+
+    -> status: success ⋅ data: todo/ok ⋅ payload: 1
+
+    >>> change external dep
+
+    -> status: success ⋅ data: todo/changed ⋅ payload: 1
+
+    >>> change external dep again
+
+    -> status: success ⋅ data: todo/changed again ⋅ payload: 1
     "
   `);
-  },
-);
+});
+
+test('useItem with selector should not trigger a rerender', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    {
+      useLoadedSnapshot: true,
+      disableDataInvalidation: true,
+    },
+  );
+
+  const renders = createLoggerStore();
+
+  let prevData: unknown;
+
+  const { rerender } = renderHook(() => {
+    const { data, status } = env.apiStore.useItem('1', {
+      selector: () => ({}),
+    });
+
+    renders.add({ status, changed: prevData !== data });
+    prevData = data;
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('Rerenders');
+
+  rerender();
+  rerender();
+  rerender();
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    -> status: success ⋅ changed: ✅
+
+    >>> Rerenders
+
+    -> status: success ⋅ changed: ❌
+    -> status: success ⋅ changed: ❌
+    -> status: success ⋅ changed: ❌
+    "
+  `);
+});
