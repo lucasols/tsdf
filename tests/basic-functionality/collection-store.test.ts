@@ -19,7 +19,7 @@ describe('test helpers', () => {
     const { store } = createCollectionStoreTestEnv(
       { '1': defaultTodo, '2': defaultTodo },
       {
-      useLoadedSnapshot: true,
+        useLoadedSnapshot: true,
         disableDataInvalidation: true,
       },
     );
@@ -234,14 +234,14 @@ test('await fetch', async () => {
 test('multiple fetches with different payloads not cancel each other, but cancel same payload fetches', async () => {
   const env = createCollectionStoreTestEnv(
     {
-        '1': defaultTodo,
-        '2': defaultTodo,
-        '3': defaultTodo,
-        '4': defaultTodo,
-        '5': defaultTodo,
-        '6': defaultTodo,
-        '7': defaultTodo,
-      },
+      '1': defaultTodo,
+      '2': defaultTodo,
+      '3': defaultTodo,
+      '4': defaultTodo,
+      '5': defaultTodo,
+      '6': defaultTodo,
+      '7': defaultTodo,
+    },
     { useLoadedSnapshot: true },
   );
 
@@ -267,13 +267,13 @@ test('multiple fetches with different payloads not cancel each other, but cancel
 
   expect(env.serverTable.numOfFinishedFetches).toBe(7);
 
-    const defaultState = {
+  const defaultState = {
     data: { value: defaultTodo },
-      error: null,
-      refetchOnMount: false as const,
-      status: 'success' as const,
-      wasLoaded: true,
-    };
+    error: null,
+    refetchOnMount: false as const,
+    status: 'success' as const,
+    wasLoaded: true,
+  };
 
   expect(env.store.state).toEqual({
     '"1': { ...defaultState, payload: '1' },
@@ -283,7 +283,7 @@ test('multiple fetches with different payloads not cancel each other, but cancel
     '"5': { ...defaultState, payload: '5' },
     '"6': { ...defaultState, payload: '6' },
     '"7': { ...defaultState, payload: '7' },
-    });
+  });
 });
 
 describe('update state functions', () => {
@@ -322,8 +322,8 @@ describe('update state functions', () => {
       apiStore.updateItemState(['1', '2'], () => {
         return {
           value: {
-          title: 'new title 2',
-          completed: false,
+            title: 'new title 2',
+            completed: false,
           },
         };
       });
@@ -388,10 +388,10 @@ describe('update state functions', () => {
           ifNothingWasUpdated: () => {
             apiStore.addItemToState('6', {
               value: {
-            title: 'item 6',
-            completed: false,
+                title: 'item 6',
+                completed: false,
               },
-          });
+            });
           },
         },
       );
@@ -412,7 +412,7 @@ describe('update state functions', () => {
       const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
         {
-        useLoadedSnapshot: true,
+          useLoadedSnapshot: true,
           disableDataInvalidation: true,
         },
       );
@@ -431,16 +431,16 @@ describe('update state functions', () => {
           ifNothingWasUpdated: () => {
             apiStore.addItemToState('6', {
               value: {
-            title: 'item 6',
-            completed: false,
+                title: 'item 6',
+                completed: false,
               },
-          });
+            });
             apiStore.addItemToState('7', {
               value: {
-            title: 'item 7',
-            completed: false,
+                title: 'item 7',
+                completed: false,
               },
-          });
+            });
           },
         },
       );
@@ -485,8 +485,8 @@ describe('update state functions', () => {
 
     apiStore.addItemToState('6', {
       value: {
-      title: 'item 6',
-      completed: false,
+        title: 'item 6',
+        completed: false,
       },
     });
 
@@ -502,7 +502,7 @@ describe('update state functions', () => {
     `);
   });
 
-  test('deleteItemState', async () => {
+  test('deleteItemState', () => {
     const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
       useLoadedSnapshot: true,
     });
@@ -543,54 +543,59 @@ test('mutating a obj passed as payload does not break the store', async () => {
 });
 
 describe('an invalidation with lower priority should not override one with higher priority', () => {
-  test.concurrent('not override high priority update', () => {
-    const env = createTestEnv({
-      useLoadedSnapshot: true,
-    });
-
-    env.store.invalidateItem('1', 'highPriority');
-
-    env.store.invalidateItem('1', 'lowPriority');
-
-    expect(env.store.getItemState('1')?.refetchOnMount).toEqual('highPriority');
-  });
-
-  test.concurrent('not override rtu update', () => {
-    const env = createTestEnv({
-      useLoadedSnapshot: true,
-    });
-
-    env.store.invalidateItem('1', 'realtimeUpdate');
-
-    env.store.invalidateItem('1', 'lowPriority');
-
-    expect(env.store.getItemState('1')?.refetchOnMount).toEqual(
-      'realtimeUpdate',
+  test('not override high priority update', () => {
+    const { apiStore } = createCollectionStoreTestEnv(
+      { '1': defaultTodo },
+      { useLoadedSnapshot: true },
     );
+
+    apiStore.invalidateItem('1', 'highPriority');
+
+    apiStore.invalidateItem('1', 'lowPriority');
+
+    expect(apiStore.getItemState('1')?.refetchOnMount).toBe('highPriority');
   });
 
-  test.concurrent('not override highPriority with rtu update', () => {
-    const env = createTestEnv({
-      useLoadedSnapshot: true,
-    });
+  test('not override rtu update', () => {
+    const { apiStore } = createCollectionStoreTestEnv(
+      { '1': defaultTodo },
+      { useLoadedSnapshot: true },
+    );
 
-    env.store.invalidateItem('1', 'highPriority');
+    apiStore.invalidateItem('1', 'realtimeUpdate');
 
-    env.store.invalidateItem('1', 'realtimeUpdate');
+    apiStore.invalidateItem('1', 'lowPriority');
 
-    expect(env.store.getItemState('1')?.refetchOnMount).toEqual('highPriority');
+    expect(apiStore.getItemState('1')?.refetchOnMount).toBe('realtimeUpdate');
+  });
+
+  test('not override highPriority with rtu update', () => {
+    const { apiStore } = createCollectionStoreTestEnv(
+      { '1': defaultTodo },
+      { useLoadedSnapshot: true },
+    );
+
+    apiStore.invalidateItem('1', 'highPriority');
+
+    apiStore.invalidateItem('1', 'realtimeUpdate');
+
+    expect(apiStore.getItemState('1')?.refetchOnMount).toBe('highPriority');
   });
 });
 
-test.concurrent('bug reproduction: await fetch with error', async () => {
-  const env = createTestEnv();
+test('bug reproduction: await fetch with error', async () => {
+  const env = createCollectionStoreTestEnv(
+    { '1': defaultTodo },
+    { disableDataInvalidation: true },
+  );
 
-  env.serverMock.setFetchError('error');
+  env.serverTable.setNextFetchError('1', 'error');
 
-  expect(await env.store.awaitFetch('1')).toEqual({
-    data: null,
-    error: {
-      message: 'error',
-    },
-  });
+  const fetchPromise = env.apiStore.awaitFetch('1');
+  await vi.runAllTimersAsync();
+  const result = await fetchPromise;
+
+  expect(result.data).toBeNull();
+  expect(result.error).toBeDefined();
+  expect(result.error?.message).toBe('error');
 });
