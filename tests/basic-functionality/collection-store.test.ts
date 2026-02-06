@@ -515,30 +515,30 @@ describe('update state functions', () => {
   });
 });
 
-test('mutation a obj passed as payload does not breaks the store', () => {
-  const env = createTestEnv<{ id: { id: string } }>({});
+test('mutating a obj passed as payload does not break the store', async () => {
+  const env = createCollectionStoreTestEnv({
+    '1': defaultTodo,
+  });
 
   const obj = { id: { id: '1' } };
 
-  env.store.scheduleFetch('highPriority', obj);
+  env.apiStore.scheduleFetch('highPriority', obj);
 
-  env.serverMock.waitFetchIdle();
+  await vi.runAllTimersAsync();
 
   obj.id.id = '2';
 
-  expect(env.store.getItemState({ id: { id: '1' } })).toMatchInlineSnapshot(`
-    {
-      "data": null,
-      "error": null,
-      "payload": {
-        "id": {
-          "id": "1",
-        },
-      },
-      "refetchOnMount": false,
-      "status": "loading",
-      "wasLoaded": false,
-    }
+  expect(env.apiStore.getItemState({ id: { id: '1' } })).toMatchInlineSnapshot(`
+    data:
+      value: { completed: '❌', title: 'todo' }
+
+    error: null
+    payload:
+      id: { id: '1' }
+
+    refetchOnMount: '❌'
+    status: 'success'
+    wasLoaded: '✅'
   `);
 });
 
