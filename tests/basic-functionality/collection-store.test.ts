@@ -477,26 +477,29 @@ describe('update state functions', () => {
   });
 
   test('addItemToState', () => {
-    const { store: collectionStore } = createTestEnv({
-      initialServerData,
+    const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
       useLoadedSnapshot: true,
     });
 
-    expect(collectionStore.getItemState('6')).toBeUndefined();
+    expect(apiStore.getItemState('6')).toBeUndefined();
 
-    collectionStore.addItemToState('6', {
+    apiStore.addItemToState('6', {
+      value: {
       title: 'item 6',
       completed: false,
+      },
     });
 
-    expect(collectionStore.getItemState('6')).toEqual({
-      data: { completed: false, title: 'item 6' },
-      error: null,
-      payload: '6',
-      refetchOnMount: false,
-      status: 'success',
-      wasLoaded: true,
-    });
+    expect(apiStore.getItemState('6')).toMatchInlineSnapshot(`
+      data:
+        value: { completed: '❌', title: 'item 6' }
+
+      error: null
+      payload: '6'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
   });
 
   test('deleteItemState', () => {
