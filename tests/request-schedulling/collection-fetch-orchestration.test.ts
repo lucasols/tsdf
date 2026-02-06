@@ -11,7 +11,10 @@ afterEach(() => {
 });
 
 test('simple mutation with revalidation and optimistic update', async () => {
-  const env = createCollectionStoreTestEnv({ item1: 0 });
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 } },
+    { disableDataInvalidation: true },
+  );
 
   renderHook(() => {
     const item = env.apiStore.useItem('item1');
@@ -20,30 +23,33 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   await vi.runAllTimersAsync();
 
-  void env.performClientUpdateAction('item1', 1, {
+  void env.performClientUpdateAction('item1', { v: 1 }, {
     withRevalidation: true,
     withOptimisticUpdate: true,
   });
 
   await vi.runAllTimersAsync();
 
-  expect(env.uiChanges).toEqual([{ item1: 0 }, { item1: 1 }]);
+  expect(env.uiChanges).toEqual([{ item1: { v: 0 } }, { item1: { v: 1 } }]);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 |
-    0     | 0     | ui-initialized
-    .     | 1     | ⬜ optimistic-ui-commit
-    .     | 1     | ⬜ >mutation-started (value: 1)
-    840ms | 1     | ⬜ <mutation-data-persisted (value: 1)
-    1.21s | 1     | 🔴 >fetch-started
-    2.01s | 1     | 🔴 <fetch-finished (value: 1)
+    time  | item1   |
+    0     | {"v":0} | ui-initialized
+    .     | {"v":1} | ⬜ optimistic-ui-commit
+    .     | {"v":1} | ⬜ >mutation-started (value: {"v":1})
+    840ms | {"v":1} | ⬜ <mutation-data-persisted (value: {"v":1})
+    1.21s | {"v":1} | 🔴 >fetch-started
+    2.01s | {"v":1} | 🔴 <fetch-finished (value: {"v":1})
     "
   `);
 });
 
 test('simple mutation with optimistic update', async () => {
-  const env = createCollectionStoreTestEnv({ item1: 0 });
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 } },
+    { disableDataInvalidation: true },
+  );
 
   renderHook(() => {
     const item = env.apiStore.useItem('item1');
@@ -52,27 +58,30 @@ test('simple mutation with optimistic update', async () => {
 
   await vi.runAllTimersAsync();
 
-  void env.performClientUpdateAction('item1', 1, {
+  void env.performClientUpdateAction('item1', { v: 1 }, {
     withOptimisticUpdate: true,
   });
 
   await vi.runAllTimersAsync();
 
-  expect(env.uiChanges).toEqual([{ item1: 0 }, { item1: 1 }]);
+  expect(env.uiChanges).toEqual([{ item1: { v: 0 } }, { item1: { v: 1 } }]);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 |
-    0     | 0     | ui-initialized
-    .     | 1     | ⬜ optimistic-ui-commit
-    .     | 1     | ⬜ >mutation-started (value: 1)
-    840ms | 1     | ⬜ <mutation-data-persisted (value: 1)
+    time  | item1   |
+    0     | {"v":0} | ui-initialized
+    .     | {"v":1} | ⬜ optimistic-ui-commit
+    .     | {"v":1} | ⬜ >mutation-started (value: {"v":1})
+    840ms | {"v":1} | ⬜ <mutation-data-persisted (value: {"v":1})
     "
   `);
 });
 
 test('prevent overfetch of low priority fetches', async () => {
-  const env = createCollectionStoreTestEnv({ item1: 0 });
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 } },
+    { disableDataInvalidation: true },
+  );
 
   renderHook(() => {
     const item = env.apiStore.useItem('item1');
@@ -100,24 +109,24 @@ test('prevent overfetch of low priority fetches', async () => {
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 |
-    0     | 0     | ui-initialized
-    .     | 0     | scheduled-fetch-triggered
-    10ms  | 0     | 🔴 >fetch-started
-    .     | 0     | -- All fetches started after this point should be skipped
-    .     | 0     | scheduled-fetch-skipped
-    20ms  | 0     | scheduled-fetch-skipped
-    30ms  | 0     | scheduled-fetch-skipped
-    810ms | 0     | 🔴 <fetch-finished (value: 0)
+    time  | item1   |
+    0     | {"v":0} | ui-initialized
+    .     | {"v":0} | scheduled-fetch-triggered
+    10ms  | {"v":0} | 🔴 >fetch-started
+    .     | {"v":0} | -- All fetches started after this point should be skipped
+    .     | {"v":0} | scheduled-fetch-skipped
+    20ms  | {"v":0} | scheduled-fetch-skipped
+    30ms  | {"v":0} | scheduled-fetch-skipped
+    810ms | {"v":0} | 🔴 <fetch-finished (value: {"v":0})
     "
   `);
 });
 
 test('fetching one item does not interfere with another item', async () => {
-  const env = createCollectionStoreTestEnv(
-    { item1: 1, item2: 2 },
-    { forceInitialDataInvalidation: true },
-  );
+  const env = createCollectionStoreTestEnv({
+    item1: { v: 1 },
+    item2: { v: 2 },
+  });
 
   renderHook(() => {
     const item1 = env.apiStore.useItem('item1');
@@ -133,23 +142,29 @@ test('fetching one item does not interfere with another item', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
-  expect(env.uiChanges).toEqual([{ item1: 1 }, { item1: 1, item2: 2 }]);
+  expect(env.uiChanges).toEqual([
+    { item1: { v: 1 } },
+    { item1: { v: 1 }, item2: { v: 2 } },
+  ]);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 | item2 |
-    10ms  | -     | -     | 🔴 [item1] >fetch-started
-    .     | -     | -     | 🟠 [item2] >fetch-started
-    810ms | -     | -     | 🔴 [item1] <fetch-finished (value: 1)
-    .     | 1     | -     | [item1] ui-initialized
-    .     | 1     | -     | 🟠 [item2] <fetch-finished (value: 2)
-    .     | 1     | 2     | [item2] ui-changed
+    time  | item1   | item2   |
+    10ms  | -       | -       | 🔴 [item1] >fetch-started
+    .     | -       | -       | 🟠 [item2] >fetch-started
+    810ms | -       | -       | 🔴 [item1] <fetch-finished (value: {"v":1})
+    .     | {"v":1} | -       | [item1] ui-initialized
+    .     | {"v":1} | -       | 🟠 [item2] <fetch-finished (value: {"v":2})
+    .     | {"v":1} | {"v":2} | [item2] ui-changed
     "
   `);
 });
 
 test('mutation on one item does not affect fetch state of another item', async () => {
-  const env = createCollectionStoreTestEnv({ item1: 0, item2: 0 });
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { disableDataInvalidation: true },
+  );
 
   renderHook(() => {
     const item1 = env.apiStore.useItem('item1');
@@ -160,7 +175,7 @@ test('mutation on one item does not affect fetch state of another item', async (
 
   await vi.runAllTimersAsync();
 
-  void env.performClientUpdateAction('item1', 1, {
+  void env.performClientUpdateAction('item1', { v: 1 }, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
@@ -175,32 +190,35 @@ test('mutation on one item does not affect fetch state of another item', async (
   await vi.runAllTimersAsync();
 
   expect(env.uiChanges).toEqual([
-    { item1: 0 },
-    { item1: 0, item2: 0 },
-    { item1: 1, item2: 0 },
+    { item1: { v: 0 } },
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { item1: { v: 1 }, item2: { v: 0 } },
   ]);
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 | item2 |
-    0     | 0     | -     | [item1] ui-initialized
-    .     | 0     | 0     | [item2] ui-changed
-    .     | 1     | 0     | ⬜ [item1] optimistic-ui-commit
-    .     | 1     | 0     | ⬜ [item1] >mutation-started (value: 1)
-    100ms | 1     | 0     | -- Fetch for item2 should proceed independently of item1 mutation
-    .     | 1     | 0     | [item2] scheduled-fetch-triggered
-    110ms | 1     | 0     | 🔴 [item2] >fetch-started
-    840ms | 1     | 0     | ⬜ [item1] <mutation-data-persisted (value: 1)
-    910ms | 1     | 0     | 🔴 [item2] <fetch-finished (value: 0)
-    1.21s | 1     | 0     | 🟠 [item1] >fetch-started
-    2.01s | 1     | 0     | 🟠 [item1] <fetch-finished (value: 1)
+    time  | item1   | item2   |
+    0     | {"v":0} | -       | [item1] ui-initialized
+    .     | {"v":0} | {"v":0} | [item2] ui-changed
+    .     | {"v":1} | {"v":0} | ⬜ [item1] optimistic-ui-commit
+    .     | {"v":1} | {"v":0} | ⬜ [item1] >mutation-started (value: {"v":1})
+    100ms | {"v":1} | {"v":0} | -- Fetch for item2 should proceed independently of item1 mutation
+    .     | {"v":1} | {"v":0} | [item2] scheduled-fetch-triggered
+    110ms | {"v":1} | {"v":0} | 🔴 [item2] >fetch-started
+    840ms | {"v":1} | {"v":0} | ⬜ [item1] <mutation-data-persisted (value: {"v":1})
+    910ms | {"v":1} | {"v":0} | 🔴 [item2] <fetch-finished (value: {"v":0})
+    1.21s | {"v":1} | {"v":0} | 🟠 [item1] >fetch-started
+    2.01s | {"v":1} | {"v":0} | 🟠 [item1] <fetch-finished (value: {"v":1})
     "
   `);
 });
 
 test('low priority fetch on one item is independent of another item fetch state', async () => {
-  const env = createCollectionStoreTestEnv({ item1: 0, item2: 0 });
+  const env = createCollectionStoreTestEnv(
+    { item1: { v: 0 }, item2: { v: 0 } },
+    { disableDataInvalidation: true },
+  );
 
   renderHook(() => {
     const item1 = env.apiStore.useItem('item1');
@@ -227,25 +245,25 @@ test('low priority fetch on one item is independent of another item fetch state'
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 | item2 |
-    0     | 0     | -     | [item1] ui-initialized
-    .     | 0     | 0     | [item2] ui-changed
-    .     | 0     | 0     | [item1] scheduled-fetch-triggered
-    10ms  | 0     | 0     | 🔴 [item1] >fetch-started
-    15ms  | 0     | 0     | -- Low priority fetch for item2 should not be affected by item1 in-flight fetch
-    .     | 0     | 0     | [item2] scheduled-fetch-triggered
-    25ms  | 0     | 0     | 🟠 [item2] >fetch-started
-    810ms | 0     | 0     | 🔴 [item1] <fetch-finished (value: 0)
-    825ms | 0     | 0     | 🟠 [item2] <fetch-finished (value: 0)
+    time  | item1   | item2   |
+    0     | {"v":0} | -       | [item1] ui-initialized
+    .     | {"v":0} | {"v":0} | [item2] ui-changed
+    .     | {"v":0} | {"v":0} | [item1] scheduled-fetch-triggered
+    10ms  | {"v":0} | {"v":0} | 🔴 [item1] >fetch-started
+    15ms  | {"v":0} | {"v":0} | -- Low priority fetch for item2 should not be affected by item1 in-flight fetch
+    .     | {"v":0} | {"v":0} | [item2] scheduled-fetch-triggered
+    25ms  | {"v":0} | {"v":0} | 🟠 [item2] >fetch-started
+    810ms | {"v":0} | {"v":0} | 🔴 [item1] <fetch-finished (value: {"v":0})
+    825ms | {"v":0} | {"v":0} | 🟠 [item2] <fetch-finished (value: {"v":0})
     "
   `);
 });
 
 test('error on one item does not affect other items', async () => {
-  const env = createCollectionStoreTestEnv(
-    { item1: 1, item2: 2 },
-    { forceInitialDataInvalidation: true },
-  );
+  const env = createCollectionStoreTestEnv({
+    item1: { v: 1 },
+    item2: { v: 2 },
+  });
 
   env.serverTable.setNextFetchError('item1', 'Network error');
 
@@ -261,14 +279,11 @@ test('error on one item does not affect other items', async () => {
   expect(item1State?.error?.message).toBe('Network error');
 
   expect(item2State?.status).toBe('success');
-  expect(item2State?.data?.value).toBe(2);
+  expect(item2State?.data?.value).toEqual({ v: 2 });
 });
 
 test('coalesces multiple fetches for the same item', async () => {
-  const env = createCollectionStoreTestEnv(
-    { item1: 1 },
-    { forceInitialDataInvalidation: true },
-  );
+  const env = createCollectionStoreTestEnv({ item1: { v: 1 } });
 
   env.scheduleFetch('highPriority', 'item1');
   env.scheduleFetch('highPriority', 'item1');
@@ -277,5 +292,5 @@ test('coalesces multiple fetches for the same item', async () => {
   await vi.runAllTimersAsync();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
-  expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
+  expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
 });
