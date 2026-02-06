@@ -1,6 +1,7 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
-import { Store } from 't-state';
+import { evtmitter } from 'evtmitter';
+import { useEffect, useState } from 'react';
 import {
   afterEach,
   beforeAll,
@@ -592,60 +593,49 @@ describe('useItem', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test('action with optmistic update and revalidation', async () => {
-    const renders = createRenderStore();
+  test('action with optimistic update and revalidation', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { useLoadedSnapshot: true },
+    );
+
+    const renders = createLoggerStore();
 
     renderHook(() => {
-      const selectionResult = collectionStore.useItem(
-        itemFetchParams.useValue(),
-      );
+      const selectionResult = env.apiStore.useItem('1');
 
-      renders.add(pick(selectionResult, ['status', 'payload', 'data']));
-    });
-
-    async function actionWithOptimisticUpdateAndRevalidation(
-      itemId: string,
-      newText: string,
-    ) {
-      const endMutation = collectionStore.startMutation(itemId);
-
-      collectionStore.updateItemState('1', (draftData) => {
-        draftData.title = newText;
-      });
-
-      try {
-        const result = await serverMock.emulateMutation({
-          '1': { title: newText, completed: false },
+      renders.add({
+        status: selectionResult.status,
+        payload: selectionResult.payload,
+        data: selectionResult.data?.value ?? null,
         });
-
-        endMutation();
-
-        return result;
-      } catch (e) {
-        endMutation();
-
-        return false;
-      } finally {
-        collectionStore.invalidateItem(itemId);
-      }
-    }
+    });
 
     act(() => {
-      actionWithOptimisticUpdateAndRevalidation('1', 'was updated');
+      void env.performClientUpdateAction(
+        '1',
+        { title: 'was updated', completed: false },
+        {
+          withOptimisticUpdate: true,
+          withRevalidation: true,
+        },
+      );
     });
 
-    await sleep(150);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: 1 -- data: {title:todo, completed:false}
-      status: success -- payload: 1 -- data: {title:was updated, completed:false}
+      -> status: success ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
+      -> status: success ⋅ payload: 1 ⋅ data: {title:was updated, completed:❌}
       "
     `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 });
-
-const serverInitialData = { '1': defaultTodo, '2': defaultTodo };
 
 describe('useItem isolated tests', () => {
   test('use deleted item', async () => {
