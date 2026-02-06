@@ -448,23 +448,36 @@ describe('useMultipleItems isolated tests', () => {
 });
 
 describe('useItem', () => {
-  afterAll(() => {
-    cleanup();
-  });
+  test('disable the initial fetch', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { forceInitialDataInvalidation: true },
+    );
 
-  const { serverMock, store: collectionStore } = createDefaultCollectionStore({
-    initialServerData: { '1': defaultTodo, '2': defaultTodo },
-  });
+    const renders = createLoggerStore();
 
-  const renders1 = createRenderStore();
-
-  const itemFetchParams = createValueStore<string | undefined | false>(false);
-
-  beforeAll(() => {
     renderHook(() => {
-      const fetchParams = itemFetchParams.useValue();
+      const selectionResult = env.apiStore.useItem(false);
 
-      const selectionResult = collectionStore.useItem(fetchParams);
+      renders.add({
+        status: selectionResult.status,
+        payload: selectionResult.payload,
+        data: selectionResult.data?.value ?? null,
+      });
+    });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: idle ⋅ payload: undefined ⋅ data: null
+      "
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
 
       renders1.add(pick(selectionResult, ['status', 'payload', 'data']));
     });
