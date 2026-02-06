@@ -1,4 +1,3 @@
-import { compactSnapshot } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import {
   afterEach,
@@ -27,9 +26,8 @@ afterEach(() => {
 describe('batch coalescing basic behavior', () => {
   test('multiple items scheduled during coalescing window are batched together', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -43,21 +41,21 @@ describe('batch coalescing basic behavior', () => {
     await vi.runAllTimersAsync();
 
     // All items should have data
-    expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
-    expect(env.apiStore.getItemState('item2')?.data?.value).toBe(2);
-    expect(env.apiStore.getItemState('item3')?.data?.value).toBe(3);
+    expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
+    expect(env.apiStore.getItemState('item2')?.data?.value).toEqual({ v: 2 });
+    expect(env.apiStore.getItemState('item3')?.data?.value).toEqual({ v: 3 });
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2', 'item3']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-            - { itemId: 'item3', data: 3 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2', 'item3']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+          - data: { v: 3 }
+            itemId: 'item3'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -71,9 +69,8 @@ describe('batch coalescing basic behavior', () => {
 
   test('single item uses fetchFn instead of batchFetchFn', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1 },
+      { item1: { v: 1 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -83,31 +80,29 @@ describe('batch coalescing basic behavior', () => {
 
     await vi.runAllTimersAsync();
 
-    expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
+    expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
 
     // Single item uses fetchFn, not batch
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - { type: 'fetch', itemId: 'item1', result: 1 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemId: 'item1'
+        result: { v: 1 }
+        type: 'fetch'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1 |
       0     | -     | scheduled-fetch-triggered
       50ms  | -     | 🔴 >fetch-started
-      850ms | -     | 🔴 <fetch-finished (value: 1)
+      850ms | -     | 🔴 <fetch-finished (value: {"v":1})
       "
     `);
   });
 
   test('items arriving at different times within window are all batched', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 100,
         useBatchFetch: true,
       },
@@ -123,17 +118,17 @@ describe('batch coalescing basic behavior', () => {
 
     await vi.runAllTimersAsync();
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2', 'item3']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-            - { itemId: 'item3', data: 3 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2', 'item3']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+          - data: { v: 3 }
+            itemId: 'item3'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -149,9 +144,8 @@ describe('batch coalescing basic behavior', () => {
 describe('maxBatchSize behavior', () => {
   test('reaching maxBatchSize triggers immediate batch fetch', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3, item4: 4 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 }, item4: { v: 4 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 100,
         useBatchFetch: true,
         maxBatchSize: 2,
@@ -164,16 +158,15 @@ describe('maxBatchSize behavior', () => {
 
     await vi.runAllTimersAsync();
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -187,9 +180,8 @@ describe('maxBatchSize behavior', () => {
 
   test('items exceeding maxBatchSize go into next batch', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3, item4: 4 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 }, item4: { v: 4 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 100,
         useBatchFetch: true,
         maxBatchSize: 2,
@@ -205,26 +197,27 @@ describe('maxBatchSize behavior', () => {
     await vi.runAllTimersAsync();
 
     // All items should have data
-    expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
-    expect(env.apiStore.getItemState('item2')?.data?.value).toBe(2);
-    expect(env.apiStore.getItemState('item3')?.data?.value).toBe(3);
-    expect(env.apiStore.getItemState('item4')?.data?.value).toBe(4);
+    expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
+    expect(env.apiStore.getItemState('item2')?.data?.value).toEqual({ v: 2 });
+    expect(env.apiStore.getItemState('item3')?.data?.value).toEqual({ v: 3 });
+    expect(env.apiStore.getItemState('item4')?.data?.value).toEqual({ v: 4 });
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-        - type: 'list'
-          itemIds: ['item3', 'item4']
-          results:
-            - { itemId: 'item3', data: 3 }
-            - { itemId: 'item4', data: 4 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+        type: 'list'
+      - itemIds: ['item3', 'item4']
+        results:
+          - data: { v: 3 }
+            itemId: 'item3'
+          - data: { v: 4 }
+            itemId: 'item4'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -244,9 +237,8 @@ describe('maxBatchSize behavior', () => {
 describe('requests during ongoing fetch', () => {
   test('requests during fetch are scheduled for after fetch completes', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -268,17 +260,18 @@ describe('requests during ongoing fetch', () => {
     await vi.runAllTimersAsync();
 
     // First list fetch, then item3 as individual fetch
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-        - { type: 'fetch', itemId: 'item3', result: 3 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+        type: 'list'
+      - itemId: 'item3'
+        result: { v: 3 }
+        type: 'fetch'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -288,7 +281,7 @@ describe('requests during ongoing fetch', () => {
       60ms  | -     | -     | [item3] scheduled-fetch-scheduled
       850ms | -     | -     | 🔴 <list-fetch-finished (value: {"count":2})
       900ms | -     | -     | 🟠 [item3] >fetch-started
-      1.7s  | -     | -     | 🟠 [item3] <fetch-finished (value: 3)
+      1.7s  | -     | -     | 🟠 [item3] <fetch-finished (value: {"v":3})
       "
     `);
   });
@@ -297,9 +290,9 @@ describe('requests during ongoing fetch', () => {
 describe('mutation handling', () => {
   test('item under mutation is excluded from batch', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2 },
+      { item1: { v: 1 }, item2: { v: 2 } },
       {
-        forceInitialDataInvalidation: false,
+        disableDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -315,10 +308,14 @@ describe('mutation handling', () => {
     await vi.runAllTimersAsync();
 
     // Start mutation on item1
-    void env.performClientUpdateAction('item1', 100, {
-      withOptimisticUpdate: true,
-      withRevalidation: true,
-    });
+    void env.performClientUpdateAction(
+      'item1',
+      { v: 100 },
+      {
+        withOptimisticUpdate: true,
+        withRevalidation: true,
+      },
+    );
 
     // Try to batch fetch both items
     env.apiStore.invalidateItem('item1', 'highPriority');
@@ -327,28 +324,29 @@ describe('mutation handling', () => {
     await vi.runAllTimersAsync();
 
     // item2 should have been fetched separately since item1 was under mutation
-    expect(env.apiStore.getItemState('item2')?.data?.value).toBe(2);
+    expect(env.apiStore.getItemState('item2')?.data?.value).toEqual({ v: 2 });
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - { type: 'fetch', itemId: 'item2', result: 2 }
-        - { type: 'fetch', itemId: 'item1', result: 100 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemId: 'item2'
+        result: { v: 2 }
+        type: 'fetch'
+      - itemId: 'item1'
+        result: { v: 100 }
+        type: 'fetch'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 | item2 |
-      0     | 1     | -     | [item1] ui-initialized
-      .     | 1     | 2     | [item2] ui-changed
-      .     | 100   | 2     | ⬜ [item1] optimistic-ui-commit
-      .     | 100   | 2     | ⬜ [item1] >mutation-started (value: 100)
-      50ms  | 100   | 2     | 🔴 [item2] >fetch-started
-      840ms | 100   | 2     | ⬜ [item1] <mutation-data-persisted (value: 100)
-      850ms | 100   | 2     | 🔴 [item2] <fetch-finished (value: 2)
-      1.25s | 100   | 2     | 🟠 [item1] >fetch-started
-      2.05s | 100   | 2     | 🟠 [item1] <fetch-finished (value: 100)
+      time  | item1     | item2   |
+      0     | {"v":1}   | -       | [item1] ui-initialized
+      .     | {"v":1}   | {"v":2} | [item2] ui-changed
+      .     | {"v":100} | {"v":2} | ⬜ [item1] optimistic-ui-commit
+      .     | {"v":100} | {"v":2} | ⬜ [item1] >mutation-started (value: {"v":100})
+      50ms  | {"v":100} | {"v":2} | 🔴 [item2] >fetch-started
+      840ms | {"v":100} | {"v":2} | ⬜ [item1] <mutation-data-persisted (value: {"v":100})
+      850ms | {"v":100} | {"v":2} | 🔴 [item2] <fetch-finished (value: {"v":2})
+      1.25s | {"v":100} | {"v":2} | 🟠 [item1] >fetch-started
+      2.05s | {"v":100} | {"v":2} | 🟠 [item1] <fetch-finished (value: {"v":100})
       "
     `);
   });
@@ -357,9 +355,8 @@ describe('mutation handling', () => {
 describe('error handling in batch', () => {
   test('batch fetch network error: all items fail with same error', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2 },
+      { item1: { v: 1 }, item2: { v: 2 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -398,9 +395,8 @@ describe('error handling in batch', () => {
 describe('awaitFetch with batch', () => {
   test('awaitFetch for specific item resolves after batch completes', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -418,21 +414,21 @@ describe('awaitFetch with batch', () => {
     const result = await resultPromise;
 
     expect(result).toEqual({
-      data: { value: 3 },
+      data: { value: { v: 3 } },
       error: null,
     });
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2', 'item3']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-            - { itemId: 'item3', data: 3 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2', 'item3']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+          - data: { v: 3 }
+            itemId: 'item3'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -446,9 +442,8 @@ describe('awaitFetch with batch', () => {
 
   test('awaitFetch returns error when batch fails', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2 },
+      { item1: { v: 1 }, item2: { v: 2 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -486,9 +481,8 @@ describe('awaitFetch with batch', () => {
 
   test('multiple awaitFetch calls for same item coalesce', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1 },
+      { item1: { v: 1 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -506,32 +500,30 @@ describe('awaitFetch with batch', () => {
       promise3,
     ]);
 
-    expect(result1).toEqual({ data: { value: 1 }, error: null });
-    expect(result2).toEqual({ data: { value: 1 }, error: null });
-    expect(result3).toEqual({ data: { value: 1 }, error: null });
+    expect(result1).toEqual({ data: { value: { v: 1 } }, error: null });
+    expect(result2).toEqual({ data: { value: { v: 1 } }, error: null });
+    expect(result3).toEqual({ data: { value: { v: 1 } }, error: null });
 
     // Only one fetch (single item, so uses fetchFn)
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - { type: 'fetch', itemId: 'item1', result: 1 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemId: 'item1'
+        result: { v: 1 }
+        type: 'fetch'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1 |
       50ms  | -     | 🔴 >fetch-started
-      850ms | -     | 🔴 <fetch-finished (value: 1)
+      850ms | -     | 🔴 <fetch-finished (value: {"v":1})
       "
     `);
   });
 
   test('awaitFetch for different items resolves when batch completes', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2 },
+      { item1: { v: 1 }, item2: { v: 2 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -544,19 +536,18 @@ describe('awaitFetch with batch', () => {
 
     const [result1, result2] = await Promise.all([promise1, promise2]);
 
-    expect(result1).toEqual({ data: { value: 1 }, error: null });
-    expect(result2).toEqual({ data: { value: 2 }, error: null });
+    expect(result1).toEqual({ data: { value: { v: 1 } }, error: null });
+    expect(result2).toEqual({ data: { value: { v: 2 } }, error: null });
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -571,9 +562,8 @@ describe('awaitFetch with batch', () => {
 describe('priority handling in batch', () => {
   test('items scheduled consecutively are batched together', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -586,17 +576,17 @@ describe('priority handling in batch', () => {
 
     await vi.runAllTimersAsync();
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2', 'item3']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-            - { itemId: 'item3', data: 3 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2', 'item3']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+          - data: { v: 3 }
+            itemId: 'item3'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -610,9 +600,8 @@ describe('priority handling in batch', () => {
 
   test('mixed priorities are batched together', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2, item3: 3 },
+      { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -624,17 +613,17 @@ describe('priority handling in batch', () => {
 
     await vi.runAllTimersAsync();
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2', 'item3']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-            - { itemId: 'item3', data: 3 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2', 'item3']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+          - data: { v: 3 }
+            itemId: 'item3'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -650,8 +639,12 @@ describe('priority handling in batch', () => {
 describe('batch with UI hooks', () => {
   test('UI updates correctly after batch fetch completes via explicit scheduling', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2 },
-      { baseCoalescingWindowMs: 50, useBatchFetch: true },
+      { item1: { v: 1 }, item2: { v: 2 } },
+      {
+        disableDataInvalidation: true,
+        baseCoalescingWindowMs: 50,
+        useBatchFetch: true,
+      },
     );
 
     renderHook(() => {
@@ -668,27 +661,26 @@ describe('batch with UI hooks', () => {
     await vi.runAllTimersAsync();
 
     // UI should still show the values
-    expect(env.apiStore.getItemState('item1')?.data?.value).toBe(1);
-    expect(env.apiStore.getItemState('item2')?.data?.value).toBe(2);
+    expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
+    expect(env.apiStore.getItemState('item2')?.data?.value).toEqual({ v: 2 });
 
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 | item2 |
-      0     | 1     | -     | [item1] ui-initialized
-      .     | 1     | 2     | [item2] ui-changed
-      50ms  | 1     | 2     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | 1     | 2     | 🔴 <list-fetch-finished (value: {"count":2})
+      time  | item1   | item2   |
+      0     | {"v":1} | -       | [item1] ui-initialized
+      .     | {"v":1} | {"v":2} | [item2] ui-changed
+      50ms  | {"v":1} | {"v":2} | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+      850ms | {"v":1} | {"v":2} | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -697,9 +689,8 @@ describe('batch with UI hooks', () => {
 describe('duplicate item requests in batch', () => {
   test('same item scheduled multiple times appears once in batch', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1 },
+      { item1: { v: 1 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -712,12 +703,11 @@ describe('duplicate item requests in batch', () => {
     await vi.runAllTimersAsync();
 
     // Single item, so uses fetchFn not batchFetchFn
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - { type: 'fetch', itemId: 'item1', result: 1 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemId: 'item1'
+        result: { v: 1 }
+        type: 'fetch'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
@@ -726,16 +716,15 @@ describe('duplicate item requests in batch', () => {
       .     | -     | scheduled-fetch-coalesced
       .     | -     | scheduled-fetch-coalesced
       50ms  | -     | 🔴 >fetch-started
-      850ms | -     | 🔴 <fetch-finished (value: 1)
+      850ms | -     | 🔴 <fetch-finished (value: {"v":1})
       "
     `);
   });
 
   test('multiple items with duplicates are deduplicated in batch', async () => {
     const env = createCollectionStoreTestEnv(
-      { item1: 1, item2: 2 },
+      { item1: { v: 1 }, item2: { v: 2 } },
       {
-        forceInitialDataInvalidation: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -749,16 +738,15 @@ describe('duplicate item requests in batch', () => {
     await vi.runAllTimersAsync();
 
     // Should have exactly 2 items in batch (deduplicated)
-    expect(compactSnapshot(env.serverTable.fetchHistory))
-      .toMatchInlineSnapshot(`
-        "
-        - type: 'list'
-          itemIds: ['item1', 'item2']
-          results:
-            - { itemId: 'item1', data: 1 }
-            - { itemId: 'item2', data: 2 }
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemIds: ['item1', 'item2']
+        results:
+          - data: { v: 1 }
+            itemId: 'item1'
+          - data: { v: 2 }
+            itemId: 'item2'
+        type: 'list'
+    `);
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "

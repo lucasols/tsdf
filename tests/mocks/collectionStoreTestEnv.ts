@@ -12,9 +12,29 @@ import {
 
 export type CollectionTestItem<D> = { value: D };
 
+type CollectionTestPayload = string | { id: { id: string } };
+
+export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
+  /** When true, disables initial data invalidation (default: false) */
+  disableDataInvalidation?: boolean;
+  /** Backward-compatible inverse of disableDataInvalidation */
+  forceInitialDataInvalidation?: boolean;
+  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  baseCoalescingWindowMs?: number;
+  mediumPriorityDelayMs?: number;
+  /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
+  useBatchFetch?: boolean;
+  /** Max items per batch (only used when useBatchFetch is true) */
+  maxBatchSize?: number;
+  /** Simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
+  useLoadedSnapshot?: boolean;
+  initialData?: Record<string, D> | 'fromServer';
+};
+
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
+    disableDataInvalidation,
     forceInitialDataInvalidation,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
@@ -23,19 +43,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     maxBatchSize,
     useLoadedSnapshot = false,
     initialData,
-  }: {
-    forceInitialDataInvalidation?: boolean;
-    dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-    baseCoalescingWindowMs?: number;
-    mediumPriorityDelayMs?: number;
-    /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
-    useBatchFetch?: boolean;
-    /** Max items per batch (only used when useBatchFetch is true) */
-    maxBatchSize?: number;
-    /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
-    useLoadedSnapshot?: boolean;
-    initialData?: Record<string, D> | 'fromServer';
-  } = {},
+  }: CollectionStoreTestEnvOptions<D> = {},
 ) {
   const {
     actionsHistory,
@@ -86,50 +94,98 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     Record<string, number | 'error' | undefined>
   >(addAction, getRelativeTime, actionsHistory);
 
+  function normalizeItemId(itemId: CollectionTestPayload): string {
+    return typeof itemId === 'string' ? itemId : itemId.id.id;
+  }
+
   // Batch fetch function - delegates to serverTable.list
-  const batchFetchFn = async (itemIds: string[], signal: AbortSignal) => {
-    const listResult = await serverTable.list({ itemIds }, signal);
+  const batchFetchFn = async (
+    payloads: CollectionTestPayload[],
+    signal: AbortSignal,
+  ) => {
+    const itemIdToPayload = new Map<string, CollectionTestPayload>();
+    for (const payload of payloads) {
+      const itemId = normalizeItemId(payload);
+      if (!itemIdToPayload.has(itemId)) {
+        itemIdToPayload.set(itemId, payload);
+      }
+    }
+
+    const listResult = await serverTable.list(
+      { itemIds: [...itemIdToPayload.keys()] },
+      signal,
+    );
 
     // Convert list result to Map format expected by collection store
-    const results = new Map<string, CollectionTestItem<D> | Error>();
+    const results = new Map<CollectionTestPayload, CollectionTestItem<D> | Error>();
     for (const { itemId, data } of listResult.items) {
+      const payload = itemIdToPayload.get(itemId) ?? itemId;
       if (data instanceof Error) {
-        results.set(itemId, data);
+        results.set(payload, data);
       } else {
-        results.set(itemId, { value: data });
+        results.set(payload, { value: data });
       }
     }
 
     return results;
   };
 
-  function getDataFromServer(sever: Record<string, D>) {
-    return Object.entries(sever).map(([itemId, value]) => ({
+  function mapInitialData(data: Record<string, D>) {
+    return Object.entries(data).map(([itemId, value]) => ({
       payload: itemId,
       data: { value },
     }));
   }
 
-  const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
+  const shouldDisableDataInvalidation =
+    forceInitialDataInvalidation === undefined ?
+      (disableDataInvalidation ?? false)
+    : !forceInitialDataInvalidation;
+
+  function getInitialData() {
+    if (useLoadedSnapshot) {
+      return mapInitialData(serverInitialData);
+    }
+
+    if (forceInitialDataInvalidation) {
+      if (initialData === 'fromServer') {
+        return mapInitialData(serverInitialData);
+      }
+
+      if (initialData) {
+        return mapInitialData(initialData);
+      }
+
+      return undefined;
+    }
+
+    return shouldDisableDataInvalidation ?
+        mapInitialData(serverInitialData)
+      : undefined;
+  }
+
+  const initialDataSnapshot = getInitialData();
+
+  const collectionStore = createCollectionStore<
+    CollectionTestItem<D>,
+    CollectionTestPayload
+  >({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,
     maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
-    fetchFn: async (itemId: string, signal: AbortSignal) => {
+    fetchFn: async (payload, signal) => {
+      const itemId = normalizeItemId(payload);
       const value = await serverTable.fetch(itemId, signal);
       return { value };
     },
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
     disableInitialDataInvalidation:
-      !forceInitialDataInvalidation || useLoadedSnapshot,
+      shouldDisableDataInvalidation || useLoadedSnapshot,
     getInitialData:
-      !forceInitialDataInvalidation || useLoadedSnapshot ?
-        () => getDataFromServer(serverInitialData)
-      : initialData === 'fromServer' ?
-        () => getDataFromServer(serverInitialData)
-      : initialData ? () => getDataFromServer(initialData)
+      initialDataSnapshot ? () => initialDataSnapshot
       : undefined,
-    disableRefetchOnMount: !forceInitialDataInvalidation || useLoadedSnapshot,
+    disableRefetchOnMount: shouldDisableDataInvalidation || useLoadedSnapshot,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     onSchedulerEvent: (event) => {
@@ -147,6 +203,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   return {
     apiStore: collectionStore,
+    store: collectionStore.store,
     serverTable,
     get uiChanges() {
       return uiChanges;

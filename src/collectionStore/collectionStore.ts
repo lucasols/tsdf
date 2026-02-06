@@ -532,40 +532,46 @@ export function createCollectionStore<
       draftData: ItemState,
       collectionItem: CollectionItem,
     ) => void | ItemState,
-    ifNothingWasUpdated?: () => void,
+    {
+      ifNothingWasUpdated,
+    }: {
+      ifNothingWasUpdated?: () => void;
+    } = {},
   ): boolean {
     const itemKeys = getItemsKeyArray(fetchParams);
 
     let someItemWasUpdated: boolean = false;
 
-    store.produceState(
-      (draft) => {
-        for (const itemKey of itemKeys) {
-          const item = draft[itemKey];
+    store.batch(() => {
+      store.produceState(
+        (draft) => {
+          for (const itemKey of itemKeys) {
+            const item = draft[itemKey];
 
-          if (!item?.data) continue;
+            if (!item?.data) continue;
 
-          someItemWasUpdated = true;
+            someItemWasUpdated = true;
 
-          const originalItem = store.state[itemKey];
-          if (!originalItem) continue;
+            const originalItem = store.state[itemKey];
+            if (!originalItem) continue;
 
-          const result = produceNewData(
-            __LEGIT_CAST__<ItemState>(item.data),
-            originalItem,
-          );
+            const result = produceNewData(
+              __LEGIT_CAST__<ItemState>(item.data),
+              originalItem,
+            );
 
-          if (result !== undefined) {
-            item.data = __LEGIT_CAST__(result);
+            if (result !== undefined) {
+              item.data = __LEGIT_CAST__(result);
+            }
           }
-        }
+        },
+        { action: 'update-item-state' },
+      );
 
-        if (ifNothingWasUpdated && !someItemWasUpdated) {
-          ifNothingWasUpdated();
-        }
-      },
-      { action: 'update-item-state' },
-    );
+      if (ifNothingWasUpdated && !someItemWasUpdated) {
+        ifNothingWasUpdated();
+      }
+    });
 
     return someItemWasUpdated;
   }
