@@ -955,35 +955,34 @@ test('fetch error then mount component without error', async () => {
     `);
 });
 
-test.concurrent('initial data is invalidated on first load', async () => {
-  const env = createTestEnv({
-    initialServerData: { '1': defaultTodo, '2': defaultTodo },
-    useLoadedSnapshot: true,
-    disableInitialDataInvalidation: false,
-  });
+test('initial data is invalidated on first load', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    { initialData: 'fromServer', forceInitialDataInvalidation: true },
+  );
 
-  env.serverMock.produceData((draft) => {
-    draft['1']!.title = 'Update';
-  });
+  env.serverTable.setItem('1', { title: 'Update', completed: false });
 
-  const renders = createRenderStore();
+  const renders = createLoggerStore();
 
   renderHook(() => {
-    const { data, status } = env.store.useItem('1', {
+    const { data, status } = env.apiStore.useItem('1', {
       returnRefetchingStatus: true,
       disableRefetchOnMount: true,
     });
 
-    renders.add({ status, data });
+    renders.add({ status, data: data?.value ?? null });
   });
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {title:todo, completed:false}
-    status: refetching -- data: {title:todo, completed:false}
-    status: success -- data: {title:Update, completed:false}
+    -> status: success ⋅ data: {title:todo, completed:❌}
+    -> status: refetching ⋅ data: {title:todo, completed:❌}
+    -> status: success ⋅ data: {title:Update, completed:❌}
     "
   `);
 });
