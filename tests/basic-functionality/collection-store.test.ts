@@ -409,39 +409,47 @@ describe('update state functions', () => {
     });
 
     test('create multiple if not exist', () => {
-      const { store } = createTestEnv({
+      const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
+        {
         useLoadedSnapshot: true,
-        disableInitialDataInvalidation: true,
-      });
-
-      let storeUpdates = 0;
-      store.store.subscribe(() => {
-        storeUpdates++;
-      });
-
-      store.updateItemState(
-        (id) => id === '?',
-        (data) => {
-          data.title = 'item 6';
-        },
-        () => {
-          store.addItemToState('6', {
-            title: 'item 6',
-            completed: false,
-          });
-          store.addItemToState('7', {
-            title: 'item 7',
-            completed: false,
-          });
+          disableDataInvalidation: true,
         },
       );
 
-      expect(storeUpdates).toEqual(1);
+      let storeUpdates = 0;
+      store.subscribe(() => {
+        storeUpdates++;
+      });
 
-      expect(store.getItemState(['6', '7', '5'])).toEqual([
+      apiStore.updateItemState(
+        (id) => id === '?',
+        (data) => {
+          data.value.title = 'item 6';
+        },
         {
-          data: { completed: false, title: 'item 6' },
+          ifNothingWasUpdated: () => {
+            apiStore.addItemToState('6', {
+              value: {
+            title: 'item 6',
+            completed: false,
+              },
+          });
+            apiStore.addItemToState('7', {
+              value: {
+            title: 'item 7',
+            completed: false,
+              },
+          });
+          },
+        },
+      );
+
+      expect(storeUpdates).toBe(1);
+
+      expect(apiStore.getItemState(['6', '7', '5'])).toEqual([
+        {
+          data: { value: { completed: false, title: 'item 6' } },
           error: null,
           payload: '6',
           refetchOnMount: false,
@@ -449,7 +457,7 @@ describe('update state functions', () => {
           wasLoaded: true,
         },
         {
-          data: { completed: false, title: 'item 7' },
+          data: { value: { completed: false, title: 'item 7' } },
           error: null,
           payload: '7',
           refetchOnMount: false,
@@ -457,7 +465,7 @@ describe('update state functions', () => {
           wasLoaded: true,
         },
         {
-          data: { completed: false, title: 'todo' },
+          data: { value: { completed: false, title: 'todo' } },
           error: null,
           payload: '5',
           refetchOnMount: false,
