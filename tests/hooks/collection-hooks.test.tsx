@@ -535,57 +535,61 @@ describe('useItem', () => {
   });
 
   test('disableRefetchOnMount', async () => {
-    const numOfFetchs = serverMock.numOfFetchsFromHere();
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { forceInitialDataInvalidation: true },
+    );
 
-    const comp2Renders = createRenderStore();
-    const compRenders = createRenderStore();
+    const comp2Renders = createLoggerStore();
+    const compRenders = createLoggerStore();
 
-    const Comp2 = () => {
-      const data = collectionStore.useItem('2', {
+    function Comp2() {
+      const data = env.apiStore.useItem('2', {
         disableRefetchOnMount: true,
         returnRefetchingStatus: true,
       });
 
-      comp2Renders.add({ status: data.status, data: data.data });
+      comp2Renders.add({ status: data.status, data: data.data?.value ?? null });
 
       return <div />;
-    };
+    }
 
-    const mountComp2 = createValueStore(false);
+    function Comp({ showComp2 }: { showComp2: boolean }) {
+      const data = env.apiStore.useItem('2');
 
-    const Comp = () => {
-      const data = collectionStore.useItem('2');
+      compRenders.add({ status: data.status, data: data.data?.value ?? null });
 
-      compRenders.add({ status: data.status, data: data.data });
+      return <>{showComp2 && <Comp2 />}</>;
+    }
 
-      return <>{mountComp2.useValue() && <Comp2 />}</>;
-    };
+    const { rerender } = render(<Comp showComp2={false} />);
 
-    render(<Comp />);
-
-    // wait the throttle time
-    await sleep(200);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(compRenders.snapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- data: null
-      status: success -- data: {title:todo, completed:false}
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {title:todo, completed:❌}
       "
     `);
 
-    expect(numOfFetchs()).toBe(1);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
-    mountComp2.set(true);
+    rerender(<Comp showComp2 />);
 
-    await sleep(200);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(comp2Renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- data: {title:todo, completed:false}
+      -> status: success ⋅ data: {title:todo, completed:❌}
       "
     `);
 
-    expect(numOfFetchs()).toBe(1);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
   test('action with optmistic update and revalidation', async () => {
