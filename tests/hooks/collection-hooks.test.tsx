@@ -387,42 +387,61 @@ describe('useMultipleItems isolated tests', () => {
   });
 
   test('with queryMetadata', async () => {
-    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
-      {
-        initialServerData: serverInitialData,
-        disableInitialDataInvalidation: false,
-      },
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { forceInitialDataInvalidation: true },
     );
 
-    const renders1 = createRenderStore();
-    const renders2 = createRenderStore();
+    const renders1 = createLoggerStore();
+    const renders2 = createLoggerStore();
 
     renderHook(() => {
-      const [item1, item2] = collectionStore.useMultipleItems(
+      const [item1, item2] = env.apiStore.useMultipleItems(
         ['1', '2'].map((item) => ({
           payload: item,
           queryMetadata: { md: `md-${item}` },
         })),
       );
 
-      renders1.add(pick(item1, ['status', 'payload', 'data', 'queryMetadata']));
-      renders2.add(pick(item2, ['status', 'payload', 'data', 'queryMetadata']));
+      renders1.add({
+        status: item1?.status,
+        payload: item1?.payload,
+        data: item1?.data?.value ?? null,
+        queryMetadata: item1?.queryMetadata,
+      });
+      renders2.add({
+        status: item2?.status,
+        payload: item2?.payload,
+        data: item2?.data?.value ?? null,
+        queryMetadata: item2?.queryMetadata,
+      });
     });
 
-    await serverMock.waitFetchIdle();
-
-    expect(renders1.renderCount()).toBeGreaterThan(0);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 1 -- data: null -- queryMetadata: {md:md-1}
-      status: success -- payload: 1 -- data: {title:todo, completed:false} -- queryMetadata: {md:md-1}
+      -> status: loading ⋅ payload: 1 ⋅ data: null ⋅ queryMetadata: {md:md-1}
+      ┌─
+      ⋅ status: success
+      ⋅ payload: 1
+      ⋅ data: {title:todo, completed:❌}
+      ⋅ queryMetadata: {md:md-1}
+      └─
       "
     `);
+
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
         "
-        status: loading -- payload: 2 -- data: null -- queryMetadata: {md:md-2}
-        status: success -- payload: 2 -- data: {title:todo, completed:false} -- queryMetadata: {md:md-2}
+      -> status: loading ⋅ payload: 2 ⋅ data: null ⋅ queryMetadata: {md:md-2}
+      ┌─
+      ⋅ status: success
+      ⋅ payload: 2
+      ⋅ data: {title:todo, completed:❌}
+      ⋅ queryMetadata: {md:md-2}
+      └─
         "
       `);
   });
