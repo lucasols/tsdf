@@ -297,23 +297,20 @@ describe('update state functions', () => {
 
   describe('updateItemState', () => {
     test('update state of one item', () => {
-      const { store } = createTestEnv({
-        initialServerData,
+      const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
         useLoadedSnapshot: true,
       });
 
-      expect(store.getItemState('1')?.data).toEqual({
-        completed: true,
-        title: 'todo',
+      expect(apiStore.getItemState('1')?.data).toEqual({
+        value: { completed: true, title: 'todo' },
       });
 
-      store.updateItemState('1', (data) => {
-        data.title = 'new title';
+      apiStore.updateItemState('1', (data) => {
+        data.value.title = 'new title';
       });
 
-      expect(store.getItemState('1')?.data).toEqual({
-        completed: true,
-        title: 'new title',
+      expect(apiStore.getItemState('1')?.data).toEqual({
+        value: { completed: true, title: 'new title' },
       });
     });
 
