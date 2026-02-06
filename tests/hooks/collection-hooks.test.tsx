@@ -693,101 +693,123 @@ describe('useItem isolated tests', () => {
   });
 
   test('use ensureIsLoaded prop', async () => {
-    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
-      {
-        initialServerData: serverInitialData,
-        useLoadedSnapshot: true,
-      },
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { useLoadedSnapshot: true },
     );
 
-    const renders = createRenderStore();
+    expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
+      data:
+        value: { completed: '❌', title: 'todo' }
+
+      error: null
+      payload: '1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+
+    const renders = createLoggerStore();
 
     renderHook(() => {
-      const selectionResult = collectionStore.useItem('1', {
+      const selectionResult = env.apiStore.useItem('1', {
         ensureIsLoaded: true,
       });
 
-      renders.add(
-        pick(selectionResult, ['status', 'payload', 'isLoading', 'data'], {
-          isLoading: 'L',
-        }),
-      );
+      renders.add({
+        status: selectionResult.status,
+        payload: selectionResult.payload,
+        isLoading: selectionResult.isLoading,
+        data: selectionResult.data?.value ?? null,
+      });
     });
 
-    await serverMock.waitFetchIdle();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: 1 -- L: true -- data: {title:todo, completed:false}
-      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
+      -> status: loading ⋅ payload: 1 ⋅ isLoading: ✅ ⋅ data: {title:todo, completed:❌}
+      -> status: success ⋅ payload: 1 ⋅ isLoading: ❌ ⋅ data: {title:todo, completed:❌}
       "
     `);
   });
 
   test('ignore refetchingStatus by default', async () => {
-    const { store, serverMock } = createDefaultCollectionStore({
-      initialServerData: serverInitialData,
-      useLoadedSnapshot: true,
-    });
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { forceInitialDataInvalidation: true },
+    );
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
     renderHook(() => {
-      const selectionResult = store.useItem('1');
+      const selectionResult = env.apiStore.useItem('1');
 
-      renders.add(pick(selectionResult, ['status', 'isLoading', 'data']));
+      renders.add({
+        status: selectionResult.status,
+        isLoading: selectionResult.isLoading,
+        data: selectionResult.data?.value ?? null,
+      });
     });
 
-    await serverMock.waitFetchIdle();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- isLoading: false -- data: {title:todo, completed:false}
+      -> status: loading ⋅ isLoading: ✅ ⋅ data: null
+      -> status: success ⋅ isLoading: ❌ ⋅ data: {title:todo, completed:❌}
       "
     `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {
-    const { store: collectionStore, serverMock } = createDefaultCollectionStore(
-      {
-        initialServerData: serverInitialData,
-        useLoadedSnapshot: true,
-      },
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { useLoadedSnapshot: true },
     );
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
-    const loadItem = createValueStore<string | false>(false);
-
-    renderHook(() => {
-      const selectionResult = collectionStore.useItem(loadItem.useValue(), {
+    const { rerender } = renderHook(
+      ({ itemPayload }: { itemPayload: string | false }) => {
+        const selectionResult = env.apiStore.useItem(itemPayload, {
         ensureIsLoaded: true,
       });
 
-      renders.add(
-        pick(selectionResult, ['status', 'payload', 'isLoading', 'data'], {
-          isLoading: 'L',
-        }),
+        renders.add({
+          status: selectionResult.status,
+          payload: selectionResult.payload,
+          isLoading: selectionResult.isLoading,
+          data: selectionResult.data?.value ?? null,
+        });
+      },
+      { initialProps: { itemPayload: false satisfies string | false } },
       );
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ data: null
+      "
+    `);
+
+    rerender({ itemPayload: '1' });
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: undefined -- L: false -- data: null
-      "
-    `);
-
-    // enable loading
-    loadItem.set('1');
-
-    await serverMock.waitFetchIdle();
-
-    expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: idle -- payload: undefined -- L: false -- data: null
-      ---
-      status: loading -- payload: 1 -- L: true -- data: {title:todo, completed:false}
-      status: success -- payload: 1 -- L: false -- data: {title:todo, completed:false}
+      -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ data: null
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: 1 ⋅ isLoading: ✅ ⋅ data: {title:todo, completed:❌}
+      -> status: success ⋅ payload: 1 ⋅ isLoading: ❌ ⋅ data: {title:todo, completed:❌}
       "
     `);
   });
