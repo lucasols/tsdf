@@ -365,7 +365,11 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     return Object.fromEntries(items);
   }
 
-  function setItem(itemId: string, data: ItemData): void {
+  function setItem(
+    itemId: string,
+    data: ItemData,
+    options?: { triggerRTUEvent?: boolean },
+  ): void {
     items.set(itemId, data);
 
     const history = itemHistory.get(itemId);
@@ -376,6 +380,10 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     }
 
     addAction?.('server-data-changed', { actionValue: data, itemId });
+
+    if (options?.triggerRTUEvent) {
+      wsEvents.emit('data_changed', { itemId, data });
+    }
   }
 
   function updateItem(itemId: string, data: Partial<ItemData>): void {
