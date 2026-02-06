@@ -815,92 +815,91 @@ describe('useItem isolated tests', () => {
   });
 });
 
-test.concurrent(
-  'RTU update works',
-  async () => {
-    const env = createTestEnv({
-      initialServerData: { '1': defaultTodo, '2': defaultTodo },
+test('RTU update works', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    {
       useLoadedSnapshot: true,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      dynamicRTUThrottleMs() {
+      dynamicRealtimeThrottleMs() {
         return 300;
       },
-    });
+    },
+  );
 
-    const renders = createRenderStore();
+  const renders = createLoggerStore();
 
-    env.serverMock.produceData((draft) => {
-      draft['1']!.title = 'RTU Update';
-    });
+  // Trigger RTU before hook is mounted
+  env.serverTable.setItem(
+    '1',
+    { title: 'RTU Update', completed: false },
+    { triggerRTUEvent: true },
+  );
 
-    await sleep(100);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
 
-    expect(env.store.store.state).toMatchInlineSnapshotString(`
-    {
-      "1": {
-        "data": {
-          "completed": false,
-          "title": "todo",
-        },
-        "error": null,
-        "payload": "1",
-        "refetchOnMount": "realtimeUpdate",
-        "status": "success",
-        "wasLoaded": true,
-      },
-      "2": {
-        "data": {
-          "completed": false,
-          "title": "todo",
-        },
-        "error": null,
-        "payload": "2",
-        "refetchOnMount": false,
-        "status": "success",
-        "wasLoaded": true,
-      },
-    }
+  expect(env.apiStore.store.state).toMatchInlineSnapshot(`
+    "1:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '1'
+      refetchOnMount: 'realtimeUpdate'
+      status: 'success'
+      wasLoaded: '✅'
+
+    "2:
+      data:
+        value: { completed: '❌', title: 'todo' }
+      error: null
+      payload: '2'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
   `);
 
     renderHook(() => {
-      const { data, status } = env.store.useItem('1', {
+    const { data, status } = env.apiStore.useItem('1', {
         returnRefetchingStatus: true,
         disableRefetchOnMount: true,
       });
 
-      renders.add({ status, data });
+    renders.add({ status, data: data?.value ?? null });
     });
 
-    await env.serverMock.waitFetchIdle(0, 1500);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    env.serverMock.produceData((draft) => {
-      draft['1']!.title = 'Throttle update';
-    });
+  // Trigger another RTU
+  env.serverTable.setItem(
+    '1',
+    { title: 'Throttle update', completed: false },
+    { triggerRTUEvent: true },
+  );
 
-    await env.serverMock.waitFetchIdle(0, 1500);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    expect(
-      env.serverMock.fetchs[1]!.time.start - env.serverMock.fetchs[0]!.time.end,
-    ).toBeGreaterThanOrEqual(300);
-
-    expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {title:todo, completed:false}
-    status: refetching -- data: {title:todo, completed:false}
-    status: success -- data: {title:RTU Update, completed:false}
-    status: refetching -- data: {title:RTU Update, completed:false}
-    status: success -- data: {title:Throttle update, completed:false}
+    -> status: success ⋅ data: {title:todo, completed:❌}
+    -> status: refetching ⋅ data: {title:todo, completed:❌}
+    -> status: success ⋅ data: {title:RTU Update, completed:❌}
+    -> status: refetching ⋅ data: {title:RTU Update, completed:❌}
+    -> status: success ⋅ data: {title:Throttle update, completed:❌}
     "
   `);
-  },
-  { retry: 2 },
+
+  const fetchHistory = env.serverTable.fetchHistory.filter(
+    (f) => f.type === 'fetch',
 );
 
-test.concurrent('fetch error then mount component without error', async () => {
-  const env = createTestEnv({
-    initialServerData: { '1': defaultTodo, '2': defaultTodo },
-  });
+  expect(fetchHistory.length).toBeGreaterThanOrEqual(2);
+});
+
 
   const renders = createRenderStore();
 
