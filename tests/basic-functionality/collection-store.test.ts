@@ -369,33 +369,37 @@ describe('update state functions', () => {
     });
 
     test('create if not exist', () => {
-      const { store } = createTestEnv({
+      const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
-        useLoadedSnapshot: true,
-      });
+        { useLoadedSnapshot: true },
+      );
 
       let storeUpdates = 0;
-      store.store.subscribe(() => {
+      store.subscribe(() => {
         storeUpdates++;
       });
 
-      store.updateItemState(
+      apiStore.updateItemState(
         '6',
         (data) => {
-          data.title = 'item 6';
+          data.value.title = 'item 6';
         },
-        () => {
-          store.addItemToState('6', {
+        {
+          ifNothingWasUpdated: () => {
+            apiStore.addItemToState('6', {
+              value: {
             title: 'item 6',
             completed: false,
+              },
           });
+          },
         },
       );
 
-      expect(storeUpdates).toEqual(1);
+      expect(storeUpdates).toBe(1);
 
-      expect(store.getItemState('6')).toEqual({
-        data: { completed: false, title: 'item 6' },
+      expect(apiStore.getItemState('6')).toEqual({
+        data: { value: { completed: false, title: 'item 6' } },
         error: null,
         payload: '6',
         refetchOnMount: false,
