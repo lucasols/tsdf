@@ -17,8 +17,6 @@ type CollectionTestPayload = string | { id: { id: string } };
 export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   /** When true, disables initial data invalidation (default: false) */
   disableDataInvalidation?: boolean;
-  /** Backward-compatible inverse of disableDataInvalidation */
-  forceInitialDataInvalidation?: boolean;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
   baseCoalescingWindowMs?: number;
   mediumPriorityDelayMs?: number;
@@ -34,8 +32,7 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
-    disableDataInvalidation,
-    forceInitialDataInvalidation,
+    disableDataInvalidation = false,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
@@ -137,31 +134,20 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     }));
   }
 
-  const shouldDisableDataInvalidation =
-    forceInitialDataInvalidation === undefined ?
-      (disableDataInvalidation ?? false)
-    : !forceInitialDataInvalidation;
-
   function getInitialData() {
     if (useLoadedSnapshot) {
       return mapInitialData(serverInitialData);
     }
 
-    if (forceInitialDataInvalidation) {
-      if (initialData === 'fromServer') {
-        return mapInitialData(serverInitialData);
-      }
-
-      if (initialData) {
-        return mapInitialData(initialData);
-      }
-
-      return undefined;
+    if (initialData === 'fromServer') {
+      return mapInitialData(serverInitialData);
     }
 
-    return shouldDisableDataInvalidation ?
-        mapInitialData(serverInitialData)
-      : undefined;
+    if (initialData) {
+      return mapInitialData(initialData);
+    }
+
+    return disableDataInvalidation ? mapInitialData(serverInitialData) : undefined;
   }
 
   const initialDataSnapshot = getInitialData();
@@ -181,11 +167,11 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     },
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
     disableInitialDataInvalidation:
-      shouldDisableDataInvalidation || useLoadedSnapshot,
+      disableDataInvalidation || useLoadedSnapshot,
     getInitialData:
       initialDataSnapshot ? () => initialDataSnapshot
       : undefined,
-    disableRefetchOnMount: shouldDisableDataInvalidation || useLoadedSnapshot,
+    disableRefetchOnMount: disableDataInvalidation || useLoadedSnapshot,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     onSchedulerEvent: (event) => {

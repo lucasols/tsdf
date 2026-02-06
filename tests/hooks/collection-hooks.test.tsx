@@ -36,8 +36,7 @@ const defaultTodo: Todo = { title: 'todo', completed: false };
 describe('useMultipleItems', () => {
   test('load the items', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo },
-      { forceInitialDataInvalidation: true },
+      { '1': defaultTodo, '2': defaultTodo }
     );
 
     const renders1 = createLoggerStore();
@@ -338,8 +337,7 @@ describe('useMultipleItems isolated tests', () => {
 
   test('disableRefetchOnMount does not disable the initial fetch', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo },
-      { forceInitialDataInvalidation: true },
+      { '1': defaultTodo, '2': defaultTodo }
     );
 
     const renders1 = createLoggerStore();
@@ -389,8 +387,7 @@ describe('useMultipleItems isolated tests', () => {
 
   test('with queryMetadata', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo },
-      { forceInitialDataInvalidation: true },
+      { '1': defaultTodo, '2': defaultTodo }
     );
 
     const renders1 = createLoggerStore();
@@ -451,8 +448,7 @@ describe('useMultipleItems isolated tests', () => {
 describe('useItem', () => {
   test('disable the initial fetch', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo },
-      { forceInitialDataInvalidation: true },
+      { '1': defaultTodo, '2': defaultTodo }
     );
 
     const renders = createLoggerStore();
@@ -482,8 +478,7 @@ describe('useItem', () => {
 
   test('enable the fetch after initial disable', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo },
-      { forceInitialDataInvalidation: true },
+      { '1': defaultTodo, '2': defaultTodo }
     );
 
     const renders = createLoggerStore();
@@ -537,8 +532,7 @@ describe('useItem', () => {
 
   test('disableRefetchOnMount', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo },
-      { forceInitialDataInvalidation: true },
+      { '1': defaultTodo, '2': defaultTodo }
     );
 
     const comp2Renders = createLoggerStore();
@@ -738,8 +732,7 @@ describe('useItem isolated tests', () => {
 
   test('ignore refetchingStatus by default', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo },
-      { forceInitialDataInvalidation: true },
+      { '1': defaultTodo, '2': defaultTodo }
     );
 
     const renders = createLoggerStore();
@@ -902,9 +895,8 @@ test('RTU update works', async () => {
 
 test('fetch error then mount component without error', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
-    { '1': defaultTodo, '2': defaultTodo },
-    { forceInitialDataInvalidation: true },
-  );
+    { '1': defaultTodo, '2': defaultTodo }
+    );
 
   const renders = createLoggerStore();
 
@@ -958,7 +950,7 @@ test('fetch error then mount component without error', async () => {
 test('initial data is invalidated on first load', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    { initialData: 'fromServer', forceInitialDataInvalidation: true },
+    { initialData: 'fromServer' },
   );
 
   env.serverTable.setItem('1', { title: 'Update', completed: false });
@@ -990,7 +982,7 @@ test('initial data is invalidated on first load', async () => {
 test('emulate load resource during its mutation', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    { initialData: 'fromServer', forceInitialDataInvalidation: true },
+    { initialData: 'fromServer' },
   );
 
   const renders = createLoggerStore();
