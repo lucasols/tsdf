@@ -22,7 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-    cleanup();
+  cleanup();
   vi.runOnlyPendingTimers();
 });
 
@@ -47,25 +47,25 @@ describe('useMultipleItems', () => {
       ({ items }) => {
         const selectionResult = env.apiStore.useMultipleItems(
           items.map((item) => ({
-        payload: item,
-      })),
-      {
-        returnRefetchingStatus: true,
-      },
-    );
+            payload: item,
+          })),
+          {
+            returnRefetchingStatus: true,
+          },
+        );
 
-    const [item1, item2] = selectionResult;
+        const [item1, item2] = selectionResult;
 
-    renders1.add({
-      status: item1?.status,
-      payload: item1?.payload,
+        renders1.add({
+          status: item1?.status,
+          payload: item1?.payload,
           data: item1?.data?.value ?? null,
-    });
-    renders2.add({
-      status: item2?.status,
-      payload: item2?.payload,
+        });
+        renders2.add({
+          status: item2?.status,
+          payload: item2?.payload,
           data: item2?.data?.value ?? null,
-    });
+        });
       },
       { initialProps: { items: ['1', '2'] } },
     );
@@ -289,16 +289,16 @@ describe('useMultipleItems isolated tests', () => {
     const renders1 = createLoggerStore();
     const renders2 = createLoggerStore();
 
-      renderHook(() => {
+    renderHook(() => {
       const [item1, item2] = env.apiStore.useMultipleItems(
-          ['1', '2'].map((item) => ({
-            payload: item,
-          })),
-          {
-            returnRefetchingStatus: true,
-            disableRefetchOnMount: true,
-          },
-        );
+        ['1', '2'].map((item) => ({
+          payload: item,
+        })),
+        {
+          returnRefetchingStatus: true,
+          disableRefetchOnMount: true,
+        },
+      );
 
       renders1.add({
         status: item1?.status,
@@ -310,18 +310,18 @@ describe('useMultipleItems isolated tests', () => {
         payload: item2?.payload,
         data: item2?.data?.value ?? null,
       });
-      });
+    });
 
-      act(() => {
+    act(() => {
       env.serverTable.setItem('1', { title: 'todo', completed: true });
       env.apiStore.invalidateItem('1');
-      });
+    });
 
     await act(async () => {
       await vi.runAllTimersAsync();
     });
 
-      expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
+    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
       -> status: refetching ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
@@ -329,7 +329,7 @@ describe('useMultipleItems isolated tests', () => {
       "
     `);
 
-      expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
+    expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ payload: 2 ⋅ data: {title:todo, completed:❌}
       "
@@ -435,7 +435,7 @@ describe('useMultipleItems isolated tests', () => {
     `);
 
     expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
-        "
+      "
       -> status: loading ⋅ payload: 2 ⋅ data: null ⋅ queryMetadata: {md:md-2}
       ┌─
       ⋅ status: success
@@ -443,8 +443,8 @@ describe('useMultipleItems isolated tests', () => {
       ⋅ data: {title:todo, completed:❌}
       ⋅ queryMetadata: {md:md-2}
       └─
-        "
-      `);
+      "
+    `);
   });
 });
 
@@ -608,7 +608,7 @@ describe('useItem', () => {
         status: selectionResult.status,
         payload: selectionResult.payload,
         data: selectionResult.data?.value ?? null,
-        });
+      });
     });
 
     act(() => {
@@ -779,8 +779,8 @@ describe('useItem isolated tests', () => {
     const { rerender } = renderHook(
       ({ itemPayload }: { itemPayload: string | false }) => {
         const selectionResult = env.apiStore.useItem(itemPayload, {
-        ensureIsLoaded: true,
-      });
+          ensureIsLoaded: true,
+        });
 
         renders.add({
           status: selectionResult.status,
@@ -790,7 +790,7 @@ describe('useItem isolated tests', () => {
         });
       },
       { initialProps: { itemPayload: false satisfies string | false } },
-      );
+    );
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
@@ -859,14 +859,14 @@ test('RTU update works', async () => {
       wasLoaded: '✅'
   `);
 
-    renderHook(() => {
+  renderHook(() => {
     const { data, status } = env.apiStore.useItem('1', {
-        returnRefetchingStatus: true,
-        disableRefetchOnMount: true,
-      });
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
+    });
 
     renders.add({ status, data: data?.value ?? null });
-    });
+  });
 
   await act(async () => {
     await vi.runAllTimersAsync();
@@ -895,7 +895,7 @@ test('RTU update works', async () => {
 
   const fetchHistory = env.serverTable.fetchHistory.filter(
     (f) => f.type === 'fetch',
-);
+  );
 
   expect(fetchHistory.length).toBeGreaterThanOrEqual(2);
 });
@@ -922,7 +922,7 @@ test('fetch error then mount component without error', async () => {
     data: null,
     error: {
       message: 'error',
-          },
+    },
     payload: '1',
     refetchOnMount: false,
     status: 'error',
@@ -947,12 +947,12 @@ test('fetch error then mount component without error', async () => {
   });
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
+    "
     -> status: error ⋅ data: null
     -> status: loading ⋅ data: null
     -> status: success ⋅ data: {title:todo, completed:❌}
-      "
-    `);
+    "
+  `);
 });
 
 test('initial data is invalidated on first load', async () => {
@@ -987,109 +987,145 @@ test('initial data is invalidated on first load', async () => {
   `);
 });
 
-test.concurrent(
-  'emulate realidateOnWindowFocus behaviour for item queries',
-  async () => {
-    const env = createTestEnv({
-      initialServerData: { '1': defaultTodo, '2': defaultTodo },
-      useLoadedSnapshot: true,
-      emulateRTU: true,
-      disableInitialDataInvalidation: false,
-    });
+test('emulate revalidateOnWindowFocus behavior for item queries', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    { initialData: 'fromServer', forceInitialDataInvalidation: true },
+  );
 
-    function emulateWindowFocus() {
-      env.store.invalidateItem(() => true, 'lowPriority');
-    }
+  env.serverTable.setFetchDurations('1', 100, 100, 100);
 
-    function getItemState(itemId = '1') {
-      return pick(
-        env.store.getItemState(itemId) ?? undefined,
-        ['refetchOnMount', 'status', 'wasLoaded'],
-        { refetchOnMount: 'rom', wasLoaded: 'wl' },
-      );
-    }
+  function emulateWindowFocus() {
+    env.apiStore.invalidateItem(() => true, 'lowPriority');
+  }
 
-    expect(getItemState()).toEqual({
-      rom: 'lowPriority',
-      status: 'success',
-      wl: true,
-    });
+  function getItemState(itemId = '1') {
+    const item = env.apiStore.getItemState(itemId);
 
-    renderHook(() => {
-      env.store.useItem('1');
-    });
+    return {
+      refetchOnMount: item?.refetchOnMount,
+      status: item?.status,
+      wasLoaded: item?.wasLoaded,
+    };
+  }
 
-    await env.serverMock.waitFetchIdle(); // initial invalidation
-
-    await sleep(1000);
-
-    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
-
-    emulateWindowFocus(); // this should not be skippe
-
-    expect(getItemState()).toEqual({
-      rom: false,
-      status: 'refetching',
-      wl: true,
-    });
-
-    await env.serverMock.waitFetchIdle();
-
-    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
-
-    emulateWindowFocus(); // this should be skipped by the throttle
-
-    // as the query is active we should not change the revalidateOnMount state
-    expect(getItemState()).toEqual({ rom: false, status: 'success', wl: true });
-    expect(getItemState('2')).toEqual({
-      rom: 'lowPriority',
-      status: 'success',
-      wl: true,
-    });
-
-    await sleep(1000);
-
-    emulateWindowFocus(); // this should not be skipped
-
-    await env.serverMock.waitFetchIdle();
-
-    expect(env.serverMock.fetchsCount).toBe(3);
-  },
-);
-
-test.concurrent('emulate load resource during its mutation', async () => {
-  const env = createTestEnv({
-    initialServerData: { '1': defaultTodo, '2': defaultTodo },
-    useLoadedSnapshot: true,
-    emulateRTU: true,
-    disableInitialDataInvalidation: false,
+  expect(getItemState()).toEqual({
+    refetchOnMount: 'lowPriority',
+    status: 'success',
+    wasLoaded: true,
   });
 
-  const renders = createRenderStore();
+  renderHook(() => {
+    env.apiStore.useItem('1');
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+
+  expect(getItemState()).toEqual({
+    refetchOnMount: false,
+    status: 'success',
+    wasLoaded: true,
+  });
+
+  act(() => {
+    emulateWindowFocus();
+  });
+
+  expect(getItemState()).toEqual({
+    refetchOnMount: false,
+    status: 'success',
+    wasLoaded: true,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(20);
+  });
+
+  expect(getItemState()).toEqual({
+    refetchOnMount: false,
+    status: 'refetching',
+    wasLoaded: true,
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(getItemState()).toEqual({
+    refetchOnMount: false,
+    status: 'success',
+    wasLoaded: true,
+  });
+
+  act(() => {
+    emulateWindowFocus();
+  });
+
+  expect(getItemState()).toEqual({
+    refetchOnMount: false,
+    status: 'success',
+    wasLoaded: true,
+  });
+  expect(getItemState('2')).toEqual({
+    refetchOnMount: 'lowPriority',
+    status: 'success',
+    wasLoaded: true,
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+
+  act(() => {
+    emulateWindowFocus();
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(3);
+});
+
+test('emulate load resource during its mutation', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    { initialData: 'fromServer', forceInitialDataInvalidation: true },
+  );
+
+  const renders = createLoggerStore();
 
   const events = evtmitter<{ openPage: undefined }>();
 
   async function createItem() {
-    const end = env.store.startMutation('3');
+    const endMutation = env.apiStore.startMutation('3');
 
     events.emit('openPage');
 
-    await env.serverMock.emulateMutation((draft) => {
-      draft['3'] = defaultTodo;
-    });
+    await env.serverTable.addItem('3', defaultTodo);
 
-    end();
+    endMutation();
   }
 
-  const Page = () => {
-    const { data, status, error } = env.store.useItem('3');
+  function Page() {
+    const { data, status, error } = env.apiStore.useItem('3');
 
-    renders.add({ status, data, error });
+    renders.add({
+      status,
+      data: data?.value ?? null,
+      error,
+    });
 
     return null;
-  };
+  }
 
-  const App = () => {
+  function App() {
     const [openPage, setOpenPage] = useState(false);
 
     useEffect(() => {
@@ -1097,18 +1133,22 @@ test.concurrent('emulate load resource during its mutation', async () => {
     }, []);
 
     return <div>{openPage && <Page />}</div>;
-  };
+  }
 
   render(<App />);
 
-  createItem();
+  act(() => {
+    void createItem();
+  });
 
-  await sleep(1000);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-  expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: loading -- data: null -- error: null
-    status: success -- data: {title:todo, completed:false} -- error: null
+    -> status: loading ⋅ data: null ⋅ error: null
+    -> status: success ⋅ data: {title:todo, completed:❌} ⋅ error: null
     "
   `);
 });
