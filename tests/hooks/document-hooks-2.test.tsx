@@ -1,10 +1,10 @@
 import { renderHook } from '@testing-library/react';
 import { expect, test } from 'vitest';
-import { sleep } from './utils/sleep';
+import { sleep } from '../../test-old/utils/sleep';
 import {
   createDefaultDocumentStore,
   createRenderStore,
-} from './utils/storeUtils';
+} from '../../test-old/utils/storeUtils';
 
 const createTestEnv = createDefaultDocumentStore;
 
