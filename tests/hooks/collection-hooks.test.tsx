@@ -479,37 +479,57 @@ describe('useItem', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(0);
   });
 
-      renders1.add(pick(selectionResult, ['status', 'payload', 'data']));
+  test('enable the fetch after initial disable', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { forceInitialDataInvalidation: true },
+    );
+
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ fetchParam }: { fetchParam: string | undefined | false }) => {
+        const selectionResult = env.apiStore.useItem(fetchParam);
+
+        renders.add({
+          status: selectionResult.status,
+          payload: selectionResult.payload,
+          data: selectionResult.data?.value ?? null,
+        });
+      },
+      {
+        initialProps: {
+          fetchParam: false satisfies string | undefined | false,
+        },
+      },
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000 * 60 * 3);
     });
-  });
 
-  test('disable the initial fetch', async () => {
-    await sleep(120);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
 
-    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: undefined -- data: null
+      -> status: idle ⋅ payload: undefined ⋅ data: null
       "
     `);
 
-    expect(serverMock.fetchsCount).toBe(0);
-  });
+    rerender({ fetchParam: '1' });
 
-  test('enable the initial fetch', async () => {
-    act(() => {
-      itemFetchParams.set('1');
+    await act(async () => {
+      await vi.runAllTimersAsync();
     });
 
-    await sleep(120);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
-    expect(serverMock.fetchsCount).toBe(1);
-
-    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: undefined -- data: null
-      ---
-      status: loading -- payload: 1 -- data: null
-      status: success -- payload: 1 -- data: {title:todo, completed:false}
+      -> status: idle ⋅ payload: undefined ⋅ data: null
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: 1 ⋅ data: null
+      -> status: success ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
       "
     `);
   });
