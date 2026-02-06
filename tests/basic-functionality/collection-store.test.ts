@@ -231,11 +231,9 @@ test('await fetch', async () => {
   expect(serverTable.numOfFinishedFetches).toBe(2);
 });
 
-test.concurrent(
-  'multiple fetchs with different payloads not cancel each other, but cancel same payload fetchs',
-  async () => {
-    const { serverMock, store: collectionStore } = createTestEnv({
-      initialServerData: {
+test('multiple fetches with different payloads not cancel each other, but cancel same payload fetches', async () => {
+  const env = createCollectionStoreTestEnv(
+    {
         '1': defaultTodo,
         '2': defaultTodo,
         '3': defaultTodo,
@@ -244,49 +242,49 @@ test.concurrent(
         '6': defaultTodo,
         '7': defaultTodo,
       },
-    });
+    { useLoadedSnapshot: true },
+  );
 
-    collectionStore.scheduleFetch('lowPriority', '1');
-    collectionStore.scheduleFetch('lowPriority', '2');
-    collectionStore.scheduleFetch('lowPriority', '3');
-    collectionStore.scheduleFetch('lowPriority', '4');
-    collectionStore.scheduleFetch('lowPriority', '5');
-    collectionStore.scheduleFetch('lowPriority', '6');
-    collectionStore.scheduleFetch('lowPriority', '7');
+  env.scheduleFetch('lowPriority', '1');
+  env.scheduleFetch('lowPriority', '2');
+  env.scheduleFetch('lowPriority', '3');
+  env.scheduleFetch('lowPriority', '4');
+  env.scheduleFetch('lowPriority', '5');
+  env.scheduleFetch('lowPriority', '6');
+  env.scheduleFetch('lowPriority', '7');
 
-    await sleep(10);
+  await vi.advanceTimersByTimeAsync(10);
 
-    collectionStore.scheduleFetch('lowPriority', '1');
-    collectionStore.scheduleFetch('lowPriority', '2');
-    collectionStore.scheduleFetch('lowPriority', '3');
-    collectionStore.scheduleFetch('lowPriority', '4');
-    collectionStore.scheduleFetch('lowPriority', '5');
-    collectionStore.scheduleFetch('lowPriority', '6');
-    collectionStore.scheduleFetch('lowPriority', '7');
+  env.scheduleFetch('lowPriority', '1');
+  env.scheduleFetch('lowPriority', '2');
+  env.scheduleFetch('lowPriority', '3');
+  env.scheduleFetch('lowPriority', '4');
+  env.scheduleFetch('lowPriority', '5');
+  env.scheduleFetch('lowPriority', '6');
+  env.scheduleFetch('lowPriority', '7');
 
-    await sleep(serverMock.fetchDuration + 5);
+  await vi.runAllTimersAsync();
 
-    expect(serverMock.fetchsCount).toEqual(7);
+  expect(env.serverTable.numOfFinishedFetches).toBe(7);
 
     const defaultState = {
-      data: defaultTodo,
+    data: { value: defaultTodo },
       error: null,
       refetchOnMount: false as const,
       status: 'success' as const,
       wasLoaded: true,
     };
 
-    expect(collectionStore.store.state).toEqual<DefaultCollectionState>({
-      '1': { ...defaultState, payload: '1' },
-      '2': { ...defaultState, payload: '2' },
-      '3': { ...defaultState, payload: '3' },
-      '4': { ...defaultState, payload: '4' },
-      '5': { ...defaultState, payload: '5' },
-      '6': { ...defaultState, payload: '6' },
-      '7': { ...defaultState, payload: '7' },
+  expect(env.store.state).toEqual({
+    '"1': { ...defaultState, payload: '1' },
+    '"2': { ...defaultState, payload: '2' },
+    '"3': { ...defaultState, payload: '3' },
+    '"4': { ...defaultState, payload: '4' },
+    '"5': { ...defaultState, payload: '5' },
+    '"6': { ...defaultState, payload: '6' },
+    '"7': { ...defaultState, payload: '7' },
     });
-  },
-);
+});
 
 describe('update state functions', () => {
   const initialServerData = {
