@@ -314,22 +314,23 @@ describe('update state functions', () => {
       });
     });
 
-    test('update multiple itens state', () => {
-      const { store } = createTestEnv({
-        initialServerData,
+    test('update multiple items state', () => {
+      const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
         useLoadedSnapshot: true,
       });
 
-      store.updateItemState(['1', '2'], () => {
+      apiStore.updateItemState(['1', '2'], () => {
         return {
+          value: {
           title: 'new title 2',
           completed: false,
+          },
         };
       });
 
       expect(
-        store.getItemState(['1', '2', '3']).map((item) => {
-          return { id: item.payload, ...item.data };
+        apiStore.getItemState(['1', '2', '3']).map((item) => {
+          return { id: item.payload, ...item.data?.value };
         }),
       ).toEqual([
         { completed: false, id: '1', title: 'new title 2' },
@@ -339,25 +340,24 @@ describe('update state functions', () => {
       ]);
     });
 
-    test('update multiple itens state with filter fn', () => {
-      const { store } = createTestEnv({
-        initialServerData,
+    test('update multiple items state with filter fn', () => {
+      const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
         useLoadedSnapshot: true,
       });
 
-      store.updateItemState(
-        (_, data) => !!data?.completed,
+      apiStore.updateItemState(
+        (_, data) => !!data?.value.completed,
         (data) => {
-          data.completed = false;
-          data.title = 'modified';
+          data.value.completed = false;
+          data.value.title = 'modified';
         },
       );
 
       expect(
-        store
+        apiStore
           .getItemState(() => true)
           .map((item) => {
-            return { id: item.payload, ...item.data };
+            return { id: item.payload, ...item.data?.value };
           }),
       ).toEqual([
         { completed: false, id: '1', title: 'modified' },
