@@ -532,7 +532,11 @@ export function createCollectionStore<
       draftData: ItemState,
       collectionItem: CollectionItem,
     ) => void | ItemState,
-    ifNothingWasUpdated?: () => void,
+    {
+      ifNothingWasUpdated,
+    }: {
+      ifNothingWasUpdated?: () => void;
+    } = {},
   ): boolean {
     const itemKeys = getItemsKeyArray(fetchParams);
 
