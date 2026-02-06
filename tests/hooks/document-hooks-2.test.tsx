@@ -1,124 +1,163 @@
-import { renderHook } from '@testing-library/react';
-import { expect, test } from 'vitest';
-import { sleep } from '../../test-old/utils/sleep';
-import {
-  createDefaultDocumentStore,
-  createRenderStore,
-} from '../../test-old/utils/storeUtils';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 
-const createTestEnv = createDefaultDocumentStore;
+beforeAll(() => {
+  vi.useFakeTimers();
+});
 
-test.concurrent(
-  'disable should keep the selected data and not be affected by invalidation',
-  async () => {
-    const env = createTestEnv({
+beforeEach(() => {
+  vi.setSystemTime(0);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.runOnlyPendingTimers();
+});
+
+type StoreValue = {
+  hello: string;
+};
+
+test('disable should keep the selected data and not be affected by invalidation', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    {
       useLoadedSnapshot: true,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-    });
+      disableInitialInvalidation: true,
+    },
+  );
 
-    const renders = createRenderStore();
+  const renders = createLoggerStore();
 
-    const { rerender } = renderHook(
-      ({ disabled }: { disabled: boolean }) => {
-        const result = env.store.useDocument({
-          isOffScreen: disabled,
-          returnRefetchingStatus: true,
-          disableRefetchOnMount: true,
-        });
-
-        renders.add(result);
-      },
-      { initialProps: { disabled: false } },
-    );
-
-    await sleep(100);
-
-    renders.addMark('first update (✅)');
-    env.serverMock.mutateData({ hello: '✅' });
-
-    await sleep(200);
-
-    renders.addMark('set disabled');
-    rerender({ disabled: true });
-
-    await sleep(100);
-
-    renders.addMark('ignored update (❌)');
-    env.serverMock.mutateData({ hello: '❌' });
-
-    await sleep(200);
-
-    renders.addMark('enabled again');
-    rerender({ disabled: false });
-
-    await sleep(200);
-
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
-      "
-      data: {hello:world} -- error: null -- status: success -- isLoading: false
-
-      >>> first update (✅)
-
-      data: {hello:world} -- error: null -- status: refetching -- isLoading: false
-      data: {hello:✅} -- error: null -- status: success -- isLoading: false
-
-      >>> set disabled
-
-      data: {hello:✅} -- error: null -- status: success -- isLoading: false
-
-      >>> ignored update (❌)
-
-      >>> enabled again
-
-      data: {hello:✅} -- error: null -- status: success -- isLoading: false
-      data: {hello:✅} -- error: null -- status: refetching -- isLoading: false
-      data: {hello:❌} -- error: null -- status: success -- isLoading: false
-      "
-    `);
-  },
-);
-
-test.concurrent(
-  'useDocument with selector should not trigger a rerender',
-  async () => {
-    const env = createTestEnv({
-      useLoadedSnapshot: true,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-    });
-
-    const renders = createRenderStore();
-
-    let prevData: any;
-
-    const { rerender } = renderHook(() => {
-      const { data, status } = env.store.useDocument({
-        selector: () => ({}),
+  const { rerender } = renderHook(
+    ({ disabled }: { disabled: boolean }) => {
+      const result = env.apiStore.useDocument({
+        disabled,
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
       });
 
-      renders.add({ status, changed: prevData !== data });
-      prevData = data;
+      renders.add({
+        data: result.data?.value ?? null,
+        error: result.error,
+        status: result.status,
+        isLoading: result.isLoading,
+      });
+    },
+    { initialProps: { disabled: false } },
+  );
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('first update (✅)');
+
+  act(() => {
+    env.emulateExternalRTU({ hello: '✅' });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('set disabled');
+
+  act(() => {
+    rerender({ disabled: true });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('ignored update (❌)');
+
+  act(() => {
+    env.emulateExternalRTU({ hello: '❌' });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  renders.addMark('enabled again');
+
+  act(() => {
+    rerender({ disabled: false });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    -> data: {hello:world} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+
+    >>> first update (✅)
+
+    -> data: {hello:world} ⋅ error: null ⋅ status: refetching ⋅ isLoading: ❌
+    -> data: {hello:✅} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+
+    >>> set disabled
+
+    -> data: {hello:✅} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+
+    >>> ignored update (❌)
+
+    >>> enabled again
+
+    -> data: {hello:✅} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+    -> data: {hello:✅} ⋅ error: null ⋅ status: refetching ⋅ isLoading: ❌
+    -> data: {hello:❌} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
+    "
+  `);
+});
+
+test('useDocument selector result should remain stable across rerenders', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    {
+      useLoadedSnapshot: true,
+      disableInitialInvalidation: true,
+    },
+  );
+
+  const renders = createLoggerStore();
+
+  let prevData: unknown;
+
+  const { rerender } = renderHook(() => {
+    const { data, status } = env.apiStore.useDocument({
+      selector: () => ({}),
     });
 
-    await env.serverMock.waitFetchIdle();
+    renders.add({ status, changed: prevData !== data });
+    prevData = data;
+  });
 
-    renders.addMark('Rerenders');
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    rerender();
-    rerender();
-    rerender();
+  renders.addMark('Rerenders');
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
-      "
-      status: success -- changed: true
+  rerender();
+  rerender();
+  rerender();
 
-      >>> Rerenders
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    -> status: success ⋅ changed: ✅
 
-      status: success -- changed: false
-      status: success -- changed: false
-      status: success -- changed: false
-      "
-    `);
-  },
-);
+    >>> Rerenders
+
+    -> status: success ⋅ changed: ❌
+    -> status: success ⋅ changed: ❌
+    -> status: success ⋅ changed: ❌
+    "
+  `);
+});
