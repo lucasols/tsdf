@@ -1,90 +1,170 @@
-import { renderHook } from '@testing-library/react';
-import { useCallback } from 'react';
-import { expect, test } from 'vitest';
-import { sleep } from '../../test-old/utils/sleep';
-import {
-  Todo,
-  createDefaultCollectionStore,
-  createRenderStore,
-} from '../../test-old/utils/storeUtils';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { useCallback, useRef } from 'react';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 
-const createTestEnv = createDefaultCollectionStore;
+type Todo = {
+  title: string;
+  completed: boolean;
+};
 
-const defaultTodo = { title: 'todo', completed: false };
+const defaultTodo: Todo = { title: 'todo', completed: false };
 
-test.concurrent(
-  'isOffScreen should keep the selected data and not be affected by invalidation',
-  async () => {
-    const env = createTestEnv({
-      initialServerData: { '1': defaultTodo, '2': defaultTodo },
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(0);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.runOnlyPendingTimers();
+});
+
+test('isOffScreen should keep the selected data and not be affected by invalidation', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo, '2': defaultTodo },
+    {
       useLoadedSnapshot: true,
-      disableInitialDataInvalidation: true,
-      emulateRTU: true,
-    });
+      disableDataInvalidation: true,
+    },
+  );
 
-    const renders = createRenderStore({
+  const renders = createLoggerStore({
       rejectKeys: ['queryMetadata'],
     });
 
     const { rerender } = renderHook(
       ({ isOffScreen }: { isOffScreen: boolean }) => {
-        const result = env.store.useItem('1', {
+      const result = env.apiStore.useItem('1', {
           isOffScreen,
           returnRefetchingStatus: true,
           disableRefetchOnMount: true,
         });
 
-        renders.add(result);
+      renders.add({
+        status: result.status,
+        data: result.data?.value ?? null,
+        error: result.error,
+        isLoading: result.isLoading,
+        payload: result.payload,
+      });
       },
       { initialProps: { isOffScreen: false } },
     );
 
-    await sleep(100);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
     renders.addMark('first update (✅)');
-    env.serverMock.mutateData({ 1: { title: '✅', completed: true } });
 
-    await sleep(200);
+  act(() => {
+    env.serverTable.setItem('1', { title: '✅', completed: true }, { triggerRTUEvent: true });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
     renders.addMark('set disabled');
-    rerender({ isOffScreen: true });
 
-    await sleep(100);
+  act(() => {
+    rerender({ isOffScreen: true });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
     renders.addMark('ignored update (❌)');
-    env.serverMock.mutateData({ 1: { title: '❌', completed: true } });
 
-    await sleep(200);
+  act(() => {
+    env.serverTable.setItem('1', { title: '❌', completed: true }, { triggerRTUEvent: true });
+  });
+
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
     renders.addMark('enabled again');
+
+  act(() => {
     rerender({ isOffScreen: false });
+  });
 
-    await sleep(200);
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      itemStateKey: 1 -- status: success -- data: {title:todo, completed:false} -- error: null -- isLoading: false -- payload: 1
+    ┌─
+    ⋅ status: success
+    ⋅ data: {title:todo, completed:❌}
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ payload: 1
+    └─
 
       >>> first update (✅)
 
-      itemStateKey: 1 -- status: refetching -- data: {title:todo, completed:false} -- error: null -- isLoading: false -- payload: 1
-      itemStateKey: 1 -- status: success -- data: {title:✅, completed:true} -- error: null -- isLoading: false -- payload: 1
+    ┌─
+    ⋅ status: refetching
+    ⋅ data: {title:todo, completed:❌}
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ payload: 1
+    └─
+    ┌─
+    ⋅ status: success
+    ⋅ data: {title:✅, completed:✅}
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ payload: 1
+    └─
 
       >>> set disabled
 
-      itemStateKey: 1 -- status: success -- data: {title:✅, completed:true} -- error: null -- isLoading: false -- payload: 1
+    ┌─
+    ⋅ status: success
+    ⋅ data: {title:✅, completed:✅}
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ payload: 1
+    └─
 
       >>> ignored update (❌)
 
       >>> enabled again
 
-      itemStateKey: 1 -- status: success -- data: {title:✅, completed:true} -- error: null -- isLoading: false -- payload: 1
-      itemStateKey: 1 -- status: refetching -- data: {title:✅, completed:true} -- error: null -- isLoading: false -- payload: 1
-      itemStateKey: 1 -- status: success -- data: {title:❌, completed:true} -- error: null -- isLoading: false -- payload: 1
+    ┌─
+    ⋅ status: success
+    ⋅ data: {title:✅, completed:✅}
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ payload: 1
+    └─
+    ┌─
+    ⋅ status: refetching
+    ⋅ data: {title:✅, completed:✅}
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ payload: 1
+    └─
+    ┌─
+    ⋅ status: success
+    ⋅ data: {title:❌, completed:✅}
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ payload: 1
+    └─
       "
     `);
-  },
-);
+});
 
 test('disable then enable isOffScreen', async () => {
   const env = createTestEnv({
