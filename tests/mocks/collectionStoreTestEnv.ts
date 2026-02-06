@@ -26,7 +26,10 @@ export type CollectionStoreTestEnvOptions = {
   useLoadedSnapshot?: boolean;
 };
 
-export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
+export function createCollectionStoreTestEnv<
+  D extends Record<string, unknown>,
+  P = string,
+>(
   serverInitialData: Record<string, D>,
   {
     disableDataInvalidation = false,
@@ -87,9 +90,19 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     Record<string, number | 'error' | undefined>
   >(addAction, getRelativeTime, actionsHistory);
 
+  function normalizeItemId(itemId: string | { id: { id: string } }): string {
+    return typeof itemId === 'string' ? itemId : itemId.id.id;
+  }
+
   // Batch fetch function - delegates to serverTable.list
-  const batchFetchFn = async (itemIds: string[], signal: AbortSignal) => {
-    const listResult = await serverTable.list({ itemIds }, signal);
+  const batchFetchFn = async (
+    itemIds: (string | { id: { id: string } })[],
+    signal: AbortSignal,
+  ) => {
+    const listResult = await serverTable.list(
+      { itemIds: itemIds.map(normalizeItemId) },
+      signal,
+    );
 
     // Convert list result to Map format expected by collection store
     const results = new Map<string, CollectionTestItem<D> | Error>();
@@ -106,12 +119,16 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const shouldProvideInitialData = disableDataInvalidation || useLoadedSnapshot;
 
-  const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
+  const collectionStore = createCollectionStore<
+    CollectionTestItem<D>,
+    string | { id: { id: string } }
+  >({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,
     maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
-    fetchFn: async (itemId: string, signal: AbortSignal) => {
+    fetchFn: async (payload, signal) => {
+      const itemId = normalizeItemId(payload);
       const value = await serverTable.fetch(itemId, signal);
       return { value };
     },
