@@ -1,25 +1,48 @@
-import { cleanup, render, renderHook } from '@testing-library/react';
-import { afterAll, describe, expect, test } from 'vitest';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, cleanup, render, renderHook } from '@testing-library/react';
+import '@testing-library/react/dont-cleanup-after-each';
 import {
-  createDefaultListQueryStore,
-  Tables,
-} from '../../test-old/utils/createDefaultListQueryStore';
-import { pick } from '../../test-old/utils/objectUtils';
-import { range } from '../../test-old/utils/range';
-import { sleep } from '../../test-old/utils/sleep';
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import {
-  createRenderStore,
-  createValueStore,
+  createListQueryStoreTestEnv,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { pick, range } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  getFetchCountFromHere,
+  produceServerData,
   shouldNotSkip,
-} from '../../test-old/utils/storeUtils';
-
-export const createTestEnv = createDefaultListQueryStore;
+  type ListQueryTestEnv,
+} from '../utils/listQueryHooksTestUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
   products: range(1, 50).map((id) => ({ id, name: `Product ${id}` })),
   orders: range(1, 50).map((id) => ({ id, name: `Order ${id}` })),
 };
+
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
 
 afterAll(() => {
   cleanup();
@@ -32,15 +55,16 @@ function getFetchQueryForTable(tableId: string): FetchQueryParams {
 }
 
 describe('useMultipleItemsQuery sequential tests', () => {
-  const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-    initialServerData,
-    disableInitialDataInvalidation: false,
-  });
+  let env: ListQueryTestEnv;
+  let listQueryStore: ListQueryTestEnv['apiStore'];
+  const usersRender = createLoggerStore();
+  const productsRender = createLoggerStore();
 
-  const usersRender = createRenderStore();
-  const productsRender = createRenderStore();
+  beforeAll(() => {
+    env = createListQueryStoreTestEnv(initialServerData);
+    listQueryStore = env.apiStore;
 
-  const { result } = renderHook(() => {
+    renderHook(() => {
     const queryResult = listQueryStore.useMultipleListQueries(
       [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
         (item) => ({
@@ -61,24 +85,33 @@ describe('useMultipleItemsQuery sequential tests', () => {
     productsRender.add(pick(products, ['status', 'payload', 'items']));
 
     return { users, products };
+    });
   });
 
   test('load the queries', async () => {
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(serverMock.fetchsCount).toBe(2);
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    expect(usersRender.getSnapshot()).toMatchInlineSnapshot(`
+    expect(usersRender.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: {tableId:users} -- items: []
-      status: success -- payload: {tableId:users} -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
+      -> status: loading ⋅ payload: {tableId:users} ⋅ items: []
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:users}
+      ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
+      └─
       "
     `);
 
-    expect(productsRender.getSnapshot()).toMatchInlineSnapshot(`
+    expect(productsRender.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: {tableId:products} -- items: []
-      status: success -- payload: {tableId:products} -- items: [{id:products||1, data:{id:1, name:Product 1}}, ...(49 more)]
+      -> status: loading ⋅ payload: {tableId:products} ⋅ items: []
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:products}
+      ⋅ items: [{id:\\products||1, data:{id:1, name:Product 1}}, …(49 more)]
+      └─
       "
     `);
   });
