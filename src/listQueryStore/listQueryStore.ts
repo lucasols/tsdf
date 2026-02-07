@@ -87,11 +87,12 @@ export type ListQueryStoreOptions<
   errorNormalizer: (exception: Error) => StoreError;
   defaultQuerySize?: number;
   maxItemBatchSize?: number;
-  getInitialData?: () =>
-    | ListQueryStoreInitialData<ItemState, QueryPayload, ItemPayload>
-    | undefined;
-  disableInitialDataInvalidation?: boolean;
-  disableRefetchOnMount?: boolean;
+  usesRealTimeUpdates?: boolean;
+  '~test'?: {
+    initialData?: ListQueryStoreInitialData<ItemState, QueryPayload, ItemPayload>;
+    initialRefetchOnMount?: FetchType | false;
+    initialLastFetchStartTime?: number;
+  };
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
@@ -120,9 +121,8 @@ export function createListQueryStore<
   errorNormalizer,
   defaultQuerySize = 50,
   maxItemBatchSize,
-  getInitialData,
-  disableInitialDataInvalidation,
-  disableRefetchOnMount: globalDisableRefetchOnMount,
+  usesRealTimeUpdates,
+  '~test': testOptions,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   mediumPriorityDelayMs,
@@ -137,41 +137,44 @@ export function createListQueryStore<
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<QueryPayload>;
 
+  const globalDisableRefetchOnMount = usesRealTimeUpdates;
+
   const store = new Store<State>({
     debugName,
     state: () => {
       const initialState: State = { items: {}, queries: {}, itemQueries: {} };
 
-      const initialData = getInitialData?.();
+      if (import.meta.env.TEST && testOptions) {
+        const initialData = testOptions.initialData;
+        const initialRefetchOnMount = testOptions.initialRefetchOnMount ?? false;
 
-      if (initialData) {
-        for (const { payload, data } of initialData.items) {
-          const itemKey = getItemKey(payload);
+        if (initialData) {
+          for (const { payload, data } of initialData.items) {
+            const itemKey = getItemKey(payload);
 
-          initialState.items[itemKey] = data;
-          initialState.itemQueries[itemKey] = {
-            error: null,
-            status: 'success',
-            refetchOnMount:
-              disableInitialDataInvalidation ? false : 'lowPriority',
-            wasLoaded: true,
-            payload,
-          };
-        }
+            initialState.items[itemKey] = data;
+            initialState.itemQueries[itemKey] = {
+              error: null,
+              status: 'success',
+              refetchOnMount: initialRefetchOnMount,
+              wasLoaded: true,
+              payload,
+            };
+          }
 
-        for (const { payload, items, hasMore } of initialData.queries) {
-          const queryKey = getQueryKey(payload);
+          for (const { payload, items, hasMore } of initialData.queries) {
+            const queryKey = getQueryKey(payload);
 
-          initialState.queries[queryKey] = {
-            error: null,
-            status: 'success',
-            refetchOnMount:
-              disableInitialDataInvalidation ? false : 'lowPriority',
-            wasLoaded: true,
-            payload,
-            items,
-            hasMore,
-          };
+            initialState.queries[queryKey] = {
+              error: null,
+              status: 'success',
+              refetchOnMount: initialRefetchOnMount,
+              wasLoaded: true,
+              payload,
+              items,
+              hasMore,
+            };
+          }
         }
       }
 
@@ -197,12 +200,24 @@ export function createListQueryStore<
     string,
     RequestScheduler<QueryFetchPayload<QueryPayload>>
   >();
+  const queryInitialFetchStartTime = new Map<string, number>();
+
+  if (import.meta.env.TEST && testOptions?.initialLastFetchStartTime !== undefined) {
+    for (const queryKey of Object.keys(store.state.queries)) {
+      queryInitialFetchStartTime.set(queryKey, testOptions.initialLastFetchStartTime);
+    }
+  }
 
   function getOrCreateQueryScheduler(
     queryKey: string,
   ): RequestScheduler<QueryFetchPayload<QueryPayload>> {
     let scheduler = querySchedulers.get(queryKey);
     if (!scheduler) {
+      const initialLastFetchStartTime = queryInitialFetchStartTime.get(queryKey);
+      if (initialLastFetchStartTime !== undefined) {
+        queryInitialFetchStartTime.delete(queryKey);
+      }
+
       scheduler = new RequestScheduler<QueryFetchPayload<QueryPayload>>({
         fetchFn: async (
           requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
@@ -223,6 +238,7 @@ export function createListQueryStore<
         dynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
+        initialLastFetchStartTime,
       });
       querySchedulers.set(queryKey, scheduler);
     }
@@ -261,6 +277,12 @@ export function createListQueryStore<
 
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
   const itemInitialFetchStartTime = new Map<string, number>();
+
+  if (import.meta.env.TEST && testOptions?.initialLastFetchStartTime !== undefined) {
+    for (const itemKey of Object.keys(store.state.itemQueries)) {
+      itemInitialFetchStartTime.set(itemKey, testOptions.initialLastFetchStartTime);
+    }
+  }
 
   function getOrCreateItemScheduler(
     itemKey: string,

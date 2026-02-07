@@ -23,7 +23,7 @@ const initialServerData: Tables = {
 describe('update state functions', () => {
   test('update state of one item', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
@@ -43,7 +43,7 @@ describe('update state functions', () => {
 
   test('update multiple itens state', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     env.apiStore.updateItemState(['users||1', 'users||2'], () => {
@@ -67,7 +67,7 @@ describe('update state functions', () => {
 
   test('update multiple itens state with filter fn', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     env.apiStore.updateItemState(
@@ -93,7 +93,7 @@ describe('update state functions', () => {
 
   test('create if not exist', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     let storeUpdates = 0;
@@ -136,7 +136,7 @@ describe('update state functions', () => {
 
   test('addItemToState', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     expect(env.apiStore.getItemState('users||20')).toBeUndefined();
@@ -164,8 +164,7 @@ describe('update state functions', () => {
 
   test('addItemToState with addItemToQueries', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
-      disableInitialInvalidation: true,
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     expect(env.apiStore.getItemState('users||20')).toBeUndefined();
@@ -261,8 +260,7 @@ describe('update state functions', () => {
 
   test('addItemToState with existing items and addItemToQueries', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: true,
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     expect(env.apiStore.getItemState('users||1')).not.toBeUndefined();
@@ -349,8 +347,7 @@ describe('update state functions', () => {
 
   test('delete item state', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: true,
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     expect(env.apiStore.getItemState('users||1')).toBeDefined();

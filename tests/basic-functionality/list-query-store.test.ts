@@ -27,18 +27,14 @@ const usersQueryParams: ListQueryParams = { tableId: 'users' };
 
 describe('test helpers', () => {
   test('snapshot is equal to loaded state', async () => {
-    const loaded = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const loaded = createListQueryStoreTestEnv(initialServerData);
 
     loaded.forceListUpdate(usersQueryParams);
 
     await vi.runAllTimersAsync();
 
     const withUserSnapshot = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: true,
-      disableRefetchOnMount: true,
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     expect(loaded.store.state).toEqual(withUserSnapshot.store.state);
@@ -48,18 +44,14 @@ describe('test helpers', () => {
     await vi.runAllTimersAsync();
 
     const withSnapshot = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: true,
-      disableRefetchOnMount: true,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
+      testScenario: { loaded: { tables: ['users', 'products'] } },
     });
 
     expect(loaded.store.state).toEqual(withSnapshot.store.state);
   });
 
   test('snapshot with filter is equal to loaded state', async () => {
-    const loaded = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const loaded = createListQueryStoreTestEnv(initialServerData);
 
     loaded.forceListUpdate({
       tableId: 'users',
@@ -69,12 +61,12 @@ describe('test helpers', () => {
     await vi.runAllTimersAsync();
 
     const withUserSnapshot = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: true,
-      disableRefetchOnMount: true,
-      useLoadedSnapshot: {
-        queries: [
-          { tableId: 'users', filters: [{ op: 'gt', field: 'id', value: 2 }] },
-        ],
+      testScenario: {
+        loaded: {
+          queries: [
+            { tableId: 'users', filters: [{ op: 'gt', field: 'id', value: 2 }] },
+          ],
+        },
       },
     });
 
@@ -84,9 +76,7 @@ describe('test helpers', () => {
 
 describe('fetch query', () => {
   test('fetch query', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
 
     expect(env.store.state).toEqual({
       items: {},
@@ -134,7 +124,7 @@ describe('fetch query', () => {
 
   test('refetch list with updated data', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
@@ -186,7 +176,7 @@ describe('fetch query', () => {
 
   test('refetch list with error', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     env.serverTable.setNextListFetchError('error');
@@ -235,9 +225,7 @@ describe('fetch query', () => {
   });
 
   test('load list with error', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
 
     env.serverTable.setNextListFetchError('error');
 
@@ -288,7 +276,6 @@ describe('fetch query', () => {
     const query: ListQueryParams = { tableId: 'products' };
 
     const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
       defaultQuerySize: 5,
     });
 
@@ -393,7 +380,7 @@ describe('fetch query', () => {
 
   test('do not load more if the query not exists or hasMore === false', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     expect(env.apiStore.loadMore(usersQueryParams, 10)).toBe('skipped');
@@ -401,9 +388,7 @@ describe('fetch query', () => {
   });
 
   test('multiple fetches with different payloads not cancel each other, but cancel same payload fetches', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
 
     env.scheduleFetch('lowPriority', { tableId: 'users' });
     env.scheduleFetch('lowPriority', { tableId: 'products' });
@@ -439,7 +424,6 @@ describe('fetch query', () => {
 
 test('ignore multiple load more made in sequence', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
-    disableInitialInvalidation: false,
     defaultQuerySize: 5,
   });
 
@@ -504,7 +488,7 @@ test('ignore multiple load more made in sequence', async () => {
 
 test('await fetch', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
-    useLoadedSnapshot: { tables: ['users'] },
+    testScenario: { loaded: { tables: ['users'] } },
   });
 
   env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
@@ -552,9 +536,7 @@ test('await fetch', async () => {
 
 describe('fetch item', () => {
   test('fetch item', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(
       `undefined`,
@@ -595,7 +577,7 @@ describe('fetch item', () => {
 
   test('await fetch item', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
@@ -632,27 +614,21 @@ describe('fetch item', () => {
   });
 
   test('test helpers initial snapshot', async () => {
-    const loaded = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const loaded = createListQueryStoreTestEnv(initialServerData);
 
     loaded.scheduleItemFetch('lowPriority', 'users||1');
 
     await vi.runAllTimersAsync();
 
     const withStateSnapshot = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: true,
-      disableRefetchOnMount: true,
-      useLoadedSnapshot: { items: ['users||1'] },
+      testScenario: { loaded: { items: ['users||1'] } },
     });
 
     expect(withStateSnapshot.store.state).toEqual(loaded.store.state);
   });
 
   test('test helpers initial snapshot 2', async () => {
-    const loaded = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const loaded = createListQueryStoreTestEnv(initialServerData);
 
     loaded.scheduleItemFetch('lowPriority', 'users||1');
     loaded.scheduleFetch('lowPriority', { tableId: 'users' });
@@ -660,9 +636,7 @@ describe('fetch item', () => {
     await vi.runAllTimersAsync();
 
     const withStateSnapshot = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: true,
-      disableRefetchOnMount: true,
-      useLoadedSnapshot: { tables: ['users'], items: ['users||1'] },
+      testScenario: { loaded: { tables: ['users'], items: ['users||1'] } },
     });
 
     expect(withStateSnapshot.store.state).toEqual(loaded.store.state);
@@ -670,7 +644,7 @@ describe('fetch item', () => {
 
   test('refetch item with updated data', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { items: ['users||1'] },
+      testScenario: { loaded: { items: ['users||1'] } },
     });
 
     env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
@@ -711,7 +685,7 @@ describe('fetch item', () => {
 
   test('refetch item with error', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { items: ['users||1'] },
+      testScenario: { loaded: { items: ['users||1'] } },
     });
 
     env.serverTable.setNextFetchError('users||1', 'error');
@@ -757,9 +731,7 @@ describe('fetch item', () => {
   });
 
   test('load item with error', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
 
     env.serverTable.setNextFetchError('users||1', 'error');
 
@@ -805,9 +777,7 @@ describe('fetch item', () => {
   });
 
   test('multiple item fetches with different ids do not cancel each other, but cancel the ones with same id', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
 
     env.scheduleItemFetch('lowPriority', 'users||1');
     env.scheduleItemFetch('lowPriority', 'users||2');
@@ -842,7 +812,7 @@ describe('fetch item', () => {
 
   test('load a item that was previously loaded by a query', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: { tables: ['users'] },
+      testScenario: { loaded: { tables: ['users'] } },
     });
 
     env.scheduleItemFetch('highPriority', 'users||1');
@@ -878,7 +848,6 @@ describe('fetch item', () => {
 
   test('load item should share the lowPriority throttle context of the queries', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
-      disableInitialInvalidation: false,
       lowPriorityThrottleMs: 1000, // Must be > fetch duration (800ms default)
     });
 
@@ -899,7 +868,7 @@ describe('fetch item', () => {
 describe('an item invalidation with lower priority should not override one with higher priority', () => {
   const rawItemId = 'users||1';
   const testEnvOptions = {
-    useLoadedSnapshot: { tables: ['users'] },
+    testScenario: { loaded: { tables: ['users'] } },
   };
 
   test('not override high priority update', () => {
@@ -969,7 +938,7 @@ describe('an item invalidation with lower priority should not override one with 
 describe('a query invalidation with lower priority should not override one with higher priority', () => {
   const queryPayload: ListQueryParams = { tableId: 'users' };
   const testEnvOptions = {
-    useLoadedSnapshot: { tables: ['users'] },
+    testScenario: { loaded: { tables: ['users'] } },
   };
 
   test('not override high priority update', () => {
@@ -1035,7 +1004,7 @@ describe('a query invalidation with lower priority should not override one with 
 
 test('invalidate everything does not cause a problem', () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
-    useLoadedSnapshot: { tables: ['users'] },
+    testScenario: { loaded: { tables: ['users'] } },
   });
 
   env.apiStore.invalidateQueryAndItems({

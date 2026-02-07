@@ -24,6 +24,20 @@ export type ListQueryParams = {
   filters?: FilterOperator[];
 };
 
+type ListQuerySnapshotConfig = {
+  tables?: string[];
+  items?: string[];
+  queries?: ListQueryParams[];
+};
+
+export type ListQueryStoreTestScenario =
+  /** App just opened, no data fetched yet. */
+  | 'idle'
+  /** User already have the app loaded and data was fetched successfully. */
+  | { loaded: ListQuerySnapshotConfig }
+  /** App started with data restored from local cache, pending server revalidation. */
+  | { idleWithLocalCache: ListQuerySnapshotConfig };
+
 // Raw item key (used for serverTable and external references)
 function getRawItemKey(tableId: string, id: number): string {
   return `${tableId}||${id}`;
@@ -37,28 +51,21 @@ function getStoreItemKey(tableId: string, id: number): string {
 export function createListQueryStoreTestEnv(
   serverInitialData: Tables,
   {
-    disableInitialInvalidation = false,
-    disableRefetchOnMount = false,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
     lowPriorityThrottleMs = 200,
-    useLoadedSnapshot,
+    testScenario,
+    usesRealTimeUpdates,
   }: {
-    disableInitialInvalidation?: boolean;
-    disableRefetchOnMount?: boolean;
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
     lowPriorityThrottleMs?: number;
-    /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
-    useLoadedSnapshot?: {
-      tables?: string[];
-      items?: string[];
-      queries?: ListQueryParams[];
-    };
+    testScenario?: ListQueryStoreTestScenario;
+    usesRealTimeUpdates?: boolean;
   } = {},
 ) {
   const {
@@ -87,85 +94,7 @@ export function createListQueryStoreTestEnv(
     actionsHistory,
   );
 
-  // Build initial data if useLoadedSnapshot is provided
-  type InitialData = {
-    queries: Array<{
-      payload: ListQueryParams;
-      hasMore: boolean;
-      items: string[];
-    }>;
-    items: Array<{ payload: string; data: Row }>;
-  };
-
-  let initialData: InitialData | undefined;
-
-  if (useLoadedSnapshot) {
-    const tablesToSnapshot = useLoadedSnapshot.tables ?? [];
-
-    initialData = { queries: [], items: [] };
-
-    // Snapshot entire tables
-    for (const tableId of tablesToSnapshot) {
-      const tableItems = serverTable.getByPrefix(`${tableId}||`);
-
-      if (tableItems.length === 0) {
-        throw new Error(
-          `loadTablesSnapshot: Table '${tableId}' doesn't exist or is empty`,
-        );
-      }
-
-      initialData.queries.push({
-        payload: { tableId },
-        hasMore: false,
-        items: tableItems.map(({ itemId }) => getCompositeKey(itemId)),
-      });
-
-      for (const { itemId, data } of tableItems) {
-        initialData.items.push({
-          payload: itemId,
-          data,
-        });
-      }
-    }
-
-    // Snapshot specific queries with filters
-    for (const query of useLoadedSnapshot.queries ?? []) {
-      const { tableId, filters } = query;
-      const result = serverTable.listSync({
-        tableId,
-        filters,
-      });
-
-      initialData.queries.push({
-        payload: query,
-        hasMore: false,
-        items: result.items.map(({ itemId }) => getCompositeKey(itemId)),
-      });
-
-      for (const { itemId, data } of result.items) {
-        initialData.items.push({
-          payload: itemId,
-          data,
-        });
-      }
-    }
-
-    // Snapshot individual items
-    if (useLoadedSnapshot.items) {
-      for (const itemId of useLoadedSnapshot.items) {
-        const itemData = serverTable.get(itemId);
-
-        if (!itemData) {
-          throw new Error(`loadItemsSnapshot: Item '${itemId}' doesn't exist`);
-        }
-
-        initialData.items.push({
-          payload: itemId,
-          data: itemData,
-        });
-      }
-    }
-  }
+  const testOptions = resolveTestOptions(testScenario, serverTable);
 
   const listQueryStore = createListQueryStore<Row, ListQueryParams, string>({
     errorNormalizer: normalizeError,
@@ -174,10 +103,8 @@ export function createListQueryStoreTestEnv(
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     defaultQuerySize,
-    getInitialData: () => initialData,
-    disableInitialDataInvalidation:
-      disableInitialInvalidation || !!useLoadedSnapshot,
-    disableRefetchOnMount: disableRefetchOnMount || !!useLoadedSnapshot,
+    usesRealTimeUpdates,
+    '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
@@ -204,24 +131,25 @@ export function createListQueryStoreTestEnv(
     },
   });
 
-  // Set up RTU listener
-  serverTable.wsEvents.on('data_changed', ({ payload }) => {
-    addAction('received-ws-data-change-event', {
-      itemId: payload.itemId,
+  if (usesRealTimeUpdates) {
+    serverTable.wsEvents.on('data_changed', ({ payload }) => {
+      addAction('received-ws-data-change-event', {
+        itemId: payload.itemId,
+      });
+
+      const [tableId] = payload.itemId.split('||');
+
+      listQueryStore.invalidateQueryAndItems({
+        queryPayload: (qp) => qp.tableId === tableId,
+        itemPayload: payload.itemId,
+        type: 'realtimeUpdate',
+      });
     });
 
-    const [tableId] = payload.itemId.split('||');
-
-    listQueryStore.invalidateQueryAndItems({
-      queryPayload: (qp) => qp.tableId === tableId,
-      itemPayload: payload.itemId,
-      type: 'realtimeUpdate',
+    serverTable.wsEvents.on('list_changed', () => {
+      addAction('received-ws-list-change-event');
     });
-  });
-
-  serverTable.wsEvents.on('list_changed', () => {
-    addAction('received-ws-list-change-event');
-  });
+  }
 
   return {
     apiStore: listQueryStore,
@@ -307,5 +235,113 @@ export function createListQueryStoreTestEnv(
     get timelineString() {
       return getTimelineString();
     },
+  };
+}
+
+type InitialData = {
+  queries: Array<{
+    payload: ListQueryParams;
+    hasMore: boolean;
+    items: string[];
+  }>;
+  items: Array<{ payload: string; data: Row }>;
+};
+
+function buildSnapshotData(
+  config: ListQuerySnapshotConfig,
+  serverTable: ReturnType<typeof createServerTableMock<Row>>,
+): InitialData {
+  const tablesToSnapshot = config.tables ?? [];
+
+  const initialData: InitialData = { queries: [], items: [] };
+
+  for (const tableId of tablesToSnapshot) {
+    const tableItems = serverTable.getByPrefix(`${tableId}||`);
+
+    if (tableItems.length === 0) {
+      throw new Error(
+        `loadTablesSnapshot: Table '${tableId}' doesn't exist or is empty`,
+      );
+    }
+
+    initialData.queries.push({
+      payload: { tableId },
+      hasMore: false,
+      items: tableItems.map(({ itemId }) => getCompositeKey(itemId)),
+    });
+
+    for (const { itemId, data } of tableItems) {
+      initialData.items.push({
+        payload: itemId,
+        data,
+      });
+    }
+  }
+
+  for (const query of config.queries ?? []) {
+    const { tableId, filters } = query;
+    const result = serverTable.listSync({
+      tableId,
+      filters,
+    });
+
+    initialData.queries.push({
+      payload: query,
+      hasMore: false,
+      items: result.items.map(({ itemId }) => getCompositeKey(itemId)),
+    });
+
+    for (const { itemId, data } of result.items) {
+      initialData.items.push({
+        payload: itemId,
+        data,
+      });
+    }
+  }
+
+  if (config.items) {
+    for (const itemId of config.items) {
+      const itemData = serverTable.get(itemId);
+
+      if (!itemData) {
+        throw new Error(`loadItemsSnapshot: Item '${itemId}' doesn't exist`);
+      }
+
+      initialData.items.push({
+        payload: itemId,
+        data: itemData,
+      });
+    }
+  }
+
+  return initialData;
+}
+
+function resolveTestOptions(
+  scenario: ListQueryStoreTestScenario | undefined,
+  serverTable: ReturnType<typeof createServerTableMock<Row>>,
+):
+  | {
+      initialData?: InitialData;
+      initialRefetchOnMount?: FetchType | false;
+      initialLastFetchStartTime?: number;
+    }
+  | undefined {
+  if (!scenario || scenario === 'idle') {
+    return undefined;
+  }
+
+  if ('loaded' in scenario) {
+    return {
+      initialData: buildSnapshotData(scenario.loaded, serverTable),
+      initialRefetchOnMount: false,
+      initialLastFetchStartTime: Date.now() - 10_000,
+    };
+  }
+
+  return {
+    initialData: buildSnapshotData(scenario.idleWithLocalCache, serverTable),
+    initialRefetchOnMount: 'lowPriority',
+    initialLastFetchStartTime: Date.now() - 10_000,
   };
 }
