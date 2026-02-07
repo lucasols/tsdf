@@ -3,15 +3,15 @@ import { afterAll, describe, expect, test } from 'vitest';
 import {
   createDefaultListQueryStore,
   Tables,
-} from './utils/createDefaultListQueryStore';
-import { pick } from './utils/objectUtils';
-import { range } from './utils/range';
-import { sleep } from './utils/sleep';
+} from '../../test-old/utils/createDefaultListQueryStore';
+import { pick } from '../../test-old/utils/objectUtils';
+import { range } from '../../test-old/utils/range';
+import { sleep } from '../../test-old/utils/sleep';
 import {
   createRenderStore,
   createValueStore,
   shouldNotSkip,
-} from './utils/storeUtils';
+} from '../../test-old/utils/storeUtils';
 
 export const createTestEnv = createDefaultListQueryStore;
 
