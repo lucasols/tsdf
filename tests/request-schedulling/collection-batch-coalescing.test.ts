@@ -10,13 +10,14 @@ import {
 } from 'vitest';
 import { StoreFetchError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -292,7 +293,8 @@ describe('mutation handling', () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 } },
       {
-        disableDataInvalidation: true,
+        testScenario: 'loaded',
+        usesRealTimeUpdates: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },
@@ -641,7 +643,8 @@ describe('batch with UI hooks', () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 } },
       {
-        disableDataInvalidation: true,
+        testScenario: 'loaded',
+        usesRealTimeUpdates: true,
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
       },

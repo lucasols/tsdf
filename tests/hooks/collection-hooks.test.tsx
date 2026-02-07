@@ -12,13 +12,14 @@ import {
   vi,
 } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -35,9 +36,10 @@ const defaultTodo: Todo = { title: 'todo', completed: false };
 
 describe('useMultipleItems', () => {
   test('load the items', async () => {
-    const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo }
-    );
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
 
     const renders1 = createLoggerStore();
     const renders2 = createLoggerStore();
@@ -93,7 +95,7 @@ describe('useMultipleItems', () => {
   test('invalidate all items', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders1 = createLoggerStore();
@@ -163,7 +165,7 @@ describe('useMultipleItems', () => {
   test('revalidation with multiple components do not trigger multiple fetches', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     for (let i = 0; i < 27; i += 1) {
@@ -205,7 +207,7 @@ describe('useMultipleItems', () => {
   test('data selector', () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const { result } = renderHook(() =>
@@ -221,7 +223,7 @@ describe('useMultipleItems', () => {
   test('rerender when item payload changes', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': { title: 'todo 1', completed: true }, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders1 = createLoggerStore();
@@ -282,7 +284,7 @@ describe('useMultipleItems isolated tests', () => {
   test('invalidate 1 item', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders1 = createLoggerStore();
@@ -336,9 +338,10 @@ describe('useMultipleItems isolated tests', () => {
   });
 
   test('disableRefetchOnMount does not disable the initial fetch', async () => {
-    const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo }
-    );
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
 
     const renders1 = createLoggerStore();
     const renders2 = createLoggerStore();
@@ -386,9 +389,10 @@ describe('useMultipleItems isolated tests', () => {
   });
 
   test('with queryMetadata', async () => {
-    const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo }
-    );
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
 
     const renders1 = createLoggerStore();
     const renders2 = createLoggerStore();
@@ -447,9 +451,10 @@ describe('useMultipleItems isolated tests', () => {
 
 describe('useItem', () => {
   test('disable the initial fetch', async () => {
-    const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo }
-    );
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
 
     const renders = createLoggerStore();
 
@@ -477,9 +482,10 @@ describe('useItem', () => {
   });
 
   test('enable the fetch after initial disable', async () => {
-    const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo }
-    );
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
 
     const renders = createLoggerStore();
 
@@ -531,9 +537,10 @@ describe('useItem', () => {
   });
 
   test('disableRefetchOnMount', async () => {
-    const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo }
-    );
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
 
     const comp2Renders = createLoggerStore();
     const compRenders = createLoggerStore();
@@ -590,7 +597,7 @@ describe('useItem', () => {
   test('action with optimistic update and revalidation', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders = createLoggerStore();
@@ -635,7 +642,7 @@ describe('useItem isolated tests', () => {
   test('use deleted item', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders = createLoggerStore();
@@ -689,7 +696,7 @@ describe('useItem isolated tests', () => {
   test('use ensureIsLoaded prop', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
@@ -731,9 +738,10 @@ describe('useItem isolated tests', () => {
   });
 
   test('ignore refetchingStatus by default', async () => {
-    const env = createCollectionStoreTestEnv<Todo>(
-      { '1': defaultTodo, '2': defaultTodo }
-    );
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+      '2': defaultTodo,
+    });
 
     const renders = createLoggerStore();
 
@@ -764,7 +772,7 @@ describe('useItem isolated tests', () => {
   test('use ensureIsLoaded prop with disabled', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders = createLoggerStore();
@@ -812,7 +820,8 @@ test('RTU update works', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      useLoadedSnapshot: true,
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
       dynamicRealtimeThrottleMs() {
         return 300;
       },
@@ -894,9 +903,10 @@ test('RTU update works', async () => {
 });
 
 test('fetch error then mount component without error', async () => {
-  const env = createCollectionStoreTestEnv<Todo>(
-    { '1': defaultTodo, '2': defaultTodo }
-    );
+  const env = createCollectionStoreTestEnv<Todo>({
+    '1': defaultTodo,
+    '2': defaultTodo,
+  });
 
   const renders = createLoggerStore();
 
@@ -950,7 +960,7 @@ test('fetch error then mount component without error', async () => {
 test('initial data is invalidated on first load', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    { initialData: 'fromServer' },
+    { testScenario: { idleWithLocalCache: 'sameAsServer' } },
   );
 
   env.serverTable.setItem('1', { title: 'Update', completed: false });
@@ -982,7 +992,7 @@ test('initial data is invalidated on first load', async () => {
 test('emulate load resource during its mutation', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    { initialData: 'fromServer' },
+    { testScenario: { idleWithLocalCache: 'sameAsServer' } },
   );
 
   const renders = createLoggerStore();

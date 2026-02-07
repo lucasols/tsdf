@@ -108,11 +108,6 @@ export type CollectionStoreOptions<
   maxBatchSize?: number;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   errorNormalizer: (exception: Error) => StoreError;
-  disableRefetchOnMount?: boolean;
-  getInitialData?: () =>
-    | CollectionInitialStateItem<ItemPayload, ItemState>[]
-    | undefined;
-  disableInitialDataInvalidation?: boolean;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
@@ -123,6 +118,15 @@ export type CollectionStoreOptions<
     error: unknown,
     options: { silentErrors?: boolean },
   ) => void;
+  usesRealTimeUpdates?: boolean;
+  /** @internal */
+  '~test'?: {
+    initialRefetchOnMount?: FetchType;
+    initialStatus?: CollectionItemStatus;
+    initialData?: CollectionInitialStateItem<ItemPayload, ItemState>[];
+    initialError?: StoreError;
+    initialLastFetchStartTime?: number;
+  };
 };
 
 export type CollectionStore<
@@ -145,38 +149,61 @@ export function createCollectionStore<
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   errorNormalizer,
-  disableInitialDataInvalidation,
   mediumPriorityDelayMs,
-  getInitialData,
-  disableRefetchOnMount: globalDisableRefetchOnMount,
   dynamicRealtimeThrottleMs,
   getCollectionItemKey: filterCollectionItemObjKey,
   onInvalidate,
   onSchedulerEvent,
   onMutationError,
+  usesRealTimeUpdates,
+  '~test': testOptions,
 }: CollectionStoreOptions<ItemState, ItemPayload>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
+
+  let initialData:
+    | CollectionInitialStateItem<ItemPayload, ItemState>[]
+    | undefined;
+  let initialRefetchOnMount: FetchType | false = false;
+  let initialStatus: CollectionItemStatus = 'success';
+  let initialError: StoreError | null = null;
+
+  const globalDisableRefetchOnMount = usesRealTimeUpdates;
+
+  if (import.meta.env.TEST && testOptions) {
+    if (testOptions.initialData) {
+      initialData = testOptions.initialData;
+    }
+
+    if (testOptions.initialRefetchOnMount) {
+      initialRefetchOnMount = testOptions.initialRefetchOnMount;
+    }
+
+    if (testOptions.initialStatus) {
+      initialStatus = testOptions.initialStatus;
+    }
+
+    if (testOptions.initialError) {
+      initialError = testOptions.initialError;
+    }
+  }
 
   const store = new Store<CollectionState>({
     debugName,
     state: () => {
       const initialState: CollectionState = {};
 
-      const initialStateItems = getInitialData?.();
-
-      if (initialStateItems) {
-        for (const item of initialStateItems) {
+      if (initialData) {
+        for (const item of initialData) {
           const itemKey = getItemKey(item.payload);
 
           initialState[itemKey] = {
             data: item.data,
-            error: null,
-            status: 'success',
+            error: initialError,
+            status: initialStatus,
             payload: item.payload,
-            refetchOnMount:
-              disableInitialDataInvalidation ? false : 'lowPriority',
-            wasLoaded: true,
+            refetchOnMount: initialRefetchOnMount,
+            wasLoaded: initialStatus !== 'loading',
           };
         }
       }
@@ -216,6 +243,7 @@ export function createCollectionStore<
         mediumPriorityDelayMs,
         maxBatchSize,
         on: onSchedulerEvent,
+        initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
       })
     : null;
 
@@ -239,6 +267,7 @@ export function createCollectionStore<
         dynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
+        initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
       });
       perItemSchedulers.set(itemKey, itemScheduler);
     }

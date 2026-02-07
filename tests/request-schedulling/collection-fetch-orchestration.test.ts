@@ -13,7 +13,7 @@ afterEach(() => {
 test('simple mutation with revalidation and optimistic update', async () => {
   const env = createCollectionStoreTestEnv(
     { item1: { v: 0 } },
-    { disableDataInvalidation: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   renderHook(() => {
@@ -23,10 +23,14 @@ test('simple mutation with revalidation and optimistic update', async () => {
 
   await vi.runAllTimersAsync();
 
-  void env.performClientUpdateAction('item1', { v: 1 }, {
-    withRevalidation: true,
-    withOptimisticUpdate: true,
-  });
+  void env.performClientUpdateAction(
+    'item1',
+    { v: 1 },
+    {
+      withRevalidation: true,
+      withOptimisticUpdate: true,
+    },
+  );
 
   await vi.runAllTimersAsync();
 
@@ -48,7 +52,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
 test('simple mutation with optimistic update', async () => {
   const env = createCollectionStoreTestEnv(
     { item1: { v: 0 } },
-    { disableDataInvalidation: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   renderHook(() => {
@@ -58,9 +62,13 @@ test('simple mutation with optimistic update', async () => {
 
   await vi.runAllTimersAsync();
 
-  void env.performClientUpdateAction('item1', { v: 1 }, {
-    withOptimisticUpdate: true,
-  });
+  void env.performClientUpdateAction(
+    'item1',
+    { v: 1 },
+    {
+      withOptimisticUpdate: true,
+    },
+  );
 
   await vi.runAllTimersAsync();
 
@@ -80,7 +88,7 @@ test('simple mutation with optimistic update', async () => {
 test('prevent overfetch of low priority fetches', async () => {
   const env = createCollectionStoreTestEnv(
     { item1: { v: 0 } },
-    { disableDataInvalidation: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   renderHook(() => {
@@ -163,7 +171,7 @@ test('fetching one item does not interfere with another item', async () => {
 test('mutation on one item does not affect fetch state of another item', async () => {
   const env = createCollectionStoreTestEnv(
     { item1: { v: 0 }, item2: { v: 0 } },
-    { disableDataInvalidation: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   renderHook(() => {
@@ -175,10 +183,14 @@ test('mutation on one item does not affect fetch state of another item', async (
 
   await vi.runAllTimersAsync();
 
-  void env.performClientUpdateAction('item1', { v: 1 }, {
-    withOptimisticUpdate: true,
-    withRevalidation: true,
-  });
+  void env.performClientUpdateAction(
+    'item1',
+    { v: 1 },
+    {
+      withOptimisticUpdate: true,
+      withRevalidation: true,
+    },
+  );
 
   await vi.advanceTimersByTimeAsync(100);
 
@@ -217,7 +229,7 @@ test('mutation on one item does not affect fetch state of another item', async (
 test('low priority fetch on one item is independent of another item fetch state', async () => {
   const env = createCollectionStoreTestEnv(
     { item1: { v: 0 }, item2: { v: 0 } },
-    { disableDataInvalidation: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   renderHook(() => {

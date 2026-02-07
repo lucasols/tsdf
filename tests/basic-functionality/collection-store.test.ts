@@ -19,8 +19,8 @@ describe('test helpers', () => {
     const { store } = createCollectionStoreTestEnv(
       { '1': defaultTodo, '2': defaultTodo },
       {
-        useLoadedSnapshot: true,
-        disableDataInvalidation: true,
+        testScenario: 'loaded',
+        usesRealTimeUpdates: true,
       },
     );
 
@@ -199,7 +199,7 @@ test('initialization fetch', async () => {
 test('await fetch', async () => {
   const { apiStore, serverTable } = createCollectionStoreTestEnv(
     { '1': defaultTodo },
-    { useLoadedSnapshot: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   serverTable.setItem('1', { title: 'new title', completed: false });
@@ -242,7 +242,7 @@ test('multiple fetches with different payloads not cancel each other, but cancel
       '6': defaultTodo,
       '7': defaultTodo,
     },
-    { useLoadedSnapshot: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   env.scheduleFetch('lowPriority', '1');
@@ -298,7 +298,8 @@ describe('update state functions', () => {
   describe('updateItemState', () => {
     test('update state of one item', () => {
       const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
-        useLoadedSnapshot: true,
+        testScenario: 'loaded',
+        usesRealTimeUpdates: true,
       });
 
       expect(apiStore.getItemState('1')?.data).toEqual({
@@ -316,7 +317,8 @@ describe('update state functions', () => {
 
     test('update multiple items state', () => {
       const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
-        useLoadedSnapshot: true,
+        testScenario: 'loaded',
+        usesRealTimeUpdates: true,
       });
 
       apiStore.updateItemState(['1', '2'], () => {
@@ -342,7 +344,8 @@ describe('update state functions', () => {
 
     test('update multiple items state with filter fn', () => {
       const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
-        useLoadedSnapshot: true,
+        testScenario: 'loaded',
+        usesRealTimeUpdates: true,
       });
 
       apiStore.updateItemState(
@@ -371,7 +374,7 @@ describe('update state functions', () => {
     test('create if not exist', () => {
       const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
-        { useLoadedSnapshot: true },
+        { testScenario: 'loaded', usesRealTimeUpdates: true },
       );
 
       let storeUpdates = 0;
@@ -412,8 +415,8 @@ describe('update state functions', () => {
       const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
         {
-          useLoadedSnapshot: true,
-          disableDataInvalidation: true,
+          testScenario: 'loaded',
+          usesRealTimeUpdates: true,
         },
       );
 
@@ -478,7 +481,8 @@ describe('update state functions', () => {
 
   test('addItemToState', () => {
     const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: true,
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
     });
 
     expect(apiStore.getItemState('6')).toBeUndefined();
@@ -504,7 +508,8 @@ describe('update state functions', () => {
 
   test('deleteItemState', () => {
     const { apiStore } = createCollectionStoreTestEnv(initialServerData, {
-      useLoadedSnapshot: true,
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
     });
 
     expect(apiStore.getItemState('1')).toBeDefined();
@@ -546,7 +551,7 @@ describe('an invalidation with lower priority should not override one with highe
   test('not override high priority update', () => {
     const { apiStore } = createCollectionStoreTestEnv(
       { '1': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     apiStore.invalidateItem('1', 'highPriority');
@@ -559,7 +564,7 @@ describe('an invalidation with lower priority should not override one with highe
   test('not override rtu update', () => {
     const { apiStore } = createCollectionStoreTestEnv(
       { '1': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     apiStore.invalidateItem('1', 'realtimeUpdate');
@@ -572,7 +577,7 @@ describe('an invalidation with lower priority should not override one with highe
   test('not override highPriority with rtu update', () => {
     const { apiStore } = createCollectionStoreTestEnv(
       { '1': defaultTodo },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     apiStore.invalidateItem('1', 'highPriority');
@@ -586,7 +591,7 @@ describe('an invalidation with lower priority should not override one with highe
 test('bug reproduction: await fetch with error', async () => {
   const env = createCollectionStoreTestEnv(
     { '1': defaultTodo },
-    { disableDataInvalidation: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   env.serverTable.setNextFetchError('1', 'error');

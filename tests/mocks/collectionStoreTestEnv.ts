@@ -1,4 +1,7 @@
-import { createCollectionStore } from '../../src/collectionStore/collectionStore';
+import {
+  createCollectionStore,
+  type CollectionInitialStateItem,
+} from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
 import { createServerTableMock } from './serverTableMock';
 import {
@@ -14,9 +17,17 @@ export type CollectionTestItem<D> = { value: D };
 
 type CollectionTestPayload = string | { id: { id: string } };
 
+export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
+  /** App just opened, no data fetched yet. */
+  | 'idle'
+  /** App already opened before and data was fetched successfully. */
+  | 'loaded'
+  /** App started with data restored from local cache, pending server revalidation. */
+  | { idleWithLocalCache: 'sameAsServer' | Record<string, D> }
+  /** Data was loaded previously but is now outdated (server has newer data). */
+  | { loadedWithStaleData: Record<string, D> };
+
 export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
-  /** When true, disables initial data invalidation (default: false) */
-  disableDataInvalidation?: boolean;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
   baseCoalescingWindowMs?: number;
   mediumPriorityDelayMs?: number;
@@ -24,22 +35,20 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   useBatchFetch?: boolean;
   /** Max items per batch (only used when useBatchFetch is true) */
   maxBatchSize?: number;
-  /** Simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
-  useLoadedSnapshot?: boolean;
-  initialData?: Record<string, D> | 'fromServer';
+  testScenario?: CollectionStoreTestScenario<D>;
+  usesRealTimeUpdates?: boolean;
 };
 
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
-    disableDataInvalidation = false,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
-    useLoadedSnapshot = false,
-    initialData,
+    testScenario,
+    usesRealTimeUpdates,
   }: CollectionStoreTestEnvOptions<D> = {},
 ) {
   const {
@@ -114,7 +123,10 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     );
 
     // Convert list result to Map format expected by collection store
-    const results = new Map<CollectionTestPayload, CollectionTestItem<D> | Error>();
+    const results = new Map<
+      CollectionTestPayload,
+      CollectionTestItem<D> | Error
+    >();
     for (const { itemId, data } of listResult.items) {
       const payload = itemIdToPayload.get(itemId) ?? itemId;
       if (data instanceof Error) {
@@ -127,30 +139,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     return results;
   };
 
-  function mapInitialData(data: Record<string, D>) {
-    return Object.entries(data).map(([itemId, value]) => ({
-      payload: itemId,
-      data: { value },
-    }));
-  }
-
-  function getInitialData() {
-    if (useLoadedSnapshot) {
-      return mapInitialData(serverInitialData);
-    }
-
-    if (initialData === 'fromServer') {
-      return mapInitialData(serverInitialData);
-    }
-
-    if (initialData) {
-      return mapInitialData(initialData);
-    }
-
-    return disableDataInvalidation ? mapInitialData(serverInitialData) : undefined;
-  }
-
-  const initialDataSnapshot = getInitialData();
+  const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
   const collectionStore = createCollectionStore<
     CollectionTestItem<D>,
@@ -166,26 +155,23 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       return { value };
     },
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
-    disableInitialDataInvalidation:
-      disableDataInvalidation || useLoadedSnapshot,
-    getInitialData:
-      initialDataSnapshot ? () => initialDataSnapshot
-      : undefined,
-    disableRefetchOnMount: disableDataInvalidation || useLoadedSnapshot,
+    usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
+    '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
   });
 
-  // Set up RTU listener
-  serverTable.wsEvents.on('data_changed', (event) => {
-    addAction('received-ws-data-change-event', {
-      itemId: event.payload.itemId,
+  if (usesRealTimeUpdates) {
+    serverTable.wsEvents.on('data_changed', (event) => {
+      addAction('received-ws-data-change-event', {
+        itemId: event.payload.itemId,
+      });
+      collectionStore.invalidateItem(event.payload.itemId, 'realtimeUpdate');
     });
-    collectionStore.invalidateItem(event.payload.itemId, 'realtimeUpdate');
-  });
+  }
 
   return {
     apiStore: collectionStore,
@@ -263,5 +249,61 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     get timelineString() {
       return getTimelineString();
     },
+  };
+}
+
+function mapInitialData<D extends Record<string, unknown>>(
+  data: Record<string, D>,
+): CollectionInitialStateItem<CollectionTestPayload, CollectionTestItem<D>>[] {
+  return Object.entries(data).map(([itemId, value]) => ({
+    payload: itemId,
+    data: { value },
+  }));
+}
+
+function resolveTestOptions<D extends Record<string, unknown>>(
+  scenario: CollectionStoreTestScenario<D> | undefined,
+  serverInitialData: Record<string, D>,
+):
+  | {
+      initialRefetchOnMount?: FetchType;
+      initialStatus?: 'success';
+      initialData?: CollectionInitialStateItem<
+        CollectionTestPayload,
+        CollectionTestItem<D>
+      >[];
+      initialLastFetchStartTime?: number;
+    }
+  | undefined {
+  if (!scenario || scenario === 'idle') {
+    return undefined;
+  }
+
+  if (scenario === 'loaded') {
+    return {
+      initialData: mapInitialData(serverInitialData),
+      initialStatus: 'success',
+      initialLastFetchStartTime: Date.now() - 10_000,
+    };
+  }
+
+  if ('idleWithLocalCache' in scenario) {
+    const cacheData =
+      scenario.idleWithLocalCache === 'sameAsServer' ?
+        serverInitialData
+      : scenario.idleWithLocalCache;
+
+    return {
+      initialData: mapInitialData(cacheData),
+      initialStatus: 'success',
+      initialRefetchOnMount: 'lowPriority',
+      initialLastFetchStartTime: Date.now() - 10_000,
+    };
+  }
+
+  return {
+    initialData: mapInitialData(scenario.loadedWithStaleData),
+    initialStatus: 'success',
+    initialLastFetchStartTime: Date.now() - 10_000,
   };
 }

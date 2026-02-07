@@ -3,6 +3,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { useCallback, useRef } from 'react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 type Todo = {
   title: string;
@@ -16,7 +17,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -28,8 +29,8 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      useLoadedSnapshot: true,
-      disableDataInvalidation: true,
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
     },
   );
 
@@ -178,7 +179,7 @@ test('disable then enable isOffScreen', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      initialData: 'fromServer',
+      testScenario: { idleWithLocalCache: 'sameAsServer' },
     },
   );
 
@@ -248,7 +249,7 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      initialData: 'fromServer',
+      testScenario: { idleWithLocalCache: 'sameAsServer' },
     },
   );
 
@@ -324,7 +325,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
       '5': defaultTodo,
     },
     {
-      initialData: 'fromServer',
+      testScenario: { idleWithLocalCache: 'sameAsServer' },
     },
   );
 
@@ -424,7 +425,7 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      initialData: 'fromServer',
+      testScenario: { idleWithLocalCache: 'sameAsServer' },
     },
   );
 
@@ -535,8 +536,8 @@ test('useItem with selector should not trigger a rerender', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      useLoadedSnapshot: true,
-      disableDataInvalidation: true,
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
     },
   );
 
