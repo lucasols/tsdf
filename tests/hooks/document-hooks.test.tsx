@@ -34,6 +34,13 @@ type StoreValue = {
 test('load data', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
+  expect(env.apiStore.store.state).toMatchInlineSnapshot(`
+    data: null
+    error: null
+    refetchOnMount: '❌'
+    status: 'idle'
+  `);
+
   const { result, unmount } = renderHook(() => env.apiStore.useDocument());
 
   expect(result.current.status).toBe('loading');
