@@ -54,9 +54,6 @@ export type OnDocumentInvalidate = (priority: FetchType) => void;
 export type DocumentStoreOptions<State extends ValidStoreState> = {
   debugName?: string;
   fetchFn: (signal: AbortSignal) => Promise<State>;
-  getInitialData?: () => State | undefined;
-  disableInitialInvalidation?: boolean;
-  disableRefetchOnMount?: boolean;
   errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
@@ -67,6 +64,15 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     error: unknown,
     options: { dontShowToast?: boolean },
   ) => void;
+  usesRealTimeUpdates?: boolean;
+  /** @internal */
+  '~test'?: {
+    initialRefetchOnMount?: FetchType;
+    initialStatus?: DocumentStatus;
+    initialData?: State;
+    initialError?: StoreError;
+    initialLastFetchStartTime?: number;
+  };
 };
 
 export type DocumentStore<State extends ValidStoreState> = ReturnType<
@@ -79,9 +85,6 @@ const DOC_REQUEST_ID = '_doc';
 export function createDocumentStore<State extends ValidStoreState>({
   debugName,
   fetchFn,
-  getInitialData,
-  disableInitialInvalidation,
-  disableRefetchOnMount: globalDisableRefetchOnMount,
   errorNormalizer,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
@@ -89,21 +92,43 @@ export function createDocumentStore<State extends ValidStoreState>({
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
+  usesRealTimeUpdates,
+  '~test': testOptions,
 }: DocumentStoreOptions<State>) {
   let invalidationWasTriggered = false;
 
-  const initialData = getInitialData?.();
+  let initialData: State | null = null;
+  let initialRefetchOnMount: FetchType | false = false;
+  let initialStatus: DocumentStatus = 'idle';
+  let initialError: StoreError | null = null;
+
+  const globalDisableRefetchOnMount = usesRealTimeUpdates;
+
+  if (import.meta.env.TEST && testOptions) {
+    if (testOptions.initialData) {
+      initialData = testOptions.initialData;
+    }
+
+    if (testOptions.initialRefetchOnMount) {
+      initialRefetchOnMount = testOptions.initialRefetchOnMount;
+    }
+
+    if (testOptions.initialStatus) {
+      initialStatus = testOptions.initialStatus;
+    }
+
+    if (testOptions.initialError) {
+      initialError = testOptions.initialError;
+    }
+  }
 
   const store = new Store<DocumentStoreState<State>>({
     debugName,
     state: () => ({
-      data: initialData ?? null,
-      error: null,
-      status: initialData !== undefined ? 'success' : 'idle',
-      refetchOnMount:
-        initialData !== undefined && !disableInitialInvalidation ?
-          'lowPriority'
-        : false,
+      data: initialData,
+      error: initialError,
+      status: initialStatus,
+      refetchOnMount: initialRefetchOnMount,
     }),
   });
 
@@ -181,6 +206,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     on: onSchedulerEvent,
+    initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
   });
 
   function scheduleFetch(

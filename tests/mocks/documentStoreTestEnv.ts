@@ -10,32 +10,34 @@ import {
   normalizeError,
 } from './testEnvUtils';
 
+export type DocumentStoreTestScenario<D> =
+  /** App just opened, no data fetched yet. */
+  | 'idle'
+  /** App already opened before and data was fetched successfully. */
+  | 'loaded'
+  /** App started with data restored from local cache, pending server revalidation. */
+  | { idleWithLocalCache: 'sameAsServer' | D }
+  /** Data was loaded previously but is now outdated (server has newer data). */
+  | { loadedWithStaleData: D };
+
 export type DocumentStoreTestEnvOptions<D> = {
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
-  initialStateData?:
-    | 'sameAsServer'
-    | {
-        value: D;
-      }
-    | null;
-  disableInitialInvalidation?: boolean;
-  /* simulate a loaded snapshot without initial invalidation and refetch on mount (as if component was already mounted) */
-  useLoadedSnapshot?: boolean;
+  testScenario?: DocumentStoreTestScenario<D>;
+  usesRealTimeUpdates?: boolean;
 };
 
 export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
-    initialStateData = null,
-    disableInitialInvalidation = false,
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = 200,
     mediumPriorityDelayMs,
-    useLoadedSnapshot = false,
+    testScenario,
+    usesRealTimeUpdates,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
   const {
@@ -54,10 +56,7 @@ export function createDocumentStoreTestEnv<D>(
 
   const serverMock = createServerMock<D>(serverInitialData, addAction);
 
-  const resolvedInitialState =
-    initialStateData === 'sameAsServer' || useLoadedSnapshot ?
-      { value: serverInitialData }
-    : initialStateData;
+  const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
   const documentStore = createDocumentStore<{ value: D }>({
     errorNormalizer: normalizeError,
@@ -67,21 +66,21 @@ export function createDocumentStoreTestEnv<D>(
       const value = await serverMock.fetch(signal);
       return { value };
     },
-    disableInitialInvalidation: disableInitialInvalidation || useLoadedSnapshot,
-    getInitialData:
-      resolvedInitialState ? () => resolvedInitialState : undefined,
-    disableRefetchOnMount: disableInitialInvalidation || useLoadedSnapshot,
+    usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
+    '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
   });
 
-  serverMock.wsEvents.on('data_changed', () => {
-    addAction('received-ws-data-change-event');
-    documentStore.invalidateData('realtimeUpdate');
-  });
+  if (usesRealTimeUpdates) {
+    serverMock.wsEvents.on('data_changed', () => {
+      addAction('received-ws-data-change-event');
+      documentStore.invalidateData('realtimeUpdate');
+    });
+  }
 
   return {
     apiStore: documentStore,
@@ -187,5 +186,49 @@ export function createDocumentStoreTestEnv<D>(
     setServerData(value: D) {
       serverMock.setData(value);
     },
+  };
+}
+
+function resolveTestOptions<D>(
+  scenario: DocumentStoreTestScenario<D> | undefined,
+  serverInitialData: D,
+):
+  | {
+      initialRefetchOnMount?: FetchType;
+      initialStatus?: 'idle' | 'success';
+      initialData?: { value: D };
+      initialLastFetchStartTime?: number;
+    }
+  | undefined {
+  if (!scenario || scenario === 'idle') {
+    return undefined;
+  }
+
+  if (scenario === 'loaded') {
+    return {
+      initialData: { value: serverInitialData },
+      initialStatus: 'success',
+      initialLastFetchStartTime: Date.now() - 10_000,
+    };
+  }
+
+  if ('idleWithLocalCache' in scenario) {
+    const cacheData =
+      scenario.idleWithLocalCache === 'sameAsServer' ?
+        serverInitialData
+      : scenario.idleWithLocalCache;
+
+    return {
+      initialData: { value: cacheData },
+      initialStatus: 'success',
+      initialRefetchOnMount: 'lowPriority',
+      initialLastFetchStartTime: Date.now() - 10_000,
+    };
+  }
+
+  return {
+    initialData: { value: scenario.loadedWithStaleData },
+    initialStatus: 'success',
+    initialLastFetchStartTime: Date.now() - 10_000,
   };
 }

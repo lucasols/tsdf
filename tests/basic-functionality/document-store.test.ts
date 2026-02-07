@@ -1,21 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-import {
-  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
-  type DocumentStoreTestEnvOptions,
-} from '../mocks/documentStoreTestEnv';
-
-function createDocumentStoreTestEnv<D>(
-  serverInitialData: D,
-  {
-    initialStateData = 'sameAsServer',
-    disableInitialInvalidation = true,
-  }: DocumentStoreTestEnvOptions<D> = {},
-) {
-  return createDocumentStoreTestEnvBase(serverInitialData, {
-    initialStateData,
-    disableInitialInvalidation,
-  });
-}
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -28,7 +12,8 @@ afterEach(() => {
 describe('basic fetch lifecycle', () => {
   test('idle -> loading -> success state transitions', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      initialStateData: null,
+      testScenario: 'idle',
+      usesRealTimeUpdates: true,
     });
 
     // Initial state should be idle
@@ -66,9 +51,12 @@ describe('basic fetch lifecycle', () => {
   });
 
   test('refetch with existing data shows refetching status and returns new data', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
-    // Initial state - has data from getInitialData (serverInitialData = 42)
+    // Initial state - has data from testScenario (serverInitialData = 42)
     expect(env.store.state).toMatchInlineSnapshot(`
       data: { value: 42 }
       error: null
@@ -106,7 +94,10 @@ describe('basic fetch lifecycle', () => {
   });
 
   test('error during refetch preserves existing data', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // First do a successful refetch to get new data
     env.setServerData(100);
@@ -139,9 +130,12 @@ describe('basic fetch lifecycle', () => {
   });
 });
 
-describe('getInitialData option', () => {
+describe('testScenario: idle', () => {
   test('store starts with initialized data', () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // Should start with initial data and success status
     expect(env.store.state).toMatchInlineSnapshot(`
@@ -152,9 +146,10 @@ describe('getInitialData option', () => {
     `);
   });
 
-  test('initial data triggers refetch on mount when invalidation enabled', async () => {
+  test('idle store fetches data on first scheduleFetch', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      initialStateData: null,
+      testScenario: 'idle',
+      usesRealTimeUpdates: true,
     });
 
     // Should start with no data and idle status
@@ -184,7 +179,10 @@ describe('getInitialData option', () => {
 
 describe('invalidateData priority', () => {
   test('lower priority invalidation should not override higher priority', () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     env.apiStore.invalidateData('highPriority');
     expect(env.store.state.refetchOnMount).toBe('highPriority');
@@ -195,7 +193,10 @@ describe('invalidateData priority', () => {
   });
 
   test('realtimeUpdate invalidation should not be overridden by lowPriority', () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     env.apiStore.invalidateData('realtimeUpdate');
     expect(env.store.state.refetchOnMount).toBe('realtimeUpdate');
@@ -206,7 +207,10 @@ describe('invalidateData priority', () => {
   });
 
   test('highPriority invalidation should not be overridden by realtimeUpdate', () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     env.apiStore.invalidateData('highPriority');
     expect(env.store.state.refetchOnMount).toBe('highPriority');
@@ -217,7 +221,10 @@ describe('invalidateData priority', () => {
   });
 
   test('higher priority can override lower priority invalidation', () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     env.apiStore.invalidateData('lowPriority');
     expect(env.store.state.refetchOnMount).toBe('lowPriority');

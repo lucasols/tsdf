@@ -13,13 +13,14 @@ import {
 import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -61,7 +62,7 @@ test('load data', async () => {
 test('invalidate data', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    { useLoadedSnapshot: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const { result } = renderHook(() => env.apiStore.useDocument());
@@ -85,10 +86,7 @@ test('invalidate data', async () => {
 test('revalidation with multiple components do not trigger multiple fetches', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    {
-      disableInitialInvalidation: true,
-      initialStateData: 'sameAsServer',
-    },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   for (let i = 0; i < 27; i += 1) {
@@ -115,7 +113,7 @@ test('revalidation with multiple components do not trigger multiple fetches', as
 test('data selector', () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    { useLoadedSnapshot: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const { result } = renderHook(() =>
@@ -270,7 +268,7 @@ test('disableRefetchOnMount', async () => {
 test('do not return refetching status by default', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    { useLoadedSnapshot: true },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const renders: Array<[string | null, DocumentStatus]> = [];
@@ -300,7 +298,7 @@ describe('action types', () => {
   test('action with optimistic update', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>(
       { hello: 'world' },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders: Array<[string | null, DocumentStatus]> = [];
@@ -334,7 +332,7 @@ describe('action types', () => {
   test('action with optimistic update and revalidation', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>(
       { hello: 'world' },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders: Array<[string | null, DocumentStatus]> = [];
@@ -372,7 +370,7 @@ describe('action types', () => {
   test('action without optimistic update', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>(
       { hello: 'world' },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders: Array<[string | null, DocumentStatus]> = [];
@@ -407,7 +405,7 @@ describe('action types', () => {
   test('action with revalidation and without optimistic update', async () => {
     const env = createDocumentStoreTestEnv<StoreValue>(
       { hello: 'world' },
-      { useLoadedSnapshot: true },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     const renders: Array<[string | null, DocumentStatus]> = [];
@@ -445,10 +443,7 @@ describe('action types', () => {
 test('rollback on error', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    {
-      useLoadedSnapshot: true,
-      disableInitialInvalidation: true,
-    },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const renders: Array<[string | null, DocumentStatus, StoreError | null]> = [];
@@ -604,7 +599,8 @@ test('RTU update works', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'lucas' },
     {
-      useLoadedSnapshot: true,
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
       dynamicRealtimeThrottleMs() {
         return 300;
       },
@@ -669,10 +665,7 @@ test('RTU update works', async () => {
 test('initial data is invalidated on first load', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    {
-      initialStateData: 'sameAsServer',
-      disableInitialInvalidation: false,
-    },
+    { testScenario: { idleWithLocalCache: 'sameAsServer' } },
   );
 
   env.setServerData({ hello: 'update' });

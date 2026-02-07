@@ -2,13 +2,14 @@ import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -23,10 +24,7 @@ type StoreValue = {
 test('disable should keep the selected data and not be affected by invalidation', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    {
-      useLoadedSnapshot: true,
-      disableInitialInvalidation: true,
-    },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const renders = createLoggerStore();
@@ -120,10 +118,7 @@ test('disable should keep the selected data and not be affected by invalidation'
 test('isOffScreen should keep the selected data and not be affected by invalidation', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    {
-      useLoadedSnapshot: true,
-      disableInitialInvalidation: true,
-    },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const renders = createLoggerStore();
@@ -217,10 +212,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
 test('useDocument selector result should remain stable across rerenders', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
     { hello: 'world' },
-    {
-      useLoadedSnapshot: true,
-      disableInitialInvalidation: true,
-    },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const renders = createLoggerStore();

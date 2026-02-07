@@ -1,36 +1,14 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
-import {
-  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
-  type DocumentStoreTestEnvOptions,
-} from '../mocks/documentStoreTestEnv';
-
-function createDocumentStoreTestEnv<D>(
-  serverInitialData: D,
-  options: DocumentStoreTestEnvOptions<D> = {},
-) {
-  const resolvedInitialStateData =
-    options.initialStateData === undefined ?
-      'sameAsServer'
-    : options.initialStateData;
-  const resolvedDisableInitialInvalidation =
-    options.disableInitialInvalidation === undefined ?
-      true
-    : options.disableInitialInvalidation;
-
-  return createDocumentStoreTestEnvBase(serverInitialData, {
-    initialStateData: resolvedInitialStateData,
-    disableInitialInvalidation: resolvedDisableInitialInvalidation,
-    ...options,
-  });
-}
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -45,7 +23,7 @@ function dynamicRealtimeThrottleMs(lastDuration: number): number {
 test('dynamically throttle realtime updates', async () => {
   // Expected: slow RTU fetch increases throttle window, causing coalescing of RTUs
   // and eventual commits for the latest updates.
-  const env = createDocumentStoreTestEnv(0, { dynamicRealtimeThrottleMs });
+  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true, dynamicRealtimeThrottleMs });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -113,6 +91,8 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   // Expected: dynamic throttle shortens for recent fetches, allowing two RTU fetches
   // while coalescing multiple RTU signals into the last update.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs(lastFetchDuration: number) {
       return lastFetchDuration < 700 ? 100 : 500;
     },
@@ -184,6 +164,8 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
 test('simple mutation that triggers a RTU', async () => {
   // Expected: mutation triggers RTU fetch after optimistic commit, committing the server state.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: (lastDuration) =>
       lastDuration > 300 ? 300 : 100,
   });
@@ -236,6 +218,8 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
   // Expected: external RTU schedules another fetch while mutation RTU is in flight,
   // both fetches eventually commit in order.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: (lastDuration) =>
       lastDuration > 1000 ? 500 : 200,
   });
@@ -316,6 +300,8 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
   // Expected: new mutation aborts in-flight RTU fetch, then schedules a new RTU fetch
   // that commits the latest mutation result.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: (lastDuration) =>
       lastDuration > 1000 ? 500 : 200,
   });
@@ -395,6 +381,8 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   // Expected: overlapping mutations each trigger RTU scheduling, but only one RTU fetch runs,
   // committing the latest data.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: (lastDuration) =>
       lastDuration > 1000 ? 500 : 200,
   });
@@ -468,6 +456,8 @@ test('slow mutation then new mutation while prev mutation is running', async () 
 test('rtu mutations without optimistic updates', async () => {
   // Expected: no optimistic UI commits, RTU fetches drive UI updates after server change.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: (lastDuration) =>
       lastDuration > 1000 ? 500 : 200,
   });
@@ -550,6 +540,8 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
   // Expected: low priority fetch starts before RTU fetch, so RTU is skipped and
   // the low priority fetch commits the server state.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs() {
       return 500;
     },
@@ -618,6 +610,8 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
 test('mutation that triggers multiple rtu updates', async () => {
   // Expected: burst of RTU fetch requests is coalesced into a single scheduled RTU fetch.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs() {
       return 500;
     },

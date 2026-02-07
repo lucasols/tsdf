@@ -1,29 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { StoreFetchError } from '../../src/utils/storeShared';
-import {
-  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
-  type DocumentStoreTestEnvOptions,
-} from '../mocks/documentStoreTestEnv';
-
-function createDocumentStoreTestEnv<D>(
-  serverInitialData: D,
-  options: DocumentStoreTestEnvOptions<D> = {},
-) {
-  const resolvedInitialStateData =
-    options.initialStateData === undefined ?
-      'sameAsServer'
-    : options.initialStateData;
-  const resolvedDisableInitialInvalidation =
-    options.disableInitialInvalidation === undefined ?
-      true
-    : options.disableInitialInvalidation;
-
-  return createDocumentStoreTestEnvBase(serverInitialData, {
-    initialStateData: resolvedInitialStateData,
-    disableInitialInvalidation: resolvedDisableInitialInvalidation,
-    ...options,
-  });
-}
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -36,7 +13,8 @@ afterEach(() => {
 describe('awaitFetch basic behavior', () => {
   test('returns data on successful fetch', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      initialStateData: null,
+      testScenario: 'idle',
+      usesRealTimeUpdates: true,
     });
 
     const resultPromise = env.apiStore.awaitFetch();
@@ -55,7 +33,8 @@ describe('awaitFetch basic behavior', () => {
 
   test('returns error on failed fetch', async () => {
     const env = createDocumentStoreTestEnv(42, {
-      initialStateData: null,
+      testScenario: 'idle',
+      usesRealTimeUpdates: true,
     });
 
     env.errorInNextFetch({
@@ -81,7 +60,10 @@ describe('awaitFetch basic behavior', () => {
   });
 
   test('triggers new fetch even when data exists', async () => {
-    const env = createDocumentStoreTestEnv(0);
+    const env = createDocumentStoreTestEnv(0, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // Initial data is already present
     expect(env.store.state.data).toEqual({ value: 0 });
@@ -105,7 +87,10 @@ describe('awaitFetch basic behavior', () => {
 
 describe('awaitFetch coalescing behavior', () => {
   test('multiple concurrent awaitFetch calls coalesce into single fetch', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // Start multiple awaitFetch calls concurrently
     const promise1 = env.apiStore.awaitFetch();
@@ -139,6 +124,8 @@ describe('awaitFetch coalescing behavior', () => {
 
   test('awaitFetch during coalescing window joins the window', async () => {
     const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
       baseCoalescingWindowMs: 50,
     });
 
@@ -169,7 +156,10 @@ describe('awaitFetch coalescing behavior', () => {
   });
 
   test('awaitFetch during ongoing fetch waits for completion then schedules another', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // Start first awaitFetch
     const promise1 = env.apiStore.awaitFetch();
@@ -204,7 +194,10 @@ describe('awaitFetch coalescing behavior', () => {
 
 describe('awaitFetch edge cases', () => {
   test('sequential awaitFetch calls each trigger their own fetch', async () => {
-    const env = createDocumentStoreTestEnv(1);
+    const env = createDocumentStoreTestEnv(1, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // First awaitFetch
     const promise1 = env.apiStore.awaitFetch();
@@ -226,7 +219,10 @@ describe('awaitFetch edge cases', () => {
   });
 
   test('awaitFetch returns latest data after server changes during fetch', async () => {
-    const env = createDocumentStoreTestEnv(1);
+    const env = createDocumentStoreTestEnv(1, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // Start awaitFetch
     const fetchPromise = env.apiStore.awaitFetch();
@@ -249,7 +245,10 @@ describe('awaitFetch edge cases', () => {
   });
 
   test('awaitFetch with immediate error', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     env.errorInNextFetch({
       message: 'Immediate failure',
@@ -274,7 +273,10 @@ describe('awaitFetch edge cases', () => {
   });
 
   test('awaitFetch preserves previous data on error', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     // First successful fetch
     const result1 = env.apiStore.awaitFetch();
@@ -318,6 +320,8 @@ describe('awaitFetch edge cases', () => {
 describe('awaitFetch timing', () => {
   test('awaitFetch waits for coalescing window before starting fetch', async () => {
     const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
       baseCoalescingWindowMs: 50,
     });
 
@@ -338,7 +342,10 @@ describe('awaitFetch timing', () => {
   });
 
   test('awaitFetch resolves only after fetch completes', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
     env.setNextFetchDurations(500);
 
     let resolved = false;
@@ -363,7 +370,10 @@ describe('awaitFetch timing', () => {
   });
 
   test('awaitFetch waits for scheduled fetch after mutation completes', async () => {
-    const env = createDocumentStoreTestEnv(0);
+    const env = createDocumentStoreTestEnv(0, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     const mutationPromise = env.performClientUpdateAction(1, {
       duration: 1200,
@@ -394,6 +404,8 @@ describe('awaitFetch timing', () => {
 
   test('three awaitFetch calls triggered outside each coalescing window coalesce during ongoing fetch', async () => {
     const env = createDocumentStoreTestEnv(1, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
       baseCoalescingWindowMs: 50,
     });
 
@@ -452,7 +464,10 @@ describe('awaitFetch timing', () => {
 
 describe('awaitFetch timeout', () => {
   test('awaitFetch times out after default 30 seconds', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
     // Set a very long fetch duration
     env.setNextFetchDurations(60_000);
 
@@ -471,7 +486,10 @@ describe('awaitFetch timeout', () => {
   });
 
   test('awaitFetch times out after custom timeout', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
     // Set a fetch duration longer than custom timeout
     env.setNextFetchDurations(10_000);
 
@@ -489,7 +507,10 @@ describe('awaitFetch timeout', () => {
   });
 
   test('awaitFetch completes before timeout returns data', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
     env.setNextFetchDurations(100);
 
     const resultPromise = env.apiStore.awaitFetch({ timeoutMs: 5_000 });
@@ -506,7 +527,10 @@ describe('awaitFetch timeout', () => {
   });
 
   test('awaitFetch with zero timeout times out immediately', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
 
     const resultPromise = env.apiStore.awaitFetch({ timeoutMs: 0 });
 
@@ -522,7 +546,10 @@ describe('awaitFetch timeout', () => {
   });
 
   test('multiple awaitFetch calls with different timeouts', async () => {
-    const env = createDocumentStoreTestEnv(42);
+    const env = createDocumentStoreTestEnv(42, {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+    });
     env.setNextFetchDurations(3_000);
 
     // First call with short timeout - should timeout
