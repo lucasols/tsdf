@@ -28,12 +28,14 @@
     "test:changed": "vitest --changed --mode development",
     "lint": "pnpm tsc && pnpm eslint && pnpm format",
     "eslint": "eslint src/ tests/ --fix",
-    "format": "prettier --write src/**/*.ts",
+    "format": "oxfmt src/ tests/",
     "tsc": "tsc -p tsconfig.prod.json",
     "tsc:watch": "tsc -p tsconfig.prod.json --watch",
     "build": "pnpm vitest run && pnpm lint && pnpm build:no-test",
     "build:no-test": "tsup --dts",
-    "pre-publish": "./scripts/check-if-is-sync.sh && pnpm build"
+    "pre-publish": "./scripts/check-if-is-sync.sh && pnpm build",
+    "hooks:install": "simple-git-hooks",
+    "hooks:uninstall": "git config --unset core.hooksPath || true && rm -rf .git/hooks/pre-commit"
   },
   "devDependencies": {
     "@ls-stack/eslint-cfg": "^0.5.1",
@@ -46,9 +48,10 @@
     "eslint": "^9.39.2",
     "eslint-plugin-react-hooks": "^7.0.1",
     "happy-dom": "^20.0.11",
-    "prettier": "^3.7.4",
+    "oxfmt": "^0.28.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "simple-git-hooks": "^2.13.1",
     "tiny-glob": "^0.2.9",
     "tsm": "^2.3.0",
     "tsup": "^8.5.1",
@@ -65,6 +68,9 @@
     "klona": "^2.0.6",
     "t-result": "^0.6.1",
     "t-state": "^9.8.1"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "node --no-warnings scripts/preCommitHook.ts"
   },
   "peerDependencies": {
     "react": "^18.0.0||^19.0.0",

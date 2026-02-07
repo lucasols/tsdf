@@ -58,6 +58,8 @@ export function createListQueryStoreTestEnv(
     lowPriorityThrottleMs = 200,
     testScenario,
     usesRealTimeUpdates,
+    useBatchFetch,
+    maxItemBatchSize,
   }: {
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
@@ -66,6 +68,10 @@ export function createListQueryStoreTestEnv(
     lowPriorityThrottleMs?: number;
     testScenario?: ListQueryStoreTestScenario;
     usesRealTimeUpdates?: boolean;
+    /** Enable batch fetch mode - uses batchFetchItemFn instead of per-item fetchItemFn */
+    useBatchFetch?: boolean;
+    /** Max items per batch (only used when useBatchFetch is true) */
+    maxItemBatchSize?: number;
   } = {},
 ) {
   const {
@@ -94,6 +100,55 @@ export function createListQueryStoreTestEnv(
     actionsHistory,
   );
 
+  // Per-item UI tracking (same pattern as collection store)
+  const itemUIValues: Record<string, unknown> = {};
+  const uiChanges: Array<Record<string, unknown>> = [];
+  let uiInitialized = false;
+
+  function trackItemUI(itemId: string, value: unknown) {
+    if (itemUIValues[itemId] === value) return;
+
+    itemUIValues[itemId] = value;
+    uiChanges.push({ ...itemUIValues });
+
+    const time = getRelativeTime();
+
+    // Skip if this was already recorded by optimistic-ui-commit
+    if (
+      actionsHistory.some(
+        (a) =>
+          a.action === 'optimistic-ui-commit' &&
+          a.time === time &&
+          a.uiValue === value &&
+          a.itemId === itemId,
+      )
+    ) {
+      return;
+    }
+
+    addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
+      uiValue: value,
+      itemId,
+    });
+    uiInitialized = true;
+  }
+
+  // Batch fetch function - delegates to serverTable.list with itemIds
+  const batchFetchItemFn = async (payloads: string[], signal: AbortSignal) => {
+    const listResult = await serverTable.list({ itemIds: payloads }, signal);
+
+    const results = new Map<string, Row | Error>();
+    for (const { itemId, data } of listResult.items) {
+      if (data instanceof Error) {
+        results.set(itemId, data);
+      } else {
+        results.set(itemId, data);
+      }
+    }
+
+    return results;
+  };
+
   const testOptions = resolveTestOptions(testScenario, serverTable);
 
   const listQueryStore = createListQueryStore<Row, ListQueryParams, string>({
@@ -104,6 +159,8 @@ export function createListQueryStoreTestEnv(
     mediumPriorityDelayMs,
     defaultQuerySize,
     usesRealTimeUpdates,
+    maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
+    batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
@@ -155,10 +212,14 @@ export function createListQueryStoreTestEnv(
     apiStore: listQueryStore,
     store: listQueryStore.store,
     serverTable,
+    get uiChanges() {
+      return uiChanges;
+    },
     get actions() {
       return actionsHistory;
     },
     trackUIChanges,
+    trackItemUI,
     addTimelineComments,
     getItemKey: (tableId: string, id: number) => getRawItemKey(tableId, id),
     getStoreItemKey: (tableId: string, id: number) =>
@@ -211,7 +272,7 @@ export function createListQueryStoreTestEnv(
 
       return result;
     },
-    performClientUpdateAction: (
+    performClientUpdateAction: async (
       itemId: string,
       newValue: Row,
       {
@@ -229,8 +290,29 @@ export function createListQueryStoreTestEnv(
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
+      const endMutation = listQueryStore.startItemMutation(itemId);
 
-      return listQueryStore.startItemMutation(itemId);
+      if (withOptimisticUpdate) {
+        listQueryStore.updateItemState(itemId, () => newValue);
+        addAction('optimistic-ui-commit', {
+          uiValue: newValue,
+          id: mutationId,
+          itemId,
+        });
+      }
+
+      await serverTable.emulateClientMutation(itemId, newValue, {
+        duration,
+        triggerRTUEvent: triggerRTU,
+        addServerDataChangeAction,
+        mutationId,
+      });
+
+      endMutation();
+
+      if (withRevalidation) {
+        listQueryStore.scheduleItemFetch('highPriority', itemId);
+      }
     },
     get timelineString() {
       return getTimelineString();
