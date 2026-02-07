@@ -208,8 +208,8 @@ export function createListQueryStore<
   const queryInitialFetchStartTime = new Map<string, number>();
 
   if (
-    import.meta.env.TEST &&
-    testOptions?.initialLastFetchStartTime !== undefined
+    import.meta.env.TEST
+    && testOptions?.initialLastFetchStartTime !== undefined
   ) {
     for (const queryKey of Object.keys(store.state.queries)) {
       queryInitialFetchStartTime.set(
@@ -254,9 +254,9 @@ export function createListQueryStore<
         coalescePayload: (existing, incoming) => ({
           ...incoming,
           type:
-            existing.type === 'loadMore' || incoming.type === 'loadMore'
-              ? 'loadMore'
-              : 'load',
+            existing.type === 'loadMore' || incoming.type === 'loadMore' ?
+              'loadMore'
+            : 'load',
           size: Math.max(existing.size, incoming.size),
         }),
       });
@@ -270,37 +270,37 @@ export function createListQueryStore<
   const useSingleItemScheduler = !!batchFetchItemFn;
 
   const singleItemScheduler =
-    useSingleItemScheduler && fetchItemFn
-      ? new RequestScheduler<ItemPayload>({
-          fetchFn: async (
-            requests: BatchRequest<ItemPayload>[],
-            fetchCtx: FetchContext,
-          ): Promise<Map<string, boolean>> => {
-            return executeItemBatchFetch(
-              requests,
-              fetchCtx,
-              store,
-              itemKeyToPayload,
-              fetchItemFn,
-              batchFetchItemFn,
-              errorNormalizer,
-            );
-          },
-          lowPriorityThrottleMs,
-          baseCoalescingWindowMs,
-          dynamicRealtimeThrottleMs,
-          mediumPriorityDelayMs,
-          maxBatchSize: maxItemBatchSize,
-          on: onSchedulerEvent,
-        })
-      : null;
+    useSingleItemScheduler && fetchItemFn ?
+      new RequestScheduler<ItemPayload>({
+        fetchFn: async (
+          requests: BatchRequest<ItemPayload>[],
+          fetchCtx: FetchContext,
+        ): Promise<Map<string, boolean>> => {
+          return executeItemBatchFetch(
+            requests,
+            fetchCtx,
+            store,
+            itemKeyToPayload,
+            fetchItemFn,
+            batchFetchItemFn,
+            errorNormalizer,
+          );
+        },
+        lowPriorityThrottleMs,
+        baseCoalescingWindowMs,
+        dynamicRealtimeThrottleMs,
+        mediumPriorityDelayMs,
+        maxBatchSize: maxItemBatchSize,
+        on: onSchedulerEvent,
+      })
+    : null;
 
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
   const itemInitialFetchStartTime = new Map<string, number>();
 
   if (
-    import.meta.env.TEST &&
-    testOptions?.initialLastFetchStartTime !== undefined
+    import.meta.env.TEST
+    && testOptions?.initialLastFetchStartTime !== undefined
   ) {
     for (const itemKey of Object.keys(store.state.itemQueries)) {
       itemInitialFetchStartTime.set(
@@ -391,8 +391,8 @@ export function createListQueryStore<
       return filterAndMap(
         Object.entries(store.state.queries),
         ([queryKey, query]) => {
-          return payloads(query.payload, query, queryKey)
-            ? { key: queryKey, payload: query.payload }
+          return payloads(query.payload, query, queryKey) ?
+              { key: queryKey, payload: query.payload }
             : false;
         },
       );
@@ -551,8 +551,8 @@ export function createListQueryStore<
     return filterAndMap(query.items, (itemKey) => {
       const item = store.state.items[itemKey];
       const itemPayload = store.state.itemQueries[itemKey]?.payload;
-      return item && itemPayload
-        ? itemDataSelector(item, itemPayload, itemKey)
+      return item && itemPayload ?
+          itemDataSelector(item, itemPayload, itemKey)
         : false;
     });
   }
@@ -751,8 +751,9 @@ export function createListQueryStore<
 
       if (!queryState) continue;
 
-      const currentInvalidationPriority = queryState.refetchOnMount
-        ? fetchTypePriority[queryState.refetchOnMount]
+      const currentInvalidationPriority =
+        queryState.refetchOnMount ?
+          fetchTypePriority[queryState.refetchOnMount]
         : -1;
       const newInvalidationPriority = fetchTypePriority[priority];
 
@@ -792,9 +793,8 @@ export function createListQueryStore<
 
       if (!item) continue;
 
-      const currentInvalidationPriority = item.refetchOnMount
-        ? fetchTypePriority[item.refetchOnMount]
-        : -1;
+      const currentInvalidationPriority =
+        item.refetchOnMount ? fetchTypePriority[item.refetchOnMount] : -1;
       const newInvalidationPriority = fetchTypePriority[priority];
 
       if (currentInvalidationPriority >= newInvalidationPriority) continue;
