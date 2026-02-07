@@ -13,13 +13,14 @@ import {
 import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {

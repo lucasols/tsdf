@@ -1,6 +1,8 @@
 import type { ScheduleFetchResults } from '../../src/requestScheduler';
 import type { StoreError } from '../../src/utils/storeShared';
 
+export const TEST_INITIAL_TIME = new Date('2025-01-01').getTime();
+
 /**
  * Custom error class that carries path and method information for testing
  */

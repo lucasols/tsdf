@@ -5,13 +5,14 @@ import {
   DEFAULT_FETCH_DURATION_MS,
   DEFAULT_MUTATION_DURATION_MS,
 } from '../mocks/serverMock';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
-  vi.setSystemTime(0);
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {

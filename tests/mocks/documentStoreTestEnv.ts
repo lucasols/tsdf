@@ -197,6 +197,7 @@ function resolveTestOptions<D>(
       initialRefetchOnMount?: FetchType;
       initialStatus?: 'idle' | 'success';
       initialData?: { value: D };
+      initialLastFetchStartTime?: number;
     }
   | undefined {
   if (!scenario || scenario === 'idle') {
@@ -207,6 +208,7 @@ function resolveTestOptions<D>(
     return {
       initialData: { value: serverInitialData },
       initialStatus: 'success',
+      initialLastFetchStartTime: Date.now() - 10_000,
     };
   }
 
@@ -220,11 +222,13 @@ function resolveTestOptions<D>(
       initialData: { value: cacheData },
       initialStatus: 'success',
       initialRefetchOnMount: 'lowPriority',
+      initialLastFetchStartTime: Date.now() - 10_000,
     };
   }
 
   return {
     initialData: { value: scenario.loadedWithStaleData },
     initialStatus: 'success',
+    initialLastFetchStartTime: Date.now() - 10_000,
   };
 }

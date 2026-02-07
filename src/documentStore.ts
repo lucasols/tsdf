@@ -71,6 +71,7 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     initialStatus?: DocumentStatus;
     initialData?: State;
     initialError?: StoreError;
+    initialLastFetchStartTime?: number;
   };
 };
 
@@ -205,6 +206,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     on: onSchedulerEvent,
+    initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
   });
 
   function scheduleFetch(
