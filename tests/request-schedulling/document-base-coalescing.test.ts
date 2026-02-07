@@ -1,29 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
-import {
-  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
-  type DocumentStoreTestEnvOptions,
-} from '../mocks/documentStoreTestEnv';
-
-function createDocumentStoreTestEnv<D>(
-  serverInitialData: D,
-  options: DocumentStoreTestEnvOptions<D> = {},
-) {
-  const resolvedInitialStateData =
-    options.initialStateData === undefined ?
-      'sameAsServer'
-    : options.initialStateData;
-  const resolvedDisableInitialInvalidation =
-    options.disableInitialInvalidation === undefined ?
-      true
-    : options.disableInitialInvalidation;
-
-  return createDocumentStoreTestEnvBase(serverInitialData, {
-    initialStateData: resolvedInitialStateData,
-    disableInitialInvalidation: resolvedDisableInitialInvalidation,
-    ...options,
-  });
-}
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -36,6 +13,8 @@ afterEach(() => {
 test('multiple high priority fetches within the same request base coalescing window', async () => {
   // Expected: high priority requests coalesce into a single fetch if triggered within high base request delay window.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
   });
 
@@ -74,6 +53,8 @@ test('multiple high priority fetches within the same request base coalescing win
 test('mixed priority fetches within the same request base coalescing window', async () => {
   // Expected: highPriority and lowPriority requests coalesce into a single fetch if triggered within base coalescing window.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
   });
 
@@ -119,6 +100,8 @@ test('mixed priority fetches within the same request base coalescing window', as
 test('multiple low priority fetches within the same request base coalescing window', async () => {
   // Expected: low priority requests coalesce into a single fetch if triggered within base coalescing window.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
   });
 
@@ -164,6 +147,8 @@ test('multiple low priority fetches within the same request base coalescing wind
 test('realtime update fetches mixed with other priority fetches within the same request base coalescing window', async () => {
   // Expected: realtime update fetches also coalesce into a single fetch if triggered within a base coalescing window.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
     dynamicRealtimeThrottleMs: () => 2_000,
   });
@@ -200,6 +185,8 @@ test('realtime update fetches mixed with other priority fetches within the same 
 test('realtime updates starts coalescing window', async () => {
   // Expected: realtime update fetches start a coalescing window if triggered within a base coalescing window.
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
     dynamicRealtimeThrottleMs: () => 2_000,
   });
@@ -236,6 +223,8 @@ test('realtime updates starts coalescing window', async () => {
 test('delayed realtime update fetches also are coalesced', async () => {
   // Expected: delayed realtime update requests are also coalesced into a single fetch
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
     dynamicRealtimeThrottleMs: () => 2_000,
   });
@@ -280,6 +269,8 @@ test('delayed realtime update fetches also are coalesced', async () => {
 test('delayed realtime update request also starts coalescing window', async () => {
   // Expected: delayed realtime update requests also start a coalescing window
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
     dynamicRealtimeThrottleMs: () => 2_000,
   });
@@ -324,6 +315,8 @@ test('delayed realtime update request also starts coalescing window', async () =
 test('medium priority triggers coalescing window after delay expires', async () => {
   // Expected: medium priority triggers a coalescing window after its delay expires
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
     mediumPriorityDelayMs: 100,
   });
@@ -361,6 +354,8 @@ test('medium priority triggers coalescing window after delay expires', async () 
 test('medium priority is cancelled when fetch starts from active coalescing window', async () => {
   // Expected: medium priority uses delay mechanism but is cancelled when coalescing window's fetch starts
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 50,
     mediumPriorityDelayMs: 100,
   });
@@ -401,6 +396,8 @@ test('medium priority is cancelled when fetch starts from active coalescing wind
 test('mixed medium and high priority fetches within coalescing window', async () => {
   // Expected: medium priority (after delay) and high priority coalesce into single fetch
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 50,
     mediumPriorityDelayMs: 100,
   });
@@ -442,6 +439,8 @@ test('mixed medium and high priority fetches within coalescing window', async ()
 test('medium priority with short delay is cancelled by fetch from coalescing window', async () => {
   // Expected: medium priority with short delay is cancelled when coalescing window fetch starts
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
     mediumPriorityDelayMs: 100,
   });

@@ -11,9 +11,14 @@ import {
 } from './testEnvUtils';
 
 export type DocumentStoreTestScenario<D> =
+  /** App just opened, no data fetched yet. */
   | 'idle'
-  | 'loadedFromServer'
-  | { idleWithLocalCache: 'sameAsServer' | D };
+  /** App already opened before and data was fetched successfully. */
+  | 'loaded'
+  /** App started with data restored from local cache, pending server revalidation. */
+  | { idleWithLocalCache: 'sameAsServer' | D }
+  /** Data was loaded previously but is now outdated (server has newer data). */
+  | { loadedWithStaleData: D };
 
 export type DocumentStoreTestEnvOptions<D> = {
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -198,21 +203,28 @@ function resolveTestOptions<D>(
     return undefined;
   }
 
-  if (scenario === 'loadedFromServer') {
+  if (scenario === 'loaded') {
     return {
       initialData: { value: serverInitialData },
       initialStatus: 'success',
     };
   }
 
-  const cacheData =
-    scenario.idleWithLocalCache === 'sameAsServer'
-      ? serverInitialData
+  if ('idleWithLocalCache' in scenario) {
+    const cacheData =
+      scenario.idleWithLocalCache === 'sameAsServer' ?
+        serverInitialData
       : scenario.idleWithLocalCache;
 
+    return {
+      initialData: { value: cacheData },
+      initialStatus: 'success',
+      initialRefetchOnMount: 'lowPriority',
+    };
+  }
+
   return {
-    initialData: { value: cacheData },
+    initialData: { value: scenario.loadedWithStaleData },
     initialStatus: 'success',
-    initialRefetchOnMount: 'lowPriority',
   };
 }

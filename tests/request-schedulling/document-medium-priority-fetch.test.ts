@@ -1,29 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
-import {
-  createDocumentStoreTestEnv as createDocumentStoreTestEnvBase,
-  type DocumentStoreTestEnvOptions,
-} from '../mocks/documentStoreTestEnv';
-
-function createDocumentStoreTestEnv<D>(
-  serverInitialData: D,
-  options: DocumentStoreTestEnvOptions<D> = {},
-) {
-  const resolvedInitialStateData =
-    options.initialStateData === undefined ?
-      'sameAsServer'
-    : options.initialStateData;
-  const resolvedDisableInitialInvalidation =
-    options.disableInitialInvalidation === undefined ?
-      true
-    : options.disableInitialInvalidation;
-
-  return createDocumentStoreTestEnvBase(serverInitialData, {
-    initialStateData: resolvedInitialStateData,
-    disableInitialInvalidation: resolvedDisableInitialInvalidation,
-    ...options,
-  });
-}
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -35,6 +12,8 @@ afterEach(() => {
 
 test('medium priority fetch runs after delay when no other fetch occurs', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
   });
 
@@ -64,6 +43,8 @@ test('medium priority fetch runs after delay when no other fetch occurs', async 
 
 test('medium priority fetch is cancelled when high priority fetch starts', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
   });
 
@@ -97,6 +78,8 @@ test('medium priority fetch is cancelled when high priority fetch starts', async
 
 test('medium priority fetch is cancelled when low priority fetch starts', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
   });
 
@@ -132,6 +115,8 @@ test('medium priority is NOT cancelled by mutation - schedules when delay expire
   // Medium priority should only be cancelled by other fetches, not by mutations
   // When the delay expires during a mutation, it should schedule itself like high priority
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
   });
 
@@ -171,6 +156,8 @@ test('medium priority is NOT cancelled by mutation - schedules when delay expire
 
 test('multiple medium priority calls reset the timer', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
   });
 
@@ -207,6 +194,8 @@ test('multiple medium priority calls reset the timer', async () => {
 
 test('medium priority during in-progress fetch schedules when delay expires', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
   });
 
@@ -252,6 +241,8 @@ test('medium priority with long delay runs normally after in-progress fetch comp
   // When medium priority has a delay longer than the in-progress fetch duration,
   // it should run normally via coalescing (not via scheduled state)
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 1000,
   });
 
@@ -295,6 +286,8 @@ test('medium priority with long delay runs normally after in-progress fetch comp
 
 test('medium priority uses coalescing window after delay expires', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
     baseCoalescingWindowMs: 50,
   });
@@ -332,6 +325,8 @@ test('medium priority uses coalescing window after delay expires', async () => {
 
 test('custom delay per call overrides global delay', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
   });
 
@@ -363,6 +358,8 @@ test('custom delay per call overrides global delay', async () => {
 
 test('medium priority during coalescing window is cancelled when fetch starts', async () => {
   const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
     mediumPriorityDelayMs: 300,
     baseCoalescingWindowMs: 50,
   });
