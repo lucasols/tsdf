@@ -325,22 +325,20 @@ test(
   },
 );
 
-test.concurrent('useItem: disable then enable isOffScreen', async () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['products', 'users'] },
-    emulateRTU: true,
-    disableInitialDataInvalidation: true,
+test('useItem: disable then enable isOffScreen', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { idleWithLocalCache: { tables: ['products', 'users'] } },
+    usesRealTimeUpdates: true,
     lowPriorityThrottleMs: 10,
   });
 
-  const renders = createRenderStore({
+  const renders = createLoggerStore({
     filterKeys: ['status', 'data', 'payload'],
   });
 
   const { rerender } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
-      const result = env.store.useItem('users||1', {
+      const result = env.apiStore.useItem('users||1', {
         isOffScreen,
         returnRefetchingStatus: true,
       });
@@ -350,37 +348,37 @@ test.concurrent('useItem: disable then enable isOffScreen', async () => {
     { initialProps: { isOffScreen: false } },
   );
 
-  await sleep(120);
+  await flushAllTimers();
 
   renders.addMark('set disabled');
 
   rerender({ isOffScreen: true });
 
-  await sleep(120);
+  await flushAllTimers();
 
   renders.addMark('enabled again');
 
   rerender({ isOffScreen: false });
 
-  await sleep(200);
+  await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {id:1, name:User 1} -- payload: users||1
-    status: refetching -- data: {id:1, name:User 1} -- payload: users||1
-    status: success -- data: {id:1, name:User 1} -- payload: users||1
+    -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
+    -> status: refetching ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
+    -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
 
     >>> set disabled
 
-    status: success -- data: {id:1, name:User 1} -- payload: users||1
+    -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
 
     >>> enabled again
 
-    status: success -- data: {id:1, name:User 1} -- payload: users||1
+    -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
     "
   `);
 
-  expect(env.serverMock.fetchsCount).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
 });
 
 test.concurrent('useListQuery: disable then enable isOffScreen', async () => {
