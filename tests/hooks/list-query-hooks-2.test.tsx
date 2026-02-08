@@ -627,12 +627,11 @@ describe('syncMutationAndInvalidation', () => {
 });
 
 test('receive a RTU', async () => {
-  const { store, serverMock } = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users', 'products'] },
-    emulateRTU: true,
-    disableInitialDataInvalidation: true,
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users', 'products'] } },
+    usesRealTimeUpdates: true,
   });
+  const store = env.apiStore;
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
     renderComponents({
@@ -642,7 +641,7 @@ test('receive a RTU', async () => {
       loadTable: 'users',
     });
 
-  const ignoreQueryRenders = createRenderStore();
+  const ignoreQueryRenders = createLoggerStore();
 
   render(
     <CompWithQueryLoaded
@@ -652,30 +651,62 @@ test('receive a RTU', async () => {
     />,
   );
 
-  serverMock.produceData((draft) => {
-    draft.users![0]!.name = 'User 1 updated';
-  });
+  env.serverTable.setItem(
+    'users||1',
+    { id: 1, name: 'User 1 updated' },
+    { triggerRTUEvent: true },
+  );
 
-  await serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-  expect(compWithQueryLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithQueryLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: refetching -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: success -- error: null -- items: [{id:1, name:User 1 updated}, ...(4 more)] -- payload: {tableId:users}
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: refetching
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1 updated}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
     "
   `);
-  expect(compWithItemLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithItemLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: refetching -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: refetching -- error: null -- data: {id:1, name:User 1 updated} -- itemId: users||1
-    status: success -- error: null -- data: {id:1, name:User 1 updated} -- itemId: users||1
+    -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    -> status: refetching ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    ┌─
+    ⋅ status: refetching
+    ⋅ error: null
+    ⋅ data: {id:1, name:User 1 updated}
+    ⋅ itemId: users||1
+    └─
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ data: {id:1, name:User 1 updated}
+    ⋅ itemId: users||1
+    └─
     "
   `);
-  expect(ignoreQueryRenders.snapshot).toMatchInlineSnapshot(`
+  expect(ignoreQueryRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products}
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:Product 1}, …(49 more)]
+    ⋅ payload: {tableId:products}
+    └─
     "
   `);
 });
