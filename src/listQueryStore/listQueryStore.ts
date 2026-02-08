@@ -1,7 +1,10 @@
 import { filterAndMap, sortBy } from '@ls-stack/utils/arrayUtils';
+import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
+import { Result, unknownToError } from 't-result';
 import { Store } from 't-state';
 import {
   BatchRequest,
@@ -109,6 +112,10 @@ export type ListQueryStoreOptions<
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
+  onMutationError?: (
+    error: unknown,
+    options: { silentErrors?: boolean },
+  ) => void;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
 };
@@ -135,6 +142,7 @@ export function createListQueryStore<
   onInvalidateQuery,
   onInvalidateItem,
   onSchedulerEvent,
+  onMutationError,
   getQueryKey: customGetQueryKey,
   getItemKey: customGetItemKey,
 }: ListQueryStoreOptions<ItemState, QueryPayload, ItemPayload>) {
@@ -430,6 +438,13 @@ export function createListQueryStore<
     itemPayload: ItemPayload,
     itemState: ItemState,
   ) => boolean;
+  type MutationPayload =
+    | ItemPayload
+    | ItemPayload[]
+    | FilterItemFn
+    | undefined
+    | null;
+  type MutationPayloadToUse = ItemPayload | ItemPayload[] | FilterItemFn;
 
   function getItemsKeyArray(
     itemsPayload: ItemPayload | ItemPayload[] | FilterItemFn,
@@ -1075,6 +1090,103 @@ export function createListQueryStore<
     );
   }
 
+  async function performMutation<T>(
+    payload: MutationPayload,
+    {
+      optimisticUpdate,
+      mutation,
+      silentErrors,
+      revalidateOnSuccess,
+      dontRevalidateOnError,
+      getRelatedQueries = () => true,
+      getRevalidateOnSuccessQueries = getRelatedQueries,
+      onSuccess,
+      onError,
+      debounce,
+    }: {
+      optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
+      mutation: (payload: MutationPayloadToUse) => Promise<T>;
+      revalidateOnSuccess?: boolean | 'queries';
+      dontRevalidateOnError?: boolean;
+      getRelatedQueries?: FilterQueryFn;
+      getRevalidateOnSuccessQueries?: FilterQueryFn;
+      onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
+      onError?: (error: StoreError | true) => void;
+      silentErrors?: boolean;
+      debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+    },
+  ): Promise<Result<Awaited<T>, StoreError | true>> {
+    const matchAllItems: FilterItemFn = () => true;
+    const payloadToUse: MutationPayloadToUse = payload ?? matchAllItems;
+
+    const endMutation = startItemMutation(payloadToUse);
+
+    if (optimisticUpdate) {
+      if (optimisticUpdate(payloadToUse) === false) {
+        endMutation();
+        return Result.err(true);
+      }
+    }
+
+    let unblockWindowClose: VoidFunction | null = null;
+
+    try {
+      if (debounce) {
+        unblockWindowClose = blockWindowClose().unblock;
+
+        const debounceResult = await awaitDebounce({
+          callId: [debounce.context, debounce.payload],
+          debounce: debounce.ms,
+        });
+
+        if (debounceResult === 'skip') {
+          endMutation();
+          return Result.err(true);
+        }
+      }
+
+      const result = await mutation(payloadToUse);
+
+      endMutation();
+
+      if (revalidateOnSuccess) {
+        invalidateQueryAndItems({
+          itemPayload: revalidateOnSuccess === 'queries' ? false : payloadToUse,
+          queryPayload: getRevalidateOnSuccessQueries,
+        });
+      }
+
+      if (onSuccess) {
+        onSuccess(result, payloadToUse);
+      }
+
+      return Result.ok(result);
+    } catch (exception) {
+      endMutation();
+
+      const error = errorNormalizer(unknownToError(exception));
+
+      if (!silentErrors && onMutationError) {
+        onMutationError(exception, { silentErrors });
+      }
+
+      if (!dontRevalidateOnError) {
+        invalidateQueryAndItems({
+          itemPayload: payloadToUse,
+          queryPayload: getRelatedQueries,
+        });
+      }
+
+      if (onError) {
+        onError(error);
+      }
+
+      return Result.err(error);
+    } finally {
+      unblockWindowClose?.();
+    }
+  }
+
   function useMultipleListQueries<
     SelectedItem = ItemState,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
@@ -1223,10 +1335,19 @@ export function createListQueryStore<
     updateItemState,
     addItemToState,
     deleteItemState,
+    performMutation,
     useMultipleListQueries,
     useListQuery,
     useMultipleItems,
     useItem,
     useFindItem,
+  };
+}
+
+function blockWindowClose() {
+  return {
+    unblock: () => {
+      // FIX: Implement unblock
+    },
   };
 }

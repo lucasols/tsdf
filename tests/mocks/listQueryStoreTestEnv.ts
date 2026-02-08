@@ -4,6 +4,7 @@ import type { FetchType } from '../../src/requestScheduler';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
   createActionTracker,
+  createEmojiCyclers,
   createUITracker,
   logScheduleFetchResult,
   logSchedulerEvent,
@@ -60,6 +61,7 @@ export function createListQueryStoreTestEnv(
     useBatchFetch,
     maxItemBatchSize,
     disableFetchItemFn,
+    optimisticListUpdates,
   }: {
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
@@ -73,6 +75,9 @@ export function createListQueryStoreTestEnv(
     /** Max items per batch (only used when useBatchFetch is true) */
     maxItemBatchSize?: number;
     disableFetchItemFn?: boolean;
+    optimisticListUpdates?: Parameters<
+      typeof createListQueryStore<Row, ListQueryParams, string>
+    >[0]['optimisticListUpdates'];
   } = {},
 ) {
   const {
@@ -82,6 +87,7 @@ export function createListQueryStoreTestEnv(
     getTimelineString,
     getRelativeTime,
   } = createActionTracker();
+  const { getMutationEmoji } = createEmojiCyclers();
 
   // Convert Tables to Record<string, Row> for serverTableMock
   const flatItems: Record<string, Row> = {};
@@ -160,6 +166,7 @@ export function createListQueryStoreTestEnv(
     usesRealTimeUpdates,
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
+    optimisticListUpdates,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
@@ -193,6 +200,34 @@ export function createListQueryStoreTestEnv(
   if (usesRealTimeUpdates) {
     serverTable.wsEvents.on('data_changed', ({ payload }) => {
       addAction('received-ws-data-change-event', {
+        itemId: payload.itemId,
+      });
+
+      const [tableId] = payload.itemId.split('||');
+
+      listQueryStore.invalidateQueryAndItems({
+        queryPayload: (qp) => qp.tableId === tableId,
+        itemPayload: payload.itemId,
+        type: 'realtimeUpdate',
+      });
+    });
+
+    serverTable.wsEvents.on('item_added', ({ payload }) => {
+      addAction('received-ws-item-added-event', {
+        itemId: payload.itemId,
+      });
+
+      const [tableId] = payload.itemId.split('||');
+
+      listQueryStore.invalidateQueryAndItems({
+        queryPayload: (qp) => qp.tableId === tableId,
+        itemPayload: false,
+        type: 'realtimeUpdate',
+      });
+    });
+
+    serverTable.wsEvents.on('item_deleted', ({ payload }) => {
+      addAction('received-ws-item-deleted-event', {
         itemId: payload.itemId,
       });
 
@@ -292,29 +327,38 @@ export function createListQueryStoreTestEnv(
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
-      const endMutation = listQueryStore.startItemMutation(itemId);
+      const tableId = itemId.split('||')[0];
 
-      if (withOptimisticUpdate) {
-        listQueryStore.updateItemState(itemId, () => newValue);
-        addAction('optimistic-ui-commit', {
-          uiValue: newValue,
-          id: mutationId,
-          itemId,
-        });
+      if (!tableId) {
+        throw new Error(`Invalid itemId format: "${itemId}"`);
       }
 
-      await serverTable.emulateClientMutation(itemId, newValue, {
-        duration,
-        triggerRTUEvent: triggerRTU,
-        addServerDataChangeAction,
-        mutationId,
+      return listQueryStore.performMutation(itemId, {
+        optimisticUpdate:
+          withOptimisticUpdate ?
+            () => {
+              listQueryStore.updateItemState(itemId, (draft) => {
+                Object.assign(draft, newValue);
+              });
+
+              addAction('optimistic-ui-commit', {
+                uiValue: newValue,
+                id: mutationId,
+                itemId,
+              });
+            }
+          : undefined,
+        mutation: async () => {
+          return serverTable.emulateClientMutation(itemId, newValue, {
+            duration,
+            triggerRTUEvent: triggerRTU,
+            addServerDataChangeAction,
+            mutationId,
+          });
+        },
+        revalidateOnSuccess: withRevalidation,
+        getRelatedQueries: (payload) => payload.tableId === tableId,
       });
-
-      endMutation();
-
-      if (withRevalidation) {
-        listQueryStore.scheduleItemFetch('highPriority', itemId);
-      }
     },
     get timelineString() {
       return getTimelineString();
