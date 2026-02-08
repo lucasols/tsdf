@@ -919,13 +919,12 @@ describe('useItem', () => {
   });
 
   test('use deleted item', async () => {
-    const { serverMock, store } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users'] },
-      disableInitialDataInvalidation: true,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
     });
+    const store = env.apiStore;
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
     renderHook(() => {
       const selectionResult = store.useItem('users||2', {
@@ -936,31 +935,33 @@ describe('useItem', () => {
       renders.add(pick(selectionResult, ['status', 'payload', 'data']));
     });
 
+    act(() => {
     store.deleteItemState('users||2');
-    serverMock.produceData((draft) => {
-      draft.users!.splice(1, 1);
+      env.serverTable.removeItem('users||2');
     });
 
-    await renders.waitNextRender();
+    await flushAllTimers();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: users||2 -- data: {id:2, name:User 2}
-      status: deleted -- payload: users||2 -- data: null
+      -> status: success ⋅ payload: users||2 ⋅ data: {id:2, name:User 2}
+      -> status: deleted ⋅ payload: users||2 ⋅ data: null
       "
     `);
 
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+
+    act(() => {
     shouldNotSkip(store.scheduleItemFetch('highPriority', 'users||2'));
+    });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
       "
-      status: success -- payload: users||2 -- data: {id:2, name:User 2}
-      status: deleted -- payload: users||2 -- data: null
-      ---
-      status: loading -- payload: users||2 -- data: null
-      status: error -- payload: users||2 -- data: null
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: users||2 ⋅ data: null
+      -> status: error ⋅ payload: users||2 ⋅ data: null
       "
     `);
   });
