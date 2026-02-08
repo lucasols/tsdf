@@ -1,14 +1,23 @@
-import { renderHook } from '@testing-library/react';
-import { useCallback } from 'react';
-import { expect, test } from 'vitest';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import '@testing-library/react/dont-cleanup-after-each';
+import { useCallback, useRef } from 'react';
 import {
-  Tables,
-  createDefaultListQueryStore,
-} from '../../test-old/utils/createDefaultListQueryStore';
-import { pick } from '../../test-old/utils/objectUtils';
-import { range } from '../../test-old/utils/range';
-import { sleep } from '../../test-old/utils/sleep';
-import { createRenderStore } from '../../test-old/utils/storeUtils';
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+  vi,
+} from 'vitest';
+import {
+  createListQueryStoreTestEnv,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { pick, range } from '../utils/genericTestUtils';
+import { flushAllTimers } from '../utils/listQueryHooksTestUtils';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -16,25 +25,38 @@ const initialServerData: Tables = {
   orders: range(1, 50).map((id) => ({ id, name: `Order ${id}` })),
 };
 
-const createTestEnv = createDefaultListQueryStore;
+beforeAll(() => {
+  vi.useFakeTimers();
+});
 
-test.concurrent(
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
+
+afterAll(() => {
+  cleanup();
+});
+
+
+test(
   'useItem: isOffScreen should keep the selected data and not be affected by invalidation',
   async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['products', 'users'] },
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['products', 'users'] } },
+      usesRealTimeUpdates: true,
     });
 
-    const renders = createRenderStore({
+    const renders = createLoggerStore({
       rejectKeys: ['queryMetadata'],
     });
 
     const { rerender } = renderHook(
       ({ isOffScreen }: { isOffScreen: boolean }) => {
-        const result = env.store.useItem('users||1', {
+        const result = env.apiStore.useItem('users||1', {
           isOffScreen,
           returnRefetchingStatus: true,
           disableRefetchOnMount: true,
@@ -45,52 +67,109 @@ test.concurrent(
       { initialProps: { isOffScreen: false } },
     );
 
-    await sleep(100);
+    await flushAllTimers();
 
     renders.addMark('first update (✅)');
-    env.serverMock.produceData((draft) => {
-      draft.users![0]!.name = '✅';
+    act(() => {
+      env.serverTable.setItem(
+        'users||1',
+        { id: 1, name: '✅' },
+        { triggerRTUEvent: true },
+      );
     });
 
-    await sleep(200);
+    await flushAllTimers();
 
     renders.addMark('set disabled');
     rerender({ isOffScreen: true });
 
-    await sleep(100);
+    await flushAllTimers();
 
     renders.addMark('ignored update (❌)');
-    env.serverMock.produceData((draft) => {
-      draft.users![0]!.name = '❌';
+    act(() => {
+      env.serverTable.setItem(
+        'users||1',
+        { id: 1, name: '❌' },
+        { triggerRTUEvent: true },
+      );
     });
 
-    await sleep(200);
+    await flushAllTimers();
 
     renders.addMark('enabled again');
     rerender({ isOffScreen: false });
 
-    await sleep(200);
+    await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- error: null -- isLoading: false -- data: {id:1, name:User 1} -- payload: users||1
+      ┌─
+      ⋅ itemStateKey: "users||1
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ isLoading: ❌
+      ⋅ data: {id:1, name:User 1}
+      ⋅ payload: users||1
+      └─
 
       >>> first update (✅)
 
-      status: refetching -- error: null -- isLoading: false -- data: {id:1, name:User 1} -- payload: users||1
-      status: success -- error: null -- isLoading: false -- data: {id:1, name:✅} -- payload: users||1
+      ┌─
+      ⋅ itemStateKey: "users||1
+      ⋅ status: refetching
+      ⋅ error: null
+      ⋅ isLoading: ❌
+      ⋅ data: {id:1, name:User 1}
+      ⋅ payload: users||1
+      └─
+      ┌─
+      ⋅ itemStateKey: "users||1
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ isLoading: ❌
+      ⋅ data: {id:1, name:✅}
+      ⋅ payload: users||1
+      └─
 
       >>> set disabled
 
-      status: success -- error: null -- isLoading: false -- data: {id:1, name:✅} -- payload: users||1
+      ┌─
+      ⋅ itemStateKey: "users||1
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ isLoading: ❌
+      ⋅ data: {id:1, name:✅}
+      ⋅ payload: users||1
+      └─
 
       >>> ignored update (❌)
 
       >>> enabled again
 
-      status: success -- error: null -- isLoading: false -- data: {id:1, name:✅} -- payload: users||1
-      status: refetching -- error: null -- isLoading: false -- data: {id:1, name:✅} -- payload: users||1
-      status: success -- error: null -- isLoading: false -- data: {id:1, name:❌} -- payload: users||1
+      ┌─
+      ⋅ itemStateKey: "users||1
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ isLoading: ❌
+      ⋅ data: {id:1, name:✅}
+      ⋅ payload: users||1
+      └─
+      ┌─
+      ⋅ itemStateKey: "users||1
+      ⋅ status: refetching
+      ⋅ error: null
+      ⋅ isLoading: ❌
+      ⋅ data: {id:1, name:✅}
+      ⋅ payload: users||1
+      └─
+      ┌─
+      ⋅ itemStateKey: "users||1
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ isLoading: ❌
+      ⋅ data: {id:1, name:❌}
+      ⋅ payload: users||1
+      └─
       "
     `);
   },
