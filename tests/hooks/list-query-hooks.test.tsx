@@ -891,13 +891,12 @@ describe('useItem', () => {
   });
 
   test('disableRefetchOnMount', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users'] },
-      disableInitialDataInvalidation: true,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const compRenders = createRenderStore();
+    const compRenders = createLoggerStore();
 
     renderHook(() => {
       const data = listQueryStore.useItem('users||1', {
@@ -908,15 +907,15 @@ describe('useItem', () => {
     });
 
     // wait some time to make sure the query is not refetched
-    await sleep(200);
+    await advanceTime(200);
 
     expect(compRenders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- data: {id:1, name:User 1}
+      -> status: success ⋅ data: {id:1, name:User 1}
       "
     `);
 
-    expect(serverMock.fetchsCount).toBe(0);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
   });
 
   test('use deleted item', async () => {
