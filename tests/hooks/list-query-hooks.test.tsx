@@ -967,13 +967,13 @@ describe('useItem', () => {
   });
 
   test('invalidate one item', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users', 'products'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const users2 = createRenderStore();
-    const products1 = createRenderStore();
+    const users2 = createLoggerStore();
+    const products1 = createLoggerStore();
 
     const { result } = renderHook(() => {
       const [usersResult, productsResult] = listQueryStore.useMultipleItems(
@@ -990,30 +990,28 @@ describe('useItem', () => {
       return { usersResult, productsResult };
     });
 
-    serverMock.produceData((draft) => {
-      draft.users![1]!.name = 'Updated User 2';
-    });
+    env.serverTable.updateItem('users||2', { name: 'Updated User 2' });
 
     listQueryStore.invalidateQueryAndItems({
       queryPayload: false,
       itemPayload: 'users||2',
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(users2.renderCount()).toBeGreaterThan(0);
+    expect(users2.logsCount()).toBeGreaterThan(0);
 
     expect(users2.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: users||2 -- data: {id:2, name:User 2}
-      status: refetching -- payload: users||2 -- data: {id:2, name:User 2}
-      status: success -- payload: users||2 -- data: {id:2, name:Updated User 2}
+      -> status: success ⋅ payload: users||2 ⋅ data: {id:2, name:User 2}
+      -> status: refetching ⋅ payload: users||2 ⋅ data: {id:2, name:User 2}
+      -> status: success ⋅ payload: users||2 ⋅ data: {id:2, name:Updated User 2}
       "
     `);
     expect(result.current.usersResult?.data?.name).toBe('Updated User 2');
     expect(products1.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: products||1 -- data: {id:1, name:Product 1}
+      -> status: success ⋅ payload: products||1 ⋅ data: {id:1, name:Product 1}
       "
     `);
   });
