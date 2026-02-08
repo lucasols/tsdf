@@ -106,6 +106,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   const knownTableIds = new Set<string>();
   const itemHistory = new Map<string, ItemData[]>();
   const customFetchDurations = new Map<string, number[]>();
+  let defaultFetchDuration = DEFAULT_FETCH_DURATION_MS;
   const nextFetchErrors = new Map<string, FetchErrorConfig>();
   let nextListFetchError: FetchErrorConfig | null = null;
 
@@ -136,7 +137,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     if (durations && durations.length > 0) {
       return notNullish(durations.shift());
     }
-    return DEFAULT_FETCH_DURATION_MS;
+    return defaultFetchDuration;
   }
 
   function getTableId(itemId: string): string | null {
@@ -266,7 +267,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     signal?.addEventListener('abort', onAbort);
 
     // Calculate max duration from filtered items
-    let maxDuration = DEFAULT_FETCH_DURATION_MS;
+    let maxDuration = defaultFetchDuration;
     if (filterItemIds) {
       for (const itemId of filterItemIds) {
         const duration = getNextFetchDuration(itemId);
@@ -683,6 +684,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       const existing = customFetchDurations.get(itemId) ?? [];
       existing.push(...durations);
       customFetchDurations.set(itemId, existing);
+    },
+    setDefaultFetchDuration(duration: number) {
+      defaultFetchDuration = duration;
     },
     setNextFetchError(itemId: string, error: FetchErrorConfig | string) {
       nextFetchErrors.set(
