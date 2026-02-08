@@ -466,24 +466,20 @@ describe('useMultipleItemsQuery isolated tests', () => {
   });
 
   test('with queryMetadata', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
 
-    const payload = createValueStore([
-      getFetchQueryForTable('users'),
-      getFetchQueryForTable('products'),
-    ]);
-
-    const usersRenders = createRenderStore();
-    const productsRenders = createRenderStore();
+    const usersRenders = createLoggerStore();
+    const productsRenders = createLoggerStore();
 
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
-        payload.useValue().map((item) => ({
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
           payload: item,
           queryMetadata: { test: item },
-        })),
+          }),
+        ),
         { itemSelector: (data) => data.name },
       );
 
@@ -495,18 +491,38 @@ describe('useMultipleItemsQuery isolated tests', () => {
       );
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(usersRenders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(usersRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: {tableId:users} -- items: [] -- queryMetadata: {test:{tableId:users}}
-      status: success -- payload: {tableId:users} -- items: [User 1, ...(4 more)] -- queryMetadata: {test:{tableId:users}}
+      ┌─
+      ⋅ status: loading
+      ⋅ payload: {tableId:users}
+      ⋅ items: []
+      ⋅ queryMetadata: {test:{tableId:users}}
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:users}
+      ⋅ items: [User 1, …(4 more)]
+      ⋅ queryMetadata: {test:{tableId:users}}
+      └─
       "
     `);
-    expect(productsRenders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(productsRenders.changesSnapshot).toMatchInlineSnapshot(`
         "
-        status: loading -- payload: {tableId:products} -- items: [] -- queryMetadata: {test:{tableId:products}}
-        status: success -- payload: {tableId:products} -- items: [Product 1, ...(49 more)] -- queryMetadata: {test:{tableId:products}}
+      ┌─
+      ⋅ status: loading
+      ⋅ payload: {tableId:products}
+      ⋅ items: []
+      ⋅ queryMetadata: {test:{tableId:products}}
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:products}
+      ⋅ items: [Product 1, …(49 more)]
+      ⋅ queryMetadata: {test:{tableId:products}}
+      └─
         "
       `);
   });
