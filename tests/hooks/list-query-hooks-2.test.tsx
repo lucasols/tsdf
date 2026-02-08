@@ -202,10 +202,10 @@ test('refetch an query and after a few ms refetch an item', async () => {
 });
 
 test('load an query and item at same time', async () => {
-  const { store, serverMock } = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users'] },
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
   });
+  const store = env.apiStore;
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
     renderComponents({
@@ -215,24 +215,39 @@ test('load an query and item at same time', async () => {
       disableRefetchOnMount: false,
     });
 
-  await serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-  expect(compWithItemLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithItemLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: refetching -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
+    -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    -> status: refetching ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
     "
   `);
-  expect(compWithQueryLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithQueryLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: refetching -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: refetching
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
     "
   `);
 
-  expect(serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 });
 
 test('load a query and a few ms after load a item with different data', async () => {
