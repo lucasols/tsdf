@@ -1,17 +1,28 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { cleanup, render, renderHook } from '@testing-library/react';
-import { afterEach, describe, expect, test } from 'vitest';
+import '@testing-library/react/dont-cleanup-after-each';
 import {
-  createDefaultListQueryStore,
-  ListQueryParams,
-  Tables,
-} from '../../test-old/utils/createDefaultListQueryStore';
-import { pick } from '../../test-old/utils/objectUtils';
-import { range } from '../../test-old/utils/range';
-import { sleep } from '../../test-old/utils/sleep';
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import {
-  createRenderStore,
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { range } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
   shouldNotSkip,
-} from '../../test-old/utils/storeUtils';
+} from '../utils/listQueryHooksTestUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -19,7 +30,25 @@ const initialServerData: Tables = {
   orders: range(1, 50).map((id) => ({ id, name: `Order ${id}` })),
 };
 
-const createTestEnv = createDefaultListQueryStore;
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
+
+afterAll(() => {
+  cleanup();
+});
+
+type ListQueryStoreApi = ReturnType<
+  typeof createListQueryStoreTestEnv
+>['apiStore'];
 
 const CompWithItemLoaded = ({
   disableRefetchOnMount = true,
@@ -28,9 +57,9 @@ const CompWithItemLoaded = ({
   renderStore,
 }: {
   disableRefetchOnMount?: boolean;
-  store: ReturnType<typeof createTestEnv>['store'];
+  store: ListQueryStoreApi;
   loadItem: string;
-  renderStore: ReturnType<typeof createRenderStore>;
+  renderStore: ReturnType<typeof createLoggerStore>;
 }) => {
   const {
     status,
@@ -55,9 +84,9 @@ const CompWithQueryLoaded = ({
   renderStore,
 }: {
   disableRefetchOnMount?: boolean;
-  store: ReturnType<typeof createTestEnv>['store'];
+  store: ListQueryStoreApi;
   loadTable: string;
-  renderStore: ReturnType<typeof createRenderStore>;
+  renderStore: ReturnType<typeof createLoggerStore>;
   filters?: ListQueryParams['filters'];
 }) => {
   const { status, error, items, payload } = store.useListQuery(
@@ -80,14 +109,14 @@ function renderComponents({
   loadTable,
   disableRefetchOnMount,
 }: {
-  store: ReturnType<typeof createTestEnv>['store'];
+  store: ListQueryStoreApi;
   loadItem: string;
   loadTable: string;
   disableRefetchOnMount: boolean;
 }) {
-  const compWithItemLoadedRenders = createRenderStore();
+  const compWithItemLoadedRenders = createLoggerStore();
 
-  const compWithQueryLoadedRenders = createRenderStore();
+  const compWithQueryLoadedRenders = createLoggerStore();
 
   render(
     <>
@@ -109,16 +138,17 @@ function renderComponents({
   return { compWithItemLoadedRenders, compWithQueryLoadedRenders };
 }
 
-afterEach(() => {
-  cleanup();
-});
+function userIdGreaterThanFilter(
+  value: number,
+): NonNullable<ListQueryParams['filters']> {
+  return [{ op: 'gt', field: 'id', value }];
+}
 
 test('refetch an query and after a few ms refetch an item', async () => {
-  const { store, serverMock } = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users'] },
-    disableInitialDataInvalidation: true,
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
   });
+  const store = env.apiStore;
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
     renderComponents({
@@ -128,30 +158,45 @@ test('refetch an query and after a few ms refetch an item', async () => {
       loadTable: 'users',
     });
 
-  serverMock.setFetchDuration(50);
+  env.serverTable.setDefaultFetchDuration(50);
 
   shouldNotSkip(
     store.scheduleListQueryFetch('highPriority', { tableId: 'users' }),
   );
 
-  await sleep(40);
+  await advanceTime(40);
 
   shouldNotSkip(store.scheduleItemFetch('highPriority', 'users||1'));
 
-  await serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-  expect(compWithItemLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithItemLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: refetching -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
+    -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    -> status: refetching ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
     "
   `);
-  expect(compWithQueryLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithQueryLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: refetching -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: refetching
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
     "
   `);
 });
