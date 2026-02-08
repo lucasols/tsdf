@@ -239,18 +239,79 @@ describe('useMultipleItemsQuery invalidation tests', () => {
       expect(getFetchCount()).toBe(2);
     });
 
-    test('refetch data after invalidations', () => {
-      expect(usersRender.getSnapshot()).toMatchInlineSnapshot(`
+  test('refetch data after invalidations', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+    const usersRender = createLoggerStore();
+    const productsRender = createLoggerStore();
+
+    renderHook(() => {
+      const queryResult = listQueryStore.useMultipleListQueries(
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
+            payload: item,
+            returnRefetchingStatus: true,
+          }),
+        ),
+        {
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
+        },
+      );
+
+      const [users, products] = queryResult;
+
+      usersRender.add(pick(users, ['status', 'payload', 'items']));
+      productsRender.add(pick(products, ['status', 'payload', 'items']));
+    });
+
+    await flushAllTimers();
+
+    usersRender.reset();
+    productsRender.reset();
+
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1 again' });
+    env.serverTable.updateItem('products||1', { name: 'Updated Product 1' });
+
+    listQueryStore.invalidateQueryAndItems({
+      itemPayload: false,
+      queryPayload: () => true,
+    });
+
+    await flushAllTimers();
+
+    expect(usersRender.changesSnapshot).toMatchInlineSnapshot(`
         "
-        status: refetching -- payload: {tableId:users} -- items: [{id:users||1, data:{id:1, name:Updated User 1}}, ...(4 more)]
-        status: success -- payload: {tableId:users} -- items: [{id:users||1, data:{id:1, name:Updated User 1 again}}, ...(4 more)]
+      ┌─
+      ⋅ status: refetching
+      ⋅ payload: {tableId:users}
+      ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:users}
+      ⋅ items: [{id:\\users||1, data:{id:1, name:Updated User 1 again}}, …(4 more)]
+      └─
         "
       `);
-
-      expect(productsRender.getSnapshot()).toMatchInlineSnapshot(`
+    expect(productsRender.changesSnapshot).toMatchInlineSnapshot(`
         "
-        status: refetching -- payload: {tableId:products} -- items: [{id:products||1, data:{id:1, name:Product 1}}, ...(49 more)]
-        status: success -- payload: {tableId:products} -- items: [{id:products||1, data:{id:1, name:Updated Product 1}}, ...(49 more)]
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:products}
+      ⋅ items: [{id:\\products||1, data:{id:1, name:Product 1}}, …(49 more)]
+      └─
+      ┌─
+      ⋅ status: refetching
+      ⋅ payload: {tableId:products}
+      ⋅ items: [{id:\\products||1, data:{id:1, name:Product 1}}, …(49 more)]
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:products}
+      ⋅ items: [{id:\\products||1, data:{id:1, name:Updated Product 1}}, …(49 more)]
+      └─
         "
       `);
     });
