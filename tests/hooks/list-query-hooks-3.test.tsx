@@ -1,3 +1,4 @@
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
 import { useCallback, useRef } from 'react';
@@ -17,7 +18,6 @@ import {
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { pick, range } from '../utils/genericTestUtils';
 import { flushAllTimers } from '../utils/listQueryHooksTestUtils';
-import { createLoggerStore } from '@ls-stack/utils/testUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -41,10 +41,7 @@ afterAll(() => {
   cleanup();
 });
 
-
-test(
-  'useItem: isOffScreen should keep the selected data and not be affected by invalidation',
-  async () => {
+test('useItem: isOffScreen should keep the selected data and not be affected by invalidation', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['products', 'users'] } },
       usesRealTimeUpdates: true,
@@ -172,12 +169,9 @@ test(
       └─
       "
     `);
-  },
-);
+});
 
-test(
-  'useListQuery: isOffScreen should keep the selected data and not be affected by invalidation',
-  async () => {
+test('useListQuery: isOffScreen should keep the selected data and not be affected by invalidation', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['products', 'users'] } },
       usesRealTimeUpdates: true,
@@ -322,8 +316,7 @@ test(
       └─
       "
     `);
-  },
-);
+});
 
 test('useItem: disable then enable isOffScreen', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
