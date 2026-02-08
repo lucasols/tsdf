@@ -781,12 +781,12 @@ describe('useItem', () => {
   });
 
   test('ignore refetchingStatus by default', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users'] },
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
     renderHook(() => {
       const selectionResult = listQueryStore.useItem('users||1', {
@@ -796,13 +796,15 @@ describe('useItem', () => {
       renders.add(pick(selectionResult, ['status', 'isLoading', 'data']));
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: success -- isLoading: false -- data: User 1
+      -> status: success ⋅ isLoading: ❌ ⋅ data: User 1
       "
     `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
   test('use ensureIsLoaded prop', async () => {
