@@ -56,29 +56,29 @@ describe('useMultipleItemsQuery invalidation tests', () => {
   test('load the queries', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;
-  const usersRender = createLoggerStore();
-  const productsRender = createLoggerStore();
+    const usersRender = createLoggerStore();
+    const productsRender = createLoggerStore();
 
     renderHook(() => {
-    const queryResult = listQueryStore.useMultipleListQueries(
-      [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-        (item) => ({
-          payload: item,
-          returnRefetchingStatus: true,
-        }),
-      ),
-      {
-        itemSelector(data, _, itemKey) {
-          return { id: itemKey, data };
+      const queryResult = listQueryStore.useMultipleListQueries(
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
+            payload: item,
+            returnRefetchingStatus: true,
+          }),
+        ),
+        {
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
         },
-      },
-    );
+      );
 
-    const [users, products] = queryResult;
+      const [users, products] = queryResult;
 
-    usersRender.add(pick(users, ['status', 'payload', 'items']));
-    productsRender.add(pick(products, ['status', 'payload', 'items']));
-  });
+      usersRender.add(pick(users, ['status', 'payload', 'items']));
+      productsRender.add(pick(products, ['status', 'payload', 'items']));
+    });
 
     await flushAllTimers();
 
@@ -207,37 +207,37 @@ describe('useMultipleItemsQuery invalidation tests', () => {
 
     const getFetchCount = getFetchCountFromHere(env);
 
-      const { unmount } = renderHook(() => {
-        const selectionResult = listQueryStore.useMultipleListQueries(
+    const { unmount } = renderHook(() => {
+      const selectionResult = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
           (item) => ({
             payload: item,
           }),
         ),
-          {
-            itemSelector(data) {
-              return data.name;
-            },
+        {
+          itemSelector(data) {
+            return data.name;
           },
-        );
+        },
+      );
 
       return selectionResult;
-      });
+    });
 
     env.serverTable.updateItem('users||1', { name: 'Updated User 1 again' });
     env.serverTable.updateItem('products||1', { name: 'Updated Product 1' });
 
-      listQueryStore.invalidateQueryAndItems({
-        itemPayload: false,
-        queryPayload: () => true,
-      });
+    listQueryStore.invalidateQueryAndItems({
+      itemPayload: false,
+      queryPayload: () => true,
+    });
 
     await flushAllTimers();
 
-      unmount();
+    unmount();
 
-      expect(getFetchCount()).toBe(2);
-    });
+    expect(getFetchCount()).toBe(2);
+  });
 
   test('refetch data after invalidations', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
@@ -282,7 +282,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     await flushAllTimers();
 
     expect(usersRender.changesSnapshot).toMatchInlineSnapshot(`
-        "
+      "
       ┌─
       ⋅ status: refetching
       ⋅ payload: {tableId:users}
@@ -293,10 +293,10 @@ describe('useMultipleItemsQuery invalidation tests', () => {
       ⋅ payload: {tableId:users}
       ⋅ items: [{id:\\users||1, data:{id:1, name:Updated User 1 again}}, …(4 more)]
       └─
-        "
-      `);
+      "
+    `);
     expect(productsRender.changesSnapshot).toMatchInlineSnapshot(`
-        "
+      "
       ┌─
       ⋅ status: success
       ⋅ payload: {tableId:products}
@@ -312,9 +312,9 @@ describe('useMultipleItemsQuery invalidation tests', () => {
       ⋅ payload: {tableId:products}
       ⋅ items: [{id:\\products||1, data:{id:1, name:Updated Product 1}}, …(49 more)]
       └─
-        "
-      `);
-    });
+      "
+    `);
+  });
 
   test('data selector', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
@@ -354,7 +354,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     await flushAllTimers();
 
     expect(extraComponentMounted.changesSnapshot).toMatchInlineSnapshot(`
-        "
+      "
       -> status: loading ⋅ payload: {tableId:users} ⋅ items: []
       -> status: success ⋅ payload: {tableId:users} ⋅ items: [User 1, …(4 more)]
       -> status: refetching ⋅ payload: {tableId:users} ⋅ items: [User 1, …(4 more)]
@@ -363,8 +363,8 @@ describe('useMultipleItemsQuery invalidation tests', () => {
       ⋅ payload: {tableId:users}
       ⋅ items: [Updated User 1 again, …(4 more)]
       └─
-        "
-      `);
+      "
+    `);
   });
 });
 
@@ -380,15 +380,15 @@ describe('useMultipleItemsQuery isolated tests', () => {
 
     const { rerender } = renderHook(
       ({ payload }: { payload: FetchQueryParams[] }) => {
-      const [users, products] = listQueryStore.useMultipleListQueries(
+        const [users, products] = listQueryStore.useMultipleListQueries(
           payload.map((item) => ({
-          payload: item,
-        })),
-        { itemSelector: (data) => data.name },
-      );
+            payload: item,
+          })),
+          { itemSelector: (data) => data.name },
+        );
 
-      usersRenders.add(pick(users, ['status', 'payload', 'items']));
-      productsRenders.add(pick(products, ['status', 'payload', 'items']));
+        usersRenders.add(pick(users, ['status', 'payload', 'items']));
+        productsRenders.add(pick(products, ['status', 'payload', 'items']));
       },
       {
         initialProps: {
@@ -405,8 +405,8 @@ describe('useMultipleItemsQuery isolated tests', () => {
     act(() => {
       rerender({
         payload: [
-      getFetchQueryForTable('users'),
-      getFetchQueryForTable('not-found'),
+          getFetchQueryForTable('users'),
+          getFetchQueryForTable('not-found'),
         ],
       });
     });
@@ -438,8 +438,8 @@ describe('useMultipleItemsQuery isolated tests', () => {
       const [users, products] = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
           (item) => ({
-          payload: item,
-          disableRefetchOnMount: true,
+            payload: item,
+            disableRefetchOnMount: true,
           }),
         ),
         { itemSelector: (data) => data.name },
@@ -476,8 +476,8 @@ describe('useMultipleItemsQuery isolated tests', () => {
       const [users, products] = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
           (item) => ({
-          payload: item,
-          queryMetadata: { test: item },
+            payload: item,
+            queryMetadata: { test: item },
           }),
         ),
         { itemSelector: (data) => data.name },
@@ -510,7 +510,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
       "
     `);
     expect(productsRenders.changesSnapshot).toMatchInlineSnapshot(`
-        "
+      "
       ┌─
       ⋅ status: loading
       ⋅ payload: {tableId:products}
@@ -523,8 +523,8 @@ describe('useMultipleItemsQuery isolated tests', () => {
       ⋅ items: [Product 1, …(49 more)]
       ⋅ queryMetadata: {test:{tableId:products}}
       └─
-        "
-      `);
+      "
+    `);
   });
 });
 
@@ -936,7 +936,7 @@ describe('useItem', () => {
     });
 
     act(() => {
-    store.deleteItemState('users||2');
+      store.deleteItemState('users||2');
       env.serverTable.removeItem('users||2');
     });
 
@@ -952,7 +952,7 @@ describe('useItem', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(0);
 
     act(() => {
-    shouldNotSkip(store.scheduleItemFetch('highPriority', 'users||2'));
+      shouldNotSkip(store.scheduleItemFetch('highPriority', 'users||2'));
     });
 
     await flushAllTimers();
@@ -1071,20 +1071,20 @@ describe('useItem', () => {
 test('initial data is invalidated on first load in item query', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     testScenario: { idleWithLocalCache: { tables: ['users', 'products'] } },
-    });
+  });
 
   env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
   const renders = createLoggerStore();
 
-    renderHook(() => {
+  renderHook(() => {
     const { data, status } = env.apiStore.useItem('users||1', {
-        returnRefetchingStatus: true,
-        disableRefetchOnMount: true,
-      });
-
-      renders.add({ status, data });
+      returnRefetchingStatus: true,
+      disableRefetchOnMount: true,
     });
+
+    renders.add({ status, data });
+  });
 
   await flushAllTimers();
 
@@ -1097,44 +1097,40 @@ test('initial data is invalidated on first load in item query', async () => {
   `);
 });
 
-test.concurrent(
-  'initial data is invalidated on first load in list query',
-  async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
-      disableInitialDataInvalidation: false,
-    });
+test('initial data is invalidated on first load in list query', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { idleWithLocalCache: { tables: ['users', 'products'] } },
+  });
 
-    env.serverMock.produceData((draft) => {
-      draft.users![0]!.name = '🆕';
-    });
+  env.serverTable.updateItem('users||1', { name: '🆕' });
 
-    const renders = createRenderStore();
+  const renders = createLoggerStore();
 
-    renderHook(() => {
-      const { items, status } = env.store.useListQuery(
-        { tableId: 'users' },
-        {
-          returnRefetchingStatus: true,
-          disableRefetchOnMount: true,
-          itemSelector(data, _, itemKey) {
-            return { id: itemKey, data };
-          },
+  renderHook(() => {
+    const { items, status } = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+        itemSelector(data, _, itemKey) {
+          return { id: itemKey, data };
         },
-      );
+      },
+    );
 
-      renders.add({ status, items });
-    });
+    renders.add({ status, items });
+  });
 
-    await env.serverMock.waitFetchIdle(0, 1500);
+  await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
-    status: refetching -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
-    status: success -- items: [{id:users||1, data:{id:1, name:🆕}}, ...(4 more)]
+    -> status: success ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
+    ┌─
+    ⋅ status: refetching
+    ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
+    └─
+    -> status: success ⋅ items: [{id:\\users||1, data:{id:1, name:🆕}}, …(4 more)]
     "
   `);
-  },
-);
+});
