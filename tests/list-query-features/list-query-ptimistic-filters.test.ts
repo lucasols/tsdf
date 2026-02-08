@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
-import { createDefaultListQueryStore } from './utils/createDefaultListQueryStore';
-import { jsonFormatter } from './utils/jsonFormatter';
-import { range } from './utils/range';
+import { createDefaultListQueryStore } from '../../test-old/utils/createDefaultListQueryStore';
+import { jsonFormatter } from '../../test-old/utils/jsonFormatter';
+import { range } from '../../test-old/utils/range';
 
 const createTestEnv = createDefaultListQueryStore;
 
