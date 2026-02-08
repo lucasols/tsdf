@@ -175,14 +175,45 @@ describe('useMultipleItemsQuery invalidation tests', () => {
 
     expect(fetchCount()).toBe(1);
   });
+
+  test('do not fetch more than expected with multiple components connected to the same items', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+    const usersRender = createLoggerStore();
+    const productsRender = createLoggerStore();
+
+    renderHook(() => {
+      const queryResult = listQueryStore.useMultipleListQueries(
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
+            payload: item,
+            returnRefetchingStatus: true,
+          }),
+        ),
+        {
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
+        },
+      );
+
+      const [users, products] = queryResult;
+
+      usersRender.add(pick(users, ['status', 'payload', 'items']));
+      productsRender.add(pick(products, ['status', 'payload', 'items']));
+    });
+
+    await flushAllTimers();
+
+    const getFetchCount = getFetchCountFromHere(env);
+
       const { unmount } = renderHook(() => {
         const selectionResult = listQueryStore.useMultipleListQueries(
-          [
-            getFetchQueryForTable('users'),
-            getFetchQueryForTable('products'),
-          ].map((item) => ({
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
             payload: item,
-          })),
+          }),
+        ),
           {
             itemSelector(data) {
               return data.name;
@@ -190,38 +221,21 @@ describe('useMultipleItemsQuery invalidation tests', () => {
           },
         );
 
-        extraComponentMounted.add({
-          status: selectionResult[0]?.status,
-          payload: selectionResult[0]?.payload,
-          items: selectionResult[0]?.items,
-        });
+      return selectionResult;
       });
 
-      productsRender.reset();
-      usersRender.reset();
-
-      serverMock.setFetchDuration((param) => {
-        return param === '1' ? 20 : 40;
-      });
-
-      serverMock.produceData((draft) => {
-        draft.users![0]!.name = 'Updated User 1 again';
-        draft.products![0]!.name = 'Updated Product 1';
-      });
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1 again' });
+    env.serverTable.updateItem('products||1', { name: 'Updated Product 1' });
 
       listQueryStore.invalidateQueryAndItems({
         itemPayload: false,
         queryPayload: () => true,
       });
 
-      await serverMock.waitFetchIdle();
-
-      serverMock.undoTimeoutChange();
+    await flushAllTimers();
 
       unmount();
-    });
 
-    test('do not fetch more than expected with multiple components connected to the same items', () => {
       expect(getFetchCount()).toBe(2);
     });
 
