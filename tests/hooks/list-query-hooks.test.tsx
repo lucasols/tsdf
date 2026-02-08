@@ -582,12 +582,27 @@ describe('useQuery', () => {
   });
 
   test('use ensureIsLoaded prop', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users'] },
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const renders = createRenderStore();
+    listQueryStore.scheduleListQueryFetch('highPriority', { tableId: 'users' });
+
+    await flushAllTimers();
+
+    expect(listQueryStore.store.state.queries).toMatchInlineSnapshot(`
+      {tableId:"users"}:
+        error: null
+        hasMore: '❌'
+        items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+        payload: { tableId: 'users' }
+        refetchOnMount: '❌'
+        status: 'success'
+        wasLoaded: '✅'
+    `);
+
+    const renders = createLoggerStore();
 
     renderHook(() => {
       const selectionResult = listQueryStore.useListQuery(
@@ -598,12 +613,12 @@ describe('useQuery', () => {
       renders.add(pick(selectionResult, ['status', 'isLoading', 'items']));
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- isLoading: true -- items: [User 1, ...(4 more)]
-      status: success -- isLoading: false -- items: [User 1, ...(4 more)]
+      -> status: loading ⋅ isLoading: ✅ ⋅ items: [User 1, …(4 more)]
+      -> status: success ⋅ isLoading: ❌ ⋅ items: [User 1, …(4 more)]
       "
     `);
   });
