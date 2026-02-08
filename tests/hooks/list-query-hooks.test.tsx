@@ -848,14 +848,14 @@ describe('useItem', () => {
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {
-    const { store: listQueryStore, serverMock } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users'] },
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
-    const Comp = ({ payload }: { payload?: string }) => {
+    function Comp({ payload }: { payload?: string }) {
       const selectionResult = listQueryStore.useItem(payload, {
         ensureIsLoaded: true,
         selector: (data) => data?.name ?? null,
@@ -866,26 +866,26 @@ describe('useItem', () => {
       );
 
       return <div />;
-    };
+    }
 
     const { rerender } = render(<Comp />);
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: null -- isLoading: false -- data: null
+      -> status: idle ⋅ payload: null ⋅ isLoading: ❌ ⋅ data: null
       "
     `);
 
     rerender(<Comp payload="users||1" />);
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: null -- isLoading: false -- data: null
-      ---
-      status: loading -- payload: users||1 -- isLoading: true -- data: User 1
-      status: success -- payload: users||1 -- isLoading: false -- data: User 1
+      -> status: idle ⋅ payload: null ⋅ isLoading: ❌ ⋅ data: null
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: users||1 ⋅ isLoading: ✅ ⋅ data: User 1
+      -> status: success ⋅ payload: users||1 ⋅ isLoading: ❌ ⋅ data: User 1
       "
     `);
   });
