@@ -251,6 +251,14 @@ export function createListQueryStore<
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime,
+        coalescePayload: (existing, incoming) => ({
+          ...incoming,
+          type:
+            existing.type === 'loadMore' || incoming.type === 'loadMore'
+              ? 'loadMore'
+              : 'load',
+          size: Math.max(existing.size, incoming.size),
+        }),
       });
       querySchedulers.set(queryKey, scheduler);
     }

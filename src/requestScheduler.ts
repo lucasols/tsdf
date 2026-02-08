@@ -127,6 +127,9 @@ export type RequestSchedulerOptions<T> = {
   maxBatchSize?: number;
   /** Initial last fetch start time for throttling (e.g., from a query that already loaded this item) */
   initialLastFetchStartTime?: number;
+  /** Coalesce payloads when the same requestId is scheduled multiple times.
+   * Called with (existing, incoming) and should return the merged payload. */
+  coalescePayload?: (existing: T, incoming: T) => T;
 };
 
 export type ScheduleFetchOptions = {
@@ -161,6 +164,9 @@ export class RequestScheduler<T> {
     | undefined;
   private readonly mediumPriorityDelayMs: number | undefined;
   private readonly maxBatchSize: number | undefined;
+  private readonly coalescePayload:
+    | ((existing: T, incoming: T) => T)
+    | undefined;
 
   private state: SchedulerState<T>;
 
@@ -172,6 +178,7 @@ export class RequestScheduler<T> {
     this.dynamicRealtimeThrottleMs = options.dynamicRealtimeThrottleMs;
     this.mediumPriorityDelayMs = options.mediumPriorityDelayMs;
     this.maxBatchSize = options.maxBatchSize;
+    this.coalescePayload = options.coalescePayload;
 
     this.state = this.createInitialState();
 
@@ -215,10 +222,10 @@ export class RequestScheduler<T> {
   get hasPendingFetch(): boolean {
     const { phase, pending } = this.state;
     return (
-      phase.type !== 'idle'
-      || pending.scheduledRequests.size > 0
-      || pending.rtuDelayed !== null
-      || pending.mediumPriorityDelayed !== null
+      phase.type !== 'idle' ||
+      pending.scheduledRequests.size > 0 ||
+      pending.rtuDelayed !== null ||
+      pending.mediumPriorityDelayed !== null
     );
   }
 
@@ -486,7 +493,9 @@ export class RequestScheduler<T> {
     const existing = phase.pendingRequests.get(requestId);
     if (existing) {
       // Update existing request with new payload/priority
-      existing.payload = payload;
+      existing.payload = this.coalescePayload
+        ? this.coalescePayload(existing.payload, payload)
+        : payload;
       existing.priority = priority;
       return 'coalesced';
     }
@@ -519,7 +528,9 @@ export class RequestScheduler<T> {
     const existing = this.state.pending.scheduledRequests.get(requestId);
     if (existing) {
       // Update existing with higher priority if needed
-      existing.payload = payload;
+      existing.payload = this.coalescePayload
+        ? this.coalescePayload(existing.payload, payload)
+        : payload;
       existing.priority = priority;
     } else {
       this.state.pending.scheduledRequests.set(requestId, {
@@ -757,8 +768,8 @@ export class RequestScheduler<T> {
         // If this was an RTU request and dynamic throttle is configured,
         // route through the RTU delay mechanism
         if (
-          request.priority === 'realtimeUpdate'
-          && this.dynamicRealtimeThrottleMs
+          request.priority === 'realtimeUpdate' &&
+          this.dynamicRealtimeThrottleMs
         ) {
           rtuRequestsToFlush.push({ requestId, payload: request.payload });
         } else {
@@ -796,7 +807,16 @@ export class RequestScheduler<T> {
     if (this.state.phase.type === 'coalescing') {
       // Merge scheduled requests into coalescing
       for (const [requestId, request] of requestsToFlush) {
-        this.state.phase.pendingRequests.set(requestId, request);
+        const existing = this.state.phase.pendingRequests.get(requestId);
+        if (existing && this.coalescePayload) {
+          existing.payload = this.coalescePayload(
+            existing.payload,
+            request.payload,
+          );
+          existing.priority = request.priority;
+        } else {
+          this.state.phase.pendingRequests.set(requestId, request);
+        }
       }
       return;
     }
@@ -828,9 +848,9 @@ export class RequestScheduler<T> {
 
     // Skip if fetch/coalescing in progress or scheduled
     if (
-      phase.type === 'fetching'
-      || phase.type === 'coalescing'
-      || pending.scheduledRequests.size > 0
+      phase.type === 'fetching' ||
+      phase.type === 'coalescing' ||
+      pending.scheduledRequests.size > 0
     ) {
       return true;
     }
@@ -895,9 +915,9 @@ export class RequestScheduler<T> {
     const { timing, phase, pending } = this.state;
 
     if (
-      !timing.lastFetchDuration
-      || !timing.lastFetchStartTime
-      || !this.dynamicRealtimeThrottleMs
+      !timing.lastFetchDuration ||
+      !timing.lastFetchStartTime ||
+      !this.dynamicRealtimeThrottleMs
     ) {
       return false;
     }
