@@ -772,17 +772,17 @@ test('emulate realidateOnWindowFocus behaviour for list queries 2', async () => 
   expect(env.serverMock.fetchsCount).toBe(3);
 });
 
-test.concurrent(
+test(
   'invalidation should not throw error when fetchItemFn is not used',
   () => {
-    const env = createTestEnv({
-      initialServerData,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users', 'products'] } },
       disableFetchItemFn: true,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
     });
+    const store = env.apiStore;
 
     expect(() => {
-      env.store.invalidateQueryAndItems({
+      store.invalidateQueryAndItems({
         itemPayload: () => true,
         queryPayload: () => true,
         type: 'lowPriority',
