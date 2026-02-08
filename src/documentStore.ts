@@ -92,7 +92,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
-  usesRealTimeUpdates,
+  usesRealTimeUpdates = false,
   '~test': testOptions,
 }: DocumentStoreOptions<State>) {
   let invalidationWasTriggered = false;
@@ -207,6 +207,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     mediumPriorityDelayMs,
     on: onSchedulerEvent,
     initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
+    usesRealTimeUpdates,
   });
 
   function scheduleFetch(

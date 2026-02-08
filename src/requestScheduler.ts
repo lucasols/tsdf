@@ -130,6 +130,8 @@ export type RequestSchedulerOptions<T> = {
   /** Coalesce payloads when the same requestId is scheduled multiple times.
    * Called with (existing, incoming) and should return the merged payload. */
   coalescePayload?: (existing: T, incoming: T) => T;
+  /** for validation of realtimeUpdate fetch type */
+  usesRealTimeUpdates: boolean;
 };
 
 export type ScheduleFetchOptions = {
@@ -167,6 +169,7 @@ export class RequestScheduler<T> {
   private readonly coalescePayload:
     | ((existing: T, incoming: T) => T)
     | undefined;
+  private readonly usesRealTimeUpdates: boolean;
 
   private state: SchedulerState<T>;
 
@@ -179,6 +182,7 @@ export class RequestScheduler<T> {
     this.mediumPriorityDelayMs = options.mediumPriorityDelayMs;
     this.maxBatchSize = options.maxBatchSize;
     this.coalescePayload = options.coalescePayload;
+    this.usesRealTimeUpdates = options.usesRealTimeUpdates;
 
     this.state = this.createInitialState();
 
@@ -278,6 +282,12 @@ export class RequestScheduler<T> {
     payload: T,
     options?: ScheduleFetchOptions,
   ): ScheduleFetchResults {
+    if (fetchType === 'realtimeUpdate' && !this.usesRealTimeUpdates) {
+      throw new Error(
+        'realtimeUpdate fetch type cannot be used if usesRealTimeUpdates is not enabled',
+      );
+    }
+
     const startTime = Date.now();
 
     // Handle medium priority scheduling

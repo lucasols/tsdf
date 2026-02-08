@@ -125,7 +125,7 @@ export function createListQueryStore<
   errorNormalizer,
   defaultQuerySize = 50,
   maxItemBatchSize,
-  usesRealTimeUpdates,
+  usesRealTimeUpdates = false,
   '~test': testOptions,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
@@ -259,6 +259,7 @@ export function createListQueryStore<
             : 'load',
           size: Math.max(existing.size, incoming.size),
         }),
+        usesRealTimeUpdates,
       });
       querySchedulers.set(queryKey, scheduler);
     }
@@ -292,6 +293,7 @@ export function createListQueryStore<
         mediumPriorityDelayMs,
         maxBatchSize: maxItemBatchSize,
         on: onSchedulerEvent,
+        usesRealTimeUpdates,
       })
     : null;
 
@@ -347,6 +349,7 @@ export function createListQueryStore<
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime,
+        usesRealTimeUpdates,
       });
       perItemSchedulers.set(itemKey, scheduler);
     }

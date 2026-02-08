@@ -606,6 +606,7 @@ describe('priority handling in batch', () => {
       {
         baseCoalescingWindowMs: 50,
         useBatchFetch: true,
+        usesRealTimeUpdates: true,
       },
     );
 

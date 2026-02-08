@@ -117,45 +117,73 @@ describe('useMultipleItemsQuery sequential tests', () => {
   });
 
   test('invalidate one query', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+    const usersRender = createLoggerStore();
+    const productsRender = createLoggerStore();
+
+    renderHook(() => {
+      const queryResult = listQueryStore.useMultipleListQueries(
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
+            payload: item,
+            returnRefetchingStatus: true,
+          }),
+        ),
+        {
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
+        },
+      );
+
+      const [users, products] = queryResult;
+
+      usersRender.add(pick(users, ['status', 'payload', 'items']));
+      productsRender.add(pick(products, ['status', 'payload', 'items']));
+    });
+
+    await flushAllTimers();
+
     usersRender.reset();
     productsRender.reset();
 
-    serverMock.produceData((draft) => {
-      draft.users![0]!.name = 'Updated User 1';
-    });
+    const fetchCount = getFetchCountFromHere(env);
+
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
     listQueryStore.invalidateQueryAndItems({
       itemPayload: false,
       queryPayload: getFetchQueryForTable('users'),
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(usersRender.renderCount()).toBeGreaterThan(0);
-
-    expect(usersRender.getSnapshot()).toMatchInlineSnapshot(`
+    expect(usersRender.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: refetching -- payload: {tableId:users} -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
-      status: success -- payload: {tableId:users} -- items: [{id:users||1, data:{id:1, name:Updated User 1}}, ...(4 more)]
+      ┌─
+      ⋅ status: refetching
+      ⋅ payload: {tableId:users}
+      ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:users}
+      ⋅ items: [{id:\\users||1, data:{id:1, name:Updated User 1}}, …(4 more)]
+      └─
       "
     `);
-    expect(result.current.users?.items[0]!.data.name).toBe('Updated User 1');
-    expect(productsRender.getSnapshot()).toMatchInlineSnapshot(`
+    expect(productsRender.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: {tableId:products} -- items: [{id:products||1, data:{id:1, name:Product 1}}, ...(49 more)]
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:products}
+      ⋅ items: [{id:\\products||1, data:{id:1, name:Product 1}}, …(49 more)]
+      └─
       "
     `);
+
+    expect(fetchCount()).toBe(1);
   });
-
-  describe('invalidate all queries', () => {
-    const extraComponentMounted = createRenderStore();
-
-    let getFetchCount: () => number;
-
-    // eslint-disable-next-line vitest/expect-expect
-    test('setup block', async () => {
-      getFetchCount = serverMock.numOfFetchsFromHere();
-
-      // mount a new hook to check if there are more fetchs than expected
       const { unmount } = renderHook(() => {
         const selectionResult = listQueryStore.useMultipleListQueries(
           [

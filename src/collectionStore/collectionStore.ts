@@ -155,7 +155,7 @@ export function createCollectionStore<
   onInvalidate,
   onSchedulerEvent,
   onMutationError,
-  usesRealTimeUpdates,
+  usesRealTimeUpdates = false,
   '~test': testOptions,
 }: CollectionStoreOptions<ItemState, ItemPayload>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
@@ -244,6 +244,7 @@ export function createCollectionStore<
         maxBatchSize,
         on: onSchedulerEvent,
         initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
+        usesRealTimeUpdates,
       })
     : null;
 
@@ -268,6 +269,7 @@ export function createCollectionStore<
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
+        usesRealTimeUpdates,
       });
       perItemSchedulers.set(itemKey, itemScheduler);
     }
