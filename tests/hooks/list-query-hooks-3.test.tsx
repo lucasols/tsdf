@@ -793,22 +793,18 @@ test.concurrent(
   },
 );
 
-test.concurrent(
-  'useItem with selector should not trigger a rerender',
-  async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
+test('useItem with selector should not trigger a rerender', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users', 'products'] } },
+    usesRealTimeUpdates: true,
     });
 
-    const renders = createRenderStore();
+  const renders = createLoggerStore();
 
-    let prevData: any;
+  let prevData: unknown;
 
     const { rerender } = renderHook(() => {
-      const { data, status } = env.store.useItem('users||1', {
+    const { data, status } = env.apiStore.useItem('users||1', {
         selector: () => ({}),
       });
 
@@ -816,7 +812,7 @@ test.concurrent(
       prevData = data;
     });
 
-    await env.serverMock.waitFetchIdle();
+  await flushAllTimers();
 
     renders.addMark('Rerenders');
 
@@ -824,19 +820,18 @@ test.concurrent(
     rerender();
     rerender();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- changed: true
+    -> status: success ⋅ changed: ✅
 
     >>> Rerenders
 
-    status: success -- changed: false
-    status: success -- changed: false
-    status: success -- changed: false
+    -> status: success ⋅ changed: ❌
+    -> status: success ⋅ changed: ❌
+    -> status: success ⋅ changed: ❌
     "
   `);
-  },
-);
+});
 
 test.concurrent(
   'useListQuery with selector should not trigger a rerender',

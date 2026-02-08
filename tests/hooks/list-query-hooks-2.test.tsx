@@ -50,7 +50,7 @@ type ListQueryStoreApi = ReturnType<
   typeof createListQueryStoreTestEnv
 >['apiStore'];
 
-const CompWithItemLoaded = ({
+function CompWithItemLoaded({
   disableRefetchOnMount = true,
   store,
   loadItem,
@@ -60,7 +60,7 @@ const CompWithItemLoaded = ({
   store: ListQueryStoreApi;
   loadItem: string;
   renderStore: ReturnType<typeof createLoggerStore>;
-}) => {
+}) {
   const {
     status,
     error,
@@ -74,9 +74,9 @@ const CompWithItemLoaded = ({
   renderStore.add({ status, error, data, itemId });
 
   return <div />;
-};
+}
 
-const CompWithQueryLoaded = ({
+function CompWithQueryLoaded({
   disableRefetchOnMount = true,
   store,
   loadTable,
@@ -88,7 +88,7 @@ const CompWithQueryLoaded = ({
   loadTable: string;
   renderStore: ReturnType<typeof createLoggerStore>;
   filters?: ListQueryParams['filters'];
-}) => {
+}) {
   const { status, error, items, payload } = store.useListQuery(
     { tableId: loadTable, filters },
     {
@@ -101,7 +101,7 @@ const CompWithQueryLoaded = ({
   renderStore.add({ status, error, items, payload });
 
   return <div />;
-};
+}
 
 function renderComponents({
   store,
