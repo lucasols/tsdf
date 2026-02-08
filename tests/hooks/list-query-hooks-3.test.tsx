@@ -1,7 +1,7 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import {
   afterAll,
   afterEach,
@@ -42,280 +42,280 @@ afterAll(() => {
 });
 
 test('useItem: isOffScreen should keep the selected data and not be affected by invalidation', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      testScenario: { loaded: { tables: ['products', 'users'] } },
-      usesRealTimeUpdates: true,
-    });
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['products', 'users'] } },
+    usesRealTimeUpdates: true,
+  });
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+  const renders = createLoggerStore({
+    rejectKeys: ['queryMetadata'],
+  });
 
-    const { rerender } = renderHook(
-      ({ isOffScreen }: { isOffScreen: boolean }) => {
-        const result = env.apiStore.useItem('users||1', {
-          isOffScreen,
-          returnRefetchingStatus: true,
-          disableRefetchOnMount: true,
-        });
+  const { rerender } = renderHook(
+    ({ isOffScreen }: { isOffScreen: boolean }) => {
+      const result = env.apiStore.useItem('users||1', {
+        isOffScreen,
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
 
-        renders.add(result);
-      },
-      { initialProps: { isOffScreen: false } },
+      renders.add(result);
+    },
+    { initialProps: { isOffScreen: false } },
+  );
+
+  await flushAllTimers();
+
+  renders.addMark('first update (✅)');
+  act(() => {
+    env.serverTable.setItem(
+      'users||1',
+      { id: 1, name: '✅' },
+      { triggerRTUEvent: true },
     );
+  });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('first update (✅)');
-    act(() => {
-      env.serverTable.setItem(
-        'users||1',
-        { id: 1, name: '✅' },
-        { triggerRTUEvent: true },
-      );
-    });
+  renders.addMark('set disabled');
+  rerender({ isOffScreen: true });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('set disabled');
-    rerender({ isOffScreen: true });
+  renders.addMark('ignored update (❌)');
+  act(() => {
+    env.serverTable.setItem(
+      'users||1',
+      { id: 1, name: '❌' },
+      { triggerRTUEvent: true },
+    );
+  });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('ignored update (❌)');
-    act(() => {
-      env.serverTable.setItem(
-        'users||1',
-        { id: 1, name: '❌' },
-        { triggerRTUEvent: true },
-      );
-    });
+  renders.addMark('enabled again');
+  rerender({ isOffScreen: false });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('enabled again');
-    rerender({ isOffScreen: false });
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:User 1}
+    ⋅ payload: users||1
+    └─
 
-    await flushAllTimers();
+    >>> first update (✅)
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
-      ┌─
-      ⋅ itemStateKey: "users||1
-      ⋅ status: success
-      ⋅ error: null
-      ⋅ isLoading: ❌
-      ⋅ data: {id:1, name:User 1}
-      ⋅ payload: users||1
-      └─
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: refetching
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:User 1}
+    ⋅ payload: users||1
+    └─
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:✅}
+    ⋅ payload: users||1
+    └─
 
-      >>> first update (✅)
+    >>> set disabled
 
-      ┌─
-      ⋅ itemStateKey: "users||1
-      ⋅ status: refetching
-      ⋅ error: null
-      ⋅ isLoading: ❌
-      ⋅ data: {id:1, name:User 1}
-      ⋅ payload: users||1
-      └─
-      ┌─
-      ⋅ itemStateKey: "users||1
-      ⋅ status: success
-      ⋅ error: null
-      ⋅ isLoading: ❌
-      ⋅ data: {id:1, name:✅}
-      ⋅ payload: users||1
-      └─
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:✅}
+    ⋅ payload: users||1
+    └─
 
-      >>> set disabled
+    >>> ignored update (❌)
 
-      ┌─
-      ⋅ itemStateKey: "users||1
-      ⋅ status: success
-      ⋅ error: null
-      ⋅ isLoading: ❌
-      ⋅ data: {id:1, name:✅}
-      ⋅ payload: users||1
-      └─
+    >>> enabled again
 
-      >>> ignored update (❌)
-
-      >>> enabled again
-
-      ┌─
-      ⋅ itemStateKey: "users||1
-      ⋅ status: success
-      ⋅ error: null
-      ⋅ isLoading: ❌
-      ⋅ data: {id:1, name:✅}
-      ⋅ payload: users||1
-      └─
-      ┌─
-      ⋅ itemStateKey: "users||1
-      ⋅ status: refetching
-      ⋅ error: null
-      ⋅ isLoading: ❌
-      ⋅ data: {id:1, name:✅}
-      ⋅ payload: users||1
-      └─
-      ┌─
-      ⋅ itemStateKey: "users||1
-      ⋅ status: success
-      ⋅ error: null
-      ⋅ isLoading: ❌
-      ⋅ data: {id:1, name:❌}
-      ⋅ payload: users||1
-      └─
-      "
-    `);
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:✅}
+    ⋅ payload: users||1
+    └─
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: refetching
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:✅}
+    ⋅ payload: users||1
+    └─
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:❌}
+    ⋅ payload: users||1
+    └─
+    "
+  `);
 });
 
 test('useListQuery: isOffScreen should keep the selected data and not be affected by invalidation', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
-      testScenario: { loaded: { tables: ['products', 'users'] } },
-      usesRealTimeUpdates: true,
-    });
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['products', 'users'] } },
+    usesRealTimeUpdates: true,
+  });
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+  const renders = createLoggerStore({
+    rejectKeys: ['queryMetadata'],
+  });
 
-    const { rerender } = renderHook(
-      ({ isOffScreen }: { isOffScreen: boolean }) => {
-        const result = env.apiStore.useListQuery(
-          { tableId: 'users' },
-          {
-            isOffScreen,
-            returnRefetchingStatus: true,
-            disableRefetchOnMount: true,
-          },
-        );
+  const { rerender } = renderHook(
+    ({ isOffScreen }: { isOffScreen: boolean }) => {
+      const result = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        {
+          isOffScreen,
+          returnRefetchingStatus: true,
+          disableRefetchOnMount: true,
+        },
+      );
 
-        renders.add(result);
-      },
-      { initialProps: { isOffScreen: false } },
+      renders.add(result);
+    },
+    { initialProps: { isOffScreen: false } },
+  );
+
+  await flushAllTimers();
+
+  renders.addMark('first update (✅)');
+  act(() => {
+    env.serverTable.setItem(
+      'users||1',
+      { id: 1, name: '✅' },
+      { triggerRTUEvent: true },
     );
+  });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('first update (✅)');
-    act(() => {
-      env.serverTable.setItem(
-        'users||1',
-        { id: 1, name: '✅' },
-        { triggerRTUEvent: true },
-      );
-    });
+  renders.addMark('set disabled');
+  rerender({ isOffScreen: true });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('set disabled');
-    rerender({ isOffScreen: true });
+  renders.addMark('ignored update (❌)');
+  act(() => {
+    env.serverTable.setItem(
+      'users||1',
+      { id: 1, name: '❌' },
+      { triggerRTUEvent: true },
+    );
+  });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('ignored update (❌)');
-    act(() => {
-      env.serverTable.setItem(
-        'users||1',
-        { id: 1, name: '❌' },
-        { triggerRTUEvent: true },
-      );
-    });
+  renders.addMark('enabled again');
+  rerender({ isOffScreen: false });
 
-    await flushAllTimers();
+  await flushAllTimers();
 
-    renders.addMark('enabled again');
-    rerender({ isOffScreen: false });
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ queryKey: {tableId:"users"}
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ error: null
+    ⋅ hasMore: ❌
+    ⋅ isLoading: ❌
+    ⋅ payload: {tableId:users}
+    ⋅ isLoadingMore: ❌
+    └─
 
-    await flushAllTimers();
+    >>> first update (✅)
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
-      "
-      ┌─
-      ⋅ queryKey: {tableId:"users"}
-      ⋅ status: success
-      ⋅ items: [{id:1, name:User 1}, …(4 more)]
-      ⋅ error: null
-      ⋅ hasMore: ❌
-      ⋅ isLoading: ❌
-      ⋅ payload: {tableId:users}
-      ⋅ isLoadingMore: ❌
-      └─
+    ┌─
+    ⋅ queryKey: {tableId:"users"}
+    ⋅ status: refetching
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ error: null
+    ⋅ hasMore: ❌
+    ⋅ isLoading: ❌
+    ⋅ payload: {tableId:users}
+    ⋅ isLoadingMore: ❌
+    └─
+    ┌─
+    ⋅ queryKey: {tableId:"users"}
+    ⋅ status: success
+    ⋅ items: [{id:1, name:✅}, …(4 more)]
+    ⋅ error: null
+    ⋅ hasMore: ❌
+    ⋅ isLoading: ❌
+    ⋅ payload: {tableId:users}
+    ⋅ isLoadingMore: ❌
+    └─
 
-      >>> first update (✅)
+    >>> set disabled
 
-      ┌─
-      ⋅ queryKey: {tableId:"users"}
-      ⋅ status: refetching
-      ⋅ items: [{id:1, name:User 1}, …(4 more)]
-      ⋅ error: null
-      ⋅ hasMore: ❌
-      ⋅ isLoading: ❌
-      ⋅ payload: {tableId:users}
-      ⋅ isLoadingMore: ❌
-      └─
-      ┌─
-      ⋅ queryKey: {tableId:"users"}
-      ⋅ status: success
-      ⋅ items: [{id:1, name:✅}, …(4 more)]
-      ⋅ error: null
-      ⋅ hasMore: ❌
-      ⋅ isLoading: ❌
-      ⋅ payload: {tableId:users}
-      ⋅ isLoadingMore: ❌
-      └─
+    ┌─
+    ⋅ queryKey: {tableId:"users"}
+    ⋅ status: success
+    ⋅ items: [{id:1, name:✅}, …(4 more)]
+    ⋅ error: null
+    ⋅ hasMore: ❌
+    ⋅ isLoading: ❌
+    ⋅ payload: {tableId:users}
+    ⋅ isLoadingMore: ❌
+    └─
 
-      >>> set disabled
+    >>> ignored update (❌)
 
-      ┌─
-      ⋅ queryKey: {tableId:"users"}
-      ⋅ status: success
-      ⋅ items: [{id:1, name:✅}, …(4 more)]
-      ⋅ error: null
-      ⋅ hasMore: ❌
-      ⋅ isLoading: ❌
-      ⋅ payload: {tableId:users}
-      ⋅ isLoadingMore: ❌
-      └─
+    >>> enabled again
 
-      >>> ignored update (❌)
-
-      >>> enabled again
-
-      ┌─
-      ⋅ queryKey: {tableId:"users"}
-      ⋅ status: success
-      ⋅ items: [{id:1, name:✅}, …(4 more)]
-      ⋅ error: null
-      ⋅ hasMore: ❌
-      ⋅ isLoading: ❌
-      ⋅ payload: {tableId:users}
-      ⋅ isLoadingMore: ❌
-      └─
-      ┌─
-      ⋅ queryKey: {tableId:"users"}
-      ⋅ status: refetching
-      ⋅ items: [{id:1, name:✅}, …(4 more)]
-      ⋅ error: null
-      ⋅ hasMore: ❌
-      ⋅ isLoading: ❌
-      ⋅ payload: {tableId:users}
-      ⋅ isLoadingMore: ❌
-      └─
-      ┌─
-      ⋅ queryKey: {tableId:"users"}
-      ⋅ status: success
-      ⋅ items: [{id:1, name:❌}, …(4 more)]
-      ⋅ error: null
-      ⋅ hasMore: ❌
-      ⋅ isLoading: ❌
-      ⋅ payload: {tableId:users}
-      ⋅ isLoadingMore: ❌
-      └─
-      "
-    `);
+    ┌─
+    ⋅ queryKey: {tableId:"users"}
+    ⋅ status: success
+    ⋅ items: [{id:1, name:✅}, …(4 more)]
+    ⋅ error: null
+    ⋅ hasMore: ❌
+    ⋅ isLoading: ❌
+    ⋅ payload: {tableId:users}
+    ⋅ isLoadingMore: ❌
+    └─
+    ┌─
+    ⋅ queryKey: {tableId:"users"}
+    ⋅ status: refetching
+    ⋅ items: [{id:1, name:✅}, …(4 more)]
+    ⋅ error: null
+    ⋅ hasMore: ❌
+    ⋅ isLoading: ❌
+    ⋅ payload: {tableId:users}
+    ⋅ isLoadingMore: ❌
+    └─
+    ┌─
+    ⋅ queryKey: {tableId:"users"}
+    ⋅ status: success
+    ⋅ items: [{id:1, name:❌}, …(4 more)]
+    ⋅ error: null
+    ⋅ hasMore: ❌
+    ⋅ isLoading: ❌
+    ⋅ payload: {tableId:users}
+    ⋅ isLoadingMore: ❌
+    └─
+    "
+  `);
 });
 
 test('useItem: disable then enable isOffScreen', async () => {
@@ -448,33 +448,33 @@ test('useListQuery: disable then enable isOffScreen', async () => {
 test('useMultipleItems should not trigger a mount refetch when some option changes', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     testScenario: { loaded: { tables: ['products', 'users'] } },
-      lowPriorityThrottleMs: 10,
-    });
+    lowPriorityThrottleMs: 10,
+  });
 
-    const filterKeys = ['status', 'data', 'payload', 'rrfs'];
+  const filterKeys = ['status', 'data', 'payload', 'rrfs'];
   const renders1 = createLoggerStore({ filterKeys });
   const renders2 = createLoggerStore({ filterKeys });
 
-    const { rerender } = renderHook(
-      ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
+  const { rerender } = renderHook(
+    ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
       const result = env.apiStore.useMultipleItems(
-          ['users||1', 'users||2'].map((payload) => ({
-            payload,
-            returnRefetchingStatus,
-          })),
-        );
+        ['users||1', 'users||2'].map((payload) => ({
+          payload,
+          returnRefetchingStatus,
+        })),
+      );
 
-        renders1.add({ ...result[0]!, rrfs: returnRefetchingStatus });
-        renders2.add({ ...result[1]!, rrfs: returnRefetchingStatus });
-      },
-      { initialProps: { returnRefetchingStatus: false } },
-    );
+      renders1.add({ ...result[0]!, rrfs: returnRefetchingStatus });
+      renders2.add({ ...result[1]!, rrfs: returnRefetchingStatus });
+    },
+    { initialProps: { returnRefetchingStatus: false } },
+  );
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    rerender({ returnRefetchingStatus: true });
+  rerender({ returnRefetchingStatus: true });
 
   await flushAllTimers();
 
@@ -497,47 +497,47 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
 test('useMultipleItems should not trigger a mount refetch for unchanged items', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     testScenario: { loaded: { tables: ['products', 'users'] } },
-      lowPriorityThrottleMs: 10,
-    });
+    lowPriorityThrottleMs: 10,
+  });
 
   const renders = createLoggerStore({
-      filterKeys: ['i', 'status', 'data', 'payload'],
-    });
+    filterKeys: ['i', 'status', 'data', 'payload'],
+  });
 
-    const { rerender } = renderHook(
-      ({ items }: { items: string[] }) => {
+  const { rerender } = renderHook(
+    ({ items }: { items: string[] }) => {
       const result = env.apiStore.useMultipleItems(
-          items.map((payload) => ({ payload })),
-        );
+        items.map((payload) => ({ payload })),
+      );
 
-        renders.add(result);
-      },
-      { initialProps: { items: ['users||1', 'users||2'] } },
-    );
+      renders.add(result);
+    },
+    { initialProps: { items: ['users||1', 'users||2'] } },
+  );
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    renders.addMark('add item');
-    rerender({ items: ['users||1', 'users||2', 'users||3'] });
+  renders.addMark('add item');
+  rerender({ items: ['users||1', 'users||2', 'users||3'] });
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-    renders.addMark('remove item');
-    rerender({ items: ['users||2', 'users||3'] });
+  renders.addMark('remove item');
+  rerender({ items: ['users||2', 'users||3'] });
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-    renders.addMark('add removed item back');
+  renders.addMark('add removed item back');
 
   env.serverTable.updateItem('users||1', { name: 'changed' });
 
-    rerender({ items: ['users||2', 'users||3', 'users||1'] });
+  rerender({ items: ['users||2', 'users||3', 'users||1'] });
 
   await flushAllTimers();
 
@@ -573,33 +573,33 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
 
 test('useMultipleListQueries should not trigger a mount refetch when some option changes', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
-    testScenario: { idleWithLocalCache: { tables: ['products', 'users'] } },
-      lowPriorityThrottleMs: 10,
-    });
+    testScenario: { loaded: { tables: ['products', 'users'] } },
+    lowPriorityThrottleMs: 10,
+  });
 
-    const filterKeys = ['i', 'status', 'items', 'payload', 'rrfs'];
+  const filterKeys = ['i', 'status', 'items', 'payload', 'rrfs'];
 
   const renders = createLoggerStore({ filterKeys });
 
-    const { rerender } = renderHook(
-      ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
+  const { rerender } = renderHook(
+    ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
       const result = env.apiStore.useMultipleListQueries(
-          [{ tableId: 'users' }, { tableId: 'products' }].map((payload) => ({
-            payload,
-            returnRefetchingStatus,
-          })),
-        );
+        [{ tableId: 'users' }, { tableId: 'products' }].map((payload) => ({
+          payload,
+          returnRefetchingStatus,
+        })),
+      );
 
       renders.add(result.map((r) => ({ ...r, rrfs: returnRefetchingStatus })));
-      },
-      { initialProps: { returnRefetchingStatus: false } },
-    );
+    },
+    { initialProps: { returnRefetchingStatus: false } },
+  );
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    rerender({ returnRefetchingStatus: true });
+  rerender({ returnRefetchingStatus: true });
 
   await flushAllTimers();
 
@@ -644,49 +644,49 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
     testScenario: {
       loaded: { tables: ['products', 'users', 'orders'] },
     },
-      lowPriorityThrottleMs: 10,
-    });
+    lowPriorityThrottleMs: 10,
+  });
 
   const renders = createLoggerStore({
-      filterKeys: ['i', 'status', 'items', 'payload'],
-    });
+    filterKeys: ['i', 'status', 'items', 'payload'],
+  });
 
-    const { rerender } = renderHook(
-      ({ items }: { items: string[] }) => {
+  const { rerender } = renderHook(
+    ({ items }: { items: string[] }) => {
       const result = env.apiStore.useMultipleListQueries(
-          items.map((payload) => ({
-            payload: { tableId: payload },
-          })),
-        );
+        items.map((payload) => ({
+          payload: { tableId: payload },
+        })),
+      );
 
-        renders.add(result);
-      },
-      { initialProps: { items: ['users', 'products'] } },
-    );
+      renders.add(result);
+    },
+    { initialProps: { items: ['users', 'products'] } },
+  );
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    renders.addMark('add item');
-    rerender({ items: ['users', 'products', 'orders'] });
+  renders.addMark('add item');
+  rerender({ items: ['users', 'products', 'orders'] });
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-    renders.addMark('remove item');
-    rerender({ items: ['users', 'orders'] });
+  renders.addMark('remove item');
+  rerender({ items: ['users', 'orders'] });
 
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
-    renders.addMark('add removed item back');
+  renders.addMark('add removed item back');
 
   env.serverTable.updateItem('products||1', { name: 'changed' });
 
-    rerender({ items: ['users', 'orders', 'products'] });
+  rerender({ items: ['users', 'orders', 'products'] });
 
   await flushAllTimers();
 
@@ -785,119 +785,109 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
   `);
 });
 
-test.concurrent(
-  'Selected value should update when selectorUsesExternalDeps is true',
-  async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users'] },
-    });
+test('Selected value should update when external dep changes (default selectorUsesExternalDeps)', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { idleWithLocalCache: { tables: ['users'] } },
+  });
 
-    const renders = createRenderStore();
+  const renders = createLoggerStore();
 
-    const { rerender } = renderHook(
-      ({
-        externalDep,
-        selectorUsesExternalDeps,
-      }: {
-        externalDep: string;
-        selectorUsesExternalDeps: boolean;
-      }) => {
-        const selector = useCallback(
-          (data: Tables[string][number] | null) => {
-            return `${data?.id}/${externalDep}`;
-          },
-          [externalDep],
-        );
+  const { rerender } = renderHook(
+    ({ externalDep }: { externalDep: string }) => {
+      const selector = useCallback(
+        (data: Tables[string][number] | null) => {
+          return `${data?.id}/${externalDep}`;
+        },
+        [externalDep],
+      );
 
-        const result = env.store.useItem('users||1', {
-          selector,
-          selectorUsesExternalDeps,
-        });
+      const result = env.apiStore.useItem('users||1', {
+        selector,
+      });
 
-        const queryResult = env.store.useListQuery(
-          { tableId: 'users' },
-          {
-            itemSelector: selector,
-            selectorUsesExternalDeps,
-          },
-        );
+      const queryResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        {
+          itemSelector: selector,
+        },
+      );
 
-        renders.add({
-          useItem: pick(result, ['status', 'data', 'payload']),
-          useListQuery: pick(queryResult, ['status', 'items', 'payload']),
-        });
-      },
-      { initialProps: { externalDep: 'ok', selectorUsesExternalDeps: false } },
-    );
+      renders.add({
+        useItem: pick(result, ['status', 'data', 'payload']),
+        useListQuery: pick(queryResult, ['status', 'items', 'payload']),
+      });
+    },
+    { initialProps: { externalDep: 'ok' } },
+  );
 
-    await env.serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    renders.addMark('change external dep (selectorUsesExternalDeps: false)');
-    rerender({ externalDep: 'changed', selectorUsesExternalDeps: false });
+  renders.addMark('change external dep');
+  rerender({ externalDep: 'changed' });
 
-    await sleep(200);
+  await flushAllTimers();
 
-    renders.addMark('change external dep');
-    rerender({ externalDep: 'changed', selectorUsesExternalDeps: true });
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    await sleep(200);
+  renders.addMark('change external dep again');
+  rerender({ externalDep: 'changed again' });
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  await flushAllTimers();
 
-    renders.addMark('change external dep again');
-    rerender({ externalDep: 'changed again', selectorUsesExternalDeps: true });
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ useItem: {status:success, data:1/ok, payload:users||1}
+    ⋅ useListQuery: {status:success, items:[1/ok, 2/ok, 3/ok, 4/ok, 5/ok], payload:{tableId:users}}
+    └─
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
-      "
-      useItem: {status:success, data:1/ok, payload:users||1} -- useListQuery: {status:success, items:[1/ok, 2/ok, 3/ok, 4/ok, 5/ok], payload:{tableId:users}}
+    >>> change external dep
 
-      >>> change external dep (selectorUsesExternalDeps: false)
+    ┌─
+    ⋅ useItem: {status:success, data:1/changed, payload:users||1}
+    ⋅ useListQuery: {status:success, items:[1/changed, 2/changed, 3/changed, 4/changed, 5/changed], payload:{tableId:users}}
+    └─
 
-      useItem: {status:success, data:1/ok, payload:users||1} -- useListQuery: {status:success, items:[1/ok, 2/ok, 3/ok, 4/ok, 5/ok], payload:{tableId:users}}
+    >>> change external dep again
 
-      >>> change external dep
-
-      useItem: {status:success, data:1/changed, payload:users||1} -- useListQuery: {status:success, items:[1/changed, 2/changed, 3/changed, 4/changed, 5/changed], payload:{tableId:users}}
-
-      >>> change external dep again
-
-      useItem: {status:success, data:1/changed again, payload:users||1} -- useListQuery: {status:success, items:[1/changed again, 2/changed again, 3/changed again, 4/changed again, 5/changed again], payload:{tableId:users}}
-      "
-    `);
-  },
-);
+    ┌─
+    ⋅ useItem: {status:success, data:1/changed again, payload:users||1}
+    ⋅ useListQuery: {status:success, items:[1/changed again, 2/changed again, 3/changed again, 4/changed again, 5/changed again], payload:{tableId:users}}
+    └─
+    "
+  `);
+});
 
 test('useItem with selector should not trigger a rerender', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     testScenario: { loaded: { tables: ['users', 'products'] } },
     usesRealTimeUpdates: true,
-    });
+  });
 
   const renders = createLoggerStore();
 
   let prevData: unknown;
 
-    const { rerender } = renderHook(() => {
+  const { rerender } = renderHook(() => {
     const { data, status } = env.apiStore.useItem('users||1', {
-        selector: () => ({}),
-      });
-
-      renders.add({ status, changed: prevData !== data });
-      prevData = data;
+      selector: () => ({}),
     });
+
+    renders.add({ status, changed: prevData !== data });
+    prevData = data;
+  });
 
   await flushAllTimers();
 
-    renders.addMark('Rerenders');
+  renders.addMark('Rerenders');
 
-    rerender();
-    rerender();
-    rerender();
+  rerender();
+  rerender();
+  rerender();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -916,31 +906,31 @@ test('useListQuery with selector should not trigger a rerender', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     testScenario: { loaded: { tables: ['users', 'products'] } },
     usesRealTimeUpdates: true,
-    });
+  });
 
   const renders = createLoggerStore();
 
   let prevData: unknown;
 
-    const { rerender } = renderHook(() => {
+  const { rerender } = renderHook(() => {
     const { items, status } = env.apiStore.useListQuery(
-        { tableId: 'users' },
-        {
-          itemSelector: () => ({}),
-        },
-      );
+      { tableId: 'users' },
+      {
+        itemSelector: () => ({}),
+      },
+    );
 
-      renders.add({ status, changed: prevData !== items });
-      prevData = items;
-    });
+    renders.add({ status, changed: prevData !== items });
+    prevData = items;
+  });
 
   await flushAllTimers();
 
-    renders.addMark('Rerenders');
+  renders.addMark('Rerenders');
 
-    rerender();
-    rerender();
-    rerender();
+  rerender();
+  rerender();
+  rerender();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
