@@ -21,9 +21,7 @@ import {
   advanceTime,
   flushAllTimers,
   getFetchCountFromHere,
-  produceServerData,
   shouldNotSkip,
-  type ListQueryTestEnv,
 } from '../utils/listQueryHooksTestUtils';
 
 const initialServerData: Tables = {
@@ -54,15 +52,12 @@ function getFetchQueryForTable(tableId: string): FetchQueryParams {
   return { tableId };
 }
 
-describe('useMultipleItemsQuery sequential tests', () => {
-  let env: ListQueryTestEnv;
-  let listQueryStore: ListQueryTestEnv['apiStore'];
+describe('useMultipleItemsQuery invalidation tests', () => {
+  test('load the queries', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
   const usersRender = createLoggerStore();
   const productsRender = createLoggerStore();
-
-  beforeAll(() => {
-    env = createListQueryStoreTestEnv(initialServerData);
-    listQueryStore = env.apiStore;
 
     renderHook(() => {
     const queryResult = listQueryStore.useMultipleListQueries(
@@ -83,12 +78,8 @@ describe('useMultipleItemsQuery sequential tests', () => {
 
     usersRender.add(pick(users, ['status', 'payload', 'items']));
     productsRender.add(pick(products, ['status', 'payload', 'items']));
-
-    return { users, products };
-    });
   });
 
-  test('load the queries', async () => {
     await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(2);
