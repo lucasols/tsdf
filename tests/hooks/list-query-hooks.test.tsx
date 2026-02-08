@@ -428,24 +428,20 @@ describe('useMultipleItemsQuery isolated tests', () => {
   });
 
   test('with disableRefetchOnMount', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
 
-    const payload = createValueStore([
-      getFetchQueryForTable('users'),
-      getFetchQueryForTable('products'),
-    ]);
-
-    const usersRenders = createRenderStore();
-    const productsRenders = createRenderStore();
+    const usersRenders = createLoggerStore();
+    const productsRenders = createLoggerStore();
 
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
-        payload.useValue().map((item) => ({
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
           payload: item,
           disableRefetchOnMount: true,
-        })),
+          }),
+        ),
         { itemSelector: (data) => data.name },
       );
 
@@ -453,18 +449,18 @@ describe('useMultipleItemsQuery isolated tests', () => {
       productsRenders.add(pick(products, ['status', 'payload', 'items']));
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(usersRenders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(usersRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: {tableId:users} -- items: []
-      status: success -- payload: {tableId:users} -- items: [User 1, ...(4 more)]
+      -> status: loading ⋅ payload: {tableId:users} ⋅ items: []
+      -> status: success ⋅ payload: {tableId:users} ⋅ items: [User 1, …(4 more)]
       "
     `);
-    expect(productsRenders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(productsRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- payload: {tableId:products} -- items: []
-      status: success -- payload: {tableId:products} -- items: [Product 1, ...(49 more)]
+      -> status: loading ⋅ payload: {tableId:products} ⋅ items: []
+      -> status: success ⋅ payload: {tableId:products} ⋅ items: [Product 1, …(49 more)]
       "
     `);
   });
