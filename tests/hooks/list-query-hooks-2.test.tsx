@@ -419,11 +419,10 @@ test('load a item and a few ms after load a query with different data', async ()
 
 describe('syncMutationAndInvalidation', () => {
   test('invalidate related queries after item invalidation', async () => {
-    const { store, serverMock } = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users', 'products'] } },
     });
+    const store = env.apiStore;
 
     const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
       renderComponents({
@@ -433,7 +432,7 @@ describe('syncMutationAndInvalidation', () => {
         loadTable: 'users',
       });
 
-    const comp3Renders = createRenderStore();
+    const comp3Renders = createLoggerStore();
 
     renderHook(() => {
       const { status, error, items } = store.useListQuery(
@@ -454,29 +453,48 @@ describe('syncMutationAndInvalidation', () => {
       queryPayload: (payload) => payload.tableId === 'users',
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(compWithItemLoadedRenders.snapshot).toMatchInlineSnapshot(`
+    expect(compWithItemLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-      status: refetching -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-      status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-      "
-    `);
-    expect(comp3Renders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- error: null -- items: [{id:products||1, data:{id:1, name:Product 1}}, ...(49 more)]
+      -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+      -> status: refetching ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+      -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
       "
     `);
-    expect(compWithQueryLoadedRenders.snapshot).toMatchInlineSnapshot(`
+    expect(comp3Renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-      status: refetching -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-      status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:\\products||1, data:{id:1, name:Product 1}}, …(49 more)]
+      └─
+      "
+    `);
+    expect(compWithQueryLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ payload: {tableId:users}
+      └─
+      ┌─
+      ⋅ status: refetching
+      ⋅ error: null
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ payload: {tableId:users}
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ payload: {tableId:users}
+      └─
       "
     `);
 
-    expect(serverMock.fetchsCount).toBe(2);
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
   });
 
   test('invalidate related item and query after query invalidation', async () => {
