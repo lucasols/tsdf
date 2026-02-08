@@ -741,46 +741,41 @@ describe('useQuery', () => {
 
 describe('useItem', () => {
   test('disable then enable the initial fetch', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
-    const Comp = ({
-      payload,
-    }: {
-      payload: string | false | undefined | null;
-    }) => {
+    function Comp({ payload }: { payload: string | false | undefined | null }) {
       const queryResult = listQueryStore.useItem(payload);
 
       renders.add(pick(queryResult, ['status', 'payload', 'data']));
 
       return <div />;
-    };
+    }
 
     const { rerender } = render(<Comp payload={false} />);
 
-    expect(renders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: null -- data: null
+      -> status: idle ⋅ payload: null ⋅ data: null
       "
     `);
 
-    expect(serverMock.fetchsCount).toBe(0);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
 
     rerender(<Comp payload="users||1" />);
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(serverMock.fetchsCount).toBe(1);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
-    expect(renders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: null -- data: null
-      ---
-      status: loading -- payload: users||1 -- data: null
-      status: success -- payload: users||1 -- data: {id:1, name:User 1}
+      -> status: idle ⋅ payload: null ⋅ data: null
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: users||1 ⋅ data: null
+      -> status: success ⋅ payload: users||1 ⋅ data: {id:1, name:User 1}
       "
     `);
   });
