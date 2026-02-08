@@ -3,11 +3,14 @@ import { expect, test } from 'vitest';
 import {
   createDefaultListQueryStore,
   Tables,
-} from './utils/createDefaultListQueryStore';
-import { randomInt } from './utils/math';
-import { range } from './utils/range';
-import { sleep } from './utils/sleep';
-import { createRenderStore, waitElapsedTime } from './utils/storeUtils';
+} from '../../test-old/utils/createDefaultListQueryStore';
+import { randomInt } from '../../test-old/utils/math';
+import { range } from '../../test-old/utils/range';
+import { sleep } from '../../test-old/utils/sleep';
+import {
+  createRenderStore,
+  waitElapsedTime,
+} from '../../test-old/utils/storeUtils';
 
 const createTestEnv = createDefaultListQueryStore;
 
