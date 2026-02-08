@@ -106,7 +106,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   const knownTableIds = new Set<string>();
   const itemHistory = new Map<string, ItemData[]>();
   const customFetchDurations = new Map<string, number[]>();
-  let defaultFetchDuration = DEFAULT_FETCH_DURATION_MS;
+  const defaultFetchDuration = DEFAULT_FETCH_DURATION_MS;
   const nextFetchErrors = new Map<string, FetchErrorConfig>();
   let nextListFetchError: FetchErrorConfig | null = null;
 
