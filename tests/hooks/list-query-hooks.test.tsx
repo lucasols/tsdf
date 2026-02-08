@@ -1068,23 +1068,17 @@ describe('useItem', () => {
   });
 });
 
-test.concurrent(
-  'initial data is invalidated on first load in item query',
-  async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
-      disableInitialDataInvalidation: false,
+test('initial data is invalidated on first load in item query', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { idleWithLocalCache: { tables: ['users', 'products'] } },
     });
 
-    env.serverMock.produceData((draft) => {
-      draft.users![0]!.name = 'Updated User 1';
-    });
+  env.serverTable.updateItem('users||1', { name: 'Updated User 1' });
 
-    const renders = createRenderStore();
+  const renders = createLoggerStore();
 
     renderHook(() => {
-      const { data, status } = env.store.useItem('users||1', {
+    const { data, status } = env.apiStore.useItem('users||1', {
         returnRefetchingStatus: true,
         disableRefetchOnMount: true,
       });
@@ -1092,17 +1086,16 @@ test.concurrent(
       renders.add({ status, data });
     });
 
-    await env.serverMock.waitFetchIdle(0, 1500);
+  await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {id:1, name:User 1}
-    status: refetching -- data: {id:1, name:User 1}
-    status: success -- data: {id:1, name:Updated User 1}
+    -> status: success ⋅ data: {id:1, name:User 1}
+    -> status: refetching ⋅ data: {id:1, name:User 1}
+    -> status: success ⋅ data: {id:1, name:Updated User 1}
     "
   `);
-  },
-);
+});
 
 test.concurrent(
   'initial data is invalidated on first load in list query',
