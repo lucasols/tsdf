@@ -103,6 +103,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   addAction?: AddActionFn,
 ) {
   const items = new Map<string, ItemData>(Object.entries(initialItems));
+  const knownTableIds = new Set<string>();
   const itemHistory = new Map<string, ItemData[]>();
   const customFetchDurations = new Map<string, number[]>();
   const nextFetchErrors = new Map<string, FetchErrorConfig>();
@@ -138,8 +139,21 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     return DEFAULT_FETCH_DURATION_MS;
   }
 
+  function getTableId(itemId: string): string | null {
+    const [tableId, rowId] = itemId.split('||');
+    if (!tableId || !rowId) {
+      return null;
+    }
+    return tableId;
+  }
+
   for (const [itemId, data] of items) {
     itemHistory.set(itemId, [data]);
+
+    const tableId = getTableId(itemId);
+    if (tableId) {
+      knownTableIds.add(tableId);
+    }
   }
 
   const wsEvents = evtmitter<ServerTableEvents<ItemData>>();
@@ -298,6 +312,24 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       throw new Error(errorConfig.message);
     }
 
+    if (tableId && !knownTableIds.has(tableId)) {
+      fetchHistory.push({
+        type: 'list',
+        itemIds: filterItemIds,
+        results: 'aborted',
+      });
+
+      if (addAction) {
+        numOfFinishedFetches++;
+        addAction('<list-fetch-error', {
+          id: listId,
+          actionValue: 'error',
+        });
+      }
+
+      throw new Error(`Table not found: ${tableId}`);
+    }
+
     let resultEntries = Array.from(items.entries());
 
     // Filter by tableId if provided (items are keyed as "tableId||id")
@@ -374,6 +406,11 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     data: ItemData,
     options?: { triggerRTUEvent?: boolean },
   ): void {
+    const tableId = getTableId(itemId);
+    if (tableId) {
+      knownTableIds.add(tableId);
+    }
+
     items.set(itemId, data);
 
     const history = itemHistory.get(itemId);
@@ -486,6 +523,11 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
 
     await sleep(setDataAt);
 
+    const tableId = getTableId(itemId);
+    if (tableId) {
+      knownTableIds.add(tableId);
+    }
+
     items.set(itemId, data);
     itemHistory.set(itemId, [data]);
 
@@ -586,6 +628,10 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       filters,
       tableId,
     } = options ?? {};
+
+    if (tableId && !knownTableIds.has(tableId)) {
+      throw new Error(`Table not found: ${tableId}`);
+    }
 
     let entriesArr = Array.from(items.entries());
 
