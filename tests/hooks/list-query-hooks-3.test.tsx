@@ -639,22 +639,21 @@ test('useMultipleListQueries should not trigger a mount refetch when some option
   `);
 });
 
-test.concurrent(
-  'useMultipleListQueries should not trigger a mount refetch for unchanged items',
-  async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['products', 'users', 'orders'] },
+test('useMultipleListQueries should not trigger a mount refetch for unchanged items', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: {
+      loaded: { tables: ['products', 'users', 'orders'] },
+    },
       lowPriorityThrottleMs: 10,
     });
 
-    const renders = createRenderStore({
+  const renders = createLoggerStore({
       filterKeys: ['i', 'status', 'items', 'payload'],
     });
 
     const { rerender } = renderHook(
       ({ items }: { items: string[] }) => {
-        const result = env.store.useMultipleListQueries(
+      const result = env.apiStore.useMultipleListQueries(
           items.map((payload) => ({
             payload: { tableId: payload },
           })),
@@ -665,64 +664,126 @@ test.concurrent(
       { initialProps: { items: ['users', 'products'] } },
     );
 
-    await env.serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
     renders.addMark('add item');
     rerender({ items: ['users', 'products', 'orders'] });
 
-    await env.serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-    expect(env.serverMock.fetchsCount).toBe(3);
+  expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
     renders.addMark('remove item');
     rerender({ items: ['users', 'orders'] });
 
-    await sleep(200);
+  await flushAllTimers();
 
-    expect(env.serverMock.fetchsCount).toBe(3);
+  expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
     renders.addMark('add removed item back');
 
-    env.serverMock.produceData((draft) => {
-      draft.products![0]!.name = 'changed';
-    });
+  env.serverTable.updateItem('products||1', { name: 'changed' });
 
     rerender({ items: ['users', 'orders', 'products'] });
 
-    await env.serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-    expect(env.serverMock.fetchsCount).toBe(4);
+  expect(env.serverTable.numOfFinishedFetches).toBe(4);
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    i: 1 -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    i: 2 -- status: success -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products}
+    ┌─
+    ⋅ i: 1
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ i: 2
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Product 1}, …(49 more)]
+    ⋅ payload: {tableId:products}
+    └─
 
     >>> add item
 
-    i: 1 -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    i: 2 -- status: success -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products}
-    i: 3 -- status: success -- items: [{id:1, name:Order 1}, ...(49 more)] -- payload: {tableId:orders}
+    ┌─
+    ⋅ i: 1
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ i: 2
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Product 1}, …(49 more)]
+    ⋅ payload: {tableId:products}
+    └─
+    ┌─
+    ⋅ i: 3
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Order 1}, …(49 more)]
+    ⋅ payload: {tableId:orders}
+    └─
 
     >>> remove item
 
-    i: 1 -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    i: 2 -- status: success -- items: [{id:1, name:Order 1}, ...(49 more)] -- payload: {tableId:orders}
+    ┌─
+    ⋅ i: 1
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ i: 2
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Order 1}, …(49 more)]
+    ⋅ payload: {tableId:orders}
+    └─
 
     >>> add removed item back
 
-    i: 1 -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    i: 2 -- status: success -- items: [{id:1, name:Order 1}, ...(49 more)] -- payload: {tableId:orders}
-    i: 3 -- status: success -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products}
-    i: 1 -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    i: 2 -- status: success -- items: [{id:1, name:Order 1}, ...(49 more)] -- payload: {tableId:orders}
-    i: 3 -- status: success -- items: [{id:1, name:changed}, ...(49 more)] -- payload: {tableId:products}
+    ┌─
+    ⋅ i: 1
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ i: 2
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Order 1}, …(49 more)]
+    ⋅ payload: {tableId:orders}
+    └─
+    ┌─
+    ⋅ i: 3
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Product 1}, …(49 more)]
+    ⋅ payload: {tableId:products}
+    └─
+    ┌─
+    ⋅ i: 1
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ i: 2
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Order 1}, …(49 more)]
+    ⋅ payload: {tableId:orders}
+    └─
+    ┌─
+    ⋅ i: 3
+    ⋅ status: success
+    ⋅ items: [{id:1, name:changed}, …(49 more)]
+    ⋅ payload: {tableId:products}
+    └─
     "
   `);
-  },
-);
+});
 
 test.concurrent(
   'Selected value should update when selectorUsesExternalDeps is true',
