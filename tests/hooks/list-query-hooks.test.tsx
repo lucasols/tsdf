@@ -652,14 +652,14 @@ describe('useQuery', () => {
   });
 
   test('use ensureIsLoaded prop with disabled', async () => {
-    const { store: listQueryStore, serverMock } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users'] },
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
-    const Comp = ({ payload }: { payload?: FetchQueryParams }) => {
+    function Comp({ payload }: { payload?: FetchQueryParams }) {
       const selectionResult = listQueryStore.useListQuery(payload, {
         ensureIsLoaded: true,
         itemSelector: (data) => data.name,
@@ -670,26 +670,36 @@ describe('useQuery', () => {
       );
 
       return <div />;
-    };
+    }
 
     const { rerender } = render(<Comp />);
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: undefined -- isLoading: false -- items: []
+      -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ items: []
       "
     `);
 
     rerender(<Comp payload={{ tableId: 'users' }} />);
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: undefined -- isLoading: false -- items: []
-      ---
-      status: loading -- payload: {tableId:users} -- isLoading: true -- items: [User 1, ...(4 more)]
-      status: success -- payload: {tableId:users} -- isLoading: false -- items: [User 1, ...(4 more)]
+      -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ items: []
+      ⋅⋅⋅
+      ┌─
+      ⋅ status: loading
+      ⋅ payload: {tableId:users}
+      ⋅ isLoading: ✅
+      ⋅ items: [User 1, …(4 more)]
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:users}
+      ⋅ isLoading: ❌
+      ⋅ items: [User 1, …(4 more)]
+      └─
       "
     `);
   });

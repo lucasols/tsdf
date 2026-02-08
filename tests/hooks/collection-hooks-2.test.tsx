@@ -179,7 +179,7 @@ test('disable then enable isOffScreen', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      testScenario: { idleWithLocalCache: 'sameAsServer' },
+      testScenario: 'loaded',
     },
   );
 
@@ -249,7 +249,7 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      testScenario: { idleWithLocalCache: 'sameAsServer' },
+      testScenario: 'loaded',
     },
   );
 
@@ -325,7 +325,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
       '5': defaultTodo,
     },
     {
-      testScenario: { idleWithLocalCache: 'sameAsServer' },
+      testScenario: 'loaded',
     },
   );
 
@@ -425,7 +425,7 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
     {
-      testScenario: { idleWithLocalCache: 'sameAsServer' },
+      testScenario: 'loaded',
     },
   );
 
