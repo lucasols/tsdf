@@ -685,9 +685,6 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       existing.push(...durations);
       customFetchDurations.set(itemId, existing);
     },
-    setDefaultFetchDuration(duration: number) {
-      defaultFetchDuration = duration;
-    },
     setNextFetchError(itemId: string, error: FetchErrorConfig | string) {
       nextFetchErrors.set(
         itemId,
