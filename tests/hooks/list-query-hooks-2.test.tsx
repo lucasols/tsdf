@@ -158,8 +158,6 @@ test('refetch an query and after a few ms refetch an item', async () => {
       loadTable: 'users',
     });
 
-  env.serverTable.setDefaultFetchDuration(50);
-
   shouldNotSkip(
     store.scheduleListQueryFetch('highPriority', { tableId: 'users' }),
   );
