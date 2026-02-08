@@ -336,11 +336,10 @@ test('load a query and a few ms after load a item with different data', async ()
 });
 
 test('load a item and a few ms after load a query with different data', async () => {
-  const { store, serverMock } = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users'] },
-    disableInitialDataInvalidation: true,
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
   });
+  const store = env.apiStore;
 
   const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
     renderComponents({
@@ -350,45 +349,72 @@ test('load a item and a few ms after load a query with different data', async ()
       loadTable: 'users',
     });
 
-  serverMock.setFetchDuration(50);
-
   shouldNotSkip(store.scheduleItemFetch('highPriority', 'users||1'));
 
-  await sleep(45);
-  serverMock.produceData((draft) => {
-    draft.users![0]!.name = 'User 1 changed';
-  });
+  await advanceTime(1000);
+  env.serverTable.updateItem('users||1', { name: 'User 1 changed' });
 
   shouldNotSkip(
     store.scheduleListQueryFetch('highPriority', { tableId: 'users' }),
   );
 
-  await serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-  expect(compWithQueryLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithQueryLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: refetching -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: success -- error: null -- items: [{id:1, name:User 1 changed}, ...(4 more)] -- payload: {tableId:users}
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: refetching
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ items: [{id:1, name:User 1 changed}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
     "
   `);
-  expect(compWithItemLoadedRenders.snapshot).toMatchInlineSnapshot(`
+  expect(compWithItemLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: refetching -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-    status: success -- error: null -- data: {id:1, name:User 1 changed} -- itemId: users||1
-    "
-  `);
-
-  expect(serverMock.fetchsSequence()).toMatchInlineSnapshot(`
-    "
-    started: 0, result: {id: 1, name: User 1}, params: users||1
-    started: 1, result: [{id: 1, name: User 1 changed}, ...(4 more)], params: users
+    -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    -> status: refetching ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+    ┌─
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ data: {id:1, name:User 1 changed}
+    ⋅ itemId: users||1
+    └─
     "
   `);
 
-  expect(serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+    - itemId: 'users||1'
+      result: { id: 1, name: 'User 1' }
+      type: 'fetch'
+    - results:
+        - data: { id: 1, name: 'User 1 changed' }
+          itemId: 'users||1'
+        - data: { id: 2, name: 'User 2' }
+          itemId: 'users||2'
+        - data: { id: 3, name: 'User 3' }
+          itemId: 'users||3'
+        - data: { id: 4, name: 'User 4' }
+          itemId: 'users||4'
+        - data: { id: 5, name: 'User 5' }
+          itemId: 'users||5'
+      type: 'list'
+  `);
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 });
 
 describe('syncMutationAndInvalidation', () => {
