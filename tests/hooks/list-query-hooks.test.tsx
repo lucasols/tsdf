@@ -530,18 +530,17 @@ describe('useMultipleItemsQuery isolated tests', () => {
 
 describe('useQuery', () => {
   test('disable then enable the initial fetch', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-    });
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
 
-    const renders = createRenderStore();
+    const renders = createLoggerStore();
 
     type Props = {
       payload: FetchQueryParams | false | undefined | null;
     };
 
     const { rerender } = renderHook(
-      ({ payload }) => {
+      ({ payload }: Props) => {
         const queryResult = listQueryStore.useListQuery(payload, {
           itemSelector(data, _, itemKey) {
             return { id: itemKey, data };
@@ -549,32 +548,35 @@ describe('useQuery', () => {
         });
 
         renders.add(pick(queryResult, ['status', 'payload', 'items']));
-
         return queryResult;
       },
-      { initialProps: { payload: false } as Props },
+      { initialProps: { payload: false } },
     );
 
-    expect(renders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: undefined -- items: []
+      -> status: idle ⋅ payload: undefined ⋅ items: []
       "
     `);
 
-    expect(serverMock.fetchsCount).toBe(0);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
 
     rerender({ payload: { tableId: 'users' } });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(serverMock.fetchsCount).toBe(1);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
-    expect(renders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: idle -- payload: undefined -- items: []
-      ---
-      status: loading -- payload: {tableId:users} -- items: []
-      status: success -- payload: {tableId:users} -- items: [{id:users||1, data:{id:1, name:User 1}}, ...(4 more)]
+      -> status: idle ⋅ payload: undefined ⋅ items: []
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: {tableId:users} ⋅ items: []
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:users}
+      ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
+      └─
       "
     `);
   });
