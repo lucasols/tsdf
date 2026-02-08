@@ -202,8 +202,15 @@ export function useMultipleItems<
       const itemState = store.state.itemQueries[itemKey];
       const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
+      if (itemState === null) {
+        // Deleted items should stay deleted until explicitly fetched/invalidated.
+        continue;
+      }
+
       const shouldFetch =
-        !itemState || !itemState.wasLoaded || itemState.refetchOnMount;
+        itemState === undefined
+        || !itemState.wasLoaded
+        || itemState.refetchOnMount;
 
       if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
         continue;
