@@ -381,22 +381,20 @@ test('useItem: disable then enable isOffScreen', async () => {
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 });
 
-test.concurrent('useListQuery: disable then enable isOffScreen', async () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['products', 'users'] },
-    emulateRTU: true,
-    disableInitialDataInvalidation: true,
+test('useListQuery: disable then enable isOffScreen', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['products', 'users'] } },
+    usesRealTimeUpdates: true,
     lowPriorityThrottleMs: 10,
   });
 
-  const renders = createRenderStore({
+  const renders = createLoggerStore({
     filterKeys: ['status', 'items', 'payload'],
   });
 
   const { rerender } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
-      const result = env.store.useListQuery(
+      const result = env.apiStore.useListQuery(
         {
           tableId: 'users',
         },
@@ -411,37 +409,47 @@ test.concurrent('useListQuery: disable then enable isOffScreen', async () => {
     { initialProps: { isOffScreen: false } },
   );
 
-  await sleep(120);
+  await flushAllTimers();
 
   renders.addMark('set disabled');
 
   rerender({ isOffScreen: true });
 
-  await sleep(120);
+  await flushAllTimers();
 
   renders.addMark('enabled again');
 
   rerender({ isOffScreen: false });
 
-  await sleep(200);
+  await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: refetching -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-    status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
+    ┌─
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
 
     >>> set disabled
 
-    status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
+    ┌─
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
 
     >>> enabled again
 
-    status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
+    ┌─
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    └─
     "
   `);
 
-  expect(env.serverMock.fetchsCount).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(0);
 });
 
 test.concurrent(
