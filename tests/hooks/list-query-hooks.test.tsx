@@ -316,14 +316,55 @@ describe('useMultipleItemsQuery invalidation tests', () => {
       `);
     });
 
-    test('data selector', () => {
-      expect(extraComponentMounted.getSnapshot()).toMatchInlineSnapshot(`
+  test('data selector', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+    const extraComponentMounted = createLoggerStore();
+
+    renderHook(() => {
+      const selectionResult = listQueryStore.useMultipleListQueries(
+        [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
+          (item) => ({
+            payload: item,
+            returnRefetchingStatus: true,
+          }),
+        ),
+        {
+          itemSelector(data) {
+            return data.name;
+          },
+        },
+      );
+
+      extraComponentMounted.add({
+        status: selectionResult[0]?.status,
+        payload: selectionResult[0]?.payload,
+        items: selectionResult[0]?.items,
+      });
+    });
+
+    await flushAllTimers();
+
+    env.serverTable.updateItem('users||1', { name: 'Updated User 1 again' });
+    listQueryStore.invalidateQueryAndItems({
+      itemPayload: false,
+      queryPayload: (payload) => payload.tableId === 'users',
+    });
+
+    await flushAllTimers();
+
+    expect(extraComponentMounted.changesSnapshot).toMatchInlineSnapshot(`
         "
-        status: success -- payload: {tableId:users} -- items: [Updated User 1, ...(4 more)]
-        status: success -- payload: {tableId:users} -- items: [Updated User 1 again, ...(4 more)]
+      -> status: loading ⋅ payload: {tableId:users} ⋅ items: []
+      -> status: success ⋅ payload: {tableId:users} ⋅ items: [User 1, …(4 more)]
+      -> status: refetching ⋅ payload: {tableId:users} ⋅ items: [User 1, …(4 more)]
+      ┌─
+      ⋅ status: success
+      ⋅ payload: {tableId:users}
+      ⋅ items: [Updated User 1 again, …(4 more)]
+      └─
         "
       `);
-    });
   });
 });
 
