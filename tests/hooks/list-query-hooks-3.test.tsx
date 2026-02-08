@@ -175,23 +175,21 @@ test(
   },
 );
 
-test.concurrent(
+test(
   'useListQuery: isOffScreen should keep the selected data and not be affected by invalidation',
   async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['products', 'users'] },
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['products', 'users'] } },
+      usesRealTimeUpdates: true,
     });
 
-    const renders = createRenderStore({
+    const renders = createLoggerStore({
       rejectKeys: ['queryMetadata'],
     });
 
     const { rerender } = renderHook(
       ({ isOffScreen }: { isOffScreen: boolean }) => {
-        const result = env.store.useListQuery(
+        const result = env.apiStore.useListQuery(
           { tableId: 'users' },
           {
             isOffScreen,
@@ -205,52 +203,123 @@ test.concurrent(
       { initialProps: { isOffScreen: false } },
     );
 
-    await sleep(100);
+    await flushAllTimers();
 
     renders.addMark('first update (✅)');
-    env.serverMock.produceData((draft) => {
-      draft.users![0]!.name = '✅';
+    act(() => {
+      env.serverTable.setItem(
+        'users||1',
+        { id: 1, name: '✅' },
+        { triggerRTUEvent: true },
+      );
     });
 
-    await sleep(200);
+    await flushAllTimers();
 
     renders.addMark('set disabled');
     rerender({ isOffScreen: true });
 
-    await sleep(100);
+    await flushAllTimers();
 
     renders.addMark('ignored update (❌)');
-    env.serverMock.produceData((draft) => {
-      draft.users![0]!.name = '❌';
+    act(() => {
+      env.serverTable.setItem(
+        'users||1',
+        { id: 1, name: '❌' },
+        { triggerRTUEvent: true },
+      );
     });
 
-    await sleep(200);
+    await flushAllTimers();
 
     renders.addMark('enabled again');
     rerender({ isOffScreen: false });
 
-    await sleep(200);
+    await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    expect(renders.snapshot).toMatchInlineSnapshot(`
       "
-      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      ┌─
+      ⋅ queryKey: {tableId:"users"}
+      ⋅ status: success
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ error: null
+      ⋅ hasMore: ❌
+      ⋅ isLoading: ❌
+      ⋅ payload: {tableId:users}
+      ⋅ isLoadingMore: ❌
+      └─
 
       >>> first update (✅)
 
-      queryKey: {"tableId":"users"} -- status: refetching -- items: [{id:1, name:User 1}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
-      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      ┌─
+      ⋅ queryKey: {tableId:"users"}
+      ⋅ status: refetching
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ error: null
+      ⋅ hasMore: ❌
+      ⋅ isLoading: ❌
+      ⋅ payload: {tableId:users}
+      ⋅ isLoadingMore: ❌
+      └─
+      ┌─
+      ⋅ queryKey: {tableId:"users"}
+      ⋅ status: success
+      ⋅ items: [{id:1, name:✅}, …(4 more)]
+      ⋅ error: null
+      ⋅ hasMore: ❌
+      ⋅ isLoading: ❌
+      ⋅ payload: {tableId:users}
+      ⋅ isLoadingMore: ❌
+      └─
 
       >>> set disabled
 
-      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      ┌─
+      ⋅ queryKey: {tableId:"users"}
+      ⋅ status: success
+      ⋅ items: [{id:1, name:✅}, …(4 more)]
+      ⋅ error: null
+      ⋅ hasMore: ❌
+      ⋅ isLoading: ❌
+      ⋅ payload: {tableId:users}
+      ⋅ isLoadingMore: ❌
+      └─
 
       >>> ignored update (❌)
 
       >>> enabled again
 
-      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
-      queryKey: {"tableId":"users"} -- status: refetching -- items: [{id:1, name:✅}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
-      queryKey: {"tableId":"users"} -- status: success -- items: [{id:1, name:❌}, ...(4 more)] -- error: null -- hasMore: false -- isLoading: false -- payload: {tableId:users} -- isLoadingMore: false
+      ┌─
+      ⋅ queryKey: {tableId:"users"}
+      ⋅ status: success
+      ⋅ items: [{id:1, name:✅}, …(4 more)]
+      ⋅ error: null
+      ⋅ hasMore: ❌
+      ⋅ isLoading: ❌
+      ⋅ payload: {tableId:users}
+      ⋅ isLoadingMore: ❌
+      └─
+      ┌─
+      ⋅ queryKey: {tableId:"users"}
+      ⋅ status: refetching
+      ⋅ items: [{id:1, name:✅}, …(4 more)]
+      ⋅ error: null
+      ⋅ hasMore: ❌
+      ⋅ isLoading: ❌
+      ⋅ payload: {tableId:users}
+      ⋅ isLoadingMore: ❌
+      └─
+      ┌─
+      ⋅ queryKey: {tableId:"users"}
+      ⋅ status: success
+      ⋅ items: [{id:1, name:❌}, …(4 more)]
+      ⋅ error: null
+      ⋅ hasMore: ❌
+      ⋅ isLoading: ❌
+      ⋅ payload: {tableId:users}
+      ⋅ isLoadingMore: ❌
+      └─
       "
     `);
   },
