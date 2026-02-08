@@ -1017,14 +1017,13 @@ describe('useItem', () => {
   });
 
   test('useMultipleItems with queryMetadata', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-      disableInitialDataInvalidation: false,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users', 'products'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const users2 = createRenderStore();
-    const products1 = createRenderStore();
+    const users2 = createLoggerStore();
+    const products1 = createLoggerStore();
 
     renderHook(() => {
       const [usersResult, productsResult] = listQueryStore.useMultipleItems(
@@ -1044,16 +1043,26 @@ describe('useItem', () => {
       return { usersResult, productsResult };
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
     expect(users2.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: users||2 -- data: {id:2, name:User 2} -- queryMetadata: {test:users||2}
+      ┌─
+      ⋅ status: success
+      ⋅ payload: users||2
+      ⋅ data: {id:2, name:User 2}
+      ⋅ queryMetadata: {test:users||2}
+      └─
       "
     `);
     expect(products1.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: products||1 -- data: {id:1, name:Product 1} -- queryMetadata: {test:products||1}
+      ┌─
+      ⋅ status: success
+      ⋅ payload: products||1
+      ⋅ data: {id:1, name:Product 1}
+      ⋅ queryMetadata: {test:products||1}
+      └─
       "
     `);
   });
