@@ -4,7 +4,6 @@ import type { FetchType } from '../../src/requestScheduler';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
   createActionTracker,
-  createEmojiCyclers,
   createUITracker,
   logScheduleFetchResult,
   logSchedulerEvent,
@@ -60,6 +59,7 @@ export function createListQueryStoreTestEnv(
     usesRealTimeUpdates,
     useBatchFetch,
     maxItemBatchSize,
+    disableFetchItemFn,
   }: {
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
@@ -72,6 +72,7 @@ export function createListQueryStoreTestEnv(
     useBatchFetch?: boolean;
     /** Max items per batch (only used when useBatchFetch is true) */
     maxItemBatchSize?: number;
+    disableFetchItemFn?: boolean;
   } = {},
 ) {
   const {
@@ -81,8 +82,6 @@ export function createListQueryStoreTestEnv(
     getTimelineString,
     getRelativeTime,
   } = createActionTracker();
-
-  const { getMutationEmoji } = createEmojiCyclers();
 
   // Convert Tables to Record<string, Row> for serverTableMock
   const flatItems: Record<string, Row> = {};
@@ -183,9 +182,12 @@ export function createListQueryStoreTestEnv(
         hasMore: result.hasMore,
       };
     },
-    fetchItemFn: async (itemId, signal) => {
-      return serverTable.fetch(itemId, signal);
-    },
+    fetchItemFn:
+      disableFetchItemFn ?
+        undefined
+      : async (itemId, signal) => {
+          return serverTable.fetch(itemId, signal);
+        },
   });
 
   if (usesRealTimeUpdates) {
