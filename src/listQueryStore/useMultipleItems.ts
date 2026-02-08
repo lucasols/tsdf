@@ -14,6 +14,12 @@ import type {
   TSFDUseListItemReturn,
 } from './types';
 
+const cacheMissError = {
+  code: 460,
+  id: 'cache-miss',
+  message: 'Cache miss',
+} as const;
+
 export type UseMultipleItemsOptions<
   ItemState extends ValidStoreState,
   Selected,
@@ -124,6 +130,18 @@ export function useMultipleItems<
           }
 
           if (!itemQuery) {
+            if (loadFromStateOnly) {
+              return {
+                itemStateKey: itemKey,
+                status: 'error',
+                error: cacheMissError,
+                isLoading: false,
+                payload,
+                data,
+                queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+              };
+            }
+
             return {
               itemStateKey: itemKey,
               status: returnIdleStatus ? 'idle' : 'loading',
@@ -153,7 +171,7 @@ export function useMultipleItems<
         },
       );
     },
-    [queriesWithId, selector],
+    [loadFromStateOnly, queriesWithId, selector],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
