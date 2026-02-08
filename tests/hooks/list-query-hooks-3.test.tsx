@@ -4,11 +4,11 @@ import { expect, test } from 'vitest';
 import {
   Tables,
   createDefaultListQueryStore,
-} from './utils/createDefaultListQueryStore';
-import { pick } from './utils/objectUtils';
-import { range } from './utils/range';
-import { sleep } from './utils/sleep';
-import { createRenderStore } from './utils/storeUtils';
+} from '../../test-old/utils/createDefaultListQueryStore';
+import { pick } from '../../test-old/utils/objectUtils';
+import { range } from '../../test-old/utils/range';
+import { sleep } from '../../test-old/utils/sleep';
+import { createRenderStore } from '../../test-old/utils/storeUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
