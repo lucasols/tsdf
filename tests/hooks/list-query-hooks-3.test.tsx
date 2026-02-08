@@ -571,55 +571,73 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
   `);
 });
 
-test.concurrent(
-  'useMultipleListQueries should not trigger a mount refetch when some option changes',
-  async () => {
-    const env = createTestEnv({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['products', 'users'] },
+test('useMultipleListQueries should not trigger a mount refetch when some option changes', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { idleWithLocalCache: { tables: ['products', 'users'] } },
       lowPriorityThrottleMs: 10,
     });
 
     const filterKeys = ['i', 'status', 'items', 'payload', 'rrfs'];
 
-    const renders = createRenderStore({ filterKeys });
+  const renders = createLoggerStore({ filterKeys });
 
     const { rerender } = renderHook(
       ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
-        const result = env.store.useMultipleListQueries(
+      const result = env.apiStore.useMultipleListQueries(
           [{ tableId: 'users' }, { tableId: 'products' }].map((payload) => ({
             payload,
             returnRefetchingStatus,
           })),
         );
 
-        renders.add(
-          result.map((r) => ({ ...r, rrfs: returnRefetchingStatus })),
-        );
+      renders.add(result.map((r) => ({ ...r, rrfs: returnRefetchingStatus })));
       },
       { initialProps: { returnRefetchingStatus: false } },
     );
 
-    await env.serverMock.waitFetchIdle();
+  await flushAllTimers();
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
     rerender({ returnRefetchingStatus: true });
 
-    await sleep(200);
+  await flushAllTimers();
 
-    expect(env.serverMock.fetchsCount).toBe(2);
+  expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    i: 1 -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users} -- rrfs: false
-    i: 2 -- status: success -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products} -- rrfs: false
-    i: 1 -- status: success -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users} -- rrfs: true
-    i: 2 -- status: success -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products} -- rrfs: true
+    ┌─
+    ⋅ i: 1
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    ⋅ rrfs: ❌
+    └─
+    ┌─
+    ⋅ i: 2
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Product 1}, …(49 more)]
+    ⋅ payload: {tableId:products}
+    ⋅ rrfs: ❌
+    └─
+    ┌─
+    ⋅ i: 1
+    ⋅ status: success
+    ⋅ items: [{id:1, name:User 1}, …(4 more)]
+    ⋅ payload: {tableId:users}
+    ⋅ rrfs: ✅
+    └─
+    ┌─
+    ⋅ i: 2
+    ⋅ status: success
+    ⋅ items: [{id:1, name:Product 1}, …(49 more)]
+    ⋅ payload: {tableId:products}
+    ⋅ rrfs: ✅
+    └─
     "
   `);
-  },
-);
+});
 
 test.concurrent(
   'useMultipleListQueries should not trigger a mount refetch for unchanged items',

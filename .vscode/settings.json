@@ -1,5 +1,6 @@
 {
   "typescript.tsdk": "node_modules/typescript/lib",
   "git.branchProtection": ["main"],
-  "typescript.preferences.includePackageJsonAutoImports": "on"
+  "typescript.preferences.includePackageJsonAutoImports": "on",
+  "cSpell.words": ["rrfs"]
 }
