@@ -498,14 +498,15 @@ describe('syncMutationAndInvalidation', () => {
   });
 
   test('invalidate related item and query after query invalidation', async () => {
-    const { store, serverMock } = createTestEnv({
-      initialServerData,
-      disableInitialDataInvalidation: true,
-      useLoadedSnapshot: {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: {
+        loaded: {
         tables: ['users', 'products'],
-        queries: [{ tableId: 'users', filters: { idIsGreaterThan: 3 } }],
+          queries: [{ tableId: 'users', filters: userIdGreaterThanFilter(3) }],
+        },
       },
     });
+    const store = env.apiStore;
 
     const { compWithItemLoadedRenders, compWithQueryLoadedRenders } =
       renderComponents({
@@ -515,9 +516,9 @@ describe('syncMutationAndInvalidation', () => {
         loadTable: 'users',
       });
 
-    const ignoreItemRenders = createRenderStore();
-    const ignoreQueryRenders = createRenderStore();
-    const relatedQueryRenders = createRenderStore();
+    const ignoreItemRenders = createLoggerStore();
+    const ignoreQueryRenders = createLoggerStore();
+    const relatedQueryRenders = createLoggerStore();
 
     render(
       <>
@@ -534,9 +535,7 @@ describe('syncMutationAndInvalidation', () => {
         <CompWithQueryLoaded
           store={store}
           loadTable="users"
-          filters={{
-            idIsGreaterThan: 3,
-          }}
+          filters={userIdGreaterThanFilter(3)}
           renderStore={relatedQueryRenders}
         />
       </>,
@@ -547,43 +546,83 @@ describe('syncMutationAndInvalidation', () => {
       queryPayload: (payload) => payload.tableId === 'users',
     });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(compWithQueryLoadedRenders.snapshot).toMatchInlineSnapshot(`
+    expect(compWithQueryLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-      status: refetching -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-      status: success -- error: null -- items: [{id:1, name:User 1}, ...(4 more)] -- payload: {tableId:users}
-      "
-    `);
-
-    expect(ignoreItemRenders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- error: null -- data: {id:1, name:Product 1} -- itemId: products||1
-      "
-    `);
-    expect(ignoreQueryRenders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- error: null -- items: [{id:1, name:Product 1}, ...(49 more)] -- payload: {tableId:products}
-      "
-    `);
-
-    expect(compWithItemLoadedRenders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-      status: refetching -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-      status: success -- error: null -- data: {id:1, name:User 1} -- itemId: users||1
-      "
-    `);
-    expect(relatedQueryRenders.snapshot).toMatchInlineSnapshot(`
-      "
-      status: success -- error: null -- items: [{id:4, name:User 4}, {id:5, name:User 5}] -- payload: {tableId:users, filters:{idIsGreaterThan:3}}
-      status: refetching -- error: null -- items: [{id:4, name:User 4}, {id:5, name:User 5}] -- payload: {tableId:users, filters:{idIsGreaterThan:3}}
-      status: success -- error: null -- items: [{id:4, name:User 4}, {id:5, name:User 5}] -- payload: {tableId:users, filters:{idIsGreaterThan:3}}
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ payload: {tableId:users}
+      └─
+      ┌─
+      ⋅ status: refetching
+      ⋅ error: null
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ payload: {tableId:users}
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      ⋅ payload: {tableId:users}
+      └─
       "
     `);
 
-    expect(serverMock.fetchsCount).toBe(3);
+    expect(ignoreItemRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ data: {id:1, name:Product 1}
+      ⋅ itemId: products||1
+      └─
+      "
+    `);
+    expect(ignoreQueryRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:1, name:Product 1}, …(49 more)]
+      ⋅ payload: {tableId:products}
+      └─
+      "
+    `);
+
+    expect(compWithItemLoadedRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+      -> status: refetching ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+      -> status: success ⋅ error: null ⋅ data: {id:1, name:User 1} ⋅ itemId: users||1
+      "
+    `);
+    expect(relatedQueryRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:4, name:User 4}, {id:5, name:User 5}]
+      ⋅ payload: {tableId:users, filters:[{op:gt, field:id, value:3}]}
+      └─
+      ┌─
+      ⋅ status: refetching
+      ⋅ error: null
+      ⋅ items: [{id:4, name:User 4}, {id:5, name:User 5}]
+      ⋅ payload: {tableId:users, filters:[{op:gt, field:id, value:3}]}
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ error: null
+      ⋅ items: [{id:4, name:User 4}, {id:5, name:User 5}]
+      ⋅ payload: {tableId:users, filters:[{op:gt, field:id, value:3}]}
+      └─
+      "
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(3);
   });
 });
 
