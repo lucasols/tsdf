@@ -370,23 +370,18 @@ describe('useMultipleItemsQuery invalidation tests', () => {
 
 describe('useMultipleItemsQuery isolated tests', () => {
   test('rerender when payload changes', async () => {
-    const { serverMock, store: listQueryStore } = createDefaultListQueryStore({
-      initialServerData,
-      useLoadedSnapshot: { tables: ['users', 'products'] },
-      disableInitialDataInvalidation: true,
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      testScenario: { loaded: { tables: ['users', 'products'] } },
     });
+    const listQueryStore = env.apiStore;
 
-    const payload = createValueStore([
-      getFetchQueryForTable('users'),
-      getFetchQueryForTable('products'),
-    ]);
+    const usersRenders = createLoggerStore();
+    const productsRenders = createLoggerStore();
 
-    const usersRenders = createRenderStore();
-    const productsRenders = createRenderStore();
-
-    renderHook(() => {
+    const { rerender } = renderHook(
+      ({ payload }: { payload: FetchQueryParams[] }) => {
       const [users, products] = listQueryStore.useMultipleListQueries(
-        payload.useValue().map((item) => ({
+          payload.map((item) => ({
           payload: item,
         })),
         { itemSelector: (data) => data.name },
@@ -394,25 +389,40 @@ describe('useMultipleItemsQuery isolated tests', () => {
 
       usersRenders.add(pick(users, ['status', 'payload', 'items']));
       productsRenders.add(pick(products, ['status', 'payload', 'items']));
-    });
+      },
+      {
+        initialProps: {
+          payload: [
+            getFetchQueryForTable('users'),
+            getFetchQueryForTable('products'),
+          ],
+        },
+      },
+    );
 
-    payload.set([
+    await flushAllTimers();
+
+    act(() => {
+      rerender({
+        payload: [
       getFetchQueryForTable('users'),
       getFetchQueryForTable('not-found'),
-    ]);
+        ],
+      });
+    });
 
-    await serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(usersRenders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(usersRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: {tableId:users} -- items: [User 1, ...(4 more)]
+      -> status: success ⋅ payload: {tableId:users} ⋅ items: [User 1, …(4 more)]
       "
     `);
-    expect(productsRenders.getSnapshot()).toMatchInlineSnapshot(`
+    expect(productsRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: success -- payload: {tableId:products} -- items: [Product 1, ...(49 more)]
-      status: loading -- payload: {tableId:not-found} -- items: []
-      status: error -- payload: {tableId:not-found} -- items: []
+      -> status: success ⋅ payload: {tableId:products} ⋅ items: [Product 1, …(49 more)]
+      -> status: loading ⋅ payload: {tableId:not-found} ⋅ items: []
+      -> status: error ⋅ payload: {tableId:not-found} ⋅ items: []
       "
     `);
   });
