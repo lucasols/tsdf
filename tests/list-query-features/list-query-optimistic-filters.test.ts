@@ -1,18 +1,64 @@
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { expect, test } from 'vitest';
-import { createDefaultListQueryStore } from '../../test-old/utils/createDefaultListQueryStore';
-import { jsonFormatter } from '../../test-old/utils/jsonFormatter';
-import { range } from '../../test-old/utils/range';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+  type Row,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
+import { range } from '../utils/genericTestUtils';
 
-const createTestEnv = createDefaultListQueryStore;
+type UserRow = Row & {
+  age: number;
+  type: 'admin' | 'user';
+};
 
-const initialServerData = {
-  users: range(1, 10).map((id, i) => ({
+const initialServerData: Tables<UserRow> = {
+  users: range(1, 10).map((id, index) => ({
     id,
     name: `User ${id}`,
-    age: i % 2 === 0 ? 20 + i : 30 + i,
-    type: i % 2 === 0 ? ('admin' as const) : ('user' as const),
+    age: index % 2 === 0 ? 20 + index : 30 + index,
+    type: index % 2 === 0 ? ('admin' as const) : ('user' as const),
   })),
 };
+
+function byTypeFilter(
+  type: 'admin' | 'user',
+): NonNullable<ListQueryParams['filters']> {
+  return [{ op: 'eq', field: 'type', value: type }];
+}
+
+function byAgeRangeFilter(
+  min: number,
+  max: number,
+): NonNullable<ListQueryParams['filters']> {
+  return [{ op: 'range', field: 'age', min, max }];
+}
+
+function getQueriesRelatedToItem(
+  env: ReturnType<typeof createListQueryStoreTestEnv<UserRow>>,
+  itemId: string,
+) {
+  const queriesRelatedToItem = env.apiStore.getQueriesRelatedToItem(itemId);
+
+  return queriesRelatedToItem.map((item) => ({
+    queryPayload: item.query.payload,
+    itemIndexInQuery: item.query.items.indexOf(getCompositeKey(itemId)),
+    querySize: item.query.items.length,
+    refetchOnMount: item.query.refetchOnMount,
+  }));
+}
+
+function getQueryItems(
+  env: ReturnType<typeof createListQueryStoreTestEnv<UserRow>>,
+  itemId: string,
+) {
+  const queriesRelatedToItem = env.apiStore.getQueriesRelatedToItem(itemId);
+
+  return queriesRelatedToItem.map((item) =>
+    item.query.items.map((itemKey) => env.store.state.items[itemKey]),
+  );
+}
 
 test.concurrent('filter items optimistically to queries', () => {
   const env = createTestEnv({
