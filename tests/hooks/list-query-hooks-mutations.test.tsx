@@ -466,42 +466,42 @@ test('user change multiple records in sequence with RTU enabled', async () => {
   `);
 });
 
-test.concurrent(
-  'query receives a RTU while the query is loading by the component mount',
-  async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
+test('query receives a RTU while the query is loading by the component mount', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    usesRealTimeUpdates: true,
     });
 
-    const renders = createRenderStore();
-
-    env.serverMock.setFetchDuration(400);
+  const renders = createLoggerStore();
 
     renderHook(() => {
-      const { data, status } = env.store.useItem('users||2', {
+    const { data, status } = env.apiStore.useItem('users||2', {
         returnRefetchingStatus: true,
       });
 
       renders.add({ status, data });
     });
 
-    await sleep(50);
+  await advanceTime(200);
 
-    env.serverMock.produceData((draft) => {
-      draft['users']![1]!.name = '✅';
+  act(() => {
+    env.serverTable.setItem(
+      'users||2',
+      { id: 2, name: '✅' },
+      { triggerRTUEvent: true },
+    );
     });
 
-    await env.serverMock.waitFetchIdle(400, 1500);
+  await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: loading -- data: null
-    status: success -- data: {id:2, name:✅}
+    -> status: loading ⋅ data: null
+    -> status: success ⋅ data: {id:2, name:✅}
+    -> status: refetching ⋅ data: {id:2, name:✅}
+    -> status: success ⋅ data: {id:2, name:✅}
     "
   `);
-  },
-);
+});
 
 test.concurrent('delete mutation with RTU', async () => {
   const env = createTestEnv({
