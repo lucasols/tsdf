@@ -64,12 +64,12 @@ test.concurrent('filter items optimistically to queries', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
     testScenario: {
       loaded: {
-      queries: [
+        queries: [
           { tableId: 'users', filters: byTypeFilter('admin') },
           { tableId: 'users', filters: byTypeFilter('user') },
           { tableId: 'users', filters: byAgeRangeFilter(20, 30) },
-      ],
-    },
+        ],
+      },
     },
     optimisticListUpdates: [
       {
@@ -118,7 +118,7 @@ test.concurrent('filter items optimistically to queries', () => {
         tableId: 'users'
       querySize: 6
       refetchOnMount: '❌'
-    `);
+  `);
 
   env.apiStore.updateItemState('users||20', (item) => {
     item.age = 19;
@@ -132,7 +132,7 @@ test.concurrent('filter items optimistically to queries', () => {
         tableId: 'users'
       querySize: 6
       refetchOnMount: 'highPriority'
-    `);
+  `);
 });
 
 test.concurrent('optimistically create a query if it does not exist', () => {
@@ -140,7 +140,7 @@ test.concurrent('optimistically create a query if it does not exist', () => {
     testScenario: {
       loaded: {
         queries: [{ tableId: 'users', filters: byTypeFilter('user') }],
-    },
+      },
     },
     optimisticListUpdates: [
       {
@@ -174,105 +174,84 @@ test.concurrent('optimistically create a query if it does not exist', () => {
   expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(`
     - '{filters:[{field:"type",op:"eq",value:"user"}],tableId:"users"}'
     - '{filters:[{field:"type",op:"eq",value:"admin"}],tableId:"users"}'
-    `);
+  `);
 });
 
 test.concurrent('optimistically sort items', () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: {
-      queries: [{ tableId: 'users', filters: { type: 'user' } }],
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: {
+      loaded: {
+        queries: [{ tableId: 'users', filters: byTypeFilter('user') }],
+      },
     },
-    disableInitialDataInvalidation: true,
-
     optimisticListUpdates: [
       {
-        queries: (query) => query.filters?.type === 'user',
+        queries: (query) =>
+          query.tableId === 'users'
+          && query.filters?.some(
+            (filter) =>
+              filter.op === 'eq'
+              && filter.field === 'type'
+              && filter.value === 'user',
+          ) === true,
         filterItem: (item) => item.type === 'user',
       },
       {
         queries: () => true,
         sort: {
-          sortBy: (item) => item.age!,
+          sortBy: (item) => item.age,
           order: 'desc',
         },
       },
     ],
   });
 
-  env.store.addItemToState('users||20', {
+  env.apiStore.addItemToState('users||20', {
     id: 20,
     name: 'User 20',
     age: 19,
     type: 'user',
   });
 
-  expect(getSortSnapshot(env)).toMatchInlineSnapshotString(`
-    "[
-      {
-        query: {
-          error: null,
-          status: 'success',
-          refetchOnMount: false,
-          wasLoaded: true,
-          payload: { tableId: 'users', filters: { type: 'user' } },
-          items:       [
-            { id: 10, name: 'User 10', age: 39, type: 'user' },
-            { id: 8, name: 'User 8', age: 37, type: 'user' },
-            { id: 6, name: 'User 6', age: 35, type: 'user' },
-            { id: 4, name: 'User 4', age: 33, type: 'user' },
-            { id: 2, name: 'User 2', age: 31, type: 'user' },
-            { id: 20, name: 'User 20', age: 19, type: 'user' },
-          ],
-          hasMore: false,
-        },
-        key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
-      },
-    ]"
+  expect(getQueriesRelatedToItem(env, 'users||20')).toMatchInlineSnapshot(`
+    - itemIndexInQuery: 5
+      queryPayload:
+        filters:
+          - { field: 'type', op: 'eq', value: 'user' }
+        tableId: 'users'
+      querySize: 6
+      refetchOnMount: '❌'
   `);
 
-  env.store.updateItemState('users||20', (item) => {
+  expect(getQueryItems(env, 'users||20')).toMatchInlineSnapshot(`
+    - - { age: 39, id: 10, name: 'User 10', type: 'user' }
+      - { age: 37, id: 8, name: 'User 8', type: 'user' }
+      - { age: 35, id: 6, name: 'User 6', type: 'user' }
+      - { age: 33, id: 4, name: 'User 4', type: 'user' }
+      - { age: 31, id: 2, name: 'User 2', type: 'user' }
+      - { age: 19, id: 20, name: 'User 20', type: 'user' }
+  `);
+
+  env.apiStore.updateItemState('users||20', (item) => {
     item.age = 34;
   });
 
-  expect(getSortSnapshot(env)).toMatchInlineSnapshotString(`
-    "[
-      {
-        query: {
-          error: null,
-          status: 'success',
-          refetchOnMount: false,
-          wasLoaded: true,
-          payload: { tableId: 'users', filters: { type: 'user' } },
-          items:       [
-            { id: 10, name: 'User 10', age: 39, type: 'user' },
-            { id: 8, name: 'User 8', age: 37, type: 'user' },
-            { id: 6, name: 'User 6', age: 35, type: 'user' },
-            { id: 20, name: 'User 20', age: 34, type: 'user' },
-            { id: 4, name: 'User 4', age: 33, type: 'user' },
-            { id: 2, name: 'User 2', age: 31, type: 'user' },
-          ],
-          hasMore: false,
-        },
-        key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
-      },
-    ]"
+  expect(getQueriesRelatedToItem(env, 'users||20')).toMatchInlineSnapshot(`
+    - itemIndexInQuery: 3
+      queryPayload:
+        filters:
+          - { field: 'type', op: 'eq', value: 'user' }
+        tableId: 'users'
+      querySize: 6
+      refetchOnMount: '❌'
+  `);
+
+  expect(getQueryItems(env, 'users||20')).toMatchInlineSnapshot(`
+    - - { age: 39, id: 10, name: 'User 10', type: 'user' }
+      - { age: 37, id: 8, name: 'User 8', type: 'user' }
+      - { age: 35, id: 6, name: 'User 6', type: 'user' }
+      - { age: 34, id: 20, name: 'User 20', type: 'user' }
+      - { age: 33, id: 4, name: 'User 4', type: 'user' }
+      - { age: 31, id: 2, name: 'User 2', type: 'user' }
   `);
 });
-
-function getSortSnapshot(env: ReturnType<typeof createTestEnv>): string {
-  return jsonFormatter(
-    env.store
-      .getQueriesState(() => true)
-      .map((q) => ({
-        ...q,
-        query: {
-          ...q.query,
-          items: q.query.items.map((id) => {
-            const item = env.store.getItemState(id);
-            return item!;
-          }),
-        },
-      })),
-  );
-}
