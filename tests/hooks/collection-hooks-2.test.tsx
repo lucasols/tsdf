@@ -458,9 +458,8 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
       );
 
       const result = env.apiStore.useItem('1', {
-        selector:
-          selectorUsesExternalDeps ?
-            selectorWithExternalDeps
+        selector: selectorUsesExternalDeps
+          ? selectorWithExternalDeps
           : selectorWithoutExternalDeps,
       });
 

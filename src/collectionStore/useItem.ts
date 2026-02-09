@@ -42,18 +42,18 @@ export function useItem<
 ): TSFDUseCollectionItemReturn<Selected, ItemPayload> {
   const query = useMemo(
     () =>
-      payload === false || payload === null || payload === undefined ?
-        []
-      : [
-          {
-            payload,
-            omitPayload,
-            returnRefetchingStatus,
-            disableRefetchOnMount,
-            returnIdleStatus,
-            isOffScreen,
-          },
-        ],
+      payload === false || payload === null || payload === undefined
+        ? []
+        : [
+            {
+              payload,
+              omitPayload,
+              returnRefetchingStatus,
+              disableRefetchOnMount,
+              returnIdleStatus,
+              isOffScreen,
+            },
+          ],
     [
       disableRefetchOnMount,
       isOffScreen,

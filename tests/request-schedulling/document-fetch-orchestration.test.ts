@@ -20,7 +20,10 @@ afterEach(() => {
 });
 
 test('simple mutation with revalidation and optimistic update', async () => {
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -54,7 +57,10 @@ test('simple mutation with revalidation and optimistic update', async () => {
 });
 
 test('simple mutation with optimistic update', async () => {
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -83,7 +89,10 @@ test('simple mutation with optimistic update', async () => {
 });
 
 test('simple mutation without optimistic update', async () => {
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -114,7 +123,10 @@ test('simple mutation without optimistic update', async () => {
 });
 
 test('prevent overfetch of low priority fetches', async () => {
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -157,7 +169,10 @@ test('prevent overfetch of low priority fetches', async () => {
 });
 
 test('multiple mutations with revalidation in sequence', async () => {
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -203,7 +218,10 @@ test('multiple mutations with revalidation in sequence', async () => {
 
 test('multiple mutations with revalidation in sequence, causing concurrent updates', async () => {
   // mutations should abort in progress fetches
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -258,7 +276,10 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
 
 test('multiple mutations with revalidation in sequence 2', async () => {
   // mutations should abort in progress fetches, stress test
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -360,7 +381,10 @@ test('multiple mutations with revalidation in sequence 2', async () => {
 
 test('multiple mutations with revalidation in sequence 3', async () => {
   // mutations should abort in progress fetches, no initial low priority fetch
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -444,7 +468,10 @@ test('multiple mutations with revalidation in sequence 3', async () => {
 test('high priority fetch during mutation', async () => {
   // Expected: high priority fetch triggered during mutation should be scheduled
   // to run after the mutation completes, preventing stale data commits.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -487,7 +514,10 @@ test('high priority fetch during mutation', async () => {
 test('multiple concurrent mutations with revalidation', async () => {
   // Expected: overlapping mutations schedule a single revalidation fetch that
   // skips redundant requests and commits only once with the latest data.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -537,7 +567,10 @@ test('multiple concurrent mutations with revalidation', async () => {
 
 test('multiple high priority fetches', async () => {
   // Expected: high priority requests coalesce into a running fetch plus one scheduled fetch.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -584,7 +617,10 @@ test('multiple high priority fetches', async () => {
 
 test('throttle low priority updates', async () => {
   // Expected: low priority requests are throttled so only the first and last execute.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -635,7 +671,10 @@ test('throttle low priority updates', async () => {
 
 test('throttle low priority after a fast fetch completes', async () => {
   // Expected: low priority throttling uses the fetch start time, even if it finishes quickly.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -678,7 +717,10 @@ test('throttle low priority after a fast fetch completes', async () => {
 test('multiple mutations with low priority fetch between', async () => {
   // Expected: low priority fetch is scheduled and coalesced with mutation revalidation,
   // resulting in a single fetch commit.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -730,7 +772,10 @@ test('very slow mutation revalidation then mutation', async () => {
   // Expected: long revalidation fetch overlaps a second mutation, causing the
   // first fetch to be aborted and a fresh fetch to commit the latest value.
   // First revalidation (2000ms) > second mutation (200ms) + second revalidation (200ms)
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -830,7 +875,10 @@ test('fetch error', async () => {
 test('low priority fetch during mutation outside throttle window', async () => {
   // Expected: low priority fetch triggered during mutation should be scheduled
   // to run after the mutation completes when outside the throttle window.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
@@ -873,7 +921,10 @@ test('low priority fetch during mutation outside throttle window', async () => {
 test('low priority fetch during mutation inside throttle window', async () => {
   // Expected: low priority fetch triggered during mutation should be skipped
   // when inside the throttle window from a previous fetch.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);

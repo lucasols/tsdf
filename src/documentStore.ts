@@ -145,9 +145,9 @@ export function createDocumentStore<State extends ValidStoreState>({
       },
       {
         action:
-          currentStatus === 'success' ?
-            'fetch-start-refetching'
-          : 'fetch-start-loading',
+          currentStatus === 'success'
+            ? 'fetch-start-refetching'
+            : 'fetch-start-loading',
       },
     );
 
@@ -174,9 +174,9 @@ export function createDocumentStore<State extends ValidStoreState>({
       store.setPartialState(
         {
           error: errorNormalizer(
-            exception instanceof Error ? exception : (
-              new Error(String(exception), { cause: exception })
-            ),
+            exception instanceof Error
+              ? exception
+              : new Error(String(exception), { cause: exception }),
           ),
           status: 'error',
         },
@@ -266,8 +266,9 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   function invalidateData(priority: FetchType = 'highPriority'): void {
     const currentRefetchOnMount = store.state.refetchOnMount;
-    const currentInvalidationPriority =
-      currentRefetchOnMount ? fetchTypePriority[currentRefetchOnMount] : -1;
+    const currentInvalidationPriority = currentRefetchOnMount
+      ? fetchTypePriority[currentRefetchOnMount]
+      : -1;
     const newInvalidationPriority = fetchTypePriority[priority];
 
     if (currentInvalidationPriority >= newInvalidationPriority) return;
@@ -401,9 +402,8 @@ export function createDocumentStore<State extends ValidStoreState>({
       (state: DocumentStoreState<State>): TSDFUseDocumentReturn<Selected> => {
         const { error } = state;
 
-        const data =
-          selector ?
-            selector(state.data)
+        const data = selector
+          ? selector(state.data)
           : __LEGIT_CAST__<Selected>(state.data);
 
         let status = state.status;

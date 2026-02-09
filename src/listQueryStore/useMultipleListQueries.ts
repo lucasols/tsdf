@@ -88,16 +88,16 @@ export function useMultipleListQueries<
       key: getQueryKey(queryProps.payload),
       payload: queryProps.payload,
       disableRefetchOnMount:
-        queryProps.disableRefetchOnMount
-        ?? allItemsDisableRefetchOnMount
-        ?? globalDisableRefetchOnMount
-        ?? false,
+        queryProps.disableRefetchOnMount ??
+        allItemsDisableRefetchOnMount ??
+        globalDisableRefetchOnMount ??
+        false,
       returnIdleStatus:
         queryProps.returnIdleStatus ?? allItemsReturnIdleStatus ?? false,
       returnRefetchingStatus:
-        queryProps.returnRefetchingStatus
-        ?? allItemsReturnRefetchingStatus
-        ?? false,
+        queryProps.returnRefetchingStatus ??
+        allItemsReturnRefetchingStatus ??
+        false,
       omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
       isOffScreen: queryProps.isOffScreen ?? allItemsIsOffScreen ?? false,
       loadSize: queryProps.loadSize ?? allItemsLoadSize,

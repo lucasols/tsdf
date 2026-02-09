@@ -374,7 +374,10 @@ describe('update state functions', () => {
     test('create if not exist', () => {
       const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
-        { testScenario: 'loaded', usesRealTimeUpdates: true },
+        {
+          testScenario: 'loaded',
+          usesRealTimeUpdates: true,
+        },
       );
 
       let storeUpdates = 0;

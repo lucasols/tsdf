@@ -141,9 +141,8 @@ export function createServerMock<Data>(
       if (nextFetchError) {
         signal?.removeEventListener('abort', onAbort);
         const endTime = Date.now();
-        const error =
-          nextFetchError.path ?
-            new FetchError(nextFetchError.message, {
+        const error = nextFetchError.path
+          ? new FetchError(nextFetchError.message, {
               path: nextFetchError.path,
               method: nextFetchError.method,
               code: nextFetchError.code,

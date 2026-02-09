@@ -51,10 +51,9 @@ export async function executeQueryFetch<
             items: [],
           };
         } else {
-          query.status =
-            query.wasLoaded ?
-              type === 'loadMore' ?
-                'loadingMore'
+          query.status = query.wasLoaded
+            ? type === 'loadMore'
+              ? 'loadingMore'
               : 'refetching'
             : 'loading';
           query.error = null;
@@ -110,9 +109,9 @@ export async function executeQueryFetch<
               const itemQuery = draft.itemQueries[itemKey];
 
               if (
-                !itemQuery
-                || (itemQuery.status !== 'loading'
-                  && itemQuery.status !== 'refetching')
+                !itemQuery ||
+                (itemQuery.status !== 'loading' &&
+                  itemQuery.status !== 'refetching')
               ) {
                 draft.itemQueries[itemKey] = {
                   error: null,

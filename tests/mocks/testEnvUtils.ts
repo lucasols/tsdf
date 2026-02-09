@@ -281,9 +281,9 @@ export function createUITracker<T>(
         if (
           actionsHistory.some(
             (action) =>
-              action.action === 'optimistic-ui-commit'
-              && action.time === time
-              && action.uiValue === value,
+              action.action === 'optimistic-ui-commit' &&
+              action.time === time &&
+              action.uiValue === value,
           )
         ) {
           return;

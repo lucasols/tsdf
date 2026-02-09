@@ -77,16 +77,16 @@ export function useMultipleItems<
       itemKey: getItemKey(queryProps.payload),
       payload: queryProps.payload,
       disableRefetchOnMount:
-        queryProps.disableRefetchOnMount
-        ?? allItemsDisableRefetchOnMount
-        ?? globalDisableRefetchOnMount
-        ?? false,
+        queryProps.disableRefetchOnMount ??
+        allItemsDisableRefetchOnMount ??
+        globalDisableRefetchOnMount ??
+        false,
       returnIdleStatus:
         queryProps.returnIdleStatus ?? allItemsReturnIdleStatus ?? false,
       returnRefetchingStatus:
-        queryProps.returnRefetchingStatus
-        ?? allItemsReturnRefetchingStatus
-        ?? false,
+        queryProps.returnRefetchingStatus ??
+        allItemsReturnRefetchingStatus ??
+        false,
       omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
       isOffScreen: queryProps.isOffScreen ?? allItemsIsOffScreen ?? false,
       queryMetadata: queryProps.queryMetadata,
@@ -121,9 +121,8 @@ export function useMultipleItems<
         > => {
           const item = state[itemKey];
 
-          const data =
-            selector ?
-              selector(item?.data ?? null)
+          const data = selector
+            ? selector(item?.data ?? null)
             : __LEGIT_CAST__<Selected>(item?.data ?? null);
 
           if (item === null) {

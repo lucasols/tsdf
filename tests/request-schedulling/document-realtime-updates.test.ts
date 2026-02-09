@@ -23,7 +23,11 @@ function dynamicRealtimeThrottleMs(lastDuration: number): number {
 test('dynamically throttle realtime updates', async () => {
   // Expected: slow RTU fetch increases throttle window, causing coalescing of RTUs
   // and eventual commits for the latest updates.
-  const env = createDocumentStoreTestEnv(0, { testScenario: 'loaded', usesRealTimeUpdates: true, dynamicRealtimeThrottleMs });
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs,
+  });
 
   renderHook(() => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);

@@ -80,10 +80,10 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     if (
       actionsHistory.some(
         (a) =>
-          a.action === 'optimistic-ui-commit'
-          && a.time === time
-          && a.uiValue === value
-          && a.itemId === itemId,
+          a.action === 'optimistic-ui-commit' &&
+          a.time === time &&
+          a.uiValue === value &&
+          a.itemId === itemId,
       )
     ) {
       return;
@@ -217,9 +217,8 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       const mutationId = getMutationEmoji();
 
       return collectionStore.performMutation(itemId, {
-        optimisticUpdate:
-          withOptimisticUpdate ?
-            () => {
+        optimisticUpdate: withOptimisticUpdate
+          ? () => {
               collectionStore.updateItemState(itemId, (draft) => {
                 draft.value = newValue;
               });
@@ -289,9 +288,9 @@ function resolveTestOptions<D extends Record<string, unknown>>(
 
   if ('idleWithLocalCache' in scenario) {
     const cacheData =
-      scenario.idleWithLocalCache === 'sameAsServer' ?
-        serverInitialData
-      : scenario.idleWithLocalCache;
+      scenario.idleWithLocalCache === 'sameAsServer'
+        ? serverInitialData
+        : scenario.idleWithLocalCache;
 
     return {
       initialData: mapInitialData(cacheData),

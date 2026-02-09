@@ -189,12 +189,11 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
         hasMore: result.hasMore,
       };
     },
-    fetchItemFn:
-      disableFetchItemFn ? undefined : (
-        async (itemId, signal) => {
+    fetchItemFn: disableFetchItemFn
+      ? undefined
+      : async (itemId, signal) => {
           return serverTable.fetch(itemId, signal);
-        }
-      ),
+        },
   });
 
   if (usesRealTimeUpdates) {
@@ -341,9 +340,8 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
       const mergedValue: TRow = { ...baseValue, ...newValue };
 
       return listQueryStore.performMutation(itemId, {
-        optimisticUpdate:
-          withOptimisticUpdate ?
-            () => {
+        optimisticUpdate: withOptimisticUpdate
+          ? () => {
               listQueryStore.updateItemState(itemId, (draft) => {
                 Object.assign(draft, newValue);
               });

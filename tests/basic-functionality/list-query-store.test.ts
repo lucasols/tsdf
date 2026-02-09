@@ -64,7 +64,10 @@ describe('test helpers', () => {
       testScenario: {
         loaded: {
           queries: [
-            { tableId: 'users', filters: [{ op: 'gt', field: 'id', value: 2 }] },
+            {
+              tableId: 'users',
+              filters: [{ op: 'gt', field: 'id', value: 2 }],
+            },
           ],
         },
       },

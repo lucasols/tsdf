@@ -78,12 +78,12 @@ test.concurrent('filter items optimistically to queries', () => {
       },
       {
         queries: (query) =>
-          query.tableId === 'users'
-          && query.filters?.some(
+          query.tableId === 'users' &&
+          query.filters?.some(
             (filter) =>
-              filter.op === 'eq'
-              && filter.field === 'type'
-              && filter.value === 'user',
+              filter.op === 'eq' &&
+              filter.field === 'type' &&
+              filter.value === 'user',
           ) === true,
         filterItem: (item) => item.type === 'user',
         invalidateQueries: true,
@@ -187,12 +187,12 @@ test.concurrent('optimistically sort items', () => {
     optimisticListUpdates: [
       {
         queries: (query) =>
-          query.tableId === 'users'
-          && query.filters?.some(
+          query.tableId === 'users' &&
+          query.filters?.some(
             (filter) =>
-              filter.op === 'eq'
-              && filter.field === 'type'
-              && filter.value === 'user',
+              filter.op === 'eq' &&
+              filter.field === 'type' &&
+              filter.value === 'user',
           ) === true,
         filterItem: (item) => item.type === 'user',
       },

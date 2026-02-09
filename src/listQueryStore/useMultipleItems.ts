@@ -76,16 +76,16 @@ export function useMultipleItems<
       itemKey: getItemKey(itemProps.payload),
       payload: itemProps.payload,
       disableRefetchOnMount:
-        itemProps.disableRefetchOnMount
-        ?? allItemsDisableRefetchOnMount
-        ?? globalDisableRefetchOnMount
-        ?? false,
+        itemProps.disableRefetchOnMount ??
+        allItemsDisableRefetchOnMount ??
+        globalDisableRefetchOnMount ??
+        false,
       returnIdleStatus:
         itemProps.returnIdleStatus ?? allItemsReturnIdleStatus ?? false,
       returnRefetchingStatus:
-        itemProps.returnRefetchingStatus
-        ?? allItemsReturnRefetchingStatus
-        ?? false,
+        itemProps.returnRefetchingStatus ??
+        allItemsReturnRefetchingStatus ??
+        false,
       isOffScreen: itemProps.isOffScreen ?? allItemsIsOffScreen ?? false,
       queryMetadata: itemProps.queryMetadata,
     }));
@@ -112,9 +112,8 @@ export function useMultipleItems<
           const itemQuery = state.itemQueries[itemKey];
           const itemState = state.items[itemKey];
 
-          const data =
-            selector ?
-              selector(itemState ?? null, itemQuery?.payload ?? null)
+          const data = selector
+            ? selector(itemState ?? null, itemQuery?.payload ?? null)
             : __LEGIT_CAST__<Selected>(itemState ?? null);
 
           if (itemQuery === null) {
@@ -226,9 +225,9 @@ export function useMultipleItems<
       }
 
       const shouldFetch =
-        itemState === undefined
-        || !itemState.wasLoaded
-        || itemState.refetchOnMount;
+        itemState === undefined ||
+        !itemState.wasLoaded ||
+        itemState.refetchOnMount;
 
       if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
         continue;

@@ -127,9 +127,8 @@ export function createDocumentStoreTestEnv<D>(
       const mutationId = getMutationEmoji();
 
       return documentStore.performMutation({
-        optimisticUpdate:
-          withOptimisticUpdate ?
-            () => {
+        optimisticUpdate: withOptimisticUpdate
+          ? () => {
               documentStore.updateState((draft) => {
                 draft.value = newValue;
               });
@@ -214,9 +213,9 @@ function resolveTestOptions<D>(
 
   if ('idleWithLocalCache' in scenario) {
     const cacheData =
-      scenario.idleWithLocalCache === 'sameAsServer' ?
-        serverInitialData
-      : scenario.idleWithLocalCache;
+      scenario.idleWithLocalCache === 'sameAsServer'
+        ? serverInitialData
+        : scenario.idleWithLocalCache;
 
     return {
       initialData: { value: cacheData },

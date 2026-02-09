@@ -228,9 +228,8 @@ export function createCollectionStore<
   const useSingleScheduler = !!batchFetchFn;
 
   // Single scheduler for batch coalescing (only used when batchFetchFn is provided)
-  const singleScheduler =
-    useSingleScheduler ?
-      new RequestScheduler<ItemPayload>({
+  const singleScheduler = useSingleScheduler
+    ? new RequestScheduler<ItemPayload>({
         fetchFn: async (
           requests: BatchRequest<ItemPayload>[],
           fetchCtx: FetchContext,
@@ -416,8 +415,9 @@ export function createCollectionStore<
 
       if (!item) continue;
 
-      const currentInvalidationPriority =
-        item.refetchOnMount ? fetchTypePriority[item.refetchOnMount] : -1;
+      const currentInvalidationPriority = item.refetchOnMount
+        ? fetchTypePriority[item.refetchOnMount]
+        : -1;
       const newInvalidationPriority = fetchTypePriority[priority];
 
       if (currentInvalidationPriority >= newInvalidationPriority) continue;

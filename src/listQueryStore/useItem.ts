@@ -46,21 +46,17 @@ export function useItem<
 ): TSFDUseListItemReturn<Selected, ItemPayload> {
   const query = useMemo(
     (): ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[] =>
-      (
-        itemPayload === false
-        || itemPayload === null
-        || itemPayload === undefined
-      ) ?
-        []
-      : [
-          {
-            payload: itemPayload,
-            disableRefetchOnMount,
-            isOffScreen,
-            returnIdleStatus,
-            returnRefetchingStatus,
-          },
-        ],
+      itemPayload === false || itemPayload === null || itemPayload === undefined
+        ? []
+        : [
+            {
+              payload: itemPayload,
+              disableRefetchOnMount,
+              isOffScreen,
+              returnIdleStatus,
+              returnRefetchingStatus,
+            },
+          ],
     [
       itemPayload,
       disableRefetchOnMount,

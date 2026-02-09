@@ -129,9 +129,8 @@ async function deleteItem(
   const id = `${tableId}||${itemId}`;
 
   return env.apiStore.performMutation(id, {
-    optimisticUpdate:
-      optimisticUpdate ?
-        () => {
+    optimisticUpdate: optimisticUpdate
+      ? () => {
           env.apiStore.deleteItemState(id);
         }
       : undefined,
