@@ -503,20 +503,18 @@ test('query receives a RTU while the query is loading by the component mount', a
   `);
 });
 
-test.concurrent('delete mutation with RTU', async () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users'] },
-    emulateRTU: true,
-    disableInitialDataInvalidation: true,
+test('delete mutation with RTU', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
+    usesRealTimeUpdates: true,
   });
 
-  const renders = createRenderStore();
-
-  env.serverMock.setFetchDuration(400);
+  const renders = createLoggerStore({
+    arrays: 'all',
+  });
 
   renderHook(() => {
-    const { items, status } = env.store.useListQuery(
+    const { items, status } = env.apiStore.useListQuery(
       { tableId: 'users' },
       {
         returnRefetchingStatus: true,
@@ -530,34 +528,38 @@ test.concurrent('delete mutation with RTU', async () => {
     renders.add({ status, items });
   });
 
-  deleteItem(env, 'users', 2, { optimisticUpdate: true, duration: 600 });
+  act(() => {
+    void deleteItem(env, 'users', 2, {
+      optimisticUpdate: true,
+      duration: 600,
+      triggerRTU: true,
+    });
+  });
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+  await flushAllTimers();
 
-  expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- items: [User 1, User 2, User 3, User 4, User 5]
-    status: success -- items: [User 1, User 3, User 4, User 5]
-    status: refetching -- items: [User 1, User 3, User 4, User 5]
-    status: success -- items: [User 1, User 3, User 4, User 5]
+    -> status: success ⋅ items: [User 1, User 2, User 3, User 4, User 5]
+    -> status: success ⋅ items: [User 1, User 3, User 4, User 5]
+    -> status: refetching ⋅ items: [User 1, User 3, User 4, User 5]
+    -> status: success ⋅ items: [User 1, User 3, User 4, User 5]
     "
   `);
 });
 
-test.concurrent('creation mutation with RTU', async () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users'] },
-    emulateRTU: true,
-    disableInitialDataInvalidation: true,
+test('creation mutation with RTU', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
+    usesRealTimeUpdates: true,
   });
 
-  const renders = createRenderStore();
-
-  env.serverMock.setFetchDuration(400);
+  const renders = createLoggerStore({
+    arrays: 'all',
+  });
 
   renderHook(() => {
-    const { items, status } = env.store.useListQuery(
+    const { items, status } = env.apiStore.useListQuery(
       { tableId: 'users' },
       {
         returnRefetchingStatus: true,
@@ -571,15 +573,19 @@ test.concurrent('creation mutation with RTU', async () => {
     renders.add({ status, items });
   });
 
-  addItemWithIdGeneratedByClient(env, 'users', '8', '🆕');
+  act(() => {
+    void addItemWithIdGeneratedByClient(env, 'users', '8', '🆕', {
+      triggerRTU: true,
+    });
+  });
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+  await flushAllTimers();
 
-  expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- items: [User 1, User 2, User 3, User 4, User 5]
-    status: refetching -- items: [User 1, User 2, User 3, User 4, User 5]
-    status: success -- items: [User 1, User 2, User 3, User 4, User 5, 🆕]
+    -> status: success ⋅ items: [User 1, User 2, User 3, User 4, User 5]
+    -> status: refetching ⋅ items: [User 1, User 2, User 3, User 4, User 5]
+    -> status: success ⋅ items: [User 1, User 2, User 3, User 4, User 5, 🆕]
     "
   `);
 });
