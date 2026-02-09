@@ -158,19 +158,15 @@ async function deleteItem(
     });
 }
 
-test.concurrent('user updating the name of a record', async () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users', 'products'] },
-    disableInitialDataInvalidation: true,
+test('user updating the name of a record', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users', 'products'] } },
   });
 
-  const renders = createRenderStore();
-
-  env.serverMock.setFetchDuration(263);
+  const renders = createLoggerStore();
 
   renderHook(() => {
-    const { data, status } = env.store.useItem('users||1', {
+    const { data, status } = env.apiStore.useItem('users||1', {
       disableRefetchOnMount: true,
     });
 
@@ -178,52 +174,49 @@ test.concurrent('user updating the name of a record', async () => {
   });
 
   function setName(name: string, duration: number) {
-    updateItemName(env, 'users', 1, name, {
-      optimisticUpdate: true,
-      revalidate: true,
+    act(() => {
+      void env.performClientItemUpdateAction(
+        'users||1',
+        { name },
+        {
+          withOptimisticUpdate: true,
+          withRevalidation: true,
       duration,
+        },
+      );
     });
   }
 
-  // perform mutation
   setName('', 530);
 
-  expect(env.store.getItemState('users||1')).toMatchObject({ name: '' });
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({ name: '' });
 
-  await sleep(263);
-
+  await advanceTime(263);
   setName('T', 662);
 
-  await sleep(263);
-
+  await advanceTime(263);
   setName('Ty', 560);
 
-  await sleep(300);
-
+  await advanceTime(300);
   setName('Typ', 560);
 
-  await sleep(226);
-
-  env.serverMock.setFetchDuration(230);
-
+  await advanceTime(226);
   setName('Type', 523);
 
-  await env.serverMock.waitFetchIdle(500, 1500);
+  await flushAllTimers();
 
-  expect(env.store.getItemState('users||1')).toMatchObject({ name: 'Type' });
-
-  expect(renders.snapshot).toMatchInlineSnapshotString(`
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({ name: 'Type' });
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- data: {id:1, name:User 1}
-    status: success -- data: {id:1, name:}
-    status: success -- data: {id:1, name:T}
-    status: success -- data: {id:1, name:Ty}
-    status: success -- data: {id:1, name:Typ}
-    status: success -- data: {id:1, name:Type}
+    -> status: success ⋅ data: {id:1, name:User 1}
+    -> status: success ⋅ data: {id:1, name:''}
+    -> status: success ⋅ data: {id:1, name:T}
+    -> status: success ⋅ data: {id:1, name:Ty}
+    -> status: success ⋅ data: {id:1, name:Typ}
+    -> status: success ⋅ data: {id:1, name:Type}
     "
   `);
-
-  expect(env.serverMock.fetchsCount).toBe(1);
 });
 
 test.concurrent(
