@@ -17,7 +17,7 @@ export type Row = {
   [key: string]: unknown;
 };
 
-export type Tables = Record<string, Row[]>;
+export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
 
 export type ListQueryParams = {
   tableId: string;
@@ -48,8 +48,8 @@ function getStoreItemKey(tableId: string, id: number): string {
   return getCompositeKey(getRawItemKey(tableId, id));
 }
 
-export function createListQueryStoreTestEnv(
-  serverInitialData: Tables,
+export function createListQueryStoreTestEnv<TRow extends Row = Row>(
+  serverInitialData: Tables<TRow>,
   {
     dynamicRealtimeThrottleMs,
     baseCoalescingWindowMs = 10,
@@ -76,7 +76,7 @@ export function createListQueryStoreTestEnv(
     maxItemBatchSize?: number;
     disableFetchItemFn?: boolean;
     optimisticListUpdates?: Parameters<
-      typeof createListQueryStore<Row, ListQueryParams, string>
+      typeof createListQueryStore<TRow, ListQueryParams, string>
     >[0]['optimisticListUpdates'];
   } = {},
 ) {
@@ -89,15 +89,15 @@ export function createListQueryStoreTestEnv(
   } = createActionTracker();
   const { getMutationEmoji } = createEmojiCyclers();
 
-  // Convert Tables to Record<string, Row> for serverTableMock
-  const flatItems: Record<string, Row> = {};
+  // Convert Tables to Record<string, TRow> for serverTableMock
+  const flatItems: Record<string, TRow> = {};
   for (const [tableId, rows] of Object.entries(serverInitialData)) {
     for (const row of rows) {
       flatItems[getRawItemKey(tableId, row.id)] = row;
     }
   }
 
-  const serverTable = createServerTableMock<Row>(flatItems, addAction);
+  const serverTable = createServerTableMock<TRow>(flatItems, addAction);
 
   const { trackUIChanges } = createUITracker<unknown>(
     addAction,
@@ -156,7 +156,7 @@ export function createListQueryStoreTestEnv(
 
   const testOptions = resolveTestOptions(testScenario, serverTable);
 
-  const listQueryStore = createListQueryStore<Row, ListQueryParams, string>({
+  const listQueryStore = createListQueryStore<TRow, ListQueryParams, string>({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
@@ -190,11 +190,11 @@ export function createListQueryStoreTestEnv(
       };
     },
     fetchItemFn:
-      disableFetchItemFn ?
-        undefined
-      : async (itemId, signal) => {
+      disableFetchItemFn ? undefined : (
+        async (itemId, signal) => {
           return serverTable.fetch(itemId, signal);
-        },
+        }
+      ),
   });
 
   if (usesRealTimeUpdates) {
@@ -309,9 +309,9 @@ export function createListQueryStoreTestEnv(
 
       return result;
     },
-    performClientUpdateAction: async (
+    performClientItemUpdateAction: (
       itemId: string,
-      newValue: Row,
+      newValue: Partial<TRow>,
       {
         withRevalidation,
         withOptimisticUpdate,
@@ -328,10 +328,17 @@ export function createListQueryStoreTestEnv(
     ) => {
       const mutationId = getMutationEmoji();
       const tableId = itemId.split('||')[0];
+      const currentItemState = listQueryStore.getItemState(itemId);
+      const baseValue = currentItemState ?? serverTable.get(itemId);
 
       if (!tableId) {
         throw new Error(`Invalid itemId format: "${itemId}"`);
       }
+      if (!baseValue) {
+        throw new Error(`Item not found in server or store state: "${itemId}"`);
+      }
+
+      const mergedValue: TRow = { ...baseValue, ...newValue };
 
       return listQueryStore.performMutation(itemId, {
         optimisticUpdate:
@@ -342,14 +349,14 @@ export function createListQueryStoreTestEnv(
               });
 
               addAction('optimistic-ui-commit', {
-                uiValue: newValue,
+                uiValue: mergedValue,
                 id: mutationId,
                 itemId,
               });
             }
           : undefined,
         mutation: async () => {
-          return serverTable.emulateClientMutation(itemId, newValue, {
+          return serverTable.emulateClientMutation(itemId, mergedValue, {
             duration,
             triggerRTUEvent: triggerRTU,
             addServerDataChangeAction,
@@ -366,22 +373,22 @@ export function createListQueryStoreTestEnv(
   };
 }
 
-type InitialData = {
+type InitialData<TRow extends Row = Row> = {
   queries: Array<{
     payload: ListQueryParams;
     hasMore: boolean;
     items: string[];
   }>;
-  items: Array<{ payload: string; data: Row }>;
+  items: Array<{ payload: string; data: TRow }>;
 };
 
-function buildSnapshotData(
+function buildSnapshotData<TRow extends Row>(
   config: ListQuerySnapshotConfig,
-  serverTable: ReturnType<typeof createServerTableMock<Row>>,
-): InitialData {
+  serverTable: ReturnType<typeof createServerTableMock<TRow>>,
+): InitialData<TRow> {
   const tablesToSnapshot = config.tables ?? [];
 
-  const initialData: InitialData = { queries: [], items: [] };
+  const initialData: InitialData<TRow> = { queries: [], items: [] };
 
   for (const tableId of tablesToSnapshot) {
     const tableItems = serverTable.getByPrefix(`${tableId}||`);
@@ -445,12 +452,12 @@ function buildSnapshotData(
   return initialData;
 }
 
-function resolveTestOptions(
+function resolveTestOptions<TRow extends Row>(
   scenario: ListQueryStoreTestScenario | undefined,
-  serverTable: ReturnType<typeof createServerTableMock<Row>>,
+  serverTable: ReturnType<typeof createServerTableMock<TRow>>,
 ):
   | {
-      initialData?: InitialData;
+      initialData?: InitialData<TRow>;
       initialRefetchOnMount?: FetchType | false;
       initialLastFetchStartTime?: number;
     }
