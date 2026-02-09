@@ -327,7 +327,7 @@ describe('mutation handling', () => {
     await vi.runAllTimersAsync();
 
     // Start mutation on table1||1
-    void env.performClientUpdateAction(
+    void env.performClientItemUpdateAction(
       'table1||1',
       { id: 1, name: 'Updated' },
       {
@@ -364,6 +364,7 @@ describe('mutation handling', () => {
       .     | {"id":1,"name":"Item 1"}  | {"id":2,"name":"Item 2"} | [table1||2] ui-changed
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | ⬜ [table1||1] optimistic-ui-commit
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | ⬜ [table1||1] >mutation-started (value: {"id":1,"name":"Updated"})
+      .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | [table1||1] ui-changed
       50ms  | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | 🔴 [table1||2] >fetch-started
       840ms | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | ⬜ [table1||1] <mutation-data-persisted (value: {"id":1,"name":"Updated"})
       850ms | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | 🔴 [table1||2] <fetch-finished (value: {"id":2,"name":"Item 2"})
@@ -605,6 +606,7 @@ describe('priority handling in batch', () => {
     const env = createListQueryStoreTestEnv(serverData, {
       baseCoalescingWindowMs: 50,
       useBatchFetch: true,
+      usesRealTimeUpdates: true,
     });
 
     env.scheduleItemFetch('lowPriority', 'table1||1');
