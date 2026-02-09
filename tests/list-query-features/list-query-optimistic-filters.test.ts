@@ -61,182 +61,119 @@ function getQueryItems(
 }
 
 test.concurrent('filter items optimistically to queries', () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: {
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: {
+      loaded: {
       queries: [
-        { tableId: 'users', filters: { type: 'admin' } },
-        { tableId: 'users', filters: { type: 'user' } },
-        { tableId: 'users', filters: { ageRange: [20, 30] } },
+          { tableId: 'users', filters: byTypeFilter('admin') },
+          { tableId: 'users', filters: byTypeFilter('user') },
+          { tableId: 'users', filters: byAgeRangeFilter(20, 30) },
       ],
     },
-    disableInitialDataInvalidation: true,
-
+    },
     optimisticListUpdates: [
       {
-        queries: { tableId: 'users', filters: { type: 'admin' } },
+        queries: { tableId: 'users', filters: byTypeFilter('admin') },
         filterItem: (item) => item.type === 'admin',
       },
       {
-        queries: (query) => query.filters?.type === 'user',
+        queries: (query) =>
+          query.tableId === 'users'
+          && query.filters?.some(
+            (filter) =>
+              filter.op === 'eq'
+              && filter.field === 'type'
+              && filter.value === 'user',
+          ) === true,
         filterItem: (item) => item.type === 'user',
         invalidateQueries: true,
         appendNewTo: 'start',
       },
       {
-        queries: [{ tableId: 'users', filters: { ageRange: [20, 30] } }],
-        filterItem: (item) => item.age! >= 20 && item.age! <= 30,
+        queries: [{ tableId: 'users', filters: byAgeRangeFilter(20, 30) }],
+        filterItem: (item) => item.age >= 20 && item.age <= 30,
       },
     ],
   });
 
-  env.store.addItemToState('users||20', {
+  env.apiStore.addItemToState('users||20', {
     id: 20,
     name: 'User 20',
     age: 20,
     type: 'user',
   });
 
-  expect(jsonFormatter(env.store.getQueriesState(() => true)))
-    .toMatchInlineSnapshotString(`
-      "[
-        {
-          query: {
-            error: null,
-            status: 'success',
-            refetchOnMount: false,
-            wasLoaded: true,
-            payload: { tableId: 'users', filters: { type: 'admin' } },
-            items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9' ],
-            hasMore: false,
-          },
-          key: '[{"filters":{"type":"admin"}},{"tableId":"users"}]',
-        },
-        {
-          query: {
-            error: null,
-            status: 'success',
-            refetchOnMount: 'highPriority',
-            wasLoaded: true,
-            payload: { tableId: 'users', filters: { type: 'user' } },
-            items: [ 'users||20', 'users||2', 'users||4', 'users||6', 'users||8', 'users||10' ],
-            hasMore: false,
-          },
-          key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
-        },
-        {
-          query: {
-            error: null,
-            status: 'success',
-            refetchOnMount: false,
-            wasLoaded: true,
-            payload: { tableId: 'users', filters: { ageRange: [ 20, 30 ] } },
-            items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9', 'users||20' ],
-            hasMore: false,
-          },
-          key: '[{"filters":{"ageRange":[20,30]}},{"tableId":"users"}]',
-        },
-      ]"
+  expect(getQueriesRelatedToItem(env, 'users||20')).toMatchInlineSnapshot(`
+    - itemIndexInQuery: 0
+      queryPayload:
+        filters:
+          - { field: 'type', op: 'eq', value: 'user' }
+        tableId: 'users'
+      querySize: 6
+      refetchOnMount: 'highPriority'
+    - itemIndexInQuery: 5
+      queryPayload:
+        filters:
+          - { field: 'age', max: 30, min: 20, op: 'range' }
+        tableId: 'users'
+      querySize: 6
+      refetchOnMount: '❌'
     `);
 
-  env.store.updateItemState('users||20', (item) => {
+  env.apiStore.updateItemState('users||20', (item) => {
     item.age = 19;
   });
 
-  expect(jsonFormatter(env.store.getQueriesState(() => true)))
-    .toMatchInlineSnapshotString(`
-      "[
-        {
-          query: {
-            error: null,
-            status: 'success',
-            refetchOnMount: false,
-            wasLoaded: true,
-            payload: { tableId: 'users', filters: { type: 'admin' } },
-            items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9' ],
-            hasMore: false,
-          },
-          key: '[{"filters":{"type":"admin"}},{"tableId":"users"}]',
-        },
-        {
-          query: {
-            error: null,
-            status: 'success',
-            refetchOnMount: 'highPriority',
-            wasLoaded: true,
-            payload: { tableId: 'users', filters: { type: 'user' } },
-            items: [ 'users||20', 'users||2', 'users||4', 'users||6', 'users||8', 'users||10' ],
-            hasMore: false,
-          },
-          key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
-        },
-        {
-          query: {
-            error: null,
-            status: 'success',
-            refetchOnMount: false,
-            wasLoaded: true,
-            payload: { tableId: 'users', filters: { ageRange: [ 20, 30 ] } },
-            items: [ 'users||1', 'users||3', 'users||5', 'users||7', 'users||9' ],
-            hasMore: false,
-          },
-          key: '[{"filters":{"ageRange":[20,30]}},{"tableId":"users"}]',
-        },
-      ]"
+  expect(getQueriesRelatedToItem(env, 'users||20')).toMatchInlineSnapshot(`
+    - itemIndexInQuery: 0
+      queryPayload:
+        filters:
+          - { field: 'type', op: 'eq', value: 'user' }
+        tableId: 'users'
+      querySize: 6
+      refetchOnMount: 'highPriority'
     `);
 });
 
-test.concurrent('optimistically create a query if it not exist', () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: {
-      queries: [{ tableId: 'users', filters: { type: 'user' } }],
+test.concurrent('optimistically create a query if it does not exist', () => {
+  const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    testScenario: {
+      loaded: {
+        queries: [{ tableId: 'users', filters: byTypeFilter('user') }],
     },
-    disableInitialDataInvalidation: true,
-
+    },
     optimisticListUpdates: [
       {
-        queries: { tableId: 'users', filters: { type: 'admin' } },
+        queries: { tableId: 'users', filters: byTypeFilter('admin') },
         filterItem: (item) => item.type === 'admin',
       },
     ],
   });
 
-  env.store.addItemToState('users||20', {
+  expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(
+    `['{filters:[{field:"type",op:"eq",value:"user"}],tableId:"users"}']`,
+  );
+
+  env.apiStore.addItemToState('users||20', {
     id: 20,
     name: 'User 20',
     age: 19,
     type: 'admin',
   });
 
-  expect(jsonFormatter(env.store.getQueriesState(() => true)))
-    .toMatchInlineSnapshotString(`
-      "[
-        {
-          query: {
-            error: null,
-            status: 'success',
-            refetchOnMount: false,
-            wasLoaded: true,
-            payload: { tableId: 'users', filters: { type: 'user' } },
-            items: [ 'users||2', 'users||4', 'users||6', 'users||8', 'users||10' ],
-            hasMore: false,
-          },
-          key: '[{"filters":{"type":"user"}},{"tableId":"users"}]',
-        },
-        {
-          query: {
-            status: 'success',
-            items: [ 'users||20' ],
-            error: null,
-            hasMore: false,
-            payload: { tableId: 'users', filters: { type: 'admin' } },
-            refetchOnMount: 'lowPriority',
-            wasLoaded: true,
-          },
-          key: '[{"filters":{"type":"admin"}},{"tableId":"users"}]',
-        },
-      ]"
+  expect(getQueriesRelatedToItem(env, 'users||20')).toMatchInlineSnapshot(`
+    - itemIndexInQuery: 0
+      queryPayload:
+        filters:
+          - { field: 'type', op: 'eq', value: 'admin' }
+        tableId: 'users'
+      querySize: 1
+      refetchOnMount: 'lowPriority'
+  `);
+
+  expect(Object.keys(env.store.state.queries)).toMatchInlineSnapshot(`
+    - '{filters:[{field:"type",op:"eq",value:"user"}],tableId:"users"}'
+    - '{filters:[{field:"type",op:"eq",value:"admin"}],tableId:"users"}'
     `);
 });
 
