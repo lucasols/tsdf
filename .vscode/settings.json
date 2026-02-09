@@ -2,5 +2,20 @@
   "typescript.tsdk": "node_modules/typescript/lib",
   "git.branchProtection": ["main"],
   "typescript.preferences.includePackageJsonAutoImports": "on",
-  "cSpell.words": ["rrfs"]
+  "cSpell.words": ["rrfs"],
+  "workbench.colorCustomizations": {
+    "activityBar.activeBackground": "#9bb3c5",
+    "activityBar.background": "#9bb3c5",
+    "activityBar.foreground": "#15202b",
+    "activityBar.inactiveForeground": "#15202b99",
+    "activityBarBadge.background": "#a15e84",
+    "activityBarBadge.foreground": "#e7e7e7",
+    "commandCenter.border": "#15202b99",
+    "sash.hoverBorder": "#9bb3c5",
+    "titleBar.activeBackground": "#7b9bb2",
+    "titleBar.activeForeground": "#15202b",
+    "titleBar.inactiveBackground": "#7b9bb299",
+    "titleBar.inactiveForeground": "#15202b99"
+  },
+  "peacock.color": "#7b9bb2"
 }
