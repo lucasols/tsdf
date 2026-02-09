@@ -4,7 +4,9 @@ import {
   newTSDFListQueryStore,
   TSFDListQueryState,
 } from '../../src/listQueryStore';
+import { isObject } from '../../src/utils/isObject';
 import { mockServerResource } from '../mocks/fetchMock';
+import { pick } from './objectUtils';
 import { normalizeError, StoreError } from './storeUtils';
 
 type Row = {
@@ -13,6 +15,17 @@ type Row = {
   type?: 'admin' | 'user';
   archived?: boolean;
   age?: number;
+  createdAt?: number;
+  createdBy?: string;
+  updatedAt?: number;
+  updatedBy?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  postalCode?: string;
+  description?: string;
 };
 
 export type Tables = {
@@ -27,13 +40,16 @@ export type ListQueryParams = {
     archived?: boolean;
     ageRange?: [number, number];
   };
+  fields?: (keyof Row)[];
 };
+
+type ItemQueryParams = string | { id: string; fields: (keyof Row)[] };
 
 export type DefaultListQueryState = TSFDListQueryState<
   Row,
   StoreError,
   ListQueryParams,
-  string
+  ItemQueryParams
 >;
 
 export function createDefaultListQueryStore({
@@ -44,10 +60,12 @@ export function createDefaultListQueryStore({
   disableFetchItemFn,
   dynamicRTUThrottleMs,
   disableInitialDataInvalidation = false,
-  debugRequests: debuFetchs,
+  debugRequests: debugFetches,
   emulateRTU,
   optimisticListUpdates,
   lowPriorityThrottleMs,
+  partialResources,
+  disableRefetchOnMount,
 }: {
   initialServerData?: Tables;
   useLoadedSnapshot?: {
@@ -59,17 +77,19 @@ export function createDefaultListQueryStore({
   defaultQuerySize?: number;
   dynamicRTUThrottleMs?: (duration: number) => number;
   debug?: never;
+  disableRefetchOnMount?: boolean;
   debugRequests?: never;
   disableInitialDataInvalidation?: boolean;
   emulateRTU?: boolean;
   lowPriorityThrottleMs?: number;
   optimisticListUpdates?: Parameters<
-    typeof newTSDFListQueryStore<Row, any, ListQueryParams, string>
+    typeof newTSDFListQueryStore<Row, any, ListQueryParams, ItemQueryParams>
   >[0]['optimisticListUpdates'];
+  partialResources?: boolean;
 } = {}) {
   const serverMock = mockServerResource<Tables, Row[] | Row>({
     initialData: initialServerData,
-    logFetchs: (debug as any) || (debuFetchs as any),
+    logFetches: (debug as any) || (debugFetches as any),
     fetchSelector: (data, param) => {
       if (param.includes('||')) {
         const [tableId, id] = param.split('||');
@@ -150,8 +170,8 @@ export function createDefaultListQueryStore({
 
           if (query.filters?.ageRange) {
             return (
-              item.age! >= query.filters.ageRange[0] &&
-              item.age! <= query.filters.ageRange[1]
+              item.age! >= query.filters.ageRange[0]! &&
+              item.age! <= query.filters.ageRange[1]!
             );
           }
 
@@ -196,10 +216,10 @@ export function createDefaultListQueryStore({
     Row,
     StoreError,
     ListQueryParams,
-    string
+    ItemQueryParams
   >({
     optimisticListUpdates,
-    fetchListFn: async ({ tableId, filters }, size) => {
+    fetchListFn: async ({ tableId, filters, fields }, size) => {
       let result = await serverMock.fetch(tableId);
       let hasMore = false;
 
@@ -225,15 +245,21 @@ export function createDefaultListQueryStore({
       if (filters?.ageRange) {
         result = result.filter(
           (item) =>
-            item.age! >= filters.ageRange![0] &&
-            item.age! <= filters.ageRange![1],
+            item.age! >= filters.ageRange![0]! &&
+            item.age! <= filters.ageRange![1]!,
         );
+      }
+
+      if (partialResources && !fields) {
+        throw new Error('fields is required when partialResources is enabled');
       }
 
       return {
         items: result.map((item) => ({
-          itemPayload: getItemId({ tableId, id: item.id }),
-          data: item,
+          itemPayload: fields
+            ? { id: getItemId({ tableId, id: item.id }), fields }
+            : getItemId({ tableId, id: item.id }),
+          data: fields ? (pick(item, fields) as Row) : item,
         })),
         hasMore,
       };
@@ -241,10 +267,22 @@ export function createDefaultListQueryStore({
     fetchItemFn: disableFetchItemFn
       ? undefined
       : async (itemId) => {
-          const result = await serverMock.fetch(itemId);
+          const idToUse = typeof itemId === 'string' ? itemId : itemId.id;
+
+          const result = await serverMock.fetch(idToUse);
 
           if (Array.isArray(result)) {
             throw new Error('Invalid server response');
+          }
+
+          if (isObject(itemId)) {
+            return pick(result, itemId.fields) as Row;
+          }
+
+          if (partialResources) {
+            throw new Error(
+              'fields is required when partialResources is enabled',
+            );
           }
 
           return result;
@@ -254,7 +292,20 @@ export function createDefaultListQueryStore({
     getInitialData: () => initialData,
     disableInitialDataInvalidation,
     lowPriorityThrottleMs,
+    disableRefetchOnMount,
     dynamicRealtimeThrottleMs: dynamicRTUThrottleMs,
+    partialResources: partialResources
+      ? {
+          getNewStateFromFetchedItem(prevItem, item) {
+            if (!prevItem) return item;
+
+            return { ...prevItem, ...item };
+          },
+          getDerivedStateFromPartialFields(fields, item) {
+            return pick(item, fields as (keyof Row)[]) as Row;
+          },
+        }
+      : undefined,
   });
 
   if (debug as any) {
@@ -281,8 +332,12 @@ export function createDefaultListQueryStore({
         if (!deepEqual(prev[tableId], data[tableId])) {
           listQueryStore.invalidateQueryAndItems({
             queryPayload: (queryPayload) => queryPayload.tableId === tableId,
-            itemPayload: (itemPayload) =>
-              itemPayload.split('||')[0] === tableId,
+            itemPayload: (itemPayload) => {
+              const idToUse =
+                typeof itemPayload === 'string' ? itemPayload : itemPayload.id;
+
+              return idToUse.split('||')[0] === tableId;
+            },
             type: 'realtimeUpdate',
           });
         }
