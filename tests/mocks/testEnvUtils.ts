@@ -263,7 +263,7 @@ export function createActionTracker() {
 export function createUITracker<T>(
   addAction: (
     action: string,
-    options?: { uiValue?: unknown; time?: number },
+    options?: { uiValue?: unknown; time?: number; itemId?: string },
   ) => void,
   getRelativeTime: () => number,
   actionsHistory: Action[],
@@ -271,7 +271,7 @@ export function createUITracker<T>(
   const uiChanges: T[] = [];
   let lastTrackedValue: T | undefined;
 
-  function trackUIChanges(value: T) {
+  function trackUIChanges(value: T, itemId?: string) {
     if (value !== lastTrackedValue) {
       lastTrackedValue = value;
       uiChanges.push(value);
@@ -291,6 +291,7 @@ export function createUITracker<T>(
 
         addAction(uiChanges.length === 1 ? 'ui-initialized' : 'ui-changed', {
           uiValue: value,
+          itemId,
         });
       }
     }

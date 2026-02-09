@@ -76,6 +76,7 @@ Tests use Vitest with `happy-dom` environment. Test files follow the pattern `sr
 - Tests should be optimized for human readability
 - Prefer using vitest fake timers
 - Use `createLoggerStore` util for create a human readable values timelines for snapshot testing
+- Use realistic times to match real usage, use as reference the default fetch durations used in the server mocks
 
 ## TypeScript Configuration
 
