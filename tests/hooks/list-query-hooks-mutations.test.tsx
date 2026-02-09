@@ -710,55 +710,45 @@ test.concurrent('RTU throttling', async () => {
   `);
 });
 
-test.concurrent('mount component after a RTU', async () => {
-  const env = createTestEnv({
-    initialServerData,
-    useLoadedSnapshot: { tables: ['users'] },
-    emulateRTU: true,
-    dynamicRTUThrottleMs(lastDuration) {
-      if (lastDuration < 100) {
-        return 200;
-      }
-
+test('mount component after a RTU', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs() {
       return 300;
     },
   });
 
-  const renders = createRenderStore();
-
-  env.serverMock.produceData((draft) => {
-    draft['users']?.push({
-      id: 6,
-      name: 'User 6',
-    });
+  const renders = createLoggerStore({
+    arrays: 'all',
   });
 
-  await sleep(100);
-
-  expect(env.store.store.state.queries).toMatchInlineSnapshotString(`
-    {
-      "{"tableId":"users"}": {
-        "error": null,
-        "hasMore": false,
-        "items": [
-          "users||1",
-          "users||2",
-          "users||3",
-          "users||4",
-          "users||5",
-        ],
-        "payload": {
-          "tableId": "users",
-        },
-        "refetchOnMount": "realtimeUpdate",
-        "status": "success",
-        "wasLoaded": true,
+  act(() => {
+    env.serverTable.setItem(
+      'users||6',
+      {
+      id: 6,
+      name: 'User 6',
       },
-    }
+      { triggerRTUEvent: true },
+    );
+  });
+
+  await advanceTime(100);
+
+  expect(env.apiStore.store.state.queries).toMatchInlineSnapshot(`
+    {tableId:"users"}:
+      error: null
+      hasMore: '❌'
+      items: ['"users||1', '"users||2', '"users||3', '"users||4', '"users||5']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'realtimeUpdate'
+      status: 'success'
+      wasLoaded: '✅'
   `);
 
   renderHook(() => {
-    const { items, status } = env.store.useListQuery(
+    const { items, status } = env.apiStore.useListQuery(
       { tableId: 'users' },
       {
         returnRefetchingStatus: true,
@@ -772,13 +762,13 @@ test.concurrent('mount component after a RTU', async () => {
     renders.add({ status, items });
   });
 
-  await env.serverMock.waitFetchIdle(0, 1500);
+  await flushAllTimers();
 
-  expect(renders.getSnapshot({ arrays: 'all' })).toMatchInlineSnapshotString(`
+  expect(renders.snapshot).toMatchInlineSnapshot(`
     "
-    status: success -- items: [User 1, User 2, User 3, User 4, User 5]
-    status: refetching -- items: [User 1, User 2, User 3, User 4, User 5]
-    status: success -- items: [User 1, User 2, User 3, User 4, User 5, User 6]
+    -> status: success ⋅ items: [User 1, User 2, User 3, User 4, User 5]
+    -> status: refetching ⋅ items: [User 1, User 2, User 3, User 4, User 5]
+    -> status: success ⋅ items: [User 1, User 2, User 3, User 4, User 5, User 6]
     "
   `);
 });
