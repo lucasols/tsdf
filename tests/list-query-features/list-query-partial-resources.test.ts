@@ -424,53 +424,42 @@ describe('useListQuery with partial resources', () => {
     `);
   });
 
-  test('load correctly when fields change from more to less fields', async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      partialResources: true,
-      disableRefetchOnMount: true,
+describe('deleteItemState with partial resources', () => {
+  test('clears itemLoadedFields entry', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
     });
 
-    const renders = createRenderLogger({
-      filterKeys: ['status', 'items', 'payload', 'error'],
+    renderHook(() => {
+      env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name'],
+      });
     });
 
-    const { rerender } = renderHook<void, ChangeFieldsProps>(
-      ({ fields }) => {
-        const result = env.store.useListQuery(
-          { tableId: 'users', fields },
-          { returnRefetchingStatus: true },
-        );
+    await flushAllTimers();
 
-        renders.add(result);
-      },
-      {
-        initialProps: { fields: ['id', 'name', 'address', 'country'] },
-      },
-    );
-
-    await env.serverMock.waitFetchIdle();
-
-    renders.addMark('Change fields');
-
-    rerender({ fields: ['id', 'name', 'address'] });
+    const storeItemKey = env.getStoreItemKeyFromRaw('users||1');
 
     expect(
-      jsonFormatter(
-        Object.values(env.store.store.state.partialItemsQueries)[0],
-      ),
-    ).toMatchInlineSnapshotString(`
-      "{
-        fields: {
-          id: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          name: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          address: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          country: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-        },
-        payload: { id: 'users||1', fields: [] },
-      }"
+      env.store.state.itemLoadedFields[storeItemKey],
+    ).toMatchInlineSnapshot(`['id', 'name']`);
+
+    act(() => {
+      env.apiStore.deleteItemState('users||1');
+    });
+
+    expect(env.store.state.itemLoadedFields[storeItemKey]).toBeUndefined();
+    expect(env.store.state.items[storeItemKey]).toBeNull();
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        itemId: 'users||1'
+        result: { id: 1, name: 'User 1' }
+        type: 'fetch'
+    `);
+  });
+});
     `);
 
     expect(jsonFormatter(env.store.store.state.queries, { maxArrayItems: 2 }))
