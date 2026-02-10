@@ -339,60 +339,73 @@ describe('useListQuery with partial resources', () => {
         type: 'list'
     `);
   });
+
+  test('fields reduce: cache hit, immediate success', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
     });
 
-    const renders = createRenderLogger({
-      filterKeys: ['status', 'items', 'payload', 'error'],
-    });
+    const renders = createLoggerStore();
 
-    const { rerender } = renderHook<void, ChangeFieldsProps>(
-      ({ fields }) => {
-        const result = env.store.useListQuery(
-          { tableId: 'users', fields },
-          { returnRefetchingStatus: true },
+    const { rerender } = renderHook(
+      ({ fields }: { fields: string[] }) => {
+        const result = env.apiStore.useListQuery(
+          { tableId: 'users' },
+          { returnRefetchingStatus: true, fields },
         );
 
-        renders.add(result);
+        renders.add(pick(result, ['status', 'items', 'error']));
       },
-      {
-        initialProps: { fields: ['id', 'name', 'address'] },
-      },
+      { initialProps: { fields: ['id', 'name', 'address'] } },
     );
 
-    await env.serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    renders.addMark('Change fields');
+    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
 
-    rerender({ fields: ['id', 'name', 'address', 'country'] });
+    renders.addMark('Reduce fields');
 
-    expect(
-      jsonFormatter(
-        Object.values(env.store.store.state.partialItemsQueries)[0],
-      ),
-    ).toMatchInlineSnapshotString(`
-      "{
-        fields: {
-          id: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          name: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          address: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-        },
-        payload: { id: 'users||1', fields: [] },
-      }"
+    act(() => {
+      rerender({ fields: ['id', 'name'] });
+    });
+
+    await flushAllTimers();
+
+    // No additional fetch
+    expect(env.serverTable.numOfFinishedFetches).toBe(fetchCountBefore);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ items: [] ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:1, name:User 1, address:Address 1}, …(4 more)]
+      ⋅ error: null
+      └─
+
+      >>> Reduce fields
+
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)] ⋅ error: null
+      "
     `);
 
-    await env.serverMock.waitFetchIdle();
-
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
-        "
-        status: loading -- items: [] -- payload: {tableId:users, fields:[id, name, address]} -- error: null
-        status: success -- items: [{id:1, name:User 1, address:Address 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address]} -- error: null
-
-        >>> Change fields
-
-        status: loading -- items: [] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
-        status: success -- items: [{id:1, name:User 1, address:Address 1, country:Country 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
-        "
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name', 'address']
+        limit: 50
+        results:
+          - data: { address: 'Address 1', id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { address: 'Address 2', id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { address: 'Address 3', id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { address: 'Address 4', id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { address: 'Address 5', id: 5, name: 'User 5' }
+            itemId: 'users||5'
+        type: 'list'
+    `);
+  });
 
     expect(
       jsonFormatter(
