@@ -57,7 +57,11 @@ import {
 
 export type ListQueryStoreEvents = {
   invalidateQuery: { priority: FetchType; queryKey: string };
-  invalidateItem: { priority: FetchType; itemKey: string };
+  invalidateItem: {
+    priority: FetchType;
+    itemKey: string;
+    invalidateFields?: string[];
+  };
 };
 
 export type ListQueryStore<
@@ -180,6 +184,7 @@ export function createListQueryStore<
         queries: {},
         itemQueries: {},
         itemLoadedFields: {},
+        itemFieldInvalidationFields: {},
       };
 
       if (import.meta.env.TEST && testOptions) {
@@ -872,6 +877,9 @@ export function createListQueryStore<
               draft.itemLoadedFields[itemKey] = loadedFields.filter(
                 (f) => !invalidateFields.includes(f),
               );
+              draft.itemFieldInvalidationFields[itemKey] = Array.from(
+                new Set(invalidateFields),
+              ).sort();
             }
           },
           { action: 'invalidate-item-fields' },
@@ -879,7 +887,12 @@ export function createListQueryStore<
 
         // Emit invalidation events so hooks can detect missing fields and refetch
         for (const { itemKey } of itemsKey) {
-          events.emit('invalidateItem', { priority, itemKey });
+          itemInvalidationWasTriggered.delete(itemKey);
+          events.emit('invalidateItem', {
+            priority,
+            itemKey,
+            invalidateFields,
+          });
         }
       } else {
         invalidateItem(itemPayload, priority);
@@ -917,6 +930,7 @@ export function createListQueryStore<
           // Clear loaded fields so all hooks refetch their fields
           if (partialResources) {
             draft.itemLoadedFields[itemKey] = [];
+            delete draft.itemFieldInvalidationFields[itemKey];
           }
         },
         { action: 'invalidate-item' },
@@ -1174,6 +1188,7 @@ export function createListQueryStore<
           draftState.items[itemKey] = null;
           draftState.itemQueries[itemKey] = null;
           delete draftState.itemLoadedFields[itemKey];
+          delete draftState.itemFieldInvalidationFields[itemKey];
 
           for (const query of Object.values(draftState.queries)) {
             if (query.items.includes(itemKey)) {
@@ -1459,6 +1474,7 @@ export function createListQueryStore<
       queries: {},
       itemQueries: {},
       itemLoadedFields: {},
+      itemFieldInvalidationFields: {},
     });
   }
 

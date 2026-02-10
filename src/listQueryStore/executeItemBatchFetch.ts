@@ -64,6 +64,16 @@ export async function executeItemBatchFetch<
     }
   }
 
+  function requestSatisfiesFieldInvalidation(
+    requestFields: string[] | undefined,
+    invalidationFields: string[] | undefined,
+  ): boolean {
+    if (!requestFields || requestFields.length === 0) return false;
+    if (!invalidationFields || invalidationFields.length === 0) return false;
+
+    return invalidationFields.every((field) => requestFields.includes(field));
+  }
+
   for (const { requestId, payload: data } of requests) {
     itemKeyToPayload.set(requestId, data.payload);
   }
@@ -72,6 +82,13 @@ export async function executeItemBatchFetch<
     (draft) => {
       for (const { requestId: itemKey, payload: data } of requests) {
         const itemQuery = draft.itemQueries[itemKey];
+        const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
+        if (
+          invalidationFields &&
+          !requestSatisfiesFieldInvalidation(data.fields, invalidationFields)
+        ) {
+          delete draft.itemFieldInvalidationFields[itemKey];
+        }
 
         if (!itemQuery) {
           draft.itemQueries[itemKey] = {
@@ -126,17 +143,20 @@ export async function executeItemBatchFetch<
             if (result instanceof Error) {
               itemQuery.error = errorNormalizer(result);
               itemQuery.status = 'error';
+              delete draft.itemFieldInvalidationFields[itemKey];
               results.set(itemKey, false);
             } else if (result !== undefined) {
               applyItemResult(draft, itemKey, result, data.fields);
               itemQuery.status = 'success';
               itemQuery.wasLoaded = true;
+              delete draft.itemFieldInvalidationFields[itemKey];
               results.set(itemKey, true);
             } else {
               itemQuery.error = errorNormalizer(
                 new Error(`No result for item ${itemKey}`),
               );
               itemQuery.status = 'error';
+              delete draft.itemFieldInvalidationFields[itemKey];
               results.set(itemKey, false);
             }
           }
@@ -163,6 +183,7 @@ export async function executeItemBatchFetch<
 
             itemQuery.error = error;
             itemQuery.status = 'error';
+            delete draft.itemFieldInvalidationFields[itemKey];
             results.set(itemKey, false);
           }
         },
@@ -194,6 +215,7 @@ export async function executeItemBatchFetch<
             applyItemResult(draft, itemKey, data, requestData.fields);
             itemQuery.status = 'success';
             itemQuery.wasLoaded = true;
+            delete draft.itemFieldInvalidationFields[itemKey];
           },
           { action: 'item-fetch-success' },
         );
@@ -214,6 +236,7 @@ export async function executeItemBatchFetch<
 
             itemQuery.error = error;
             itemQuery.status = 'error';
+            delete draft.itemFieldInvalidationFields[itemKey];
           },
           { action: 'item-fetch-error' },
         );

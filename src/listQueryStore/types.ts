@@ -35,6 +35,7 @@ export type TSFDListQueryState<
   queries: Record<string, TSFDListQuery<QueryPayload>>;
   itemQueries: Record<string, TSDFItemQuery<ItemPayload> | null>;
   itemLoadedFields: Record<string, string[]>;
+  itemFieldInvalidationFields: Record<string, string[]>;
 };
 
 export type TSFDUseListQueryReturn<
