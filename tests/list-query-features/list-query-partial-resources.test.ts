@@ -460,31 +460,49 @@ describe('deleteItemState with partial resources', () => {
     `);
   });
 });
+
+describe('updateItemState with partial resources', () => {
+  test('works correctly with accumulated data', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name', 'address'],
+      });
+
+      renders.add(pick(result, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    act(() => {
+      env.apiStore.updateItemState('users||1', (draft) => {
+        draft['name'] = 'Updated Name';
+      });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1, address:Address 1}
+      -> status: success ⋅ data: {id:1, name:Updated Name, address:Address 1}
+      "
     `);
 
-    expect(jsonFormatter(env.store.store.state.queries, { maxArrayItems: 2 }))
-      .toMatchInlineSnapshotString(`
-        "{
-          [{"fields":["id","name","address","country"]},{"tableId":"users"}]: {
-            error: null,
-            status: 'success',
-            wasLoaded: true,
-            payload: { tableId: 'users', fields: [ 'id', 'name', 'address', 'country' ] },
-            refetchOnMount: false,
-            hasMore: false,
-            items:     [
-              '{"id":"users||1"}',
-              '{"id":"users||2"}',
-              ... +48 items
-            ],
-          },
-        }"
-      `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name', 'address']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1, name: 'User 1' }
+        type: 'fetch'
+    `);
+  });
+});
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
-      "
-      status: loading -- items: [] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
-      status: success -- items: [{id:1, name:User 1, address:Address 1, country:Country 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
 
       >>> Change fields
 
