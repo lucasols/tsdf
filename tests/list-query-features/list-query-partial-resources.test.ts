@@ -163,62 +163,58 @@ describe('useItem with partial resources', () => {
       `);
   });
 
-  test('load correctly when fields change from more to less fields', async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      partialResources: true,
+  test('fields reduce (4 -> 3): cache hit, no fetch, instant success', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
     });
 
-    const renders = createRenderLogger({
-      filterKeys: ['status', 'data', 'payload', 'error'],
-    });
+    const renders = createLoggerStore();
 
-    const { rerender } = renderHook<void, ChangeFieldsProps>(
-      ({ fields }) => {
-        const result = env.store.useItem(
-          { id: 'users||1', fields },
-          { returnRefetchingStatus: true },
-        );
+    const { rerender } = renderHook(
+      ({ fields }: { fields: string[] }) => {
+        const result = env.apiStore.useItem('users||1', {
+          returnRefetchingStatus: true,
+          fields,
+        });
 
-        renders.add(result);
+        renders.add(pick(result, ['status', 'data', 'error']));
       },
-      {
-        initialProps: { fields: ['id', 'name', 'address', 'country'] },
-      },
+      { initialProps: { fields: ['id', 'name', 'address', 'country'] } },
     );
 
-    await env.serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    renders.addMark('Change fields');
+    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
 
+    renders.addMark('Reduce fields');
+
+    act(() => {
     rerender({ fields: ['id', 'name', 'address'] });
+    });
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    // No additional fetch should happen
+    expect(env.serverTable.numOfFinishedFetches).toBe(fetchCountBefore);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- data: null -- payload: {id:users||1, fields:[id, name, address, country]} -- error: null
-      status: success -- data: {id:1, name:User 1, address:Address 1, country:Country 1} -- payload: {id:users||1, fields:[id, name, address, country]} -- error: null
+      -> status: loading ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ data: {id:1, name:User 1, address:Address 1, country:Country 1}
+      ⋅ error: null
+      └─
 
-      >>> Change fields
+      >>> Reduce fields
 
-      status: success -- data: {id:1, name:User 1, address:Address 1} -- payload: {id:users||1, fields:[id, name, address]} -- error: null
+      -> status: success ⋅ data: {id:1, name:User 1, address:Address 1} ⋅ error: null
       "
     `);
 
-    expect(jsonFormatter(env.store.store.state.partialItemsQueries))
-      .toMatchInlineSnapshotString(`
-      "{
-        {"id":"users||1"}: {
-          payload: { id: 'users||1', fields: [] },
-          fields: {
-            id: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-            name: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-            address: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-            country: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-          },
-        },
-      }"
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name', 'address', 'country']
+        itemId: 'users||1'
+        result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
+        type: 'fetch'
     `);
   });
 });
