@@ -113,6 +113,8 @@ export async function executeQueryFetch<
                   const existingFields = draft.itemLoadedFields[itemKey] ?? [];
                   const fieldSet = new Set([...existingFields, ...fields]);
                   draft.itemLoadedFields[itemKey] = Array.from(fieldSet).sort();
+                } else {
+                  draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
                 }
               } else {
                 draft.items[itemKey] = reusePrevIfEqual({
