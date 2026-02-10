@@ -205,7 +205,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     if (errorConfig) {
       signal?.removeEventListener('abort', onAbort);
       nextFetchErrors.delete(itemId);
-      fetchHistory.push({ type: 'fetch', itemId, fields: options?.fields, result: 'error' });
+      fetchHistory.push({
+        type: 'fetch',
+        itemId,
+        fields: options?.fields,
+        result: 'error',
+      });
       if (addAction) {
         numOfFinishedFetches++;
         addAction('<fetch-error', {
@@ -233,7 +238,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     // Check for abort after network delay
     if (signal?.aborted) {
       onAbort();
-      fetchHistory.push({ type: 'fetch', itemId, fields: options?.fields, result: 'aborted' });
+      fetchHistory.push({
+        type: 'fetch',
+        itemId,
+        fields: options?.fields,
+        result: 'aborted',
+      });
       if (addAction) {
         numOfFinishedFetches++;
       }
@@ -242,7 +252,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
 
     const item = items.get(itemId);
     if (item === undefined) {
-      fetchHistory.push({ type: 'fetch', itemId, fields: options?.fields, result: 'error' });
+      fetchHistory.push({
+        type: 'fetch',
+        itemId,
+        fields: options?.fields,
+        result: 'error',
+      });
       if (addAction) {
         numOfFinishedFetches++;
       }
@@ -254,7 +269,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         ? selectFields(item, options.fields)
         : item;
 
-    fetchHistory.push({ type: 'fetch', itemId, fields: options?.fields, result });
+    fetchHistory.push({
+      type: 'fetch',
+      itemId,
+      fields: options?.fields,
+      result,
+    });
     if (addAction) {
       numOfFinishedFetches++;
       addAction('<fetch-finished', {

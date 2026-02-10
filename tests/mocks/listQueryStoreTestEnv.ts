@@ -131,10 +131,10 @@ export function createListQueryStoreTestEnv<
     if (
       actionsHistory.some(
         (a) =>
-          a.action === 'optimistic-ui-commit'
-          && a.time === time
-          && a.uiValue === value
-          && a.itemId === itemId,
+          a.action === 'optimistic-ui-commit' &&
+          a.time === time &&
+          a.uiValue === value &&
+          a.itemId === itemId,
       )
     ) {
       return;
@@ -210,12 +210,11 @@ export function createListQueryStoreTestEnv<
         hasMore: result.hasMore,
       };
     },
-    fetchItemFn:
-      disableFetchItemFn ? undefined : (
-        async (payload, { signal, fields }) => {
+    fetchItemFn: disableFetchItemFn
+      ? undefined
+      : async (payload, { signal, fields }) => {
           return serverTable.fetch(payload, signal, { fields });
-        }
-      ),
+        },
   });
 
   if (usesRealTimeUpdates) {
@@ -364,9 +363,8 @@ export function createListQueryStoreTestEnv<
       const mergedValue: TRow = { ...baseValue, ...newValue };
 
       return listQueryStore.performMutation(itemId, {
-        optimisticUpdate:
-          withOptimisticUpdate ?
-            () => {
+        optimisticUpdate: withOptimisticUpdate
+          ? () => {
               listQueryStore.updateItemState(itemId, (draft) => {
                 Object.assign(draft, newValue);
               });

@@ -856,13 +856,16 @@ export class RequestScheduler<T> {
 
     const { phase, pending } = this.state;
 
-    // Skip if fetch/coalescing in progress or scheduled
-    if (
-      phase.type === 'fetching' ||
-      phase.type === 'coalescing' ||
-      pending.scheduledRequests.size > 0
-    ) {
-      return true;
+    // Skip when another request is already active, but still allow same-request
+    // coalescing so payload details (e.g. selected fields) are not lost.
+    if (phase.type === 'fetching') return true;
+
+    if (phase.type === 'coalescing') {
+      return !phase.pendingRequests.has(requestId);
+    }
+
+    if (pending.scheduledRequests.size > 0) {
+      return !pending.scheduledRequests.has(requestId);
     }
 
     // Check if within throttle window

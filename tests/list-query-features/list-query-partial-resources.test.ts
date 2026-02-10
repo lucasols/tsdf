@@ -480,6 +480,65 @@ describe('cross-hook field loading', () => {
         type: 'fetch'
     `);
   });
+
+  test('hookA and hookB mounted together both reach success', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const hookARenders = createLoggerStore();
+    const hookBRenders = createLoggerStore();
+
+    renderHook(() => {
+      const resultA = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name'],
+      });
+
+      const resultB = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'address'],
+      });
+
+      hookARenders.add(pick(resultA, ['status', 'data']));
+      hookBRenders.add(pick(resultB, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    expect(hookARenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
+      "
+    `);
+
+    expect(hookBRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, address:Address 1}
+      "
+    `);
+
+    const storeItemKey = env.getStoreItemKeyFromRaw('users||1');
+
+    expect(
+      env.store.state.itemLoadedFields[storeItemKey],
+    ).toMatchInlineSnapshot(`['address', 'id', 'name']`);
+
+    expect(env.store.state.items[storeItemKey]).toMatchInlineSnapshot(`
+      address: 'Address 1'
+      id: 1
+      name: 'User 1'
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['address', 'id', 'name']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1, name: 'User 1' }
+        type: 'fetch'
+    `);
+  });
   });
 
 describe('deleteItemState with partial resources', () => {
