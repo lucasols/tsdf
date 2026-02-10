@@ -26,8 +26,9 @@ export async function executeQueryFetch<
   fetchListFn: (
     payload: QueryPayload,
     size: number,
-    signal: AbortSignal,
+    options: { signal: AbortSignal; coalescingKey: string },
   ) => Promise<FetchListFnReturn<ItemState, ItemPayload>>,
+  coalescingKey: string,
   errorNormalizer: (exception: Error) => StoreError,
   getItemKey: (params: ItemPayload) => string,
   updateItemSchedulerTiming: (itemKey: string, startTime: number) => void,
@@ -76,11 +77,10 @@ export async function executeQueryFetch<
       const { payload, size } = fetchPayload;
 
       try {
-        const { items, hasMore } = await fetchListFn(
-          payload,
-          size,
-          fetchCtx.signal,
-        );
+        const { items, hasMore } = await fetchListFn(payload, size, {
+          signal: fetchCtx.signal,
+          coalescingKey,
+        });
 
         if (fetchCtx.shouldAbort()) {
           results.set(queryKey, false);
