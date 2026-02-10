@@ -620,39 +620,84 @@ describe('updateItemState with partial resources', () => {
   });
 });
 
+describe('invalidateQueryAndItems with fields', () => {
+  test('per-field invalidation: only hooks requesting invalidated fields refetch', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
 
-      >>> Change fields
+    const nameHookRenders = createLoggerStore();
+    const addressHookRenders = createLoggerStore();
 
-      status: success -- items: [{id:1, name:User 1, address:Address 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address]} -- error: null
+    renderHook(() => {
+      const nameResult = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name'],
+      });
+
+      const addressResult = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'address'],
+      });
+
+      nameHookRenders.add(pick(nameResult, ['status', 'data']));
+      addressHookRenders.add(pick(addressResult, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
+
+    nameHookRenders.addMark('Invalidate address field');
+    addressHookRenders.addMark('Invalidate address field');
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        fields: ['address'],
+      });
+    });
+
+    await flushAllTimers();
+
+    // Only the address hook should have refetched
+    expect(env.serverTable.numOfFinishedFetches - fetchCountBefore).toBe(1);
+
+    expect(nameHookRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
+
+      >>> Invalidate address field
+
+      -> status: success ⋅ data: {id:1, name:User 1}
       "
     `);
+
+    expect(addressHookRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, address:Address 1}
+
+      >>> Invalidate address field
+
+      -> status: refetching ⋅ data: {id:1, address:Address 1}
+      -> status: success ⋅ data: {id:1, address:Address 1}
+      "
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['address', 'id', 'name']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1, name: 'User 1' }
+        type: 'fetch'
+      - fields: ['address']
+        itemId: 'users||1'
+        result: { address: 'Address 1' }
+        type: 'fetch'
+    `);
   });
-
-  test('load correctly when fields change from more to less fields: with refetch on mount', async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      partialResources: true,
-    });
-
-    const renders = createRenderLogger({
-      filterKeys: ['status', 'items', 'payload', 'error'],
-    });
-
-    const { rerender } = renderHook<void, ChangeFieldsProps>(
-      ({ fields }) => {
-        const result = env.store.useListQuery(
-          { tableId: 'users', fields },
-          { returnRefetchingStatus: true },
-        );
-
-        renders.add(result);
-      },
-      {
-        initialProps: { fields: ['id', 'name', 'address', 'country'] },
-      },
-    );
 
     await env.serverMock.waitFetchIdle();
 
