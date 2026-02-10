@@ -773,6 +773,111 @@ describe('invalidateQueryAndItems with fields', () => {
         type: 'fetch'
     `);
   });
+
+  test('useListQuery per-field invalidation: affected hook stays refetching and list query refetches', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const { unmount } = renderHook(() => {
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: ['id', 'name', 'address'] },
+      );
+    });
+
+    await flushAllTimers();
+    unmount();
+
+    const nameHookRenders = createLoggerStore();
+    const addressHookRenders = createLoggerStore();
+
+    renderHook(() => {
+      const nameResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: ['id', 'name'] },
+      );
+
+      const addressResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: ['id', 'address'] },
+      );
+
+      nameHookRenders.add(pick(nameResult, ['status', 'items']));
+      addressHookRenders.add(pick(addressResult, ['status', 'items']));
+    });
+
+    await flushAllTimers();
+
+    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
+
+    nameHookRenders.addMark('Invalidate address field');
+    addressHookRenders.addMark('Invalidate address field');
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        fields: ['address'],
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(env.serverTable.numOfFinishedFetches - fetchCountBefore).toBe(1);
+
+    expect(nameHookRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
+
+      >>> Invalidate address field
+
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      -> status: refetching ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      "
+    `);
+    expect(addressHookRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ items: [{id:1, address:Address 1}, …(4 more)]
+
+      >>> Invalidate address field
+
+      -> status: refetching ⋅ items: [{id:1, address:Address 1}, …(4 more)]
+      -> status: success ⋅ items: [{id:1, address:Address 1}, …(4 more)]
+      "
+    `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name', 'address']
+        limit: 50
+        results:
+          - data: { address: 'Address 1', id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { address: 'Address 2', id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { address: 'Address 3', id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { address: 'Address 4', id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { address: 'Address 5', id: 5, name: 'User 5' }
+            itemId: 'users||5'
+        type: 'list'
+      - fields: ['id', 'address']
+        limit: 50
+        results:
+          - data: { address: 'Address 1', id: 1 }
+            itemId: 'users||1'
+          - data: { address: 'Address 2', id: 2 }
+            itemId: 'users||2'
+          - data: { address: 'Address 3', id: 3 }
+            itemId: 'users||3'
+          - data: { address: 'Address 4', id: 4 }
+            itemId: 'users||4'
+          - data: { address: 'Address 5', id: 5 }
+            itemId: 'users||5'
+        type: 'list'
+    `);
+  });
 });
 
 describe('RTU with partial resources', () => {

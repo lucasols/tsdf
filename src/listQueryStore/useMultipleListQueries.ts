@@ -192,7 +192,19 @@ export function useMultipleListQueries<
               return fields.some((f) => !loadedFields.includes(f));
             });
 
-            if (someItemMissingFields) {
+            const hasAffectedFieldInvalidation = query.items.some((itemKey) => {
+              const itemFieldInvalidationFields =
+                state.itemFieldInvalidationFields[itemKey];
+
+              return (
+                !!itemFieldInvalidationFields &&
+                fields.some((f) => itemFieldInvalidationFields.includes(f))
+              );
+            });
+
+            if (someItemMissingFields && hasAffectedFieldInvalidation) {
+              status = 'refetching';
+            } else if (someItemMissingFields) {
               status = 'loading';
             }
           }
@@ -264,7 +276,7 @@ export function useMultipleListQueries<
       if (isOffScreen) continue;
 
       const queryState = getQueryState(payload);
-      const fetchType = queryState?.refetchOnMount || 'lowPriority';
+      let fetchType = queryState?.refetchOnMount || 'lowPriority';
 
       let shouldFetch =
         !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
@@ -283,7 +295,30 @@ export function useMultipleListQueries<
         });
 
         if (someItemMissingFields) {
-          shouldFetch = true;
+          const isQueryFetchInFlight =
+            queryState.status === 'loading' ||
+            queryState.status === 'refetching' ||
+            queryState.status === 'loadingMore';
+
+          if (!isQueryFetchInFlight) {
+            shouldFetch = true;
+
+            const hasAffectedFieldInvalidation = queryState.items.some(
+              (itemKey) => {
+                const itemFieldInvalidationFields =
+                  store.state.itemFieldInvalidationFields[itemKey];
+
+                return (
+                  !!itemFieldInvalidationFields &&
+                  fields.some((f) => itemFieldInvalidationFields.includes(f))
+                );
+              },
+            );
+
+            if (hasAffectedFieldInvalidation && fetchType === 'lowPriority') {
+              fetchType = 'highPriority';
+            }
+          }
         }
       }
 
@@ -312,6 +347,7 @@ export function useMultipleListQueries<
     scheduleListQueryFetch,
     partialResources,
     store.state.itemLoadedFields,
+    store.state.itemFieldInvalidationFields,
   ]);
 
   return storeState;
