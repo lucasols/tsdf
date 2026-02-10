@@ -1,62 +1,101 @@
-import { range } from '@ls-stack/utils/iteratorUtils';
-import { renderHook } from '@testing-library/react';
-import { describe, expect, test } from 'vitest';
-import { Tables } from './utils/createDefaultListQueryStore';
-import { jsonFormatter } from './utils/jsonFormatter';
-import { createRenderLogger } from './utils/storeUtils';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import '@testing-library/react/dont-cleanup-after-each';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
+import type { ListQueryStore } from '../../src/listQueryStore/listQueryStore';
+import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
+import {
+  createListQueryStoreTestEnv,
+  type Row,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { pick, range } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/listQueryHooksTestUtils';
+
+const partialResourcesConfig: PartialResourcesConfig<Row> = {
+  mergeItems: (prev, fetched) => {
+    if (!prev) return fetched;
+    return { ...prev, ...fetched };
+  },
+  selectFields: (fields, item) => {
+    const result: Record<string, unknown> = {};
+    for (const field of fields) {
+      if (field in item) {
+        result[field] = item[field];
+      }
+    }
+    return __LEGIT_CAST__<Row>(result);
+  },
+};
 
 const initialServerData: Tables = {
-  users: range(1, 50).map((id) => ({
+  users: range(1, 5).map((id) => ({
     id,
     name: `User ${id}`,
-    type: id % 2 === 0 ? 'admin' : 'user',
     address: `Address ${id}`,
-    age: id,
-    city: `City ${id}`,
+    age: id * 10,
     country: `Country ${id}`,
-    createdAt: 12345678,
-    createdBy: `User ${id}`,
-    phone: `+${id}`,
-    postalCode: `1234${id}`,
-    updatedAt: 12345678,
-    updatedBy: `User ${id}`,
   })),
 };
 
-type ChangeFieldsProps = {
-  fields: (keyof Tables[string][number])[];
-};
+beforeAll(() => {
+  vi.useFakeTimers();
+});
 
-describe.concurrent('useItem', () => {
-  test('should load only the selected fields', async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      partialResources: true,
-      disableRefetchOnMount: true,
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
+
+afterAll(() => {
+  cleanup();
+});
+
+describe('useItem with partial resources', () => {
+  test('load only the selected fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
     });
 
-    const renders = createRenderLogger({
-      filterKeys: ['status', 'data', 'payload', 'error'],
-    });
+    const renders = createLoggerStore();
 
     renderHook(() => {
-      const result = env.store.useItem(
-        { id: 'users||1', fields: ['id', 'name', 'address'] },
-        { returnRefetchingStatus: true },
-      );
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name', 'address'],
+      });
 
-      renders.add(result);
+      renders.add(pick(result, ['status', 'data', 'error']));
     });
 
-    await env.serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- data: null -- payload: {id:users||1, fields:[id, name, address]} -- error: null
-      status: success -- data: {id:1, name:User 1, address:Address 1} -- payload: {id:users||1, fields:[id, name, address]} -- error: null
+      -> status: loading ⋅ data: null ⋅ error: null
+      -> status: success ⋅ data: {id:1, name:User 1, address:Address 1} ⋅ error: null
       "
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name', 'address']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1, name: 'User 1' }
+        type: 'fetch'
     `);
   });
 
