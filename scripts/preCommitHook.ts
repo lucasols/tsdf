@@ -24,9 +24,9 @@ function preCommitHook() {
 
     const allFiles = stagedFiles.split('\n').filter((file) => file.trim());
     const workingTreeFiles = new Set(
-      unstagedFiles ?
-        unstagedFiles.split('\n').filter((file) => file.trim())
-      : [],
+      unstagedFiles
+        ? unstagedFiles.split('\n').filter((file) => file.trim())
+        : [],
     );
 
     const filesToFormat = allFiles.filter(

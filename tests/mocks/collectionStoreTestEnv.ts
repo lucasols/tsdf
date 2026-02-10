@@ -15,8 +15,6 @@ import {
 
 export type CollectionTestItem<D> = { value: D };
 
-type CollectionTestPayload = string | { id: { id: string } };
-
 export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** App just opened, no data fetched yet. */
   | 'idle'
@@ -35,6 +33,8 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   useBatchFetch?: boolean;
   /** Max items per batch (only used when useBatchFetch is true) */
   maxBatchSize?: number;
+  /** Optional function to group batch fetches by key */
+  getItemsBatchKey?: (payload: string) => string | false;
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
 };
@@ -47,6 +47,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
+    getItemsBatchKey,
     testScenario,
     usesRealTimeUpdates,
   }: CollectionStoreTestEnvOptions<D> = {},
@@ -100,39 +101,34 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     Record<string, number | 'error' | undefined>
   >(addAction, getRelativeTime, actionsHistory);
 
-  function normalizeItemId(itemId: CollectionTestPayload): string {
-    return typeof itemId === 'string' ? itemId : itemId.id.id;
-  }
-
   // Batch fetch function - delegates to serverTable.list
   const batchFetchFn = async (
-    payloads: CollectionTestPayload[],
+    payloads: string[],
     signal: AbortSignal,
+    batchKey: string,
   ) => {
-    const itemIdToPayload = new Map<string, CollectionTestPayload>();
+    const uniquePayloads = new Map<string, string>();
     for (const payload of payloads) {
-      const itemId = normalizeItemId(payload);
-      if (!itemIdToPayload.has(itemId)) {
-        itemIdToPayload.set(itemId, payload);
+      if (!uniquePayloads.has(payload)) {
+        uniquePayloads.set(payload, payload);
       }
     }
 
     const listResult = await serverTable.list(
-      { itemIds: [...itemIdToPayload.keys()] },
+      { itemIds: [...uniquePayloads.keys()], batchKey },
       signal,
     );
 
     // Convert list result to Map format expected by collection store
-    const results = new Map<
-      CollectionTestPayload,
-      CollectionTestItem<D> | Error
-    >();
+    const results = new Map<string, CollectionTestItem<D> | Error>();
     for (const { itemId, data } of listResult.items) {
-      const payload = itemIdToPayload.get(itemId) ?? itemId;
+      const originalPayload = uniquePayloads.get(itemId);
+      if (!originalPayload) continue;
+
       if (data instanceof Error) {
-        results.set(payload, data);
+        results.set(originalPayload, data);
       } else {
-        results.set(payload, { value: data });
+        results.set(originalPayload, { value: data });
       }
     }
 
@@ -141,17 +137,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
-  const collectionStore = createCollectionStore<
-    CollectionTestItem<D>,
-    CollectionTestPayload
-  >({
+  const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs,
     maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
+    getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     fetchFn: async (payload, signal) => {
-      const itemId = normalizeItemId(payload);
-      const value = await serverTable.fetch(itemId, signal);
+      const value = await serverTable.fetch(payload, signal);
       return { value };
     },
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
@@ -253,7 +246,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
 function mapInitialData<D extends Record<string, unknown>>(
   data: Record<string, D>,
-): CollectionInitialStateItem<CollectionTestPayload, CollectionTestItem<D>>[] {
+): CollectionInitialStateItem<string, CollectionTestItem<D>>[] {
   return Object.entries(data).map(([itemId, value]) => ({
     payload: itemId,
     data: { value },
@@ -267,10 +260,7 @@ function resolveTestOptions<D extends Record<string, unknown>>(
   | {
       initialRefetchOnMount?: FetchType;
       initialStatus?: 'success';
-      initialData?: CollectionInitialStateItem<
-        CollectionTestPayload,
-        CollectionTestItem<D>
-      >[];
+      initialData?: CollectionInitialStateItem<string, CollectionTestItem<D>>[];
       initialLastFetchStartTime?: number;
     }
   | undefined {

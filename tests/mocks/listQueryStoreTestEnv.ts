@@ -67,6 +67,7 @@ export function createListQueryStoreTestEnv<
     usesRealTimeUpdates,
     useBatchFetch,
     maxItemBatchSize,
+    getItemsBatchKey,
     disableFetchItemFn,
     optimisticListUpdates,
     partialResources,
@@ -82,6 +83,8 @@ export function createListQueryStoreTestEnv<
     useBatchFetch?: boolean;
     /** Max items per batch (only used when useBatchFetch is true) */
     maxItemBatchSize?: number;
+    /** Optional function to group batch fetches by key */
+    getItemsBatchKey?: (payload: string) => string | false;
     disableFetchItemFn?: boolean;
     optimisticListUpdates?: Parameters<
       typeof createListQueryStore<TRow, ListQueryParams, ListQueryItemPayload>
@@ -150,10 +153,25 @@ export function createListQueryStoreTestEnv<
   // Batch fetch function - delegates to serverTable.list with itemIds
   const batchFetchItemFn = async (
     requests: { payload: ListQueryItemPayload; fields?: string[] }[],
-    { signal }: { signal: AbortSignal },
-  ) => {
+    { signal, batchKey }: { signal: AbortSignal; batchKey: string },
+  ): Promise<Map<ListQueryItemPayload, TRow | Error>> => {
     const ids = requests.map((r) => r.payload);
-    const listResult = await serverTable.list({ itemIds: ids }, signal);
+    const shouldFetchAllFields = requests.some(
+      (request) => !request.fields || request.fields.length === 0,
+    );
+    const mergedFields = shouldFetchAllFields
+      ? undefined
+      : Array.from(
+          new Set(requests.flatMap((request) => request.fields ?? [])),
+        ).sort();
+    const listResult = await serverTable.list(
+      {
+        itemIds: ids,
+        batchKey,
+        fields: partialResources ? mergedFields : undefined,
+      },
+      signal,
+    );
 
     const results = new Map<ListQueryItemPayload, TRow | Error>();
     for (const request of requests) {
@@ -162,6 +180,11 @@ export function createListQueryStoreTestEnv<
       );
       if (listItem) {
         results.set(request.payload, listItem.data);
+      } else {
+        results.set(
+          request.payload,
+          new Error(`Item not found: ${request.payload}`),
+        );
       }
     }
 
@@ -185,6 +208,7 @@ export function createListQueryStoreTestEnv<
     usesRealTimeUpdates,
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
+    getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     optimisticListUpdates,
     partialResources,
     '~test': testOptions,

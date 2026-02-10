@@ -103,7 +103,10 @@ export type CollectionStoreOptions<
   batchFetchFn?: (
     payloads: ItemPayload[],
     signal: AbortSignal,
+    batchKey: string,
   ) => Promise<Map<ItemPayload, ItemState | Error>>;
+  /** Optional function to group batch fetches by key. Return false to fall back to individual fetchFn */
+  getItemsBatchKey?: (payload: ItemPayload) => string | false;
   /** Max items per batch - triggers immediate fetch when reached */
   maxBatchSize?: number;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
@@ -145,6 +148,7 @@ export function createCollectionStore<
   debugName,
   fetchFn,
   batchFetchFn,
+  getItemsBatchKey,
   maxBatchSize,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
@@ -223,18 +227,21 @@ export function createCollectionStore<
   // Map to track itemKey -> payload for batch fetch results
   const itemKeyToPayload = new Map<string, ItemPayload>();
 
-  // Use single scheduler only when batchFetchFn is provided
-  // Otherwise, use per-item schedulers for backward compatibility
-  const useSingleScheduler = !!batchFetchFn;
+  const useBatchSchedulers = !!batchFetchFn;
 
-  // Single scheduler for batch coalescing (only used when batchFetchFn is provided)
-  const singleScheduler = useSingleScheduler
-    ? new RequestScheduler<ItemPayload>({
+  const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+
+  function getOrCreateBatchKeyScheduler(
+    batchKey: string,
+  ): RequestScheduler<ItemPayload> {
+    let scheduler = batchKeySchedulers.get(batchKey);
+    if (!scheduler) {
+      scheduler = new RequestScheduler<ItemPayload>({
         fetchFn: async (
           requests: BatchRequest<ItemPayload>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
-          return executeBatchFetch(requests, fetchCtx);
+          return executeBatchFetch(requests, fetchCtx, batchKey);
         },
         lowPriorityThrottleMs,
         baseCoalescingWindowMs,
@@ -244,8 +251,11 @@ export function createCollectionStore<
         on: onSchedulerEvent,
         initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
         usesRealTimeUpdates,
-      })
-    : null;
+      });
+      batchKeySchedulers.set(batchKey, scheduler);
+    }
+    return scheduler;
+  }
 
   // Per-item schedulers for backward compatibility (when batchFetchFn is NOT provided)
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
@@ -275,14 +285,28 @@ export function createCollectionStore<
     return itemScheduler;
   }
 
-  function getScheduler(itemKey: string): RequestScheduler<ItemPayload> {
-    if (singleScheduler) return singleScheduler;
+  function getScheduler(
+    itemKey: string,
+    payload: ItemPayload,
+  ): RequestScheduler<ItemPayload> {
+    if (useBatchSchedulers) {
+      if (getItemsBatchKey) {
+        const batchKey = getItemsBatchKey(payload);
+        if (batchKey !== false) {
+          return getOrCreateBatchKeyScheduler(batchKey);
+        }
+        // batchKey === false → fall through to per-item scheduler
+      } else {
+        return getOrCreateBatchKeyScheduler('__default__');
+      }
+    }
     return getOrCreateItemScheduler(itemKey);
   }
 
   async function executeBatchFetch(
     requests: BatchRequest<ItemPayload>[],
     fetchCtx: FetchContext,
+    batchKey?: string,
   ): Promise<Map<string, boolean>> {
     return executeBatchFetchBase(
       requests,
@@ -292,6 +316,7 @@ export function createCollectionStore<
       fetchFn,
       batchFetchFn,
       errorNormalizer,
+      batchKey,
     );
   }
 
@@ -320,7 +345,7 @@ export function createCollectionStore<
 
     for (const param of payloads) {
       const itemKey = getItemKey(param);
-      const scheduler = getScheduler(itemKey);
+      const scheduler = getScheduler(itemKey, param);
       results.push(scheduler.scheduleFetch(itemKey, fetchType, param, options));
     }
 
@@ -340,7 +365,7 @@ export function createCollectionStore<
     { data: ItemState; error: null } | { data: null; error: StoreFetchError }
   > {
     const itemId = getItemKey(params);
-    const scheduler = getScheduler(itemId);
+    const scheduler = getScheduler(itemId, params);
 
     const result = await scheduler.awaitFetch(itemId, params, options);
 
@@ -388,17 +413,19 @@ export function createCollectionStore<
 
   function getItemsKeyArray(
     params: ItemPayload[] | FilterItemsFn | ItemPayload,
-  ): string[] {
+  ): { itemKey: string; payload: ItemPayload }[] {
     const items = store.state;
 
     if (Array.isArray(params)) {
-      return params.map(getItemKey);
+      return params.map((p) => ({ itemKey: getItemKey(p), payload: p }));
     } else if (typeof params === 'function') {
       return filterAndMap(Object.entries(items), ([itemKey, item]) => {
-        return item && params(item.payload, item.data) ? itemKey : false;
+        return item && params(item.payload, item.data)
+          ? { itemKey, payload: item.payload }
+          : false;
       });
     } else {
-      return [getItemKey(params)];
+      return [{ payload: params, itemKey: getItemKey(params) }];
     }
   }
 
@@ -410,7 +437,7 @@ export function createCollectionStore<
   ) {
     const itemsKey = getItemsKeyArray(itemPayload);
 
-    for (const itemKey of itemsKey) {
+    for (const { itemKey } of itemsKey) {
       const item = store.state[itemKey];
 
       if (!item) continue;
@@ -457,8 +484,8 @@ export function createCollectionStore<
     if (typeof params === 'function' || Array.isArray(params)) {
       const itemsId = getItemsKeyArray(params);
 
-      return filterAndMap(itemsId, (itemId) => {
-        return store.state[itemId] || false;
+      return filterAndMap(itemsId, ({ itemKey }) => {
+        return store.state[itemKey] || false;
       });
     }
 
@@ -512,8 +539,8 @@ export function createCollectionStore<
 
     const endMutations: (() => boolean)[] = [];
 
-    for (const itemKey of itemKeys) {
-      const scheduler = getScheduler(itemKey);
+    for (const { itemKey, payload } of itemKeys) {
+      const scheduler = getScheduler(itemKey, payload);
       endMutations.push(scheduler.startMutation(itemKey));
     }
 
@@ -549,7 +576,7 @@ export function createCollectionStore<
 
     store.produceState(
       (draft) => {
-        for (const itemKey of itemKeys) {
+        for (const { itemKey } of itemKeys) {
           draft[itemKey] = null;
         }
       },
@@ -576,7 +603,7 @@ export function createCollectionStore<
     store.batch(() => {
       store.produceState(
         (draft) => {
-          for (const itemKey of itemKeys) {
+          for (const { itemKey } of itemKeys) {
             const item = draft[itemKey];
 
             if (!item?.data) continue;
@@ -682,21 +709,23 @@ export function createCollectionStore<
   }
 
   function reset() {
-    if (singleScheduler) {
-      singleScheduler.reset();
-    } else {
-      for (const scheduler of perItemSchedulers.values()) {
-        scheduler.reset();
-      }
-      perItemSchedulers.clear();
+    for (const scheduler of batchKeySchedulers.values()) {
+      scheduler.reset();
     }
+    batchKeySchedulers.clear();
+
+    for (const scheduler of perItemSchedulers.values()) {
+      scheduler.reset();
+    }
+    perItemSchedulers.clear();
+
     store.setState({});
   }
 
   return {
     store,
     events,
-    scheduler: singleScheduler,
+    scheduler: null,
     get invalidationWasTriggered() {
       return invalidationWasTriggered;
     },

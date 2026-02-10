@@ -868,6 +868,37 @@ describe('fetch item', () => {
     // The item scheduler has its own throttle context
     expect(result).toBe('skipped');
   });
+
+  test('load item should share lowPriority throttle with queries when batch fetch is enabled', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      lowPriorityThrottleMs: 1000, // Must be > fetch duration (800ms default)
+      useBatchFetch: true,
+    });
+
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+
+    await vi.runAllTimersAsync();
+
+    const result = env.scheduleItemFetch('lowPriority', 'users||1');
+
+    expect(result).toBe('skipped');
+  });
+
+  test('load item should share lowPriority throttle with grouped batch schedulers', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      lowPriorityThrottleMs: 1000, // Must be > fetch duration (800ms default)
+      useBatchFetch: true,
+      getItemsBatchKey: (payload) => payload.split('||')[0] ?? '__default__',
+    });
+
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+
+    await vi.runAllTimersAsync();
+
+    const result = env.scheduleItemFetch('lowPriority', 'users||1');
+
+    expect(result).toBe('skipped');
+  });
 });
 
 describe('an item invalidation with lower priority should not override one with higher priority', () => {
