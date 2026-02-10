@@ -56,6 +56,50 @@ const serverData: Tables = {
 };
 
 describe('query coalescing with partial resources', () => {
+  test('same fields with different order still coalesce into one fetch', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      baseCoalescingWindowMs: 50,
+      defaultQuerySize: 2,
+      partialResources: partialResourcesConfig,
+    });
+
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'table1' },
+      2,
+      { fields: ['id', 'name'] },
+    );
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'table1' },
+      4,
+      { fields: ['name', 'id'] },
+    );
+
+    await vi.runAllTimersAsync();
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        limit: 4
+        results:
+          - data: { id: 1, name: 'Item 1' }
+            itemId: 'table1||1'
+          - data: { id: 2, name: 'Item 2' }
+            itemId: 'table1||2'
+          - data: { id: 3, name: 'Item 3' }
+            itemId: 'table1||3'
+          - data: { id: 4, name: 'Item 4' }
+            itemId: 'table1||4'
+        type: 'list'
+    `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    const itemKey = env.getStoreItemKeyFromRaw('table1||1');
+    expect(env.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
+      `['id', 'name']`,
+    );
+  });
+
   test('same query key with different fields and sizes uses merged fields and max size', async () => {
     const env = createListQueryStoreTestEnv(serverData, {
       baseCoalescingWindowMs: 50,
