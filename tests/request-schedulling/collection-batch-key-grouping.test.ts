@@ -172,64 +172,64 @@ describe('batch key grouping', () => {
     `);
   });
 
-//   test('mixed: some items batched by key, some individual', async () => {
-//     const env = createCollectionStoreTestEnv(
-//       {
-//         'api1-item1': { v: 1 },
-//         'api1-item2': { v: 2 },
-//         'api2-item1': { v: 10 },
-//         'api2-item2': { v: 20 },
-//       },
-//       {
-//         baseCoalescingWindowMs: 50,
-//         useBatchFetch: true,
-//         getItemsBatchKey: (payload) => {
-//           const id = payload;
-//           // api2 items fall back to individual fetch
-//           if (id.startsWith('api2-')) return false;
-//           return getBatchKey(id);
-//         },
-//       },
-//     );
+  test('mixed: some items batched by key, some individual', async () => {
+    const env = createCollectionStoreTestEnv(
+      {
+        'api1-item1': { v: 1 },
+        'api1-item2': { v: 2 },
+        'api2-item1': { v: 10 },
+        'api2-item2': { v: 20 },
+      },
+      {
+        baseCoalescingWindowMs: 50,
+        useBatchFetch: true,
+        getItemsBatchKey: (payload) => {
+          const id = payload;
+          // api2 items fall back to individual fetch
+          if (id.startsWith('api2-')) return false;
+          return getBatchKey(id);
+        },
+      },
+    );
 
-//     env.scheduleFetch('highPriority', 'api1-item1');
-//     env.scheduleFetch('highPriority', 'api2-item1');
-//     env.scheduleFetch('highPriority', 'api1-item2');
-//     env.scheduleFetch('highPriority', 'api2-item2');
+    env.scheduleFetch('highPriority', 'api1-item1');
+    env.scheduleFetch('highPriority', 'api2-item1');
+    env.scheduleFetch('highPriority', 'api1-item2');
+    env.scheduleFetch('highPriority', 'api2-item2');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
-//       v: 1,
-//     });
-//     expect(env.apiStore.getItemState('api1-item2')?.data?.value).toEqual({
-//       v: 2,
-//     });
-//     expect(env.apiStore.getItemState('api2-item1')?.data?.value).toEqual({
-//       v: 10,
-//     });
-//     expect(env.apiStore.getItemState('api2-item2')?.data?.value).toEqual({
-//       v: 20,
-//     });
+    expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
+      v: 1,
+    });
+    expect(env.apiStore.getItemState('api1-item2')?.data?.value).toEqual({
+      v: 2,
+    });
+    expect(env.apiStore.getItemState('api2-item1')?.data?.value).toEqual({
+      v: 10,
+    });
+    expect(env.apiStore.getItemState('api2-item2')?.data?.value).toEqual({
+      v: 20,
+    });
 
-//     // api1 items batched, api2 items fetched individually
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - batchKey: 'api1'
-//         itemIds: ['api1-item1', 'api1-item2']
-//         results:
-//           - data: { v: 1 }
-//             itemId: 'api1-item1'
-//           - data: { v: 2 }
-//             itemId: 'api1-item2'
-//         type: 'list'
-//       - itemId: 'api2-item1'
-//         result: { v: 10 }
-//         type: 'fetch'
-//       - itemId: 'api2-item2'
-//         result: { v: 20 }
-//         type: 'fetch'
-//     `);
-//   });
+    // api1 items batched, api2 items fetched individually
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: 'api1'
+        itemIds: ['api1-item1', 'api1-item2']
+        results:
+          - data: { v: 1 }
+            itemId: 'api1-item1'
+          - data: { v: 2 }
+            itemId: 'api1-item2'
+        type: 'list'
+      - itemId: 'api2-item1'
+        result: { v: 10 }
+        type: 'fetch'
+      - itemId: 'api2-item2'
+        result: { v: 20 }
+        type: 'fetch'
+    `);
+  });
 
 //   test('backward compat: no getItemsBatchKey + useBatchFetch → all items batched', async () => {
 //     const env = createCollectionStoreTestEnv(
