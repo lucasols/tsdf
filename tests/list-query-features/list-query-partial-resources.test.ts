@@ -123,7 +123,7 @@ describe('useItem with partial resources', () => {
     renders.addMark('Expand fields');
 
     act(() => {
-    rerender({ fields: ['id', 'name', 'address', 'country'] });
+      rerender({ fields: ['id', 'name', 'address', 'country'] });
     });
 
     await flushAllTimers();
@@ -160,7 +160,7 @@ describe('useItem with partial resources', () => {
         itemId: 'users||1'
         result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
         type: 'fetch'
-      `);
+    `);
   });
 
   test('fields reduce (4 -> 3): cache hit, no fetch, instant success', async () => {
@@ -189,8 +189,10 @@ describe('useItem with partial resources', () => {
     renders.addMark('Reduce fields');
 
     act(() => {
-    rerender({ fields: ['id', 'name', 'address'] });
+      rerender({ fields: ['id', 'name', 'address'] });
     });
+
+    await flushAllTimers();
 
     // No additional fetch should happen
     expect(env.serverTable.numOfFinishedFetches).toBe(fetchCountBefore);
@@ -293,7 +295,7 @@ describe('useListQuery with partial resources', () => {
     await flushAllTimers();
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
-    "
+      "
       -> status: loading ⋅ items: [] ⋅ error: null
       -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)] ⋅ error: null
 
@@ -539,7 +541,7 @@ describe('cross-hook field loading', () => {
         type: 'fetch'
     `);
   });
-  });
+});
 
 describe('deleteItemState with partial resources', () => {
   test('clears itemLoadedFields entry', async () => {
@@ -772,6 +774,67 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
   });
 });
+
+describe('RTU with partial resources', () => {
+  test('RTU invalidation: refetch uses current hook fields, data merges correctly', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      usesRealTimeUpdates: true,
+      partialResources: partialResourcesConfig,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+        fields: ['id', 'name'],
+      });
+
+      renders.add(pick(result, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    renders.addMark('Server update + RTU');
+
+    // Simulate a server update that triggers RTU
+    env.serverTable.setItem(
+      'users||1',
+      {
+        id: 1,
+        name: 'Updated User 1',
+        address: 'Address 1',
+        age: 10,
+        country: 'Country 1',
+      },
+      { triggerRTUEvent: true },
+    );
+
+    await advanceTime(50);
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
+
+      >>> Server update + RTU
+
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:Updated User 1}
+      "
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        itemId: 'users||1'
+        result: { id: 1, name: 'User 1' }
+        type: 'fetch'
+      - fields: ['id', 'name']
+        itemId: 'users||1'
+        result: { id: 1, name: 'Updated User 1' }
+        type: 'fetch'
     `);
   });
 });
