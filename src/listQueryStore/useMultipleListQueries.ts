@@ -295,7 +295,7 @@ export function useMultipleListQueries<
         if (shouldFetch) {
           scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
         }
-      } else {
+      } else if (!partialResources || shouldFetch) {
         scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
       }
     }

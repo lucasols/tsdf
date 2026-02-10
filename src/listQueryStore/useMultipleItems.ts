@@ -283,7 +283,7 @@ export function useMultipleItems<
         if (shouldFetch) {
           scheduleItemFetch(fetchType, payload, { fields });
         }
-      } else {
+      } else if (!partialResources || shouldFetch) {
         scheduleItemFetch(fetchType, payload, { fields });
       }
     }

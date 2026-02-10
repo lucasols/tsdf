@@ -240,6 +240,7 @@ export function createListQueryStore<
     RequestScheduler<QueryFetchPayload<QueryPayload>>
   >();
   const queryInitialFetchStartTime = new Map<string, number>();
+  const lastQueryFields = new Map<string, string[] | undefined>();
 
   if (
     import.meta.env.TEST
@@ -555,6 +556,8 @@ export function createListQueryStore<
       const currentQuerySize = queryState?.items.length ?? 0;
       const querySize = Math.max(currentQuerySize, size ?? defaultQuerySize);
 
+      lastQueryFields.set(queryKey, options?.fields);
+
       return getOrCreateQueryScheduler(queryKey).scheduleFetch(
         queryKey,
         fetchType,
@@ -586,6 +589,7 @@ export function createListQueryStore<
     const queryKey = getQueryKey(params);
     const loadSize = size ?? defaultQuerySize;
     const newSize = queryState.items.length + loadSize;
+    const fields = lastQueryFields.get(queryKey);
 
     return getOrCreateQueryScheduler(queryKey).scheduleFetch(
       queryKey,
@@ -594,6 +598,7 @@ export function createListQueryStore<
         type: 'loadMore',
         payload: params,
         size: newSize,
+        fields,
       },
     );
   }
