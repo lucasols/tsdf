@@ -99,78 +99,67 @@ describe('useItem with partial resources', () => {
     `);
   });
 
-  test('load correctly when fields change from less to more fields', async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      partialResources: true,
+  test('fields expand (3 -> 4): refetch triggers, data accumulates', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
     });
 
-    const renders = createRenderLogger({
-      filterKeys: ['status', 'data', 'payload', 'error'],
-    });
+    const renders = createLoggerStore();
 
-    const { rerender } = renderHook<void, ChangeFieldsProps>(
-      ({ fields }) => {
-        const result = env.store.useItem(
-          { id: 'users||1', fields },
-          { returnRefetchingStatus: true },
-        );
+    const { rerender } = renderHook(
+      ({ fields }: { fields: string[] }) => {
+        const result = env.apiStore.useItem('users||1', {
+          returnRefetchingStatus: true,
+          fields,
+        });
 
-        renders.add(result);
+        renders.add(pick(result, ['status', 'data', 'error']));
       },
       { initialProps: { fields: ['id', 'name', 'address'] } },
     );
 
-    await env.serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    renders.addMark('Change fields');
+    renders.addMark('Expand fields');
 
+    act(() => {
     rerender({ fields: ['id', 'name', 'address', 'country'] });
+    });
 
-    expect(jsonFormatter(env.store.store.state.partialItemsQueries))
-      .toMatchInlineSnapshotString(`
-      "{
-        {"id":"users||1"}: {
-          payload: { id: 'users||1', fields: [] },
-          fields: {
-            id: { status: 'refetching', error: null, wasLoaded: true, refetchOnMount: false },
-            name: { status: 'refetching', error: null, wasLoaded: true, refetchOnMount: false },
-            address: { status: 'refetching', error: null, wasLoaded: true, refetchOnMount: false },
-            country: { status: 'loading', error: null, wasLoaded: false, refetchOnMount: false },
-          },
-        },
-      }"
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null ⋅ error: null
+      -> status: success ⋅ data: {id:1, name:User 1, address:Address 1} ⋅ error: null
+
+      >>> Expand fields
+
+      -> status: loading ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ data: {id:1, name:User 1, address:Address 1, country:Country 1}
+      ⋅ error: null
+      └─
+      "
     `);
 
-    await env.serverMock.waitFetchIdle();
+    // Verify accumulated data in store (has all fields)
+    const storeItemKey = env.getStoreItemKeyFromRaw('users||1');
 
-    expect(jsonFormatter(env.store.store.state.partialItemsQueries))
-      .toMatchInlineSnapshotString(`
-      "{
-        {"id":"users||1"}: {
-          payload: { id: 'users||1', fields: [] },
-          fields: {
-            id: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-            name: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-            address: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-            country: { status: 'success', error: null, wasLoaded: true, refetchOnMount: false },
-          },
-        },
-      }"
-    `);
+    expect(
+      env.store.state.itemLoadedFields[storeItemKey],
+    ).toMatchInlineSnapshot(`['address', 'country', 'id', 'name']`);
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
-        "
-        status: loading -- data: null -- payload: {id:users||1, fields:[id, name, address]} -- error: null
-        status: success -- data: {id:1, name:User 1, address:Address 1} -- payload: {id:users||1, fields:[id, name, address]} -- error: null
-
-        >>> Change fields
-
-        status: loading -- data: null -- payload: {id:users||1, fields:[id, name, address, country]} -- error: null
-        status: success -- data: {id:1, name:User 1, address:Address 1, country:Country 1} -- payload: {id:users||1, fields:[id, name, address, country]} -- error: null
-        "
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name', 'address']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1, name: 'User 1' }
+        type: 'fetch'
+      - fields: ['id', 'name', 'address', 'country']
+        itemId: 'users||1'
+        result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
+        type: 'fetch'
       `);
   });
 
