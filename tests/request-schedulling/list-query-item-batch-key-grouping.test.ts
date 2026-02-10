@@ -223,49 +223,50 @@ describe('batch key grouping', () => {
     `);
   });
 
-//   test('backward compat: no getItemsBatchKey + useBatchFetch → all items batched', async () => {
-//     const env = createListQueryStoreTestEnv(serverData, {
-//       baseCoalescingWindowMs: 50,
-//       useBatchFetch: true,
-//       // No getItemsBatchKey provided
-//     });
+  test('backward compat: no getItemsBatchKey + useBatchFetch → all items batched', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      baseCoalescingWindowMs: 50,
+      useBatchFetch: true,
+      // No getItemsBatchKey provided
+    });
 
-//     env.scheduleItemFetch('highPriority', 'table1||1');
-//     env.scheduleItemFetch('highPriority', 'table1||2');
-//     env.scheduleItemFetch('highPriority', 'table2||10');
+    env.scheduleItemFetch('highPriority', 'table1||1');
+    env.scheduleItemFetch('highPriority', 'table1||2');
+    env.scheduleItemFetch('highPriority', 'table2||10');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     // All items should go into a single batch (default key)
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - itemIds: ['table1||1', 'table1||2', 'table2||10']
-//         results:
-//           - data: { id: 1, name: 'Item 1' }
-//             itemId: 'table1||1'
-//           - data: { id: 2, name: 'Item 2' }
-//             itemId: 'table1||2'
-//           - data: { id: 10, name: 'Item 10' }
-//             itemId: 'table2||10'
-//         type: 'list'
-//     `);
-//   });
+    // All items should go into a single batch (default key)
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2', 'table2||10']
+        results:
+          - data: { id: 1, name: 'Item 1' }
+            itemId: 'table1||1'
+          - data: { id: 2, name: 'Item 2' }
+            itemId: 'table1||2'
+          - data: { id: 10, name: 'Item 10' }
+            itemId: 'table2||10'
+        type: 'list'
+    `);
+  });
 
-//   test('single item in a batch key group uses fetchItemFn', async () => {
-//     const env = createListQueryStoreTestEnv(serverData, {
-//       baseCoalescingWindowMs: 50,
-//       useBatchFetch: true,
-//       getItemsBatchKey: (payload) => getTableFromItemId(payload),
-//     });
+  test('single item in a batch key group uses fetchItemFn', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      baseCoalescingWindowMs: 50,
+      useBatchFetch: true,
+      getItemsBatchKey: (payload) => getTableFromItemId(payload),
+    });
 
-//     env.scheduleItemFetch('highPriority', 'table1||1');
+    env.scheduleItemFetch('highPriority', 'table1||1');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     // Single item uses fetchItemFn, not batchFetchItemFn
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - itemId: 'table1||1'
-//         result: { id: 1, name: 'Item 1' }
-//         type: 'fetch'
-//     `);
-//   });
-// });
+    // Single item uses fetchItemFn, not batchFetchItemFn
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemId: 'table1||1'
+        result: { id: 1, name: 'Item 1' }
+        type: 'fetch'
+    `);
+  });
+});
