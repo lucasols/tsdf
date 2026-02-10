@@ -145,9 +145,12 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
   const batchFetchItemFn = async (
     payloads: string[],
     signal: AbortSignal,
-    _batchKey: string,
+    batchKey: string,
   ): Promise<Map<string, TRow | Error>> => {
-    const listResult = await serverTable.list({ itemIds: payloads }, signal);
+    const listResult = await serverTable.list(
+      { itemIds: payloads, batchKey },
+      signal,
+    );
 
     const results = new Map<string, TRow | Error>();
     for (const { itemId, data } of listResult.items) {

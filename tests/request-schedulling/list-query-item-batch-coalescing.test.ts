@@ -60,7 +60,8 @@ describe('batch coalescing basic behavior', () => {
     });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2', 'table1||3']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2', 'table1||3']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -130,7 +131,8 @@ describe('batch coalescing basic behavior', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2', 'table1||3']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2', 'table1||3']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -166,7 +168,8 @@ describe('maxItemBatchSize behavior', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -217,14 +220,16 @@ describe('maxItemBatchSize behavior', () => {
     });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
           - data: { id: 2, name: 'Item 2' }
             itemId: 'table1||2'
         type: 'list'
-      - itemIds: ['table1||3', 'table1||4']
+      - batchKey: '__default__'
+        itemIds: ['table1||3', 'table1||4']
         results:
           - data: { id: 3, name: 'Item 3' }
             itemId: 'table1||3'
@@ -272,7 +277,8 @@ describe('requests during ongoing fetch', () => {
 
     // First list fetch, then table1||3 as individual fetch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -436,7 +442,8 @@ describe('awaitItemFetch with batch', () => {
     });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2', 'table1||3']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2', 'table1||3']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -548,7 +555,8 @@ describe('awaitItemFetch with batch', () => {
     expect(result2).toEqual({ data: { id: 2, name: 'Item 2' }, error: null });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -581,7 +589,8 @@ describe('priority handling in batch', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2', 'table1||3']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2', 'table1||3']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -616,7 +625,8 @@ describe('priority handling in batch', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2', 'table1||3']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2', 'table1||3']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -681,7 +691,8 @@ describe('batch with UI hooks', () => {
     });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -749,7 +760,8 @@ describe('duplicate item requests in batch', () => {
 
     // Should have exactly 2 items in batch (deduplicated)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['table1||1', 'table1||2']
+      - batchKey: '__default__'
+        itemIds: ['table1||1', 'table1||2']
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
