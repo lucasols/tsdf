@@ -61,7 +61,6 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     useBatchFetch,
     maxItemBatchSize,
     getItemsBatchKey,
-    getListQueryCoalescingKey,
     disableFetchItemFn,
     optimisticListUpdates,
   }: {
@@ -78,7 +77,6 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     maxItemBatchSize?: number;
     /** Optional function to group batch fetches by key */
     getItemsBatchKey?: (payload: string) => string | false;
-    getListQueryCoalescingKey?: (payload: ListQueryParams) => string;
     disableFetchItemFn?: boolean;
     optimisticListUpdates?: Parameters<
       typeof createListQueryStore<TRow, ListQueryParams, string>
@@ -179,23 +177,17 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
-    getListQueryCoalescingKey,
     optimisticListUpdates,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
-    fetchListFn: async (
-      { tableId, filters },
-      size,
-      { signal, coalescingKey },
-    ) => {
+    fetchListFn: async ({ tableId, filters }, size, signal) => {
       const result = await serverTable.list(
         {
           tableId,
           filters,
           limit: size,
-          batchKey: getListQueryCoalescingKey ? coalescingKey : undefined,
         },
         signal,
       );

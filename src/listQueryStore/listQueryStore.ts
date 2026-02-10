@@ -77,7 +77,7 @@ export type ListQueryStoreOptions<
   fetchListFn: (
     payload: QueryPayload,
     size: number,
-    options: { signal: AbortSignal; coalescingKey: string },
+    signal: AbortSignal,
   ) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
   fetchItemFn?: (
     payload: ItemPayload,
@@ -120,7 +120,6 @@ export type ListQueryStoreOptions<
   ) => void;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
-  getListQueryCoalescingKey?: (payload: QueryPayload) => string;
 };
 
 export function createListQueryStore<
@@ -149,7 +148,6 @@ export function createListQueryStore<
   onMutationError,
   getQueryKey: customGetQueryKey,
   getItemKey: customGetItemKey,
-  getListQueryCoalescingKey,
 }: ListQueryStoreOptions<ItemState, QueryPayload, ItemPayload>) {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<QueryPayload>;
@@ -212,13 +210,6 @@ export function createListQueryStore<
     );
   }
 
-  function getQuerySchedulerKey(params: QueryPayload): string {
-    if (getListQueryCoalescingKey) {
-      return getListQueryCoalescingKey(params);
-    }
-    return getQueryKey(params);
-  }
-
   const events = evtmitter<ListQueryStoreEvents>();
 
   const querySchedulers = new Map<
@@ -240,14 +231,14 @@ export function createListQueryStore<
   }
 
   function getOrCreateQueryScheduler(
-    querySchedulerKey: string,
+    queryKey: string,
   ): RequestScheduler<QueryFetchPayload<QueryPayload>> {
-    let scheduler = querySchedulers.get(querySchedulerKey);
+    let scheduler = querySchedulers.get(queryKey);
     if (!scheduler) {
       const initialLastFetchStartTime =
-        queryInitialFetchStartTime.get(querySchedulerKey);
+        queryInitialFetchStartTime.get(queryKey);
       if (initialLastFetchStartTime !== undefined) {
-        queryInitialFetchStartTime.delete(querySchedulerKey);
+        queryInitialFetchStartTime.delete(queryKey);
       }
 
       scheduler = new RequestScheduler<QueryFetchPayload<QueryPayload>>({
@@ -260,7 +251,6 @@ export function createListQueryStore<
             fetchCtx,
             store,
             fetchListFn,
-            querySchedulerKey,
             errorNormalizer,
             getItemKey,
             updateItemSchedulerTiming,
@@ -282,7 +272,7 @@ export function createListQueryStore<
         }),
         usesRealTimeUpdates,
       });
-      querySchedulers.set(querySchedulerKey, scheduler);
+      querySchedulers.set(queryKey, scheduler);
     }
     return scheduler;
   }
@@ -570,9 +560,7 @@ export function createListQueryStore<
       const currentQuerySize = queryState?.items.length ?? 0;
       const querySize = Math.max(currentQuerySize, size ?? defaultQuerySize);
 
-      return getOrCreateQueryScheduler(
-        getQuerySchedulerKey(param),
-      ).scheduleFetch(
+      return getOrCreateQueryScheduler(queryKey).scheduleFetch(
         queryKey,
         fetchType,
         { type: 'load', payload: param, size: querySize },
@@ -599,13 +587,15 @@ export function createListQueryStore<
     const loadSize = size ?? defaultQuerySize;
     const newSize = queryState.items.length + loadSize;
 
-    return getOrCreateQueryScheduler(
-      getQuerySchedulerKey(params),
-    ).scheduleFetch(queryKey, 'highPriority', {
-      type: 'loadMore',
-      payload: params,
-      size: newSize,
-    });
+    return getOrCreateQueryScheduler(queryKey).scheduleFetch(
+      queryKey,
+      'highPriority',
+      {
+        type: 'loadMore',
+        payload: params,
+        size: newSize,
+      },
+    );
   }
 
   function getQueryItems<T>(
@@ -639,9 +629,7 @@ export function createListQueryStore<
     const queryKey = getQueryKey(params);
     const size = options.size ?? defaultQuerySize;
 
-    const result = await getOrCreateQueryScheduler(
-      getQuerySchedulerKey(params),
-    ).awaitFetch(
+    const result = await getOrCreateQueryScheduler(queryKey).awaitFetch(
       queryKey,
       { type: 'load', payload: params, size },
       { timeoutMs: options.timeoutMs },
@@ -907,9 +895,7 @@ export function createListQueryStore<
       for (const [queryKey, query] of Object.entries(store.state.queries)) {
         if (query.items.includes(itemKey)) {
           endMutations.push(
-            getOrCreateQueryScheduler(
-              getQuerySchedulerKey(query.payload),
-            ).startMutation(queryKey),
+            getOrCreateQueryScheduler(queryKey).startMutation(queryKey),
           );
         }
       }
