@@ -282,6 +282,7 @@ export function createListQueryStore<
   const useBatchSchedulers = !!batchFetchItemFn && !!fetchItemFn;
 
   const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+  const batchInitialFetchStartTime = new Map<string, number>();
 
   function getOrCreateBatchKeyScheduler(
     batchKey: string,
@@ -290,6 +291,12 @@ export function createListQueryStore<
     if (!scheduler) {
       if (!fetchItemFn) {
         throw new Error(noFetchItemFnError);
+      }
+
+      const initialLastFetchStartTime =
+        batchInitialFetchStartTime.get(batchKey);
+      if (initialLastFetchStartTime !== undefined) {
+        batchInitialFetchStartTime.delete(batchKey);
       }
 
       scheduler = new RequestScheduler<ItemPayload>({
@@ -314,6 +321,7 @@ export function createListQueryStore<
         mediumPriorityDelayMs,
         maxBatchSize: maxItemBatchSize,
         on: onSchedulerEvent,
+        initialLastFetchStartTime,
         usesRealTimeUpdates,
       });
       batchKeySchedulers.set(batchKey, scheduler);
@@ -328,11 +336,31 @@ export function createListQueryStore<
     import.meta.env.TEST &&
     testOptions?.initialLastFetchStartTime !== undefined
   ) {
-    for (const itemKey of Object.keys(store.state.itemQueries)) {
-      itemInitialFetchStartTime.set(
-        itemKey,
-        testOptions.initialLastFetchStartTime,
-      );
+    for (const [itemKey, itemQuery] of Object.entries(
+      store.state.itemQueries,
+    )) {
+      const initialLastFetchStartTime = testOptions.initialLastFetchStartTime;
+
+      if (useBatchSchedulers) {
+        const payload = itemQuery?.payload;
+        const batchKey =
+          payload && getItemsBatchKey
+            ? getItemsBatchKey(payload)
+            : '__default__';
+
+        if (batchKey !== false) {
+          const existingStartTime = batchInitialFetchStartTime.get(batchKey);
+          batchInitialFetchStartTime.set(
+            batchKey,
+            existingStartTime === undefined
+              ? initialLastFetchStartTime
+              : Math.max(existingStartTime, initialLastFetchStartTime),
+          );
+          continue;
+        }
+      }
+
+      itemInitialFetchStartTime.set(itemKey, initialLastFetchStartTime);
     }
   }
 
@@ -395,7 +423,9 @@ export function createListQueryStore<
     if (!fetchItemFn) return;
 
     if (useBatchSchedulers) {
-      const payload = itemKeyToPayload.get(itemKey);
+      const payload =
+        itemKeyToPayload.get(itemKey) ??
+        store.state.itemQueries[itemKey]?.payload;
       const batchKey =
         payload && getItemsBatchKey ? getItemsBatchKey(payload) : '__default__';
 
@@ -403,8 +433,16 @@ export function createListQueryStore<
         const scheduler = batchKeySchedulers.get(batchKey);
         if (scheduler) {
           scheduler.setLastFetchStartTime(startTime);
-          return;
+        } else {
+          const existingStartTime = batchInitialFetchStartTime.get(batchKey);
+          batchInitialFetchStartTime.set(
+            batchKey,
+            existingStartTime === undefined
+              ? startTime
+              : Math.max(existingStartTime, startTime),
+          );
         }
+        return;
       }
     }
 
@@ -1339,6 +1377,7 @@ export function createListQueryStore<
       scheduler.reset();
     }
     batchKeySchedulers.clear();
+    batchInitialFetchStartTime.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
       scheduler.reset();
