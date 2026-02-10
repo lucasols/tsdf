@@ -263,21 +263,82 @@ describe('useListQuery with partial resources', () => {
     `);
   });
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+  test('fields expand: refetch with new fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const renders = createLoggerStore();
+
+    const { rerender } = renderHook(
+      ({ fields }: { fields: string[] }) => {
+        const result = env.apiStore.useListQuery(
+          { tableId: 'users' },
+          { returnRefetchingStatus: true, fields },
+        );
+
+        renders.add(pick(result, ['status', 'items', 'error']));
+      },
+      { initialProps: { fields: ['id', 'name'] } },
+    );
+
+    await flushAllTimers();
+
+    renders.addMark('Expand fields');
+
+    act(() => {
+      rerender({ fields: ['id', 'name', 'address'] });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
-    status: loading -- items: [] -- payload: {tableId:users, fields:[id, name, address]} -- error: null
-    status: success -- items: [{id:1, name:User 1, address:Address 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address]} -- error: null
-    "
+      -> status: loading ⋅ items: [] ⋅ error: null
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)] ⋅ error: null
+
+      >>> Expand fields
+
+      -> status: loading ⋅ items: [] ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:1, name:User 1, address:Address 1}, …(4 more)]
+      ⋅ error: null
+      └─
+      "
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        limit: 50
+        results:
+          - data: { id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { id: 5, name: 'User 5' }
+            itemId: 'users||5'
+        type: 'list'
+      - fields: ['id', 'name', 'address']
+        limit: 50
+        results:
+          - data: { address: 'Address 1', id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { address: 'Address 2', id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { address: 'Address 3', id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { address: 'Address 4', id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { address: 'Address 5', id: 5, name: 'User 5' }
+            itemId: 'users||5'
+        type: 'list'
     `);
   });
-
-  test('load correctly when fields change from less to more fields', async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      partialResources: true,
-      disableRefetchOnMount: true,
     });
 
     const renders = createRenderLogger({
@@ -475,14 +536,57 @@ describe('useListQuery with partial resources', () => {
   });
 });
 
-// FIX: test concurrent fetches with different fields
+describe('type safety: fields requirement with partialResources', () => {
+  test('fields is required in hooks when partialResources is enabled', () => {
+    const store =
+      __LEGIT_CAST__<
+        ListQueryStore<Row, string, string, PartialResourcesConfig<Row>>
+      >(undefined);
 
-// FIX: test use fallback list then load more
+    // Type-only test: function is never called to avoid React hook errors
+    function typeCheck_() {
+      // @ts-expect-error - useItem requires fields when partialResources is enabled
+      store.useItem('id');
 
-// FIX: test use fallback list then load more
+      store.useItem('id', { fields: ['name'] });
 
-// FIX: load list then load item with less but common fields
+      // @ts-expect-error - useListQuery requires fields when partialResources is enabled
+      store.useListQuery('payload');
 
-// FIX: load two lists with different fields then load item with common fields
+      store.useListQuery('payload', { fields: ['name'] });
 
-// FIX: update item state
+      // @ts-expect-error - useMultipleItems requires fields when partialResources is enabled
+      store.useMultipleItems([{ payload: 'id' }]);
+
+      store.useMultipleItems([{ payload: 'id', fields: ['name'] }]);
+
+      // @ts-expect-error - useMultipleListQueries requires fields when partialResources is enabled
+      store.useMultipleListQueries([{ payload: 'payload' }]);
+
+      store.useMultipleListQueries([{ payload: 'payload', fields: ['name'] }]);
+    }
+
+    void typeCheck_;
+    expect(true).toBe(true); // Dummy assertion to satisfy test requirements
+  });
+
+  test('fields is optional in hooks when partialResources is not enabled', () => {
+    const store =
+      __LEGIT_CAST__<ListQueryStore<Row, string, string>>(undefined);
+
+    function typeCheck_() {
+      store.useItem('id');
+      store.useListQuery('payload');
+      store.useMultipleItems([{ payload: 'id' }]);
+      store.useMultipleListQueries([{ payload: 'payload' }]);
+
+      store.useItem('id', { fields: ['name'] });
+      store.useListQuery('payload', { fields: ['name'] });
+      store.useMultipleItems([{ payload: 'id', fields: ['name'] }]);
+      store.useMultipleListQueries([{ payload: 'payload', fields: ['name'] }]);
+    }
+
+    void typeCheck_;
+    expect(true).toBe(true); // Dummy assertion to satisfy test requirements
+  });
+});
