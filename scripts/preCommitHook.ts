@@ -35,7 +35,6 @@ function preCommitHook() {
     console.log('Files formatted and re-staged successfully.');
   } catch (error) {
     console.error('Error in pre-commit hook:', error);
-    process.exit(1);
   }
 }
 

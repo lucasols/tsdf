@@ -15,3 +15,4 @@ coverage
 dist
 .quokka.ts
 .DS_Store
+.vscode/settings.json
