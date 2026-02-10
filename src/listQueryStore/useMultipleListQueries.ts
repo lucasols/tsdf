@@ -10,6 +10,7 @@ import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
+  type FieldsInput,
   type ListQueryUseMultipleListQueriesQuery,
   type PartialResourcesConfig,
   type TSFDListQuery,
@@ -62,7 +63,7 @@ export function useMultipleListQueries<
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
-    options?: { fields?: string[] },
+    options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   queryInvalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
@@ -77,7 +78,7 @@ export function useMultipleListQueries<
   type QueryWithId = {
     key: string;
     payload: QueryPayload;
-    fields: string[] | undefined;
+    fields: FieldsInput | undefined;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -124,7 +125,7 @@ export function useMultipleListQueries<
     (
       state: State,
       query: TSFDListQuery<QueryPayload>,
-      fields: string[] | undefined,
+      fields: FieldsInput | undefined,
     ): SelectedItem[] => {
       return filterAndMap(query.items, (itemKey) => {
         let item = state.items[itemKey];
@@ -132,7 +133,7 @@ export function useMultipleListQueries<
         if (!item || !itemPayload) return false;
 
         // Apply field selection for partial resources
-        if (partialResources && fields && fields.length > 0) {
+        if (partialResources && Array.isArray(fields) && fields.length > 0) {
           item = partialResources.selectFields(fields, item);
         }
 
@@ -183,7 +184,7 @@ export function useMultipleListQueries<
           // Override status when partial resources has items with missing fields
           if (
             partialResources &&
-            fields &&
+            Array.isArray(fields) &&
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
@@ -281,26 +282,21 @@ export function useMultipleListQueries<
       let shouldFetch =
         !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
 
-      // For partial resources, check if all items in the query have the requested fields
-      if (
-        partialResources &&
-        !shouldFetch &&
-        queryState &&
-        fields &&
-        fields.length > 0
-      ) {
-        const someItemMissingFields = queryState.items.some((itemKey) => {
-          const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-          return fields.some((f) => !loadedFields.includes(f));
-        });
+      // For partial resources, fetch again when requested fields are missing
+      // or when a full-resource hook is affected by field invalidation.
+      if (partialResources && !shouldFetch && queryState) {
+        const isQueryFetchInFlight =
+          queryState.status === 'loading' ||
+          queryState.status === 'refetching' ||
+          queryState.status === 'loadingMore';
 
-        if (someItemMissingFields) {
-          const isQueryFetchInFlight =
-            queryState.status === 'loading' ||
-            queryState.status === 'refetching' ||
-            queryState.status === 'loadingMore';
+        if (Array.isArray(fields) && fields.length > 0) {
+          const someItemMissingFields = queryState.items.some((itemKey) => {
+            const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+            return fields.some((f) => !loadedFields.includes(f));
+          });
 
-          if (!isQueryFetchInFlight) {
+          if (someItemMissingFields && !isQueryFetchInFlight) {
             shouldFetch = true;
 
             const hasAffectedFieldInvalidation = queryState.items.some(
@@ -316,6 +312,23 @@ export function useMultipleListQueries<
             );
 
             if (hasAffectedFieldInvalidation && fetchType === 'lowPriority') {
+              fetchType = 'highPriority';
+            }
+          }
+        } else if (fields === '*') {
+          const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
+            const itemFieldInvalidationFields =
+              store.state.itemFieldInvalidationFields[itemKey];
+            return (
+              !!itemFieldInvalidationFields &&
+              itemFieldInvalidationFields.length > 0
+            );
+          });
+
+          if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
+            shouldFetch = true;
+
+            if (fetchType === 'lowPriority') {
               fetchType = 'highPriority';
             }
           }

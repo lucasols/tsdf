@@ -9,6 +9,7 @@ import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
+  type FieldsInput,
   type ListQueryUseMultipleItemsQuery,
   type PartialResourcesConfig,
   type TSFDListQueryState,
@@ -55,7 +56,7 @@ export function useMultipleItems<
   scheduleItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
-    options?: { fields?: string[] },
+    options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   itemInvalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
@@ -67,7 +68,7 @@ export function useMultipleItems<
   type QueryWithId = {
     itemKey: string;
     payload: ItemPayload;
-    fields: string[] | undefined;
+    fields: FieldsInput | undefined;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -120,7 +121,12 @@ export function useMultipleItems<
           let itemState = rawItemState;
 
           // Apply field selection for partial resources
-          if (partialResources && itemState && fields && fields.length > 0) {
+          if (
+            partialResources &&
+            itemState &&
+            Array.isArray(fields) &&
+            fields.length > 0
+          ) {
             itemState = partialResources.selectFields(fields, itemState);
           }
 
@@ -171,7 +177,7 @@ export function useMultipleItems<
           // Override status when partial resources has missing fields
           if (
             partialResources &&
-            fields &&
+            Array.isArray(fields) &&
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
@@ -205,7 +211,7 @@ export function useMultipleItems<
           if (
             partialResources &&
             status === 'refetching' &&
-            fields &&
+            Array.isArray(fields) &&
             fields.length > 0 &&
             itemFieldInvalidationFields &&
             !fields.some((f) => itemFieldInvalidationFields.includes(f))
@@ -257,6 +263,7 @@ export function useMultipleItems<
       fieldsToFetch = Array.from(new Set(event.invalidateFields)).sort();
 
       const hasAffectedHook = matchingQueries.some(({ fields }) => {
+        if (fields === '*') return true;
         if (!fields || fields.length === 0) return true;
         return fields.some((field) => event.invalidateFields?.includes(field));
       });
@@ -312,7 +319,12 @@ export function useMultipleItems<
         itemState.refetchOnMount;
 
       // For partial resources, check if all requested fields are loaded
-      if (partialResources && !shouldFetch && fields && fields.length > 0) {
+      if (
+        partialResources &&
+        !shouldFetch &&
+        Array.isArray(fields) &&
+        fields.length > 0
+      ) {
         const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
         const hasMissingFields = fields.some((f) => !loadedFields.includes(f));
 

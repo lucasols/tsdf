@@ -99,6 +99,48 @@ describe('useItem with partial resources', () => {
     `);
   });
 
+  test('fields "*" loads full item without projection', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: '*',
+      });
+
+      renders.add(pick(result, ['status', 'data', 'error']));
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ data: {id:1, name:User 1, address:Address 1, age:10, country:Country 1}
+      ⋅ error: null
+      └─
+      "
+    `);
+
+    const [firstFetch] = env.serverTable.fetchHistory;
+    expect(firstFetch?.type).toBe('fetch');
+    if (firstFetch?.type === 'fetch') {
+      expect(firstFetch.fields).toBeUndefined();
+    }
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemId: 'users||1'
+        result: { address: 'Address 1', age: 10, country: 'Country 1', id: 1, name: 'User 1' }
+        type: 'fetch'
+    `);
+  });
+
   test('fields expand (3 -> 4): refetch triggers, data accumulates', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
@@ -263,6 +305,42 @@ describe('useListQuery with partial resources', () => {
             itemId: 'users||5'
         type: 'list'
     `);
+  });
+
+  test('fields "*" loads full list items without projection', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: '*' },
+      );
+
+      renders.add(pick(result, ['status', 'items', 'error']));
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ items: [] ⋅ error: null
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:1, name:User 1, address:Address 1, age:10, country:Country 1}, …(4 more)]
+      ⋅ error: null
+      └─
+      "
+    `);
+
+    const [firstFetch] = env.serverTable.fetchHistory;
+    expect(firstFetch?.type).toBe('list');
+    if (firstFetch?.type === 'list') {
+      expect(firstFetch.fields).toBeUndefined();
+    }
   });
 
   test('fields expand: refetch with new fields', async () => {
@@ -1021,13 +1099,13 @@ describe('RTU with partial resources', () => {
 });
 
 describe('await* preload with partial resources', () => {
-  test('awaitItemFetch full preload satisfies later field hook without refetch', async () => {
+  test('awaitItemFetch with fields "*" satisfies later field hook without refetch', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
     });
 
     const preloadPromise = env.apiStore.awaitItemFetch('users||1', {
-      fields: ['id', 'name', 'address', 'age', 'country'],
+      fields: '*',
     });
 
     await flushAllTimers();
@@ -1060,9 +1138,15 @@ describe('await* preload with partial resources', () => {
       -> status: success ⋅ data: {id:1, name:User 1}
       "
     `);
+
+    const [firstFetch] = env.serverTable.fetchHistory;
+    expect(firstFetch?.type).toBe('fetch');
+    if (firstFetch?.type === 'fetch') {
+      expect(firstFetch.fields).toBeUndefined();
+    }
   });
 
-  test('awaitListQueryFetch full preload satisfies later list hook without refetch', async () => {
+  test('awaitListQueryFetch with fields "*" satisfies later list hook without refetch', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
     });
@@ -1072,7 +1156,7 @@ describe('await* preload with partial resources', () => {
         tableId: 'users',
       },
       {
-        fields: ['id', 'name', 'address', 'age', 'country'],
+        fields: '*',
       },
     );
 
@@ -1101,6 +1185,61 @@ describe('await* preload with partial resources', () => {
       -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
       "
     `);
+
+    const firstListFetch = env.serverTable.fetchHistory.find(
+      (fetch) => fetch.type === 'list',
+    );
+    expect(firstListFetch).toBeDefined();
+    if (firstListFetch?.type === 'list') {
+      expect(firstListFetch.fields).toBeUndefined();
+    }
+  });
+
+  test('fetch methods accept fields "*"', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    expect(() =>
+      env.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+        fields: '*',
+      }),
+    ).not.toThrow();
+    await flushAllTimers();
+
+    expect(() =>
+      env.apiStore.scheduleListQueryFetch(
+        'highPriority',
+        { tableId: 'users' },
+        2,
+        { fields: '*' },
+      ),
+    ).not.toThrow();
+    await flushAllTimers();
+
+    expect(() =>
+      env.apiStore.loadMore({ tableId: 'users' }, { size: 2, fields: '*' }),
+    ).not.toThrow();
+    await flushAllTimers();
+
+    const awaitItemPromise = env.apiStore.awaitItemFetch('users||2', {
+      fields: '*',
+    });
+    const awaitListPromise = env.apiStore.awaitListQueryFetch(
+      { tableId: 'users' },
+      {
+        fields: '*',
+      },
+    );
+
+    await flushAllTimers();
+
+    await expect(awaitItemPromise).resolves.toMatchObject({ error: null });
+    await expect(awaitListPromise).resolves.toMatchObject({ error: null });
+
+    for (const fetch of env.serverTable.fetchHistory) {
+      expect(fetch.fields).toBeUndefined();
+    }
   });
 
   test('fetch methods throw when fields is missing', async () => {
@@ -1178,27 +1317,34 @@ describe('type safety: fields requirement with partialResources', () => {
       store.useItem('id');
 
       store.useItem('id', { fields: ['name'] });
+      store.useItem('id', { fields: '*' });
 
       // @ts-expect-error - useListQuery requires fields when partialResources is enabled
       store.useListQuery('payload');
 
       store.useListQuery('payload', { fields: ['name'] });
+      store.useListQuery('payload', { fields: '*' });
 
       // @ts-expect-error - useMultipleItems requires fields when partialResources is enabled
       store.useMultipleItems([{ payload: 'id' }]);
 
       store.useMultipleItems([{ payload: 'id', fields: ['name'] }]);
+      store.useMultipleItems([{ payload: 'id', fields: '*' }]);
 
       // @ts-expect-error - useMultipleListQueries requires fields when partialResources is enabled
       store.useMultipleListQueries([{ payload: 'payload' }]);
 
       store.useMultipleListQueries([{ payload: 'payload', fields: ['name'] }]);
+      store.useMultipleListQueries([{ payload: 'payload', fields: '*' }]);
 
       // @ts-expect-error - scheduleItemFetch requires fields when partialResources is enabled
       store.scheduleItemFetch('highPriority', 'id');
 
       store.scheduleItemFetch('highPriority', 'id', {
         fields: ['name'],
+      });
+      store.scheduleItemFetch('highPriority', 'id', {
+        fields: '*',
       });
 
       // @ts-expect-error - scheduleListQueryFetch requires fields when partialResources is enabled
@@ -1207,21 +1353,27 @@ describe('type safety: fields requirement with partialResources', () => {
       store.scheduleListQueryFetch('highPriority', 'payload', undefined, {
         fields: ['name'],
       });
+      store.scheduleListQueryFetch('highPriority', 'payload', undefined, {
+        fields: '*',
+      });
 
       // @ts-expect-error - loadMore requires fields when partialResources is enabled
       store.loadMore('payload');
 
       store.loadMore('payload', { fields: ['name'] });
+      store.loadMore('payload', { fields: '*' });
 
       // @ts-expect-error - awaitItemFetch requires fields when partialResources is enabled
       void store.awaitItemFetch('id');
 
       void store.awaitItemFetch('id', { fields: ['name'] });
+      void store.awaitItemFetch('id', { fields: '*' });
 
       // @ts-expect-error - awaitListQueryFetch requires fields when partialResources is enabled
       void store.awaitListQueryFetch('payload');
 
       void store.awaitListQueryFetch('payload', { fields: ['name'] });
+      void store.awaitListQueryFetch('payload', { fields: '*' });
     }
 
     void typeCheck_;
@@ -1239,9 +1391,13 @@ describe('type safety: fields requirement with partialResources', () => {
       store.useMultipleListQueries([{ payload: 'payload' }]);
 
       store.useItem('id', { fields: ['name'] });
+      store.useItem('id', { fields: '*' });
       store.useListQuery('payload', { fields: ['name'] });
+      store.useListQuery('payload', { fields: '*' });
       store.useMultipleItems([{ payload: 'id', fields: ['name'] }]);
+      store.useMultipleItems([{ payload: 'id', fields: '*' }]);
       store.useMultipleListQueries([{ payload: 'payload', fields: ['name'] }]);
+      store.useMultipleListQueries([{ payload: 'payload', fields: '*' }]);
 
       store.scheduleItemFetch('highPriority', 'id');
       store.scheduleListQueryFetch('highPriority', 'payload');
@@ -1250,12 +1406,19 @@ describe('type safety: fields requirement with partialResources', () => {
       void store.awaitListQueryFetch('payload');
 
       store.scheduleItemFetch('highPriority', 'id', { fields: ['name'] });
+      store.scheduleItemFetch('highPriority', 'id', { fields: '*' });
       store.scheduleListQueryFetch('highPriority', 'payload', undefined, {
         fields: ['name'],
       });
+      store.scheduleListQueryFetch('highPriority', 'payload', undefined, {
+        fields: '*',
+      });
       store.loadMore('payload', { fields: ['name'] });
+      store.loadMore('payload', { fields: '*' });
       void store.awaitItemFetch('id', { fields: ['name'] });
+      void store.awaitItemFetch('id', { fields: '*' });
       void store.awaitListQueryFetch('payload', { fields: ['name'] });
+      void store.awaitListQueryFetch('payload', { fields: '*' });
     }
 
     void typeCheck_;

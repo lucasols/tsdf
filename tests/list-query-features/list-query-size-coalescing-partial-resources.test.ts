@@ -145,7 +145,7 @@ describe('query coalescing with partial resources', () => {
     );
   });
 
-  test('one request without fields keeps full-resource fetch while still coalescing size', async () => {
+  test('coalescing "*" with specific fields resolves to one full fetch', async () => {
     const env = createListQueryStoreTestEnv(serverData, {
       baseCoalescingWindowMs: 50,
       defaultQuerySize: 2,
@@ -155,19 +155,29 @@ describe('query coalescing with partial resources', () => {
     env.apiStore.scheduleListQueryFetch(
       'highPriority',
       { tableId: 'table1' },
-      3,
-      { fields: ['id', 'name'] },
+      2,
+      { fields: '*' },
     );
     env.apiStore.scheduleListQueryFetch(
       'highPriority',
       { tableId: 'table1' },
-      4,
+      5,
+      { fields: ['id', 'address'] },
     );
 
     await vi.runAllTimersAsync();
 
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+    const [firstFetch] = env.serverTable.fetchHistory;
+    expect(firstFetch?.type).toBe('list');
+    if (firstFetch?.type === 'list') {
+      expect(firstFetch.limit).toBe(5);
+      expect(firstFetch.fields).toBeUndefined();
+    }
+
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 4
+      - limit: 5
         results:
           - data: { address: 'Address 1', country: 'Country 1', id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -177,14 +187,37 @@ describe('query coalescing with partial resources', () => {
             itemId: 'table1||3'
           - data: { address: 'Address 4', country: 'Country 4', id: 4, name: 'Item 4' }
             itemId: 'table1||4'
+          - data: { address: 'Address 5', country: 'Country 5', id: 5, name: 'Item 5' }
+            itemId: 'table1||5'
         type: 'list'
     `);
-    expect(env.apiStore.getItemState('table1||1')).toMatchInlineSnapshot(`
-      address: 'Address 1'
-      country: 'Country 1'
-      id: 1
-      name: 'Item 1'
-    `);
+
+    const itemKey = env.getStoreItemKeyFromRaw('table1||1');
+    expect(env.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
+      `['address', 'country', 'id', 'name']`,
+    );
+  });
+
+  test('request without fields throws when partial resources is enabled', () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      baseCoalescingWindowMs: 50,
+      defaultQuerySize: 2,
+      partialResources: partialResourcesConfig,
+    });
+    const apiStore = __LEGIT_CAST__<{
+      scheduleListQueryFetch: (
+        fetchType: string,
+        payload: { tableId: string },
+        size?: number,
+        options?: unknown,
+      ) => unknown;
+    }>(env.apiStore);
+
+    expect(() =>
+      apiStore.scheduleListQueryFetch('highPriority', { tableId: 'table1' }, 4),
+    ).toThrowError(
+      'fields option is required when partialResources is enabled',
+    );
   });
 });
 

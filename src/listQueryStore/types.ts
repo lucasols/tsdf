@@ -6,6 +6,8 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 
+export type FieldsInput = string[] | '*';
+
 export type QueryStatus = TSDFStatus | 'loadingMore';
 
 export type TSFDListQuery<QueryPayload extends ValidPayload> = {
@@ -46,7 +48,7 @@ export type TSFDUseListQueryReturn<
   items: Selected[];
   status: QueryStatus | 'idle';
   payload: QueryPayload | undefined;
-  fields: string[] | undefined;
+  fields: FieldsInput | undefined;
   error: StoreError | null;
   queryKey: string;
   hasMore: boolean;
@@ -103,7 +105,7 @@ export type ListQueryUseMultipleItemsQuery<
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
   payload: ItemPayload;
-  fields?: string[];
+  fields?: FieldsInput;
   queryMetadata?: QueryMetadata;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
@@ -116,7 +118,7 @@ export type ListQueryUseMultipleListQueriesQuery<
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
   payload: QueryPayload;
-  fields?: string[];
+  fields?: FieldsInput;
   queryMetadata?: QueryMetadata;
   omitPayload?: boolean;
   disableRefetchOnMount?: boolean;
@@ -172,5 +174,5 @@ export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
 
 export type FieldsOption<HasPartialResources extends boolean> =
   HasPartialResources extends true
-    ? { fields: string[] }
-    : { fields?: string[] };
+    ? { fields: FieldsInput }
+    : { fields?: FieldsInput };

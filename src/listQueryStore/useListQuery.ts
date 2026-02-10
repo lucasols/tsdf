@@ -5,6 +5,7 @@ import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
 import type {
+  FieldsInput,
   ListQueryUseMultipleListQueriesQuery,
   TSFDListQueryState,
   TSFDUseListQueryReturn,
@@ -17,7 +18,7 @@ export type UseListQueryOptions<
   SelectedItem,
 > = UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem> & {
   ensureIsLoaded?: boolean;
-  fields?: string[];
+  fields?: FieldsInput;
 };
 
 export function useListQuery<
@@ -44,7 +45,7 @@ export function useListQuery<
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
-    options?: { fields?: string[] },
+    options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   useMultipleListQueries: <S = ItemState>(
     queries: ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[],
