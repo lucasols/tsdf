@@ -548,17 +548,17 @@ test('mutating a obj passed as payload does not break the store', async () => {
 
   expect(collectionStore.getItemState({ id: { id: '1' } }))
     .toMatchInlineSnapshot(`
-    data:
-      value: { completed: '❌', title: 'todo' }
+      data:
+        value: { completed: '❌', title: 'todo' }
 
-    error: null
-    payload:
-      id: { id: '1' }
+      error: null
+      payload:
+        id: { id: '1' }
 
-    refetchOnMount: '❌'
-    status: 'success'
-    wasLoaded: '✅'
-  `);
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
 });
 
 describe('an invalidation with lower priority should not override one with higher priority', () => {
