@@ -17,6 +17,7 @@ export type UseListQueryOptions<
   SelectedItem,
 > = UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem> & {
   ensureIsLoaded?: boolean;
+  fields?: string[];
 };
 
 export function useListQuery<
@@ -35,6 +36,7 @@ export function useListQuery<
     loadSize,
     isOffScreen,
     ensureIsLoaded,
+    fields,
   }: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   getQueryKey: (params: QueryPayload) => string,
@@ -42,6 +44,7 @@ export function useListQuery<
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
+    options?: { fields?: string[] },
   ) => ScheduleFetchResults,
   useMultipleListQueries: <S = ItemState>(
     queries: ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[],
@@ -50,21 +53,23 @@ export function useListQuery<
 ): TSFDUseListQueryReturn<SelectedItem, QueryPayload> {
   const query = useMemo(
     (): ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[] =>
-      payload === false || payload === null || payload === undefined
-        ? []
-        : [
-            {
-              payload,
-              disableRefetchOnMount,
-              returnIdleStatus,
-              returnRefetchingStatus,
-              omitPayload,
-              isOffScreen,
-              loadSize,
-            },
-          ],
+      payload === false || payload === null || payload === undefined ?
+        []
+      : [
+          {
+            payload,
+            fields,
+            disableRefetchOnMount,
+            returnIdleStatus,
+            returnRefetchingStatus,
+            omitPayload,
+            isOffScreen,
+            loadSize,
+          },
+        ],
     [
       disableRefetchOnMount,
+      fields,
       isOffScreen,
       loadSize,
       omitPayload,
@@ -101,7 +106,7 @@ export function useListQuery<
     !!payload,
     () => {
       if (payload) {
-        scheduleListQueryFetch('highPriority', payload);
+        scheduleListQueryFetch('highPriority', payload, undefined, { fields });
       }
     },
   );

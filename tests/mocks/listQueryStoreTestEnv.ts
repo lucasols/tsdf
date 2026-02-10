@@ -1,5 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createListQueryStore } from '../../src/listQueryStore/listQueryStore';
+import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
@@ -23,6 +24,8 @@ export type ListQueryParams = {
   tableId: string;
   filters?: FilterOperator[];
 };
+
+type ListQueryItemPayload = string;
 
 type ListQuerySnapshotConfig = {
   tables?: string[];
@@ -48,7 +51,11 @@ function getStoreItemKey(tableId: string, id: number): string {
   return getCompositeKey(getRawItemKey(tableId, id));
 }
 
-export function createListQueryStoreTestEnv<TRow extends Row = Row>(
+export function createListQueryStoreTestEnv<
+  TRow extends Row = Row,
+  TPartialResources extends PartialResourcesConfig<TRow> | undefined =
+    undefined,
+>(
   serverInitialData: Tables<TRow>,
   {
     dynamicRealtimeThrottleMs,
@@ -62,6 +69,7 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     maxItemBatchSize,
     disableFetchItemFn,
     optimisticListUpdates,
+    partialResources,
   }: {
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
@@ -76,8 +84,9 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     maxItemBatchSize?: number;
     disableFetchItemFn?: boolean;
     optimisticListUpdates?: Parameters<
-      typeof createListQueryStore<TRow, ListQueryParams, string>
+      typeof createListQueryStore<TRow, ListQueryParams, ListQueryItemPayload>
     >[0]['optimisticListUpdates'];
+    partialResources?: TPartialResources;
   } = {},
 ) {
   const {
@@ -122,10 +131,10 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     if (
       actionsHistory.some(
         (a) =>
-          a.action === 'optimistic-ui-commit' &&
-          a.time === time &&
-          a.uiValue === value &&
-          a.itemId === itemId,
+          a.action === 'optimistic-ui-commit'
+          && a.time === time
+          && a.uiValue === value
+          && a.itemId === itemId,
       )
     ) {
       return;
@@ -139,15 +148,20 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
   }
 
   // Batch fetch function - delegates to serverTable.list with itemIds
-  const batchFetchItemFn = async (payloads: string[], signal: AbortSignal) => {
-    const listResult = await serverTable.list({ itemIds: payloads }, signal);
+  const batchFetchItemFn = async (
+    requests: { payload: ListQueryItemPayload; fields?: string[] }[],
+    { signal }: { signal: AbortSignal },
+  ) => {
+    const ids = requests.map((r) => r.payload);
+    const listResult = await serverTable.list({ itemIds: ids }, signal);
 
-    const results = new Map<string, Row | Error>();
-    for (const { itemId, data } of listResult.items) {
-      if (data instanceof Error) {
-        results.set(itemId, data);
-      } else {
-        results.set(itemId, data);
+    const results = new Map<ListQueryItemPayload, TRow | Error>();
+    for (const request of requests) {
+      const listItem = listResult.items.find(
+        (item) => item.itemId === request.payload,
+      );
+      if (listItem) {
+        results.set(request.payload, listItem.data);
       }
     }
 
@@ -156,7 +170,12 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
 
   const testOptions = resolveTestOptions(testScenario, serverTable);
 
-  const listQueryStore = createListQueryStore<TRow, ListQueryParams, string>({
+  const listQueryStore = createListQueryStore<
+    TRow,
+    ListQueryParams,
+    ListQueryItemPayload,
+    TPartialResources
+  >({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
@@ -167,15 +186,17 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     optimisticListUpdates,
+    partialResources,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
-    fetchListFn: async ({ tableId, filters }, size, signal) => {
+    fetchListFn: async ({ tableId, filters }, size, { signal, fields }) => {
       const result = await serverTable.list(
         {
           tableId,
           filters,
+          fields: partialResources ? fields : undefined,
           limit: size,
         },
         signal,
@@ -189,11 +210,12 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
         hasMore: result.hasMore,
       };
     },
-    fetchItemFn: disableFetchItemFn
-      ? undefined
-      : async (itemId, signal) => {
-          return serverTable.fetch(itemId, signal);
-        },
+    fetchItemFn:
+      disableFetchItemFn ? undefined : (
+        async (payload, { signal, fields }) => {
+          return serverTable.fetch(payload, signal, { fields });
+        }
+      ),
   });
 
   if (usesRealTimeUpdates) {
@@ -283,16 +305,18 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     },
     scheduleItemFetch: (
       fetchType: FetchType,
-      itemId: string,
+      itemPayload: ListQueryItemPayload,
       options?: { mediumPriorityDelayMs?: number },
     ) => {
       const result = listQueryStore.scheduleItemFetch(
         fetchType,
-        itemId,
+        itemPayload,
         options,
       );
 
-      logScheduleFetchResult(result, (action) => addAction(action, { itemId }));
+      logScheduleFetchResult(result, (action) =>
+        addAction(action, { itemId: itemPayload }),
+      );
 
       return result;
     },
@@ -340,8 +364,9 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
       const mergedValue: TRow = { ...baseValue, ...newValue };
 
       return listQueryStore.performMutation(itemId, {
-        optimisticUpdate: withOptimisticUpdate
-          ? () => {
+        optimisticUpdate:
+          withOptimisticUpdate ?
+            () => {
               listQueryStore.updateItemState(itemId, (draft) => {
                 Object.assign(draft, newValue);
               });

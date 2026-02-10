@@ -16,6 +16,7 @@ export type UseItemOptions<
   Selected,
 > = UseMultipleItemsOptions<ItemState, Selected> & {
   ensureIsLoaded?: boolean;
+  fields?: string[];
 };
 
 export function useItem<
@@ -33,11 +34,13 @@ export function useItem<
     returnIdleStatus,
     returnRefetchingStatus,
     isOffScreen,
+    fields,
   }: UseItemOptions<ItemState, Selected>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   scheduleItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
+    options?: { fields?: string[] },
   ) => ScheduleFetchResults,
   useMultipleItems: <S = ItemState | null>(
     items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
@@ -51,6 +54,7 @@ export function useItem<
         : [
             {
               payload: itemPayload,
+              fields,
               disableRefetchOnMount,
               isOffScreen,
               returnIdleStatus,
@@ -59,6 +63,7 @@ export function useItem<
           ],
     [
       itemPayload,
+      fields,
       disableRefetchOnMount,
       isOffScreen,
       returnIdleStatus,
@@ -90,7 +95,7 @@ export function useItem<
     !!itemPayload,
     () => {
       if (itemPayload) {
-        scheduleItemFetch('highPriority', itemPayload);
+        scheduleItemFetch('highPriority', itemPayload, { fields });
       }
     },
   );

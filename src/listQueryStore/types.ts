@@ -34,6 +34,7 @@ export type TSFDListQueryState<
   items: Record<string, ItemState | null>;
   queries: Record<string, TSFDListQuery<QueryPayload>>;
   itemQueries: Record<string, TSDFItemQuery<ItemPayload> | null>;
+  itemLoadedFields: Record<string, string[]>;
 };
 
 export type TSFDUseListQueryReturn<
@@ -100,6 +101,7 @@ export type ListQueryUseMultipleItemsQuery<
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
   payload: ItemPayload;
+  fields?: string[];
   queryMetadata?: QueryMetadata;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
@@ -112,6 +114,7 @@ export type ListQueryUseMultipleListQueriesQuery<
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
 > = {
   payload: QueryPayload;
+  fields?: string[];
   queryMetadata?: QueryMetadata;
   omitPayload?: boolean;
   disableRefetchOnMount?: boolean;
@@ -157,4 +160,15 @@ export type QueryFetchPayload<QueryPayload extends ValidPayload> = {
   type: 'load' | 'loadMore';
   payload: QueryPayload;
   size: number;
+  fields?: string[];
 };
+
+export type PartialResourcesConfig<ItemState extends ValidStoreState> = {
+  mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState;
+  selectFields: (fields: string[], item: ItemState) => ItemState;
+};
+
+export type FieldsOption<HasPartialResources extends boolean> =
+  HasPartialResources extends true
+    ? { fields: string[] }
+    : { fields?: string[] };

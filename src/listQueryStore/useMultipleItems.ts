@@ -8,10 +8,11 @@ import { Store } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
-import type {
-  ListQueryUseMultipleItemsQuery,
-  TSFDListQueryState,
-  TSFDUseListItemReturn,
+import {
+  type ListQueryUseMultipleItemsQuery,
+  type PartialResourcesConfig,
+  type TSFDListQueryState,
+  type TSFDUseListItemReturn,
 } from './types';
 
 const cacheMissError = {
@@ -54,16 +55,19 @@ export function useMultipleItems<
   scheduleItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
+    options?: { fields?: string[] },
   ) => ScheduleFetchResults,
   itemInvalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
+  partialResources?: PartialResourcesConfig<ItemState>,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
 
   type QueryWithId = {
     itemKey: string;
     payload: ItemPayload;
+    fields: string[] | undefined;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -75,6 +79,7 @@ export function useMultipleItems<
     return items.map((itemProps) => ({
       itemKey: getItemKey(itemProps.payload),
       payload: itemProps.payload,
+      fields: itemProps.fields,
       disableRefetchOnMount:
         itemProps.disableRefetchOnMount ??
         allItemsDisableRefetchOnMount ??
@@ -105,12 +110,18 @@ export function useMultipleItems<
         ({
           itemKey,
           payload,
+          fields,
           returnIdleStatus,
           returnRefetchingStatus,
           queryMetadata,
         }): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
           const itemQuery = state.itemQueries[itemKey];
-          const itemState = state.items[itemKey];
+          let itemState = state.items[itemKey];
+
+          // Apply field selection for partial resources
+          if (partialResources && itemState && fields && fields.length > 0) {
+            itemState = partialResources.selectFields(fields, itemState);
+          }
 
           const data = selector
             ? selector(itemState ?? null, itemQuery?.payload ?? null)
@@ -154,7 +165,24 @@ export function useMultipleItems<
 
           let status = itemQuery.status;
 
-          if (!returnRefetchingStatus && itemQuery.status === 'refetching') {
+          // Override status when partial resources has missing fields
+          if (
+            partialResources &&
+            fields &&
+            fields.length > 0 &&
+            (status === 'success' || status === 'refetching')
+          ) {
+            const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+            const hasMissingFields = fields.some(
+              (f) => !loadedFields.includes(f),
+            );
+
+            if (hasMissingFields) {
+              status = 'loading';
+            }
+          }
+
+          if (!returnRefetchingStatus && status === 'refetching') {
             status = 'success';
           }
 
@@ -163,14 +191,19 @@ export function useMultipleItems<
             status,
             error: itemQuery.error,
             isLoading: status === 'loading',
-            data,
+            data:
+              status === 'loading' && partialResources
+                ? selector
+                  ? selector(null, itemQuery.payload)
+                  : __LEGIT_CAST__<Selected>(null)
+                : data,
             payload,
             queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
           };
         },
       );
     },
-    [loadFromStateOnly, queriesWithId, selector],
+    [loadFromStateOnly, queriesWithId, selector, partialResources],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -180,7 +213,7 @@ export function useMultipleItems<
   useOnEvtmitterEvent(events, 'invalidateItem', ({ payload: event }) => {
     if (loadFromStateOnly || !fetchItemFn) return;
 
-    for (const { payload, itemKey, isOffScreen } of queriesWithId) {
+    for (const { payload, fields, itemKey, isOffScreen } of queriesWithId) {
       if (isOffScreen) continue;
 
       if (itemKey !== event.itemKey) continue;
@@ -193,7 +226,7 @@ export function useMultipleItems<
           query.refetchOnMount = false;
         });
 
-        scheduleItemFetch(event.priority, payload);
+        scheduleItemFetch(event.priority, payload, { fields });
         itemInvalidationWasTriggered.add(itemKey);
       }
     }
@@ -208,6 +241,7 @@ export function useMultipleItems<
 
     for (const {
       payload,
+      fields,
       itemKey,
       isOffScreen,
       disableRefetchOnMount,
@@ -224,10 +258,20 @@ export function useMultipleItems<
         continue;
       }
 
-      const shouldFetch =
+      let shouldFetch =
         itemState === undefined ||
         !itemState.wasLoaded ||
         itemState.refetchOnMount;
+
+      // For partial resources, check if all requested fields are loaded
+      if (partialResources && !shouldFetch && fields && fields.length > 0) {
+        const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+        const hasMissingFields = fields.some((f) => !loadedFields.includes(f));
+
+        if (hasMissingFields) {
+          shouldFetch = true;
+        }
+      }
 
       if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
         continue;
@@ -237,10 +281,10 @@ export function useMultipleItems<
 
       if (disableRefetchOnMount) {
         if (shouldFetch) {
-          scheduleItemFetch(fetchType, payload);
+          scheduleItemFetch(fetchType, payload, { fields });
         }
       } else {
-        scheduleItemFetch(fetchType, payload);
+        scheduleItemFetch(fetchType, payload, { fields });
       }
     }
 
@@ -253,7 +297,9 @@ export function useMultipleItems<
     queriesWithId,
     scheduleItemFetch,
     store.state.itemQueries,
+    store.state.itemLoadedFields,
     fetchItemFn,
+    partialResources,
   ]);
 
   return storeState;
