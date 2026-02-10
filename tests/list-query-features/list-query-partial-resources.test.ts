@@ -406,22 +406,80 @@ describe('useListQuery with partial resources', () => {
         type: 'list'
     `);
   });
+});
+
+describe('cross-hook field loading', () => {
+  test('hookB loads missing fields and reaches success after hookA', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const hookARenders = createLoggerStore();
+    const hookBRenders = createLoggerStore();
+
+    renderHook(() => {
+      const resultA = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name'],
+      });
+
+      hookARenders.add(pick(resultA, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    renderHook(() => {
+      const resultB = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'address'],
+      });
+
+      hookBRenders.add(pick(resultB, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    expect(hookARenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
+      -> status: refetching ⋅ data: {id:1, name:User 1}
+      -> status: success ⋅ data: {id:1, name:User 1}
+      "
+    `);
+
+    expect(hookBRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, address:Address 1}
+      "
+    `);
+
+    // Verify accumulated fields in store
+    const storeItemKey = env.getStoreItemKeyFromRaw('users||1');
 
     expect(
-      jsonFormatter(
-        Object.values(env.store.store.state.partialItemsQueries)[0],
-      ),
-    ).toMatchInlineSnapshotString(`
-      "{
-        fields: {
-          id: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          name: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          address: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          country: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-        },
-        payload: { id: 'users||1', fields: [] },
-      }"
+      env.store.state.itemLoadedFields[storeItemKey],
+    ).toMatchInlineSnapshot(`['address', 'id', 'name']`);
+
+    // The underlying item should have all accumulated data
+    expect(env.store.state.items[storeItemKey]).toMatchInlineSnapshot(`
+      address: 'Address 1'
+      id: 1
+      name: 'User 1'
     `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        itemId: 'users||1'
+        result: { id: 1, name: 'User 1' }
+        type: 'fetch'
+      - fields: ['id', 'address']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1 }
+        type: 'fetch'
+    `);
+  });
   });
 
 describe('deleteItemState with partial resources', () => {

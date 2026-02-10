@@ -306,6 +306,23 @@ export function createListQueryStore<
 
   type ItemFetchData = { payload: ItemPayload; fields?: string[] };
 
+  function coalesceItemFetchPayload(
+    existing: ItemFetchData,
+    incoming: ItemFetchData,
+  ) {
+    // If either request asks for all fields, keep "all fields".
+    if (!existing.fields || !incoming.fields) {
+      return { payload: incoming.payload, fields: undefined };
+    }
+
+    return {
+      payload: incoming.payload,
+      fields: Array.from(
+        new Set([...existing.fields, ...incoming.fields]),
+      ).sort(),
+    };
+  }
+
   const useSingleItemScheduler = !!batchFetchItemFn;
 
   const singleItemScheduler =
@@ -332,6 +349,7 @@ export function createListQueryStore<
         mediumPriorityDelayMs,
         maxBatchSize: maxItemBatchSize,
         on: onSchedulerEvent,
+        coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
       })
     : null;
@@ -389,6 +407,7 @@ export function createListQueryStore<
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime,
+        coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
       });
       perItemSchedulers.set(itemKey, scheduler);
