@@ -1,7 +1,7 @@
 import { filterAndMap, sortBy } from '@ls-stack/utils/arrayUtils';
 import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { Result, unknownToError } from 't-result';
@@ -24,19 +24,22 @@ import {
 } from '../utils/storeShared';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
-import type {
-  FetchListFnReturn,
-  ListQueryStoreInitialData,
-  ListQueryUseMultipleItemsQuery,
-  ListQueryUseMultipleListQueriesQuery,
-  OnListQueryInvalidate,
-  OnListQueryItemInvalidate,
-  OptimisticListUpdate,
-  QueryFetchPayload,
-  TSFDListQuery,
-  TSFDListQueryState,
-  TSFDUseListItemReturn,
-  TSFDUseListQueryReturn,
+import {
+  type FetchListFnReturn,
+  type FieldsInput,
+  type FieldsOption,
+  type ListQueryStoreInitialData,
+  type ListQueryUseMultipleItemsQuery,
+  type ListQueryUseMultipleListQueriesQuery,
+  type OnListQueryInvalidate,
+  type OnListQueryItemInvalidate,
+  type OptimisticListUpdate,
+  type PartialResourcesConfig,
+  type QueryFetchPayload,
+  type TSFDListQuery,
+  type TSFDListQueryState,
+  type TSFDUseListItemReturn,
+  type TSFDUseListQueryReturn,
 } from './types';
 import { useFindItem as useFindItemHook } from './useFindItem';
 import { useItem as useItemHook, UseItemOptions } from './useItem';
@@ -55,38 +58,52 @@ import {
 
 export type ListQueryStoreEvents = {
   invalidateQuery: { priority: FetchType; queryKey: string };
-  invalidateItem: { priority: FetchType; itemKey: string };
+  invalidateItem: {
+    priority: FetchType;
+    itemKey: string;
+    invalidateFields?: string[];
+  };
 };
 
 export type ListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
+  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
+    undefined,
 > = ReturnType<
-  typeof createListQueryStore<ItemState, QueryPayload, ItemPayload>
+  typeof createListQueryStore<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources
+  >
 >;
 
 const noFetchItemFnError = 'No fetchItemFn was provided';
+const noPartialResourcesFieldsOptionError =
+  'fields option is required when partialResources is enabled';
 
 export type ListQueryStoreOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
+  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
+    undefined,
 > = {
   debugName?: string;
   fetchListFn: (
     payload: QueryPayload,
     size: number,
-    signal: AbortSignal,
+    options: { signal: AbortSignal; fields?: string[] },
   ) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
   fetchItemFn?: (
     payload: ItemPayload,
-    signal: AbortSignal,
+    options: { signal: AbortSignal; fields?: string[] },
   ) => Promise<ItemState>;
   batchFetchItemFn?: (
-    payloads: ItemPayload[],
-    signal: AbortSignal,
-    batchKey: string,
+    requests: { payload: ItemPayload; fields?: string[] }[],
+    options: { signal: AbortSignal; batchKey: string },
   ) => Promise<Map<ItemPayload, ItemState | Error>>;
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   errorNormalizer: (exception: Error) => StoreError;
@@ -120,12 +137,15 @@ export type ListQueryStoreOptions<
   ) => void;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
+  partialResources?: TPartialResources;
 };
 
 export function createListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
+  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
+    undefined,
 >({
   debugName,
   fetchListFn,
@@ -148,16 +168,134 @@ export function createListQueryStore<
   onMutationError,
   getQueryKey: customGetQueryKey,
   getItemKey: customGetItemKey,
-}: ListQueryStoreOptions<ItemState, QueryPayload, ItemPayload>) {
+  partialResources,
+}: ListQueryStoreOptions<
+  ItemState,
+  QueryPayload,
+  ItemPayload,
+  TPartialResources
+>) {
+  type HasPR = [TPartialResources] extends [undefined] ? false : true;
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
   type Query = TSFDListQuery<QueryPayload>;
+  type FetchFieldsOption = HasPR extends true
+    ? { fields: FieldsInput }
+    : { fields?: FieldsInput };
+  type ScheduleFetchWithFieldsOption = ScheduleFetchOptions & FetchFieldsOption;
+  type AwaitListQueryFetchOptions = {
+    size?: number;
+    timeoutMs?: number;
+  } & FetchFieldsOption;
+  type AwaitItemFetchOptions = {
+    timeoutMs?: number;
+  } & FetchFieldsOption;
+  type LoadMoreWithFieldsOptions = { size?: number } & FetchFieldsOption;
+
+  function normalizeFieldsOption(
+    fields: FieldsInput | undefined,
+  ): string[] | undefined {
+    if (partialResources && fields === undefined) {
+      throw new Error(noPartialResourcesFieldsOptionError);
+    }
+
+    if (fields === '*') return undefined;
+
+    return fields;
+  }
+
+  type ScheduleListQueryFetchApi = {
+    (
+      fetchType: FetchType,
+      payload: QueryPayload,
+      ...args: HasPR extends true
+        ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
+        : [size?: number, options?: ScheduleFetchWithFieldsOption]
+    ): ScheduleFetchResults;
+    (
+      fetchType: FetchType,
+      payload: QueryPayload[],
+      ...args: HasPR extends true
+        ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
+        : [size?: number, options?: ScheduleFetchWithFieldsOption]
+    ): ScheduleFetchResults[];
+  };
+
+  type ScheduleItemFetchApi = {
+    (
+      fetchType: FetchType,
+      itemPayload: ItemPayload,
+      ...args: HasPR extends true
+        ? [options: ScheduleFetchWithFieldsOption]
+        : [options?: ScheduleFetchWithFieldsOption]
+    ): ScheduleFetchResults;
+    (
+      fetchType: FetchType,
+      itemPayload: ItemPayload[],
+      ...args: HasPR extends true
+        ? [options: ScheduleFetchWithFieldsOption]
+        : [options?: ScheduleFetchWithFieldsOption]
+    ): ScheduleFetchResults[];
+  };
+
+  type LoadMoreApi = HasPR extends true
+    ? {
+        (
+          params: QueryPayload,
+          size: number,
+          options: FetchFieldsOption,
+        ): ScheduleFetchResults;
+        (
+          params: QueryPayload,
+          options: LoadMoreWithFieldsOptions,
+        ): ScheduleFetchResults;
+      }
+    : {
+        (
+          params: QueryPayload,
+          size?: number,
+          options?: FetchFieldsOption,
+        ): ScheduleFetchResults;
+        (
+          params: QueryPayload,
+          options?: LoadMoreWithFieldsOptions,
+        ): ScheduleFetchResults;
+      };
+
+  type AwaitListQueryFetchApi = (
+    params: QueryPayload,
+    ...args: HasPR extends true
+      ? [options: AwaitListQueryFetchOptions]
+      : [options?: AwaitListQueryFetchOptions]
+  ) => Promise<
+    | { items: []; error: StoreFetchError; hasMore: boolean }
+    | {
+        items: { data: ItemState; itemPayload: ItemPayload }[];
+        error: null;
+        hasMore: boolean;
+      }
+  >;
+
+  type AwaitItemFetchApi = (
+    itemPayload: ItemPayload,
+    ...args: HasPR extends true
+      ? [options: AwaitItemFetchOptions]
+      : [options?: AwaitItemFetchOptions]
+  ) => Promise<
+    { data: null; error: StoreFetchError } | { data: ItemState; error: null }
+  >;
 
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
 
   const store = new Store<State>({
     debugName,
     state: () => {
-      const initialState: State = { items: {}, queries: {}, itemQueries: {} };
+      const initialState: State = {
+        items: {},
+        queries: {},
+        itemQueries: {},
+        itemLoadedFields: {},
+        itemFieldInvalidationFields: {},
+      };
 
       if (import.meta.env.TEST && testOptions) {
         const initialData = testOptions.initialData;
@@ -254,6 +392,7 @@ export function createListQueryStore<
             errorNormalizer,
             getItemKey,
             updateItemSchedulerTiming,
+            partialResources,
           );
         },
         lowPriorityThrottleMs,
@@ -269,6 +408,13 @@ export function createListQueryStore<
               ? 'loadMore'
               : 'load',
           size: Math.max(existing.size, incoming.size),
+          // Preserve fields requested by all coalesced hooks.
+          fields:
+            !existing.fields || !incoming.fields
+              ? undefined
+              : Array.from(
+                  new Set([...existing.fields, ...incoming.fields]),
+                ).sort(),
         }),
         usesRealTimeUpdates,
       });
@@ -279,14 +425,33 @@ export function createListQueryStore<
 
   const itemKeyToPayload = new Map<string, ItemPayload>();
 
+  type ItemFetchData = { payload: ItemPayload; fields?: string[] };
+
+  function coalesceItemFetchPayload(
+    existing: ItemFetchData,
+    incoming: ItemFetchData,
+  ) {
+    // If either request asks for all fields, keep "all fields".
+    if (!existing.fields || !incoming.fields) {
+      return { payload: incoming.payload, fields: undefined };
+    }
+
+    return {
+      payload: incoming.payload,
+      fields: Array.from(
+        new Set([...existing.fields, ...incoming.fields]),
+      ).sort(),
+    };
+  }
+
   const useBatchSchedulers = !!batchFetchItemFn && !!fetchItemFn;
 
-  const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+  const batchKeySchedulers = new Map<string, RequestScheduler<ItemFetchData>>();
   const batchInitialFetchStartTime = new Map<string, number>();
 
   function getOrCreateBatchKeyScheduler(
     batchKey: string,
-  ): RequestScheduler<ItemPayload> {
+  ): RequestScheduler<ItemFetchData> {
     let scheduler = batchKeySchedulers.get(batchKey);
     if (!scheduler) {
       if (!fetchItemFn) {
@@ -299,9 +464,9 @@ export function createListQueryStore<
         batchInitialFetchStartTime.delete(batchKey);
       }
 
-      scheduler = new RequestScheduler<ItemPayload>({
+      scheduler = new RequestScheduler<ItemFetchData>({
         fetchFn: async (
-          requests: BatchRequest<ItemPayload>[],
+          requests: BatchRequest<ItemFetchData>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
           return executeItemBatchFetch(
@@ -312,6 +477,7 @@ export function createListQueryStore<
             fetchItemFn,
             batchFetchItemFn,
             errorNormalizer,
+            partialResources,
             batchKey,
           );
         },
@@ -322,6 +488,7 @@ export function createListQueryStore<
         maxBatchSize: maxItemBatchSize,
         on: onSchedulerEvent,
         initialLastFetchStartTime,
+        coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
       });
       batchKeySchedulers.set(batchKey, scheduler);
@@ -329,7 +496,7 @@ export function createListQueryStore<
     return scheduler;
   }
 
-  const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+  const perItemSchedulers = new Map<string, RequestScheduler<ItemFetchData>>();
   const itemInitialFetchStartTime = new Map<string, number>();
 
   if (
@@ -367,7 +534,7 @@ export function createListQueryStore<
   function getOrCreateItemScheduler(
     itemKey: string,
     payload: ItemPayload,
-  ): RequestScheduler<ItemPayload> {
+  ): RequestScheduler<ItemFetchData> {
     if (useBatchSchedulers) {
       if (getItemsBatchKey) {
         const batchKey = getItemsBatchKey(payload);
@@ -391,9 +558,9 @@ export function createListQueryStore<
         itemInitialFetchStartTime.delete(itemKey);
       }
 
-      scheduler = new RequestScheduler<ItemPayload>({
+      scheduler = new RequestScheduler<ItemFetchData>({
         fetchFn: async (
-          requests: BatchRequest<ItemPayload>[],
+          requests: BatchRequest<ItemFetchData>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
           return executeItemBatchFetch(
@@ -404,6 +571,7 @@ export function createListQueryStore<
             fetchItemFn,
             undefined,
             errorNormalizer,
+            partialResources,
           );
         },
         lowPriorityThrottleMs,
@@ -412,6 +580,7 @@ export function createListQueryStore<
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime,
+        coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
       });
       perItemSchedulers.set(itemKey, scheduler);
@@ -575,20 +744,21 @@ export function createListQueryStore<
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
-    options?: ScheduleFetchOptions,
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
   ): ScheduleFetchResults;
   function scheduleListQueryFetch(
     fetchType: FetchType,
     payload: QueryPayload[],
     size?: number,
-    options?: ScheduleFetchOptions,
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
   ): ScheduleFetchResults[];
   function scheduleListQueryFetch(
     fetchType: FetchType,
     payload: QueryPayload | QueryPayload[],
     size?: number,
-    options?: ScheduleFetchOptions,
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
   ): ScheduleFetchResults | ScheduleFetchResults[] {
+    const fields = normalizeFieldsOption(options?.fields);
     const multiplePayloads = Array.isArray(payload);
     const payloads = multiplePayloads ? payload : [payload];
 
@@ -601,7 +771,12 @@ export function createListQueryStore<
       return getOrCreateQueryScheduler(queryKey).scheduleFetch(
         queryKey,
         fetchType,
-        { type: 'load', payload: param, size: querySize },
+        {
+          type: 'load',
+          payload: param,
+          size: querySize,
+          fields,
+        },
         options,
       );
     });
@@ -615,14 +790,35 @@ export function createListQueryStore<
     return firstResult;
   }
 
-  function loadMore(params: QueryPayload, size?: number): ScheduleFetchResults {
+  function loadMore(
+    params: QueryPayload,
+    size?: number,
+    options?: { fields?: FieldsInput },
+  ): ScheduleFetchResults;
+  function loadMore(
+    params: QueryPayload,
+    options?: { size?: number; fields?: FieldsInput },
+  ): ScheduleFetchResults;
+  function loadMore(
+    params: QueryPayload,
+    sizeOrOptions?: number | { size?: number; fields?: FieldsInput },
+    options?: { fields?: FieldsInput },
+  ): ScheduleFetchResults {
+    const fields = (
+      typeof sizeOrOptions === 'number' ? options : (sizeOrOptions ?? options)
+    )?.fields;
+    const fieldsToFetch = normalizeFieldsOption(fields);
+
     const queryState = getQueryState(params);
 
     if (!queryState || !queryState.hasMore) return 'skipped';
     if (queryState.status !== 'success') return 'skipped';
 
     const queryKey = getQueryKey(params);
-    const loadSize = size ?? defaultQuerySize;
+    const loadSize =
+      typeof sizeOrOptions === 'number'
+        ? sizeOrOptions
+        : (sizeOrOptions?.size ?? defaultQuerySize);
     const newSize = queryState.items.length + loadSize;
 
     return getOrCreateQueryScheduler(queryKey).scheduleFetch(
@@ -632,6 +828,7 @@ export function createListQueryStore<
         type: 'loadMore',
         payload: params,
         size: newSize,
+        fields: fieldsToFetch,
       },
     );
   }
@@ -655,7 +852,7 @@ export function createListQueryStore<
 
   async function awaitListQueryFetch(
     params: QueryPayload,
-    options: { size?: number; timeoutMs?: number } = {},
+    options: { size?: number; timeoutMs?: number; fields?: FieldsInput } = {},
   ): Promise<
     | { items: []; error: StoreFetchError; hasMore: boolean }
     | {
@@ -666,10 +863,11 @@ export function createListQueryStore<
   > {
     const queryKey = getQueryKey(params);
     const size = options.size ?? defaultQuerySize;
+    const fields = normalizeFieldsOption(options.fields);
 
     const result = await getOrCreateQueryScheduler(queryKey).awaitFetch(
       queryKey,
-      { type: 'load', payload: params, size },
+      { type: 'load', payload: params, size, fields },
       { timeoutMs: options.timeoutMs },
     );
 
@@ -729,22 +927,23 @@ export function createListQueryStore<
   function scheduleItemFetch(
     fetchType: FetchType,
     itemPayload: ItemPayload,
-    options?: ScheduleFetchOptions,
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
   ): ScheduleFetchResults;
   function scheduleItemFetch(
     fetchType: FetchType,
     itemPayload: ItemPayload[],
-    options?: ScheduleFetchOptions,
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
   ): ScheduleFetchResults[];
   function scheduleItemFetch(
     fetchType: FetchType,
     itemPayload: ItemPayload | ItemPayload[],
-    options?: ScheduleFetchOptions,
+    options?: ScheduleFetchOptions & { fields?: FieldsInput },
   ): ScheduleFetchResults | ScheduleFetchResults[] {
     if (!fetchItemFn) {
       throw new Error(noFetchItemFnError);
     }
 
+    const fields = normalizeFieldsOption(options?.fields);
     const fetchMultiple = Array.isArray(itemPayload);
     const itemsId = fetchMultiple ? itemPayload : [itemPayload];
 
@@ -753,7 +952,7 @@ export function createListQueryStore<
       return getOrCreateItemScheduler(itemKey, payload).scheduleFetch(
         itemKey,
         fetchType,
-        payload,
+        { payload, fields },
         options,
       );
     });
@@ -769,7 +968,7 @@ export function createListQueryStore<
 
   async function awaitItemFetch(
     itemPayload: ItemPayload,
-    options: { timeoutMs?: number } = {},
+    options: { timeoutMs?: number; fields?: FieldsInput } = {},
   ): Promise<
     { data: null; error: StoreFetchError } | { data: ItemState; error: null }
   > {
@@ -778,11 +977,16 @@ export function createListQueryStore<
     }
 
     const itemKey = getItemKey(itemPayload);
+    const fields = normalizeFieldsOption(options.fields);
 
     const result = await getOrCreateItemScheduler(
       itemKey,
       itemPayload,
-    ).awaitFetch(itemKey, itemPayload, options);
+    ).awaitFetch(
+      itemKey,
+      { payload: itemPayload, fields },
+      { timeoutMs: options.timeoutMs },
+    );
 
     if (result === 'timeout') {
       return {
@@ -834,10 +1038,12 @@ export function createListQueryStore<
     itemPayload,
     queryPayload,
     type: priority = 'highPriority',
+    fields: invalidateFields,
   }: {
     itemPayload: ItemPayload | ItemPayload[] | FilterItemFn | false;
     queryPayload: QueryPayload | QueryPayload[] | FilterQueryFn | false;
     type?: FetchType;
+    fields?: string[];
   }) {
     const queriesKey = queryPayload ? getQueriesKeyArray(queryPayload) : [];
 
@@ -870,7 +1076,39 @@ export function createListQueryStore<
     }
 
     if (itemPayload) {
-      invalidateItem(itemPayload, priority);
+      if (partialResources && invalidateFields) {
+        // Per-field invalidation: remove specified fields from itemLoadedFields
+        const itemsKey = getItemsKeyArray(itemPayload);
+
+        store.produceState(
+          (draft) => {
+            for (const { itemKey } of itemsKey) {
+              const loadedFields = draft.itemLoadedFields[itemKey];
+              if (!loadedFields) continue;
+
+              draft.itemLoadedFields[itemKey] = loadedFields.filter(
+                (f) => !invalidateFields.includes(f),
+              );
+              draft.itemFieldInvalidationFields[itemKey] = Array.from(
+                new Set(invalidateFields),
+              ).sort();
+            }
+          },
+          { action: 'invalidate-item-fields' },
+        );
+
+        // Emit invalidation events so hooks can detect missing fields and refetch
+        for (const { itemKey } of itemsKey) {
+          itemInvalidationWasTriggered.delete(itemKey);
+          events.emit('invalidateItem', {
+            priority,
+            itemKey,
+            invalidateFields,
+          });
+        }
+      } else {
+        invalidateItem(itemPayload, priority);
+      }
     }
   }
 
@@ -900,6 +1138,12 @@ export function createListQueryStore<
           if (!query) return;
 
           query.refetchOnMount = priority;
+
+          // Clear loaded fields so all hooks refetch their fields
+          if (partialResources) {
+            draft.itemLoadedFields[itemKey] = [];
+            delete draft.itemFieldInvalidationFields[itemKey];
+          }
         },
         { action: 'invalidate-item' },
       );
@@ -1155,6 +1399,8 @@ export function createListQueryStore<
         for (const { itemKey } of itemsId) {
           draftState.items[itemKey] = null;
           draftState.itemQueries[itemKey] = null;
+          delete draftState.itemLoadedFields[itemKey];
+          delete draftState.itemFieldInvalidationFields[itemKey];
 
           for (const query of Object.values(draftState.queries)) {
             if (query.items.includes(itemKey)) {
@@ -1264,7 +1510,27 @@ export function createListQueryStore<
     }
   }
 
-  function useMultipleListQueries<
+  const useMultipleListQueries: {
+    <
+      SelectedItem = ItemState,
+      QueryMetadata extends undefined | Record<string, unknown> = undefined,
+    >(
+      queries: (ListQueryUseMultipleListQueriesQuery<
+        QueryPayload,
+        QueryMetadata
+      > &
+        FieldsOption<HasPR>)[],
+      options?: UseMultipleListQueriesOptions<
+        ItemState,
+        ItemPayload,
+        SelectedItem
+      >,
+    ): readonly TSFDUseListQueryReturn<
+      SelectedItem,
+      QueryPayload,
+      QueryMetadata
+    >[];
+  } = __LEGIT_CAST__(function useMultipleListQueries<
     SelectedItem = ItemState,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
   >(
@@ -1298,10 +1564,26 @@ export function createListQueryStore<
       scheduleListQueryFetch,
       queryInvalidationWasTriggered,
       globalDisableRefetchOnMount,
+      partialResources,
     );
-  }
+  });
 
-  function useListQuery<SelectedItem = ItemState>(
+  const useListQuery: {
+    <SelectedItem = ItemState>(
+      payload: QueryPayload | false | null | undefined,
+      ...args: HasPR extends true
+        ? [
+            options: UseListQueryOptions<
+              ItemState,
+              ItemPayload,
+              SelectedItem
+            > & {
+              fields: FieldsInput;
+            },
+          ]
+        : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
+    ): TSFDUseListQueryReturn<SelectedItem, QueryPayload>;
+  } = function useListQuery<SelectedItem = ItemState>(
     payload: QueryPayload | false | null | undefined,
     options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> = {},
   ): TSFDUseListQueryReturn<SelectedItem, QueryPayload> {
@@ -1313,9 +1595,18 @@ export function createListQueryStore<
       scheduleListQueryFetch,
       useMultipleListQueries,
     );
-  }
+  };
 
-  function useMultipleItems<
+  const useMultipleItems: {
+    <
+      Selected = ItemState | null,
+      QueryMetadata extends undefined | Record<string, unknown> = undefined,
+    >(
+      items: (ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata> &
+        FieldsOption<HasPR>)[],
+      options?: UseMultipleItemsOptions<ItemState, Selected>,
+    ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[];
+  } = function useMultipleItems<
     Selected = ItemState | null,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
   >(
@@ -1338,10 +1629,22 @@ export function createListQueryStore<
       itemInvalidationWasTriggered,
       globalDisableRefetchOnMount,
       fetchItemFn,
+      partialResources,
     );
-  }
+  };
 
-  function useItem<Selected = ItemState | null>(
+  const useItem: {
+    <Selected = ItemState | null>(
+      itemPayload: ItemPayload | false | null | undefined,
+      ...args: HasPR extends true
+        ? [
+            options: UseItemOptions<ItemState, Selected> & {
+              fields: FieldsInput;
+            },
+          ]
+        : [options?: UseItemOptions<ItemState, Selected>]
+    ): TSFDUseListItemReturn<Selected, ItemPayload>;
+  } = function useItem<Selected = ItemState | null>(
     itemPayload: ItemPayload | false | null | undefined,
     options: UseItemOptions<ItemState, Selected> = {},
   ): TSFDUseListItemReturn<Selected, ItemPayload> {
@@ -1352,7 +1655,7 @@ export function createListQueryStore<
       scheduleItemFetch,
       useMultipleItems,
     );
-  }
+  };
 
   function useFindItem<SelectedItem = ItemState | null>(
     findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
@@ -1384,8 +1687,21 @@ export function createListQueryStore<
     }
     perItemSchedulers.clear();
 
-    store.setState({ items: {}, queries: {}, itemQueries: {} });
+    store.setState({
+      items: {},
+      queries: {},
+      itemQueries: {},
+      itemLoadedFields: {},
+      itemFieldInvalidationFields: {},
+    });
   }
+
+  const scheduleListQueryFetchApi: ScheduleListQueryFetchApi =
+    scheduleListQueryFetch;
+  const loadMoreApi: LoadMoreApi = loadMore;
+  const scheduleItemFetchApi: ScheduleItemFetchApi = scheduleItemFetch;
+  const awaitListQueryFetchApi: AwaitListQueryFetchApi = awaitListQueryFetch;
+  const awaitItemFetchApi: AwaitItemFetchApi = awaitItemFetch;
 
   return {
     store,
@@ -1397,17 +1713,17 @@ export function createListQueryStore<
       return itemInvalidationWasTriggered;
     },
     reset,
-    scheduleListQueryFetch,
+    scheduleListQueryFetch: scheduleListQueryFetchApi,
     getQueryState,
     getQueryKey,
     getQueriesState,
     getQueriesRelatedToItem,
-    awaitListQueryFetch,
-    loadMore,
+    awaitListQueryFetch: awaitListQueryFetchApi,
+    loadMore: loadMoreApi,
     getItemKey,
     getItemState,
-    scheduleItemFetch,
-    awaitItemFetch,
+    scheduleItemFetch: scheduleItemFetchApi,
+    awaitItemFetch: awaitItemFetchApi,
     invalidateQueryAndItems,
     invalidateItem,
     startItemMutation,

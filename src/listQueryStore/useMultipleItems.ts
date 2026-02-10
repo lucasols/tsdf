@@ -8,10 +8,12 @@ import { Store } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
-import type {
-  ListQueryUseMultipleItemsQuery,
-  TSFDListQueryState,
-  TSFDUseListItemReturn,
+import {
+  type FieldsInput,
+  type ListQueryUseMultipleItemsQuery,
+  type PartialResourcesConfig,
+  type TSFDListQueryState,
+  type TSFDUseListItemReturn,
 } from './types';
 
 const cacheMissError = {
@@ -54,16 +56,19 @@ export function useMultipleItems<
   scheduleItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
+    options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   itemInvalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
+  partialResources?: PartialResourcesConfig<ItemState>,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
 
   type QueryWithId = {
     itemKey: string;
     payload: ItemPayload;
+    fields: FieldsInput | undefined;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -75,6 +80,7 @@ export function useMultipleItems<
     return items.map((itemProps) => ({
       itemKey: getItemKey(itemProps.payload),
       payload: itemProps.payload,
+      fields: itemProps.fields,
       disableRefetchOnMount:
         itemProps.disableRefetchOnMount ??
         allItemsDisableRefetchOnMount ??
@@ -105,12 +111,24 @@ export function useMultipleItems<
         ({
           itemKey,
           payload,
+          fields,
           returnIdleStatus,
           returnRefetchingStatus,
           queryMetadata,
         }): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
           const itemQuery = state.itemQueries[itemKey];
-          const itemState = state.items[itemKey];
+          const rawItemState = state.items[itemKey];
+          let itemState = rawItemState;
+
+          // Apply field selection for partial resources
+          if (
+            partialResources &&
+            itemState &&
+            Array.isArray(fields) &&
+            fields.length > 0
+          ) {
+            itemState = partialResources.selectFields(fields, itemState);
+          }
 
           const data = selector
             ? selector(itemState ?? null, itemQuery?.payload ?? null)
@@ -153,8 +171,56 @@ export function useMultipleItems<
           }
 
           let status = itemQuery.status;
+          const itemFieldInvalidationFields =
+            state.itemFieldInvalidationFields[itemKey];
 
-          if (!returnRefetchingStatus && itemQuery.status === 'refetching') {
+          // Override status when partial resources has missing fields
+          if (
+            partialResources &&
+            Array.isArray(fields) &&
+            fields.length > 0 &&
+            (status === 'success' || status === 'refetching')
+          ) {
+            const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+            const missingFields = fields.filter(
+              (f) => !loadedFields.includes(f),
+            );
+            const hasMissingFields = missingFields.length > 0;
+            const missingFieldsAreFromPerFieldInvalidation =
+              !!itemFieldInvalidationFields &&
+              missingFields.every((f) =>
+                itemFieldInvalidationFields.includes(f),
+              );
+            const missingFieldsAreAvailableInState =
+              hasMissingFields &&
+              !!rawItemState &&
+              typeof rawItemState === 'object' &&
+              missingFields.every((f) => f in rawItemState);
+
+            if (
+              hasMissingFields &&
+              !(
+                missingFieldsAreFromPerFieldInvalidation &&
+                missingFieldsAreAvailableInState
+              )
+            ) {
+              status = 'loading';
+            }
+          }
+
+          if (
+            partialResources &&
+            status === 'refetching' &&
+            Array.isArray(fields) &&
+            fields.length > 0 &&
+            itemFieldInvalidationFields &&
+            !fields.some((f) => itemFieldInvalidationFields.includes(f))
+          ) {
+            // Keep unaffected hooks at success during per-field invalidation refetches.
+            status = 'success';
+          }
+
+          if (!returnRefetchingStatus && status === 'refetching') {
             status = 'success';
           }
 
@@ -163,14 +229,19 @@ export function useMultipleItems<
             status,
             error: itemQuery.error,
             isLoading: status === 'loading',
-            data,
+            data:
+              status === 'loading' && partialResources
+                ? selector
+                  ? selector(null, itemQuery.payload)
+                  : __LEGIT_CAST__<Selected>(null)
+                : data,
             payload,
             queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
           };
         },
       );
     },
-    [loadFromStateOnly, queriesWithId, selector],
+    [loadFromStateOnly, queriesWithId, selector, partialResources],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -180,23 +251,40 @@ export function useMultipleItems<
   useOnEvtmitterEvent(events, 'invalidateItem', ({ payload: event }) => {
     if (loadFromStateOnly || !fetchItemFn) return;
 
-    for (const { payload, itemKey, isOffScreen } of queriesWithId) {
-      if (isOffScreen) continue;
+    const matchingQueries = queriesWithId.filter(
+      ({ itemKey, isOffScreen }) => !isOffScreen && itemKey === event.itemKey,
+    );
 
-      if (itemKey !== event.itemKey) continue;
+    if (matchingQueries.length === 0) return;
+    if (itemInvalidationWasTriggered.has(event.itemKey)) return;
 
-      if (!itemInvalidationWasTriggered.has(itemKey)) {
-        store.produceState((draft) => {
-          const query = draft.itemQueries[itemKey];
-          if (!query?.refetchOnMount) return;
+    let fieldsToFetch: string[] | undefined;
+    if (event.invalidateFields && event.invalidateFields.length > 0) {
+      fieldsToFetch = Array.from(new Set(event.invalidateFields)).sort();
 
-          query.refetchOnMount = false;
-        });
+      const hasAffectedHook = matchingQueries.some(({ fields }) => {
+        if (fields === '*') return true;
+        if (!fields || fields.length === 0) return true;
+        return fields.some((field) => event.invalidateFields?.includes(field));
+      });
 
-        scheduleItemFetch(event.priority, payload);
-        itemInvalidationWasTriggered.add(itemKey);
-      }
+      if (!hasAffectedHook) return;
     }
+
+    const firstQuery = matchingQueries[0];
+    if (!firstQuery) return;
+
+    store.produceState((draft) => {
+      const query = draft.itemQueries[event.itemKey];
+      if (!query?.refetchOnMount) return;
+
+      query.refetchOnMount = false;
+    });
+
+    scheduleItemFetch(event.priority, firstQuery.payload, {
+      fields: fieldsToFetch ?? firstQuery.fields,
+    });
+    itemInvalidationWasTriggered.add(event.itemKey);
   });
 
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
@@ -208,6 +296,7 @@ export function useMultipleItems<
 
     for (const {
       payload,
+      fields,
       itemKey,
       isOffScreen,
       disableRefetchOnMount,
@@ -224,10 +313,25 @@ export function useMultipleItems<
         continue;
       }
 
-      const shouldFetch =
+      let shouldFetch =
         itemState === undefined ||
         !itemState.wasLoaded ||
         itemState.refetchOnMount;
+
+      // For partial resources, check if all requested fields are loaded
+      if (
+        partialResources &&
+        !shouldFetch &&
+        Array.isArray(fields) &&
+        fields.length > 0
+      ) {
+        const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+        const hasMissingFields = fields.some((f) => !loadedFields.includes(f));
+
+        if (hasMissingFields) {
+          shouldFetch = true;
+        }
+      }
 
       if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
         continue;
@@ -237,10 +341,10 @@ export function useMultipleItems<
 
       if (disableRefetchOnMount) {
         if (shouldFetch) {
-          scheduleItemFetch(fetchType, payload);
+          scheduleItemFetch(fetchType, payload, { fields });
         }
-      } else {
-        scheduleItemFetch(fetchType, payload);
+      } else if (!partialResources || shouldFetch) {
+        scheduleItemFetch(fetchType, payload, { fields });
       }
     }
 
@@ -253,7 +357,9 @@ export function useMultipleItems<
     queriesWithId,
     scheduleItemFetch,
     store.state.itemQueries,
+    store.state.itemLoadedFields,
     fetchItemFn,
+    partialResources,
   ]);
 
   return storeState;

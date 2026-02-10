@@ -9,10 +9,11 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import type {
-  FetchListFnReturn,
-  QueryFetchPayload,
-  TSFDListQueryState,
+import {
+  type FetchListFnReturn,
+  type PartialResourcesConfig,
+  type QueryFetchPayload,
+  type TSFDListQueryState,
 } from './types';
 
 export async function executeQueryFetch<
@@ -26,11 +27,12 @@ export async function executeQueryFetch<
   fetchListFn: (
     payload: QueryPayload,
     size: number,
-    signal: AbortSignal,
+    options: { signal: AbortSignal; fields?: string[] },
   ) => Promise<FetchListFnReturn<ItemState, ItemPayload>>,
   errorNormalizer: (exception: Error) => StoreError,
   getItemKey: (params: ItemPayload) => string,
   updateItemSchedulerTiming: (itemKey: string, startTime: number) => void,
+  partialResources?: PartialResourcesConfig<ItemState>,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
 
@@ -73,14 +75,13 @@ export async function executeQueryFetch<
 
   const fetchPromises = requests.map(
     async ({ requestId: queryKey, payload: fetchPayload }) => {
-      const { payload, size } = fetchPayload;
+      const { payload, size, fields } = fetchPayload;
 
       try {
-        const { items, hasMore } = await fetchListFn(
-          payload,
-          size,
-          fetchCtx.signal,
-        );
+        const { items, hasMore } = await fetchListFn(payload, size, {
+          signal: fetchCtx.signal,
+          fields,
+        });
 
         if (fetchCtx.shouldAbort()) {
           results.set(queryKey, false);
@@ -100,10 +101,28 @@ export async function executeQueryFetch<
             for (const { data, itemPayload } of items) {
               const itemKey = getItemKey(itemPayload);
 
-              draft.items[itemKey] = reusePrevIfEqual({
-                current: data,
-                prev: draft.items[itemKey] ?? undefined,
-              });
+              if (partialResources) {
+                const prev = draft.items[itemKey] ?? undefined;
+                const merged = partialResources.mergeItems(prev, data);
+                draft.items[itemKey] = reusePrevIfEqual({
+                  current: merged,
+                  prev,
+                });
+
+                if (fields && fields.length > 0) {
+                  const existingFields = draft.itemLoadedFields[itemKey] ?? [];
+                  const fieldSet = new Set([...existingFields, ...fields]);
+                  draft.itemLoadedFields[itemKey] = Array.from(fieldSet).sort();
+                } else {
+                  draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
+                }
+              } else {
+                draft.items[itemKey] = reusePrevIfEqual({
+                  current: data,
+                  prev: draft.items[itemKey] ?? undefined,
+                });
+              }
+
               query.items.push(itemKey);
 
               const itemQuery = draft.itemQueries[itemKey];

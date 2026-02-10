@@ -1,4 +1,5 @@
 import { notNullish } from '@ls-stack/utils/assertions';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import type { StoreError } from '../../src/utils/storeShared';
 import { sleep } from '../../test-old/utils/sleep';
@@ -25,6 +26,7 @@ export type ListQueryOptions = {
   itemIds?: string[];
   filters?: FilterOperator[];
   tableId?: string;
+  fields?: string[];
   batchKey?: string;
 };
 
@@ -63,6 +65,19 @@ function applyFilters<T extends Record<string, unknown>>(
   filters: FilterOperator[],
 ): boolean {
   return filters.every((filter) => applyFilter(item, filter));
+}
+
+function selectFields<T extends Record<string, unknown>>(
+  item: T,
+  fields: string[],
+): T {
+  const result: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (field in item) {
+      result[field] = item[field];
+    }
+  }
+  return __LEGIT_CAST__<T>(result);
 }
 
 export type ListQueryResult<ItemData> = {
@@ -118,11 +133,18 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
 
   // Fetch history tracking
   type FetchHistoryEntry =
-    | { type: 'fetch'; itemId: string; result: ItemData | 'error' | 'aborted' }
+    | {
+        type: 'fetch';
+        itemId: string;
+        fields: string[] | undefined;
+        result: ItemData | 'error' | 'aborted';
+      }
     | {
         type: 'list';
         itemIds: string[] | undefined;
         limit: number | undefined;
+        fields: string[] | undefined;
+        filters: FilterOperator[] | undefined;
         batchKey: string | undefined;
         results:
           | Array<{ itemId: string; data: ItemData | 'error' }>
@@ -164,6 +186,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   async function fetch(
     itemId: string,
     signal?: AbortSignal,
+    options?: { fields?: string[] },
   ): Promise<ItemData> {
     const fetchId = addAction ? getFetchId() : undefined;
 
@@ -185,7 +208,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     if (errorConfig) {
       signal?.removeEventListener('abort', onAbort);
       nextFetchErrors.delete(itemId);
-      fetchHistory.push({ type: 'fetch', itemId, result: 'error' });
+      fetchHistory.push({
+        type: 'fetch',
+        itemId,
+        fields: options?.fields,
+        result: 'error',
+      });
       if (addAction) {
         numOfFinishedFetches++;
         addAction('<fetch-error', {
@@ -213,7 +241,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     // Check for abort after network delay
     if (signal?.aborted) {
       onAbort();
-      fetchHistory.push({ type: 'fetch', itemId, result: 'aborted' });
+      fetchHistory.push({
+        type: 'fetch',
+        itemId,
+        fields: options?.fields,
+        result: 'aborted',
+      });
       if (addAction) {
         numOfFinishedFetches++;
       }
@@ -222,20 +255,39 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
 
     const item = items.get(itemId);
     if (item === undefined) {
-      fetchHistory.push({ type: 'fetch', itemId, result: 'error' });
+      fetchHistory.push({
+        type: 'fetch',
+        itemId,
+        fields: options?.fields,
+        result: 'error',
+      });
       if (addAction) {
         numOfFinishedFetches++;
       }
       throw new Error(`Item not found: ${itemId}`);
     }
 
-    fetchHistory.push({ type: 'fetch', itemId, result: item });
+    const result =
+      options?.fields && options.fields.length > 0
+        ? selectFields(item, options.fields)
+        : item;
+
+    fetchHistory.push({
+      type: 'fetch',
+      itemId,
+      fields: options?.fields,
+      result,
+    });
     if (addAction) {
       numOfFinishedFetches++;
-      addAction('<fetch-finished', { actionValue: item, id: fetchId, itemId });
+      addAction('<fetch-finished', {
+        actionValue: result,
+        id: fetchId,
+        itemId,
+      });
     }
 
-    return item;
+    return result;
   }
 
   async function list(
@@ -248,6 +300,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       itemIds: filterItemIds,
       filters,
       tableId,
+      fields,
+      batchKey,
     } = options ?? {};
     const listId = addAction ? getFetchId() : undefined;
 
@@ -288,7 +342,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         limit,
         results: 'aborted',
-        batchKey: options?.batchKey,
+        filters,
+        fields,
+        batchKey,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -305,7 +361,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         limit,
         results: 'aborted',
-        batchKey: options?.batchKey,
+        filters,
+        fields,
+        batchKey,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -323,7 +381,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         results: 'aborted',
         limit,
-        batchKey: options?.batchKey,
+        filters,
+        fields,
+        batchKey,
       });
 
       if (addAction) {
@@ -368,10 +428,10 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     const paginatedEntries = resultEntries.slice(startIndex, endIndex);
     const hasMore = endIndex < totalCount;
 
-    // Build result
+    // Build result (apply field selection if requested)
     const resultItems = paginatedEntries.map(([itemId, data]) => ({
       itemId,
-      data,
+      data: fields && fields.length > 0 ? selectFields(data, fields) : data,
     }));
 
     const result: ListQueryResult<ItemData> = {
@@ -387,7 +447,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         data,
       })),
-      batchKey: options?.batchKey,
+      fields,
+      filters,
+      batchKey,
     });
 
     if (addAction) {
@@ -663,6 +725,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       itemIds: filterItemIds,
       filters,
       tableId,
+      fields,
     } = options ?? {};
 
     if (tableId && !knownTableIds.has(tableId)) {
@@ -694,7 +757,10 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     const hasMore = endIndex < totalCount;
 
     return {
-      items: paginatedEntries.map(([itemId, data]) => ({ itemId, data })),
+      items: paginatedEntries.map(([itemId, data]) => ({
+        itemId,
+        data: fields && fields.length > 0 ? selectFields(data, fields) : data,
+      })),
       hasMore,
     };
   }

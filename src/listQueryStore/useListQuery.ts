@@ -5,6 +5,7 @@ import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
 import type {
+  FieldsInput,
   ListQueryUseMultipleListQueriesQuery,
   TSFDListQueryState,
   TSFDUseListQueryReturn,
@@ -17,6 +18,7 @@ export type UseListQueryOptions<
   SelectedItem,
 > = UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem> & {
   ensureIsLoaded?: boolean;
+  fields?: FieldsInput;
 };
 
 export function useListQuery<
@@ -35,6 +37,7 @@ export function useListQuery<
     loadSize,
     isOffScreen,
     ensureIsLoaded,
+    fields,
   }: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   getQueryKey: (params: QueryPayload) => string,
@@ -42,6 +45,7 @@ export function useListQuery<
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
+    options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   useMultipleListQueries: <S = ItemState>(
     queries: ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[],
@@ -55,6 +59,7 @@ export function useListQuery<
         : [
             {
               payload,
+              fields,
               disableRefetchOnMount,
               returnIdleStatus,
               returnRefetchingStatus,
@@ -65,6 +70,7 @@ export function useListQuery<
           ],
     [
       disableRefetchOnMount,
+      fields,
       isOffScreen,
       loadSize,
       omitPayload,
@@ -82,6 +88,7 @@ export function useListQuery<
     (): TSFDUseListQueryReturn<SelectedItem, QueryPayload> =>
       queryResult[0] ?? {
         payload: undefined,
+        fields,
         error: null,
         hasMore: false,
         isLoading: false,
@@ -91,7 +98,7 @@ export function useListQuery<
         isLoadingMore: false,
         queryMetadata: undefined,
       },
-    [queryResult],
+    [queryResult, fields],
   );
 
   const queryKey = payload ? getQueryKey(payload) : '';
@@ -101,7 +108,7 @@ export function useListQuery<
     !!payload,
     () => {
       if (payload) {
-        scheduleListQueryFetch('highPriority', payload);
+        scheduleListQueryFetch('highPriority', payload, undefined, { fields });
       }
     },
   );

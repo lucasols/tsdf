@@ -1,5 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createListQueryStore } from '../../src/listQueryStore/listQueryStore';
+import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
@@ -23,6 +24,8 @@ export type ListQueryParams = {
   tableId: string;
   filters?: FilterOperator[];
 };
+
+type ListQueryItemPayload = string;
 
 type ListQuerySnapshotConfig = {
   tables?: string[];
@@ -48,7 +51,11 @@ function getStoreItemKey(tableId: string, id: number): string {
   return getCompositeKey(getRawItemKey(tableId, id));
 }
 
-export function createListQueryStoreTestEnv<TRow extends Row = Row>(
+export function createListQueryStoreTestEnv<
+  TRow extends Row = Row,
+  TPartialResources extends PartialResourcesConfig<TRow> | undefined =
+    undefined,
+>(
   serverInitialData: Tables<TRow>,
   {
     dynamicRealtimeThrottleMs,
@@ -63,6 +70,7 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     getItemsBatchKey,
     disableFetchItemFn,
     optimisticListUpdates,
+    partialResources,
   }: {
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
@@ -79,8 +87,9 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     getItemsBatchKey?: (payload: string) => string | false;
     disableFetchItemFn?: boolean;
     optimisticListUpdates?: Parameters<
-      typeof createListQueryStore<TRow, ListQueryParams, string>
+      typeof createListQueryStore<TRow, ListQueryParams, ListQueryItemPayload>
     >[0]['optimisticListUpdates'];
+    partialResources?: TPartialResources;
   } = {},
 ) {
   const {
@@ -143,21 +152,39 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
 
   // Batch fetch function - delegates to serverTable.list with itemIds
   const batchFetchItemFn = async (
-    payloads: string[],
-    signal: AbortSignal,
-    batchKey: string,
-  ): Promise<Map<string, TRow | Error>> => {
+    requests: { payload: ListQueryItemPayload; fields?: string[] }[],
+    { signal, batchKey }: { signal: AbortSignal; batchKey: string },
+  ): Promise<Map<ListQueryItemPayload, TRow | Error>> => {
+    const ids = requests.map((r) => r.payload);
+    const shouldFetchAllFields = requests.some(
+      (request) => !request.fields || request.fields.length === 0,
+    );
+    const mergedFields = shouldFetchAllFields
+      ? undefined
+      : Array.from(
+          new Set(requests.flatMap((request) => request.fields ?? [])),
+        ).sort();
     const listResult = await serverTable.list(
-      { itemIds: payloads, batchKey },
+      {
+        itemIds: ids,
+        batchKey,
+        fields: partialResources ? mergedFields : undefined,
+      },
       signal,
     );
 
-    const results = new Map<string, TRow | Error>();
-    for (const { itemId, data } of listResult.items) {
-      if (data instanceof Error) {
-        results.set(itemId, data);
+    const results = new Map<ListQueryItemPayload, TRow | Error>();
+    for (const request of requests) {
+      const listItem = listResult.items.find(
+        (item) => item.itemId === request.payload,
+      );
+      if (listItem) {
+        results.set(request.payload, listItem.data);
       } else {
-        results.set(itemId, data);
+        results.set(
+          request.payload,
+          new Error(`Item not found: ${request.payload}`),
+        );
       }
     }
 
@@ -166,7 +193,12 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
 
   const testOptions = resolveTestOptions(testScenario, serverTable);
 
-  const listQueryStore = createListQueryStore<TRow, ListQueryParams, string>({
+  const listQueryStore = createListQueryStore<
+    TRow,
+    ListQueryParams,
+    ListQueryItemPayload,
+    TPartialResources
+  >({
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
@@ -178,15 +210,17 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     optimisticListUpdates,
+    partialResources,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
-    fetchListFn: async ({ tableId, filters }, size, signal) => {
+    fetchListFn: async ({ tableId, filters }, size, { signal, fields }) => {
       const result = await serverTable.list(
         {
           tableId,
           filters,
+          fields: partialResources ? fields : undefined,
           limit: size,
         },
         signal,
@@ -202,8 +236,8 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     },
     fetchItemFn: disableFetchItemFn
       ? undefined
-      : async (itemId, signal) => {
-          return serverTable.fetch(itemId, signal);
+      : async (payload, { signal, fields }) => {
+          return serverTable.fetch(payload, signal, { fields });
         },
   });
 
@@ -294,16 +328,18 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     },
     scheduleItemFetch: (
       fetchType: FetchType,
-      itemId: string,
+      itemPayload: ListQueryItemPayload,
       options?: { mediumPriorityDelayMs?: number },
     ) => {
       const result = listQueryStore.scheduleItemFetch(
         fetchType,
-        itemId,
+        itemPayload,
         options,
       );
 
-      logScheduleFetchResult(result, (action) => addAction(action, { itemId }));
+      logScheduleFetchResult(result, (action) =>
+        addAction(action, { itemId: itemPayload }),
+      );
 
       return result;
     },

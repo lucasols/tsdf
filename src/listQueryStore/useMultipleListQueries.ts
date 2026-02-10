@@ -9,11 +9,13 @@ import { Store } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
-import type {
-  ListQueryUseMultipleListQueriesQuery,
-  TSFDListQuery,
-  TSFDListQueryState,
-  TSFDUseListQueryReturn,
+import {
+  type FieldsInput,
+  type ListQueryUseMultipleListQueriesQuery,
+  type PartialResourcesConfig,
+  type TSFDListQuery,
+  type TSFDListQueryState,
+  type TSFDUseListQueryReturn,
 } from './types';
 
 export type UseMultipleListQueriesOptions<
@@ -61,9 +63,11 @@ export function useMultipleListQueries<
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
+    options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   queryInvalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
+  partialResources: PartialResourcesConfig<ItemState> | undefined,
 ): readonly TSFDUseListQueryReturn<
   SelectedItem,
   QueryPayload,
@@ -74,6 +78,7 @@ export function useMultipleListQueries<
   type QueryWithId = {
     key: string;
     payload: QueryPayload;
+    fields: FieldsInput | undefined;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -87,6 +92,7 @@ export function useMultipleListQueries<
     return queries.map((queryProps) => ({
       key: getQueryKey(queryProps.payload),
       payload: queryProps.payload,
+      fields: queryProps.fields,
       disableRefetchOnMount:
         queryProps.disableRefetchOnMount ??
         allItemsDisableRefetchOnMount ??
@@ -116,11 +122,20 @@ export function useMultipleListQueries<
   ]);
 
   const getQueryItems = useCallback(
-    (state: State, query: TSFDListQuery<QueryPayload>): SelectedItem[] => {
+    (
+      state: State,
+      query: TSFDListQuery<QueryPayload>,
+      fields: FieldsInput | undefined,
+    ): SelectedItem[] => {
       return filterAndMap(query.items, (itemKey) => {
-        const item = state.items[itemKey];
+        let item = state.items[itemKey];
         const itemPayload = state.itemQueries[itemKey]?.payload;
         if (!item || !itemPayload) return false;
+
+        // Apply field selection for partial resources
+        if (partialResources && Array.isArray(fields) && fields.length > 0) {
+          item = partialResources.selectFields(fields, item);
+        }
 
         if (itemSelector) {
           return itemSelector(item, itemPayload, itemKey);
@@ -128,7 +143,7 @@ export function useMultipleListQueries<
         return __LEGIT_CAST__<SelectedItem>(item);
       });
     },
-    [itemSelector],
+    [itemSelector, partialResources],
   );
 
   const resultSelector = useCallback(
@@ -137,6 +152,7 @@ export function useMultipleListQueries<
         ({
           key: queryKey,
           payload,
+          fields,
           omitPayload,
           returnIdleStatus,
           returnRefetchingStatus,
@@ -156,6 +172,7 @@ export function useMultipleListQueries<
               error: null,
               hasMore: false,
               payload: omitPayload ? undefined : payload,
+              fields,
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
               queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
@@ -164,25 +181,58 @@ export function useMultipleListQueries<
 
           let status = query.status;
 
-          if (!returnRefetchingStatus && query.status === 'refetching') {
+          // Override status when partial resources has items with missing fields
+          if (
+            partialResources &&
+            Array.isArray(fields) &&
+            fields.length > 0 &&
+            (status === 'success' || status === 'refetching')
+          ) {
+            const someItemMissingFields = query.items.some((itemKey) => {
+              const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+              return fields.some((f) => !loadedFields.includes(f));
+            });
+
+            const hasAffectedFieldInvalidation = query.items.some((itemKey) => {
+              const itemFieldInvalidationFields =
+                state.itemFieldInvalidationFields[itemKey];
+
+              return (
+                !!itemFieldInvalidationFields &&
+                fields.some((f) => itemFieldInvalidationFields.includes(f))
+              );
+            });
+
+            if (someItemMissingFields && hasAffectedFieldInvalidation) {
+              status = 'refetching';
+            } else if (someItemMissingFields) {
+              status = 'loading';
+            }
+          }
+
+          if (!returnRefetchingStatus && status === 'refetching') {
             status = 'success';
           }
 
           return {
             queryKey,
             status,
-            items: getQueryItems(state, query),
+            items:
+              status === 'loading' && partialResources
+                ? []
+                : getQueryItems(state, query, fields),
             error: query.error,
             hasMore: query.hasMore,
             isLoading: status === 'loading',
             payload: omitPayload ? undefined : query.payload,
+            fields,
             isLoadingMore: status === 'loadingMore',
             queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
           };
         },
       );
     },
-    [queriesWithId, getQueryItems],
+    [queriesWithId, getQueryItems, partialResources],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -190,7 +240,7 @@ export function useMultipleListQueries<
   });
 
   useOnEvtmitterEvent(events, 'invalidateQuery', ({ payload: event }) => {
-    for (const { key, payload, isOffScreen } of queriesWithId) {
+    for (const { key, payload, fields, isOffScreen } of queriesWithId) {
       if (isOffScreen) continue;
 
       if (key !== event.queryKey) continue;
@@ -203,7 +253,7 @@ export function useMultipleListQueries<
           query.refetchOnMount = false;
         });
 
-        scheduleListQueryFetch(event.priority, payload);
+        scheduleListQueryFetch(event.priority, payload, undefined, { fields });
         queryInvalidationWasTriggered.add(key);
       }
     }
@@ -217,6 +267,7 @@ export function useMultipleListQueries<
     for (const {
       key: queryId,
       payload,
+      fields,
       isOffScreen,
       loadSize,
       disableRefetchOnMount,
@@ -226,10 +277,63 @@ export function useMultipleListQueries<
       if (isOffScreen) continue;
 
       const queryState = getQueryState(payload);
-      const fetchType = queryState?.refetchOnMount || 'lowPriority';
+      let fetchType = queryState?.refetchOnMount || 'lowPriority';
 
-      const shouldFetch =
+      let shouldFetch =
         !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
+
+      // For partial resources, fetch again when requested fields are missing
+      // or when a full-resource hook is affected by field invalidation.
+      if (partialResources && !shouldFetch && queryState) {
+        const isQueryFetchInFlight =
+          queryState.status === 'loading' ||
+          queryState.status === 'refetching' ||
+          queryState.status === 'loadingMore';
+
+        if (Array.isArray(fields) && fields.length > 0) {
+          const someItemMissingFields = queryState.items.some((itemKey) => {
+            const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+            return fields.some((f) => !loadedFields.includes(f));
+          });
+
+          if (someItemMissingFields && !isQueryFetchInFlight) {
+            shouldFetch = true;
+
+            const hasAffectedFieldInvalidation = queryState.items.some(
+              (itemKey) => {
+                const itemFieldInvalidationFields =
+                  store.state.itemFieldInvalidationFields[itemKey];
+
+                return (
+                  !!itemFieldInvalidationFields &&
+                  fields.some((f) => itemFieldInvalidationFields.includes(f))
+                );
+              },
+            );
+
+            if (hasAffectedFieldInvalidation && fetchType === 'lowPriority') {
+              fetchType = 'highPriority';
+            }
+          }
+        } else if (fields === '*') {
+          const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
+            const itemFieldInvalidationFields =
+              store.state.itemFieldInvalidationFields[itemKey];
+            return (
+              !!itemFieldInvalidationFields &&
+              itemFieldInvalidationFields.length > 0
+            );
+          });
+
+          if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
+            shouldFetch = true;
+
+            if (fetchType === 'lowPriority') {
+              fetchType = 'highPriority';
+            }
+          }
+        }
+      }
 
       if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(queryId)) {
         continue;
@@ -239,10 +343,10 @@ export function useMultipleListQueries<
 
       if (disableRefetchOnMount) {
         if (shouldFetch) {
-          scheduleListQueryFetch(fetchType, payload, loadSize);
+          scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
         }
-      } else {
-        scheduleListQueryFetch(fetchType, payload, loadSize);
+      } else if (!partialResources || shouldFetch) {
+        scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
       }
     }
 
@@ -254,6 +358,9 @@ export function useMultipleListQueries<
     ignoreQueriesInRefetchOnMount,
     queriesWithId,
     scheduleListQueryFetch,
+    partialResources,
+    store.state.itemLoadedFields,
+    store.state.itemFieldInvalidationFields,
   ]);
 
   return storeState;

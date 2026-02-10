@@ -5,6 +5,7 @@ import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
 import type {
+  FieldsInput,
   ListQueryUseMultipleItemsQuery,
   TSFDListQueryState,
   TSFDUseListItemReturn,
@@ -16,6 +17,7 @@ export type UseItemOptions<
   Selected,
 > = UseMultipleItemsOptions<ItemState, Selected> & {
   ensureIsLoaded?: boolean;
+  fields?: FieldsInput;
 };
 
 export function useItem<
@@ -33,11 +35,13 @@ export function useItem<
     returnIdleStatus,
     returnRefetchingStatus,
     isOffScreen,
+    fields,
   }: UseItemOptions<ItemState, Selected>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   scheduleItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
+    options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   useMultipleItems: <S = ItemState | null>(
     items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
@@ -51,6 +55,7 @@ export function useItem<
         : [
             {
               payload: itemPayload,
+              fields,
               disableRefetchOnMount,
               isOffScreen,
               returnIdleStatus,
@@ -59,6 +64,7 @@ export function useItem<
           ],
     [
       itemPayload,
+      fields,
       disableRefetchOnMount,
       isOffScreen,
       returnIdleStatus,
@@ -90,7 +96,7 @@ export function useItem<
     !!itemPayload,
     () => {
       if (itemPayload) {
-        scheduleItemFetch('highPriority', itemPayload);
+        scheduleItemFetch('highPriority', itemPayload, { fields });
       }
     },
   );

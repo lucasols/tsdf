@@ -85,6 +85,8 @@ describe('fetch query', () => {
       items: {},
       queries: {},
       itemQueries: {},
+      itemLoadedFields: {},
+      itemFieldInvalidationFields: {},
     });
 
     env.scheduleFetch('lowPriority', usersQueryParams);
@@ -1110,5 +1112,7 @@ test('invalidate everything does not cause a problem', () => {
         wasLoaded: true,
       },
     },
+    itemLoadedFields: {},
+    itemFieldInvalidationFields: {},
   });
 });

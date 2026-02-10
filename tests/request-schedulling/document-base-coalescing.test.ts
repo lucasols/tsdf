@@ -88,9 +88,9 @@ test('mixed priority fetches within the same request base coalescing window', as
     time  | ui |
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
-    5ms   | 0  | scheduled-fetch-skipped
+    5ms   | 0  | scheduled-fetch-coalesced
     10ms  | 0  | scheduled-fetch-coalesced
-    15ms  | 0  | scheduled-fetch-skipped
+    15ms  | 0  | scheduled-fetch-coalesced
     20ms  | 0  | 🔴 >fetch-started
     820ms | 0  | 🔴 <fetch-finished (value: 0)
     "
@@ -135,9 +135,9 @@ test('multiple low priority fetches within the same request base coalescing wind
     time  | ui |
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
-    5ms   | 0  | scheduled-fetch-skipped
-    10ms  | 0  | scheduled-fetch-skipped
-    15ms  | 0  | scheduled-fetch-skipped
+    5ms   | 0  | scheduled-fetch-coalesced
+    10ms  | 0  | scheduled-fetch-coalesced
+    15ms  | 0  | scheduled-fetch-coalesced
     20ms  | 0  | 🔴 >fetch-started
     820ms | 0  | 🔴 <fetch-finished (value: 0)
     "

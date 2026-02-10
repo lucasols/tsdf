@@ -253,6 +253,8 @@ describe('update state functions', () => {
           wasLoaded: true,
         },
       },
+      itemLoadedFields: {},
+      itemFieldInvalidationFields: {},
     });
   });
 
@@ -340,6 +342,8 @@ describe('update state functions', () => {
           wasLoaded: true,
         },
       },
+      itemLoadedFields: {},
+      itemFieldInvalidationFields: {},
     });
   });
 
@@ -404,6 +408,8 @@ describe('update state functions', () => {
           wasLoaded: true,
         },
       },
+      itemLoadedFields: {},
+      itemFieldInvalidationFields: {},
     });
   });
 });
