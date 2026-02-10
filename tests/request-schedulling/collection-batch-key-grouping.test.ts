@@ -1,78 +1,78 @@
-// import {
-//   afterEach,
-//   beforeAll,
-//   beforeEach,
-//   describe,
-//   expect,
-//   test,
-//   vi,
-// } from 'vitest';
-// import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-// import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
-// beforeAll(() => {
-//   vi.useFakeTimers();
-// });
+beforeAll(() => {
+  vi.useFakeTimers();
+});
 
-// beforeEach(() => {
-//   vi.setSystemTime(TEST_INITIAL_TIME);
-// });
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
 
-// afterEach(() => {
-//   vi.runOnlyPendingTimers();
-// });
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
 
-// function getBatchKey(itemId: string): string {
-//   const prefix = itemId.split('-')[0];
-//   if (!prefix) throw new Error(`Invalid itemId: ${itemId}`);
-//   return prefix;
-// }
+function getBatchKey(itemId: string): string {
+  const prefix = itemId.split('-')[0];
+  if (!prefix) throw new Error(`Invalid itemId: ${itemId}`);
+  return prefix;
+}
 
-// describe('batch key grouping', () => {
-//   test('items with same batch key are batched together', async () => {
-//     const env = createCollectionStoreTestEnv(
-//       {
-//         'api1-item1': { v: 1 },
-//         'api1-item2': { v: 2 },
-//         'api1-item3': { v: 3 },
-//       },
-//       {
-//         baseCoalescingWindowMs: 50,
-//         useBatchFetch: true,
-//         getItemsBatchKey: (payload) => getBatchKey(payload),
-//       },
-//     );
+describe('batch key grouping', () => {
+  test('items with same batch key are batched together', async () => {
+    const env = createCollectionStoreTestEnv(
+      {
+        'api1-item1': { v: 1 },
+        'api1-item2': { v: 2 },
+        'api1-item3': { v: 3 },
+      },
+      {
+        baseCoalescingWindowMs: 50,
+        useBatchFetch: true,
+        getItemsBatchKey: (payload) => getBatchKey(payload),
+      },
+    );
 
-//     env.scheduleFetch('highPriority', 'api1-item1');
-//     env.scheduleFetch('highPriority', 'api1-item2');
-//     env.scheduleFetch('highPriority', 'api1-item3');
+    env.scheduleFetch('highPriority', 'api1-item1');
+    env.scheduleFetch('highPriority', 'api1-item2');
+    env.scheduleFetch('highPriority', 'api1-item3');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
-//       v: 1,
-//     });
-//     expect(env.apiStore.getItemState('api1-item2')?.data?.value).toEqual({
-//       v: 2,
-//     });
-//     expect(env.apiStore.getItemState('api1-item3')?.data?.value).toEqual({
-//       v: 3,
-//     });
+    expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
+      v: 1,
+    });
+    expect(env.apiStore.getItemState('api1-item2')?.data?.value).toEqual({
+      v: 2,
+    });
+    expect(env.apiStore.getItemState('api1-item3')?.data?.value).toEqual({
+      v: 3,
+    });
 
-//     // All items with same batch key should be in one batch
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - batchKey: 'api1'
-//         itemIds: ['api1-item1', 'api1-item2', 'api1-item3']
-//         results:
-//           - data: { v: 1 }
-//             itemId: 'api1-item1'
-//           - data: { v: 2 }
-//             itemId: 'api1-item2'
-//           - data: { v: 3 }
-//             itemId: 'api1-item3'
-//         type: 'list'
-//     `);
-//   });
+    // All items with same batch key should be in one batch
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: 'api1'
+        itemIds: ['api1-item1', 'api1-item2', 'api1-item3']
+        results:
+          - data: { v: 1 }
+            itemId: 'api1-item1'
+          - data: { v: 2 }
+            itemId: 'api1-item2'
+          - data: { v: 3 }
+            itemId: 'api1-item3'
+        type: 'list'
+    `);
+  });
 
 //   test('items with different batch keys go to separate batches', async () => {
 //     const env = createCollectionStoreTestEnv(
