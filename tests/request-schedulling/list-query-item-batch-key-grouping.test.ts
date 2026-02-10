@@ -127,46 +127,47 @@ describe('batch key grouping', () => {
     `);
   });
 
-//   test('false batch key falls back to individual fetchItemFn', async () => {
-//     const env = createListQueryStoreTestEnv(serverData, {
-//       baseCoalescingWindowMs: 50,
-//       useBatchFetch: true,
-//       getItemsBatchKey: (payload) => {
-//         // table2 items should not be batched
-//         if (payload.startsWith('table2||')) return false;
-//         return getTableFromItemId(payload);
-//       },
-//     });
+  test('false batch key falls back to individual fetchItemFn', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      baseCoalescingWindowMs: 50,
+      useBatchFetch: true,
+      getItemsBatchKey: (payload) => {
+        // table2 items should not be batched
+        if (payload.startsWith('table2||')) return false;
+        return getTableFromItemId(payload);
+      },
+    });
 
-//     env.scheduleItemFetch('highPriority', 'table1||1');
-//     env.scheduleItemFetch('highPriority', 'table1||2');
-//     env.scheduleItemFetch('highPriority', 'table2||10');
+    env.scheduleItemFetch('highPriority', 'table1||1');
+    env.scheduleItemFetch('highPriority', 'table1||2');
+    env.scheduleItemFetch('highPriority', 'table2||10');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     expect(env.apiStore.getItemState('table1||1')).toEqual({
-//       id: 1,
-//       name: 'Item 1',
-//     });
-//     expect(env.apiStore.getItemState('table2||10')).toEqual({
-//       id: 10,
-//       name: 'Item 10',
-//     });
+    expect(env.apiStore.getItemState('table1||1')).toEqual({
+      id: 1,
+      name: 'Item 1',
+    });
+    expect(env.apiStore.getItemState('table2||10')).toEqual({
+      id: 10,
+      name: 'Item 10',
+    });
 
-//     // table1 items batched, table2||10 individual fetch
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - itemIds: ['table1||1', 'table1||2']
-//         results:
-//           - data: { id: 1, name: 'Item 1' }
-//             itemId: 'table1||1'
-//           - data: { id: 2, name: 'Item 2' }
-//             itemId: 'table1||2'
-//         type: 'list'
-//       - itemId: 'table2||10'
-//         result: { id: 10, name: 'Item 10' }
-//         type: 'fetch'
-//     `);
-//   });
+    // table1 items batched, table2||10 individual fetch
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: 'table1'
+        itemIds: ['table1||1', 'table1||2']
+        results:
+          - data: { id: 1, name: 'Item 1' }
+            itemId: 'table1||1'
+          - data: { id: 2, name: 'Item 2' }
+            itemId: 'table1||2'
+        type: 'list'
+      - itemId: 'table2||10'
+        result: { id: 10, name: 'Item 10' }
+        type: 'fetch'
+    `);
+  });
 
 //   test('mixed: some items batched by key, some individual', async () => {
 //     const env = createListQueryStoreTestEnv(serverData, {
