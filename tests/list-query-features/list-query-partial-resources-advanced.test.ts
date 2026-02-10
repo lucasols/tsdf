@@ -348,6 +348,101 @@ describe('list then load item: cross-source field accumulation', () => {
   });
 });
 
+describe('load more with partial resources', () => {
+  test('load list with fields then load more: new items also have fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+      defaultQuerySize: 3,
+    });
+
+    const renders = createLoggerStore();
+
+    const { result } = renderHook(() => {
+      const result = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: ['id', 'name'] },
+      );
+
+      renders.add(
+        pick(result, ['status', 'items', 'hasMore', 'isLoadingMore']),
+      );
+
+      return result.fields;
+    });
+
+    await flushAllTimers();
+
+    renders.addMark('Load more');
+
+    act(() => {
+      env.apiStore.loadMore(
+        { tableId: 'users' },
+        {
+          fields: result.current,
+        },
+      );
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ items: [] ⋅ hasMore: ❌ ⋅ isLoadingMore: ❌
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:1, name:User 1}, …(2 more)]
+      ⋅ hasMore: ✅
+      ⋅ isLoadingMore: ❌
+      └─
+
+      >>> Load more
+
+      ┌─
+      ⋅ status: loadingMore
+      ⋅ items: [{id:1, name:User 1}, …(2 more)]
+      ⋅ hasMore: ✅
+      ⋅ isLoadingMore: ✅
+      └─
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:1, name:User 1}, …(5 more)]
+      ⋅ hasMore: ✅
+      ⋅ isLoadingMore: ❌
+      └─
+      "
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        limit: 3
+        results:
+          - data: { id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { id: 3, name: 'User 3' }
+            itemId: 'users||3'
+        type: 'list'
+      - fields: ['id', 'name']
+        limit: 6
+        results:
+          - data: { id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { id: 5, name: 'User 5' }
+            itemId: 'users||5'
+          - data: { id: 6, name: 'User 6' }
+            itemId: 'users||6'
+        type: 'list'
+    `);
+  });
+});
+
 describe('concurrent fetches with different fields', () => {
   test('two items with different fields fetched concurrently', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {

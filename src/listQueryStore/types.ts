@@ -46,6 +46,7 @@ export type TSFDUseListQueryReturn<
   items: Selected[];
   status: QueryStatus | 'idle';
   payload: QueryPayload | undefined;
+  fields: string[] | undefined;
   error: StoreError | null;
   queryKey: string;
   hasMore: boolean;

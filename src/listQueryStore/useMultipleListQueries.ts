@@ -171,6 +171,7 @@ export function useMultipleListQueries<
               error: null,
               hasMore: false,
               payload: omitPayload ? undefined : payload,
+              fields,
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
               queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
@@ -211,6 +212,7 @@ export function useMultipleListQueries<
             hasMore: query.hasMore,
             isLoading: status === 'loading',
             payload: omitPayload ? undefined : query.payload,
+            fields,
             isLoadingMore: status === 'loadingMore',
             queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
           };

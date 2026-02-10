@@ -87,6 +87,7 @@ export function useListQuery<
     (): TSFDUseListQueryReturn<SelectedItem, QueryPayload> =>
       queryResult[0] ?? {
         payload: undefined,
+        fields,
         error: null,
         hasMore: false,
         isLoading: false,
@@ -96,7 +97,7 @@ export function useListQuery<
         isLoadingMore: false,
         queryMetadata: undefined,
       },
-    [queryResult],
+    [queryResult, fields],
   );
 
   const queryKey = payload ? getQueryKey(payload) : '';

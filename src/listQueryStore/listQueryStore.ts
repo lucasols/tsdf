@@ -245,7 +245,6 @@ export function createListQueryStore<
     RequestScheduler<QueryFetchPayload<QueryPayload>>
   >();
   const queryInitialFetchStartTime = new Map<string, number>();
-  const lastQueryFields = new Map<string, string[] | undefined>();
 
   if (
     import.meta.env.TEST &&
@@ -580,8 +579,6 @@ export function createListQueryStore<
       const currentQuerySize = queryState?.items.length ?? 0;
       const querySize = Math.max(currentQuerySize, size ?? defaultQuerySize);
 
-      lastQueryFields.set(queryKey, options?.fields);
-
       return getOrCreateQueryScheduler(queryKey).scheduleFetch(
         queryKey,
         fetchType,
@@ -604,16 +601,34 @@ export function createListQueryStore<
     return firstResult;
   }
 
-  function loadMore(params: QueryPayload, size?: number): ScheduleFetchResults {
+  function loadMore(
+    params: QueryPayload,
+    size?: number,
+    options?: { fields?: string[] },
+  ): ScheduleFetchResults;
+  function loadMore(
+    params: QueryPayload,
+    options?: { size?: number; fields?: string[] },
+  ): ScheduleFetchResults;
+  function loadMore(
+    params: QueryPayload,
+    sizeOrOptions?: number | { size?: number; fields?: string[] },
+    options?: { fields?: string[] },
+  ): ScheduleFetchResults {
     const queryState = getQueryState(params);
 
     if (!queryState || !queryState.hasMore) return 'skipped';
     if (queryState.status !== 'success') return 'skipped';
 
     const queryKey = getQueryKey(params);
-    const loadSize = size ?? defaultQuerySize;
+    const loadSize =
+      typeof sizeOrOptions === 'number'
+        ? sizeOrOptions
+        : (sizeOrOptions?.size ?? defaultQuerySize);
     const newSize = queryState.items.length + loadSize;
-    const fields = lastQueryFields.get(queryKey);
+    const fields = (
+      typeof sizeOrOptions === 'number' ? options : (sizeOrOptions ?? options)
+    )?.fields;
 
     return getOrCreateQueryScheduler(queryKey).scheduleFetch(
       queryKey,

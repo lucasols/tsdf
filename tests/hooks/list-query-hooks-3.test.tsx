@@ -241,6 +241,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ hasMore: ❌
     ⋅ isLoading: ❌
     ⋅ payload: {tableId:users}
+    ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     └─
 
@@ -254,6 +255,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ hasMore: ❌
     ⋅ isLoading: ❌
     ⋅ payload: {tableId:users}
+    ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     └─
     ┌─
@@ -264,6 +266,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ hasMore: ❌
     ⋅ isLoading: ❌
     ⋅ payload: {tableId:users}
+    ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     └─
 
@@ -277,6 +280,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ hasMore: ❌
     ⋅ isLoading: ❌
     ⋅ payload: {tableId:users}
+    ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     └─
 
@@ -292,6 +296,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ hasMore: ❌
     ⋅ isLoading: ❌
     ⋅ payload: {tableId:users}
+    ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     └─
     ┌─
@@ -302,6 +307,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ hasMore: ❌
     ⋅ isLoading: ❌
     ⋅ payload: {tableId:users}
+    ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     └─
     ┌─
@@ -312,6 +318,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ hasMore: ❌
     ⋅ isLoading: ❌
     ⋅ payload: {tableId:users}
+    ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     └─
     "
