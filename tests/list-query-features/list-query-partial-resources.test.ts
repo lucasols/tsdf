@@ -878,6 +878,82 @@ describe('invalidateQueryAndItems with fields', () => {
         type: 'list'
     `);
   });
+
+  test('useListQuery invalidation without fields: clears loaded fields and refetches the list hook', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: ['id', 'name'] },
+      );
+
+      renders.add(pick(result, ['status', 'items']));
+    });
+
+    await flushAllTimers();
+
+    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
+
+    renders.addMark('Invalidate all fields');
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(env.serverTable.numOfFinishedFetches - fetchCountBefore).toBe(1);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ items: []
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
+
+      >>> Invalidate all fields
+
+      -> status: loading ⋅ items: []
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
+      "
+    `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        limit: 50
+        results:
+          - data: { id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { id: 5, name: 'User 5' }
+            itemId: 'users||5'
+        type: 'list'
+      - fields: ['id', 'name']
+        limit: 50
+        results:
+          - data: { id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { id: 5, name: 'User 5' }
+            itemId: 'users||5'
+        type: 'list'
+    `);
+  });
 });
 
 describe('RTU with partial resources', () => {
