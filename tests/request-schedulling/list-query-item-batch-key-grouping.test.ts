@@ -1,86 +1,87 @@
-// import {
-//   afterEach,
-//   beforeAll,
-//   beforeEach,
-//   describe,
-//   expect,
-//   test,
-//   vi,
-// } from 'vitest';
-// import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
-// import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
+import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
-// beforeAll(() => {
-//   vi.useFakeTimers();
-// });
+beforeAll(() => {
+  vi.useFakeTimers();
+});
 
-// beforeEach(() => {
-//   vi.setSystemTime(TEST_INITIAL_TIME);
-// });
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
 
-// afterEach(() => {
-//   vi.runOnlyPendingTimers();
-// });
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
 
-// const serverData = {
-//   table1: [
-//     { id: 1, name: 'Item 1' },
-//     { id: 2, name: 'Item 2' },
-//     { id: 3, name: 'Item 3' },
-//     { id: 4, name: 'Item 4' },
-//   ],
-//   table2: [
-//     { id: 10, name: 'Item 10' },
-//     { id: 20, name: 'Item 20' },
-//   ],
-// };
+const serverData = {
+  table1: [
+    { id: 1, name: 'Item 1' },
+    { id: 2, name: 'Item 2' },
+    { id: 3, name: 'Item 3' },
+    { id: 4, name: 'Item 4' },
+  ],
+  table2: [
+    { id: 10, name: 'Item 10' },
+    { id: 20, name: 'Item 20' },
+  ],
+};
 
-// function getTableFromItemId(itemId: string): string {
-//   const tableId = itemId.split('||')[0];
-//   if (!tableId) throw new Error(`Invalid itemId: ${itemId}`);
-//   return tableId;
-// }
+function getTableFromItemId(itemId: string): string {
+  const tableId = itemId.split('||')[0];
+  if (!tableId) throw new Error(`Invalid itemId: ${itemId}`);
+  return tableId;
+}
 
-// describe('batch key grouping', () => {
-//   test('items with same batch key are batched together', async () => {
-//     const env = createListQueryStoreTestEnv(serverData, {
-//       baseCoalescingWindowMs: 50,
-//       useBatchFetch: true,
-//       getItemsBatchKey: (payload) => getTableFromItemId(payload),
-//     });
+describe('batch key grouping', () => {
+  test('items with same batch key are batched together', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      baseCoalescingWindowMs: 50,
+      useBatchFetch: true,
+      getItemsBatchKey: (payload) => getTableFromItemId(payload),
+    });
 
-//     env.scheduleItemFetch('highPriority', 'table1||1');
-//     env.scheduleItemFetch('highPriority', 'table1||2');
-//     env.scheduleItemFetch('highPriority', 'table1||3');
+    env.scheduleItemFetch('highPriority', 'table1||1');
+    env.scheduleItemFetch('highPriority', 'table1||2');
+    env.scheduleItemFetch('highPriority', 'table1||3');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     expect(env.apiStore.getItemState('table1||1')).toEqual({
-//       id: 1,
-//       name: 'Item 1',
-//     });
-//     expect(env.apiStore.getItemState('table1||2')).toEqual({
-//       id: 2,
-//       name: 'Item 2',
-//     });
-//     expect(env.apiStore.getItemState('table1||3')).toEqual({
-//       id: 3,
-//       name: 'Item 3',
-//     });
+    expect(env.apiStore.getItemState('table1||1')).toEqual({
+      id: 1,
+      name: 'Item 1',
+    });
+    expect(env.apiStore.getItemState('table1||2')).toEqual({
+      id: 2,
+      name: 'Item 2',
+    });
+    expect(env.apiStore.getItemState('table1||3')).toEqual({
+      id: 3,
+      name: 'Item 3',
+    });
 
-//     // All items with same batch key should be in one batch
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - itemIds: ['table1||1', 'table1||2', 'table1||3']
-//         results:
-//           - data: { id: 1, name: 'Item 1' }
-//             itemId: 'table1||1'
-//           - data: { id: 2, name: 'Item 2' }
-//             itemId: 'table1||2'
-//           - data: { id: 3, name: 'Item 3' }
-//             itemId: 'table1||3'
-//         type: 'list'
-//     `);
-//   });
+    // All items with same batch key should be in one batch
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: 'table1'
+        itemIds: ['table1||1', 'table1||2', 'table1||3']
+        results:
+          - data: { id: 1, name: 'Item 1' }
+            itemId: 'table1||1'
+          - data: { id: 2, name: 'Item 2' }
+            itemId: 'table1||2'
+          - data: { id: 3, name: 'Item 3' }
+            itemId: 'table1||3'
+        type: 'list'
+    `);
+  });
 
 //   test('items with different batch keys go to separate batches', async () => {
 //     const env = createListQueryStoreTestEnv(serverData, {
