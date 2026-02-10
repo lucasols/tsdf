@@ -266,25 +266,25 @@ describe('batch key grouping', () => {
     `);
   });
 
-//   test('single item in a batch key group uses fetchFn', async () => {
-//     const env = createCollectionStoreTestEnv(
-//       { 'api1-item1': { v: 1 } },
-//       {
-//         baseCoalescingWindowMs: 50,
-//         useBatchFetch: true,
-//         getItemsBatchKey: (payload) => getBatchKey(payload),
-//       },
-//     );
+  test('single item in a batch key group uses fetchFn', async () => {
+    const env = createCollectionStoreTestEnv(
+      { 'api1-item1': { v: 1 } },
+      {
+        baseCoalescingWindowMs: 50,
+        useBatchFetch: true,
+        getItemsBatchKey: (payload) => getBatchKey(payload),
+      },
+    );
 
-//     env.scheduleFetch('highPriority', 'api1-item1');
+    env.scheduleFetch('highPriority', 'api1-item1');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     // Single item uses fetchFn, not batchFetchFn
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - itemId: 'api1-item1'
-//         result: { v: 1 }
-//         type: 'fetch'
-//     `);
-//   });
-// });
+    // Single item uses fetchFn, not batchFetchFn
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - itemId: 'api1-item1'
+        result: { v: 1 }
+        type: 'fetch'
+    `);
+  });
+});
