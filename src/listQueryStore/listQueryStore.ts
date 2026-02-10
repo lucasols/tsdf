@@ -86,7 +86,9 @@ export type ListQueryStoreOptions<
   batchFetchItemFn?: (
     payloads: ItemPayload[],
     signal: AbortSignal,
+    batchKey: string,
   ) => Promise<Map<ItemPayload, ItemState | Error>>;
+  getItemsBatchKey?: (payload: ItemPayload) => string | false;
   errorNormalizer: (exception: Error) => StoreError;
   defaultQuerySize?: number;
   maxItemBatchSize?: number;
@@ -129,6 +131,7 @@ export function createListQueryStore<
   fetchListFn,
   fetchItemFn,
   batchFetchItemFn,
+  getItemsBatchKey,
   errorNormalizer,
   defaultQuerySize = 50,
   maxItemBatchSize,
@@ -262,9 +265,9 @@ export function createListQueryStore<
         coalescePayload: (existing, incoming) => ({
           ...incoming,
           type:
-            existing.type === 'loadMore' || incoming.type === 'loadMore' ?
-              'loadMore'
-            : 'load',
+            existing.type === 'loadMore' || incoming.type === 'loadMore'
+              ? 'loadMore'
+              : 'load',
           size: Math.max(existing.size, incoming.size),
         }),
         usesRealTimeUpdates,
@@ -276,34 +279,55 @@ export function createListQueryStore<
 
   const itemKeyToPayload = new Map<string, ItemPayload>();
 
-  const useSingleItemScheduler = !!batchFetchItemFn;
+  const useBatchSchedulers = !!batchFetchItemFn && !!fetchItemFn;
 
-  const singleItemScheduler =
-    useSingleItemScheduler && fetchItemFn
-      ? new RequestScheduler<ItemPayload>({
-          fetchFn: async (
-            requests: BatchRequest<ItemPayload>[],
-            fetchCtx: FetchContext,
-          ): Promise<Map<string, boolean>> => {
-            return executeItemBatchFetch(
-              requests,
-              fetchCtx,
-              store,
-              itemKeyToPayload,
-              fetchItemFn,
-              batchFetchItemFn,
-              errorNormalizer,
-            );
-          },
-          lowPriorityThrottleMs,
-          baseCoalescingWindowMs,
-          dynamicRealtimeThrottleMs,
-          mediumPriorityDelayMs,
-          maxBatchSize: maxItemBatchSize,
-          on: onSchedulerEvent,
-          usesRealTimeUpdates,
-        })
-      : null;
+  const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
+  const batchInitialFetchStartTime = new Map<string, number>();
+
+  function getOrCreateBatchKeyScheduler(
+    batchKey: string,
+  ): RequestScheduler<ItemPayload> {
+    let scheduler = batchKeySchedulers.get(batchKey);
+    if (!scheduler) {
+      if (!fetchItemFn) {
+        throw new Error(noFetchItemFnError);
+      }
+
+      const initialLastFetchStartTime =
+        batchInitialFetchStartTime.get(batchKey);
+      if (initialLastFetchStartTime !== undefined) {
+        batchInitialFetchStartTime.delete(batchKey);
+      }
+
+      scheduler = new RequestScheduler<ItemPayload>({
+        fetchFn: async (
+          requests: BatchRequest<ItemPayload>[],
+          fetchCtx: FetchContext,
+        ): Promise<Map<string, boolean>> => {
+          return executeItemBatchFetch(
+            requests,
+            fetchCtx,
+            store,
+            itemKeyToPayload,
+            fetchItemFn,
+            batchFetchItemFn,
+            errorNormalizer,
+            batchKey,
+          );
+        },
+        lowPriorityThrottleMs,
+        baseCoalescingWindowMs,
+        dynamicRealtimeThrottleMs,
+        mediumPriorityDelayMs,
+        maxBatchSize: maxItemBatchSize,
+        on: onSchedulerEvent,
+        initialLastFetchStartTime,
+        usesRealTimeUpdates,
+      });
+      batchKeySchedulers.set(batchKey, scheduler);
+    }
+    return scheduler;
+  }
 
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
   const itemInitialFetchStartTime = new Map<string, number>();
@@ -312,18 +336,49 @@ export function createListQueryStore<
     import.meta.env.TEST &&
     testOptions?.initialLastFetchStartTime !== undefined
   ) {
-    for (const itemKey of Object.keys(store.state.itemQueries)) {
-      itemInitialFetchStartTime.set(
-        itemKey,
-        testOptions.initialLastFetchStartTime,
-      );
+    for (const [itemKey, itemQuery] of Object.entries(
+      store.state.itemQueries,
+    )) {
+      const initialLastFetchStartTime = testOptions.initialLastFetchStartTime;
+
+      if (useBatchSchedulers) {
+        const payload = itemQuery?.payload;
+        const batchKey =
+          payload && getItemsBatchKey
+            ? getItemsBatchKey(payload)
+            : '__default__';
+
+        if (batchKey !== false) {
+          const existingStartTime = batchInitialFetchStartTime.get(batchKey);
+          batchInitialFetchStartTime.set(
+            batchKey,
+            existingStartTime === undefined
+              ? initialLastFetchStartTime
+              : Math.max(existingStartTime, initialLastFetchStartTime),
+          );
+          continue;
+        }
+      }
+
+      itemInitialFetchStartTime.set(itemKey, initialLastFetchStartTime);
     }
   }
 
   function getOrCreateItemScheduler(
     itemKey: string,
+    payload: ItemPayload,
   ): RequestScheduler<ItemPayload> {
-    if (singleItemScheduler) return singleItemScheduler;
+    if (useBatchSchedulers) {
+      if (getItemsBatchKey) {
+        const batchKey = getItemsBatchKey(payload);
+        if (batchKey !== false) {
+          return getOrCreateBatchKeyScheduler(batchKey);
+        }
+        // batchKey === false → fall through to per-item scheduler
+      } else {
+        return getOrCreateBatchKeyScheduler('__default__');
+      }
+    }
 
     let scheduler = perItemSchedulers.get(itemKey);
     if (!scheduler) {
@@ -367,9 +422,28 @@ export function createListQueryStore<
   function updateItemSchedulerTiming(itemKey: string, startTime: number) {
     if (!fetchItemFn) return;
 
-    if (singleItemScheduler) {
-      singleItemScheduler.setLastFetchStartTime(startTime);
-      return;
+    if (useBatchSchedulers) {
+      const payload =
+        itemKeyToPayload.get(itemKey) ??
+        store.state.itemQueries[itemKey]?.payload;
+      const batchKey =
+        payload && getItemsBatchKey ? getItemsBatchKey(payload) : '__default__';
+
+      if (batchKey !== false) {
+        const scheduler = batchKeySchedulers.get(batchKey);
+        if (scheduler) {
+          scheduler.setLastFetchStartTime(startTime);
+        } else {
+          const existingStartTime = batchInitialFetchStartTime.get(batchKey);
+          batchInitialFetchStartTime.set(
+            batchKey,
+            existingStartTime === undefined
+              ? startTime
+              : Math.max(existingStartTime, startTime),
+          );
+        }
+        return;
+      }
     }
 
     const existingScheduler = perItemSchedulers.get(itemKey);
@@ -676,7 +750,7 @@ export function createListQueryStore<
 
     const results = itemsId.map((payload) => {
       const itemKey = getItemKey(payload);
-      return getOrCreateItemScheduler(itemKey).scheduleFetch(
+      return getOrCreateItemScheduler(itemKey, payload).scheduleFetch(
         itemKey,
         fetchType,
         payload,
@@ -705,11 +779,10 @@ export function createListQueryStore<
 
     const itemKey = getItemKey(itemPayload);
 
-    const result = await getOrCreateItemScheduler(itemKey).awaitFetch(
+    const result = await getOrCreateItemScheduler(
       itemKey,
       itemPayload,
-      options,
-    );
+    ).awaitFetch(itemKey, itemPayload, options);
 
     if (result === 'timeout') {
       return {
@@ -851,9 +924,9 @@ export function createListQueryStore<
 
     const endMutations: (() => boolean)[] = [];
 
-    for (const { itemKey } of itemsKey) {
+    for (const { itemKey, payload } of itemsKey) {
       if (fetchItemFn) {
-        const itemScheduler = getOrCreateItemScheduler(itemKey);
+        const itemScheduler = getOrCreateItemScheduler(itemKey, payload);
         endMutations.push(itemScheduler.startMutation(itemKey));
       }
 
@@ -1300,14 +1373,16 @@ export function createListQueryStore<
     }
     querySchedulers.clear();
 
-    if (singleItemScheduler) {
-      singleItemScheduler.reset();
-    } else {
-      for (const scheduler of perItemSchedulers.values()) {
-        scheduler.reset();
-      }
-      perItemSchedulers.clear();
+    for (const scheduler of batchKeySchedulers.values()) {
+      scheduler.reset();
     }
+    batchKeySchedulers.clear();
+    batchInitialFetchStartTime.clear();
+
+    for (const scheduler of perItemSchedulers.values()) {
+      scheduler.reset();
+    }
+    perItemSchedulers.clear();
 
     store.setState({ items: {}, queries: {}, itemQueries: {} });
   }

@@ -25,6 +25,7 @@ export type ListQueryOptions = {
   itemIds?: string[];
   filters?: FilterOperator[];
   tableId?: string;
+  batchKey?: string;
 };
 
 function applyFilter<T extends Record<string, unknown>>(
@@ -122,6 +123,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         type: 'list';
         itemIds: string[] | undefined;
         limit: number | undefined;
+        batchKey: string | undefined;
         results:
           | Array<{ itemId: string; data: ItemData | 'error' }>
           | 'aborted';
@@ -286,6 +288,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         limit,
         results: 'aborted',
+        batchKey: options?.batchKey,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -302,6 +305,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         limit,
         results: 'aborted',
+        batchKey: options?.batchKey,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -318,6 +322,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         type: 'list',
         itemIds: filterItemIds,
         results: 'aborted',
+        limit,
+        batchKey: options?.batchKey,
       });
 
       if (addAction) {
@@ -381,6 +387,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         data,
       })),
+      batchKey: options?.batchKey,
     });
 
     if (addAction) {

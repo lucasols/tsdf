@@ -55,13 +55,13 @@ describe('update state functions', () => {
 
     expect(env.apiStore.getItemState(['users||1', 'users||2', 'users||3']))
       .toMatchInlineSnapshot(`
-      - data: { id: 1, name: 'new name' }
-        payload: 'users||1'
-      - data: { id: 1, name: 'new name' }
-        payload: 'users||2'
-      - data: { id: 3, name: 'User 3' }
-        payload: 'users||3'
-    `);
+        - data: { id: 1, name: 'new name' }
+          payload: 'users||1'
+        - data: { id: 1, name: 'new name' }
+          payload: 'users||2'
+        - data: { id: 3, name: 'User 3' }
+          payload: 'users||3'
+      `);
   });
 
   test('update multiple itens state with filter fn', () => {
@@ -152,12 +152,12 @@ describe('update state functions', () => {
 
     expect(env.store.state.itemQueries[env.getStoreItemKeyFromRaw('users||20')])
       .toMatchInlineSnapshot(`
-      error: null
-      payload: 'users||20'
-      refetchOnMount: '❌'
-      status: 'success'
-      wasLoaded: '✅'
-    `);
+        error: null
+        payload: 'users||20'
+        refetchOnMount: '❌'
+        status: 'success'
+        wasLoaded: '✅'
+      `);
   });
 
   test('addItemToState with addItemToQueries', () => {

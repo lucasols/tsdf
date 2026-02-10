@@ -25,9 +25,11 @@ export async function executeItemBatchFetch<
     | ((
         payloads: ItemPayload[],
         signal: AbortSignal,
+        batchKey: string,
       ) => Promise<Map<ItemPayload, ItemState | Error>>)
     | undefined,
   errorNormalizer: (exception: Error) => StoreError,
+  batchKey?: string,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
 
@@ -68,7 +70,11 @@ export async function executeItemBatchFetch<
   if (batchFetchItemFn && requests.length > 1) {
     try {
       const payloads = requests.map((r) => r.payload);
-      const batchResults = await batchFetchItemFn(payloads, fetchCtx.signal);
+      const batchResults = await batchFetchItemFn(
+        payloads,
+        fetchCtx.signal,
+        batchKey ?? '__default__',
+      );
 
       if (fetchCtx.shouldAbort()) {
         for (const { requestId } of requests) {
