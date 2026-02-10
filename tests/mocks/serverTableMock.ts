@@ -143,6 +143,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: string[] | undefined;
         limit: number | undefined;
         fields: string[] | undefined;
+        filters: FilterOperator[] | undefined;
         results:
           | Array<{ itemId: string; data: ItemData | 'error' }>
           | 'aborted';
@@ -265,9 +266,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     }
 
     const result =
-      options?.fields && options.fields.length > 0
-        ? selectFields(item, options.fields)
-        : item;
+      options?.fields && options.fields.length > 0 ?
+        selectFields(item, options.fields)
+      : item;
 
     fetchHistory.push({
       type: 'fetch',
@@ -338,6 +339,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         limit,
         results: 'aborted',
+        filters,
         fields,
       });
       if (addAction) {
@@ -355,6 +357,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         limit,
         results: 'aborted',
+        filters,
         fields,
       });
       if (addAction) {
@@ -373,6 +376,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemIds: filterItemIds,
         results: 'aborted',
         limit,
+        filters,
         fields,
       });
 
@@ -438,6 +442,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         data,
       })),
       fields,
+      filters,
     });
 
     if (addAction) {
