@@ -699,21 +699,79 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
   });
 
-    await env.serverMock.waitFetchIdle();
+  test('invalidation without fields: clears all loaded fields, all hooks refetch', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
 
-    renders.addMark('Change fields');
+    const nameHookRenders = createLoggerStore();
+    const addressHookRenders = createLoggerStore();
 
-    rerender({ fields: ['id', 'name', 'address'] });
+    renderHook(() => {
+      const nameResult = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name'],
+      });
 
-    expect(renders.snapshot).toMatchInlineSnapshotString(`
+      const addressResult = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'address'],
+      });
+
+      nameHookRenders.add(pick(nameResult, ['status', 'data']));
+      addressHookRenders.add(pick(addressResult, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    nameHookRenders.addMark('Invalidate all fields');
+    addressHookRenders.addMark('Invalidate all fields');
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(nameHookRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      status: loading -- items: [] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
-      status: success -- items: [{id:1, name:User 1, address:Address 1, country:Country 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address, country]} -- error: null
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
 
-      >>> Change fields
+      >>> Invalidate all fields
 
-      status: success -- items: [{id:1, name:User 1, address:Address 1}, ...(49 more)] -- payload: {tableId:users, fields:[id, name, address]} -- error: null
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
       "
+    `);
+
+    expect(addressHookRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, address:Address 1}
+
+      >>> Invalidate all fields
+
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, address:Address 1}
+      "
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['address', 'id', 'name']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1, name: 'User 1' }
+        type: 'fetch'
+      - fields: ['address', 'id', 'name']
+        itemId: 'users||1'
+        result: { address: 'Address 1', id: 1, name: 'User 1' }
+        type: 'fetch'
+    `);
+  });
+});
     `);
   });
 });
