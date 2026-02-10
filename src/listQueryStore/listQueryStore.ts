@@ -298,6 +298,13 @@ export function createListQueryStore<
               ? 'loadMore'
               : 'load',
           size: Math.max(existing.size, incoming.size),
+          // Preserve fields requested by all coalesced hooks.
+          fields:
+            !existing.fields || !incoming.fields
+              ? undefined
+              : Array.from(
+                  new Set([...existing.fields, ...incoming.fields]),
+                ).sort(),
         }),
         usesRealTimeUpdates,
       });

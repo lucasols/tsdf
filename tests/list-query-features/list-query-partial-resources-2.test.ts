@@ -260,7 +260,7 @@ describe('list then load item: cross-source field accumulation', () => {
     `);
   });
 
-  test('load two lists with different fields then load item with common fields: cache hit', async () => {
+  test('load list with id/name then load item with the same fields: cache hit', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
     });
