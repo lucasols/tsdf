@@ -47,7 +47,8 @@ describe('batch coalescing basic behavior', () => {
     expect(env.apiStore.getItemState('item3')?.data?.value).toEqual({ v: 3 });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2', 'item3']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2', 'item3']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -120,7 +121,8 @@ describe('batch coalescing basic behavior', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2', 'item3']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2', 'item3']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -160,7 +162,8 @@ describe('maxBatchSize behavior', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -204,14 +207,16 @@ describe('maxBatchSize behavior', () => {
     expect(env.apiStore.getItemState('item4')?.data?.value).toEqual({ v: 4 });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2']
         results:
           - data: { v: 1 }
             itemId: 'item1'
           - data: { v: 2 }
             itemId: 'item2'
         type: 'list'
-      - itemIds: ['item3', 'item4']
+      - batchKey: '__default__'
+        itemIds: ['item3', 'item4']
         results:
           - data: { v: 3 }
             itemId: 'item3'
@@ -262,7 +267,8 @@ describe('requests during ongoing fetch', () => {
 
     // First list fetch, then item3 as individual fetch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -421,7 +427,8 @@ describe('awaitFetch with batch', () => {
     });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2', 'item3']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2', 'item3']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -542,7 +549,8 @@ describe('awaitFetch with batch', () => {
     expect(result2).toEqual({ data: { value: { v: 2 } }, error: null });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -579,7 +587,8 @@ describe('priority handling in batch', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2', 'item3']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2', 'item3']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -617,7 +626,8 @@ describe('priority handling in batch', () => {
     await vi.runAllTimersAsync();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2', 'item3']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2', 'item3']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -669,7 +679,8 @@ describe('batch with UI hooks', () => {
     expect(env.apiStore.getItemState('item2')?.data?.value).toEqual({ v: 2 });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2']
         results:
           - data: { v: 1 }
             itemId: 'item1'
@@ -743,7 +754,8 @@ describe('duplicate item requests in batch', () => {
 
     // Should have exactly 2 items in batch (deduplicated)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemIds: ['item1', 'item2']
+      - batchKey: '__default__'
+        itemIds: ['item1', 'item2']
         results:
           - data: { v: 1 }
             itemId: 'item1'

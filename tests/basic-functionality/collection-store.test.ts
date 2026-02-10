@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import { createCollectionStore } from '../../src/collectionStore/collectionStore';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
+import { normalizeError } from '../mocks/testEnvUtils';
 
 type TodoItem = { title: string; completed: boolean };
 
@@ -524,19 +526,28 @@ describe('update state functions', () => {
 });
 
 test('mutating a obj passed as payload does not break the store', async () => {
-  const env = createCollectionStoreTestEnv({
-    '1': defaultTodo,
+  const collectionStore = createCollectionStore<
+    { value: TodoItem },
+    { id: { id: string } }
+  >({
+    errorNormalizer: normalizeError,
+    lowPriorityThrottleMs: 200,
+    baseCoalescingWindowMs: 10,
+    fetchFn: () => {
+      return Promise.resolve({ value: defaultTodo });
+    },
   });
 
   const obj = { id: { id: '1' } };
 
-  env.apiStore.scheduleFetch('highPriority', obj);
+  collectionStore.scheduleFetch('highPriority', obj);
 
   await vi.runAllTimersAsync();
 
   obj.id.id = '2';
 
-  expect(env.apiStore.getItemState({ id: { id: '1' } })).toMatchInlineSnapshot(`
+  expect(collectionStore.getItemState({ id: { id: '1' } }))
+    .toMatchInlineSnapshot(`
     data:
       value: { completed: '❌', title: 'todo' }
 

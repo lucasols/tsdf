@@ -60,6 +60,7 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     usesRealTimeUpdates,
     useBatchFetch,
     maxItemBatchSize,
+    getItemsBatchKey,
     disableFetchItemFn,
     optimisticListUpdates,
   }: {
@@ -74,6 +75,8 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     useBatchFetch?: boolean;
     /** Max items per batch (only used when useBatchFetch is true) */
     maxItemBatchSize?: number;
+    /** Optional function to group batch fetches by key */
+    getItemsBatchKey?: (payload: string) => string | false;
     disableFetchItemFn?: boolean;
     optimisticListUpdates?: Parameters<
       typeof createListQueryStore<TRow, ListQueryParams, string>
@@ -139,10 +142,14 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
   }
 
   // Batch fetch function - delegates to serverTable.list with itemIds
-  const batchFetchItemFn = async (payloads: string[], signal: AbortSignal) => {
+  const batchFetchItemFn = async (
+    payloads: string[],
+    signal: AbortSignal,
+    _batchKey: string,
+  ): Promise<Map<string, TRow | Error>> => {
     const listResult = await serverTable.list({ itemIds: payloads }, signal);
 
-    const results = new Map<string, Row | Error>();
+    const results = new Map<string, TRow | Error>();
     for (const { itemId, data } of listResult.items) {
       if (data instanceof Error) {
         results.set(itemId, data);
@@ -166,6 +173,7 @@ export function createListQueryStoreTestEnv<TRow extends Row = Row>(
     usesRealTimeUpdates,
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
+    getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     optimisticListUpdates,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
