@@ -219,72 +219,49 @@ describe('useItem with partial resources', () => {
   });
 });
 
-describe.concurrent('useListQuery', () => {
-  test('should load only the selected fields', async () => {
-    const env = createTestEnv({
-      initialServerData,
-      emulateRTU: true,
-      disableInitialDataInvalidation: true,
-      partialResources: true,
-      disableRefetchOnMount: true,
+describe('useListQuery with partial resources', () => {
+  test('load only the selected fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
     });
 
-    const renders = createRenderLogger({
-      filterKeys: ['status', 'items', 'payload', 'error'],
-    });
+    const renders = createLoggerStore();
 
     renderHook(() => {
-      const result = env.store.useListQuery(
-        {
-          tableId: 'users',
-          fields: ['id', 'name', 'address'],
-        },
-        { returnRefetchingStatus: true },
+      const result = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: ['id', 'name'] },
       );
 
-      renders.add(result);
+      renders.add(pick(result, ['status', 'items', 'error']));
     });
 
-    await env.serverMock.waitFetchIdle();
+    await flushAllTimers();
 
-    expect(jsonFormatter(env.store.store.state.queries, { maxArrayItems: 5 }))
-      .toMatchInlineSnapshot(`
-      "{
-        [{"fields":["id","name","address"]},{"tableId":"users"}]: {
-          error: null,
-          status: 'success',
-          wasLoaded: true,
-          payload: { tableId: 'users', fields: [ 'id', 'name', 'address' ] },
-          refetchOnMount: false,
-          hasMore: false,
-          items:     [
-            '{"id":"users||1"}',
-            '{"id":"users||2"}',
-            '{"id":"users||3"}',
-            '{"id":"users||4"}',
-            '{"id":"users||5"}',
-            ... +45 items
-          ],
-        },
-      }"
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ items: [] ⋅ error: null
+      -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)] ⋅ error: null
+      "
     `);
 
-    expect(env.store.store.state.itemQueries).toEqual({});
-
-    expect(
-      jsonFormatter(
-        Object.values(env.store.store.state.partialItemsQueries)[0],
-      ),
-    ).toMatchInlineSnapshot(`
-      "{
-        fields: {
-          id: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          name: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-          address: { error: null, status: 'success', wasLoaded: true, refetchOnMount: false },
-        },
-        payload: { id: 'users||1', fields: [] },
-      }"
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        limit: 50
+        results:
+          - data: { id: 1, name: 'User 1' }
+            itemId: 'users||1'
+          - data: { id: 2, name: 'User 2' }
+            itemId: 'users||2'
+          - data: { id: 3, name: 'User 3' }
+            itemId: 'users||3'
+          - data: { id: 4, name: 'User 4' }
+            itemId: 'users||4'
+          - data: { id: 5, name: 'User 5' }
+            itemId: 'users||5'
+        type: 'list'
     `);
+  });
 
     expect(renders.snapshot).toMatchInlineSnapshotString(`
     "
