@@ -231,40 +231,40 @@ describe('batch key grouping', () => {
     `);
   });
 
-//   test('backward compat: no getItemsBatchKey + useBatchFetch → all items batched', async () => {
-//     const env = createCollectionStoreTestEnv(
-//       {
-//         'api1-item1': { v: 1 },
-//         'api1-item2': { v: 2 },
-//         'api2-item1': { v: 10 },
-//       },
-//       {
-//         baseCoalescingWindowMs: 50,
-//         useBatchFetch: true,
-//         // No getItemsBatchKey provided
-//       },
-//     );
+  test('backward compat: no getItemsBatchKey + useBatchFetch → all items batched', async () => {
+    const env = createCollectionStoreTestEnv(
+      {
+        'api1-item1': { v: 1 },
+        'api1-item2': { v: 2 },
+        'api2-item1': { v: 10 },
+      },
+      {
+        baseCoalescingWindowMs: 50,
+        useBatchFetch: true,
+        // No getItemsBatchKey provided
+      },
+    );
 
-//     env.scheduleFetch('highPriority', 'api1-item1');
-//     env.scheduleFetch('highPriority', 'api1-item2');
-//     env.scheduleFetch('highPriority', 'api2-item1');
+    env.scheduleFetch('highPriority', 'api1-item1');
+    env.scheduleFetch('highPriority', 'api1-item2');
+    env.scheduleFetch('highPriority', 'api2-item1');
 
-//     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-//     // All items should go into a single batch (default key)
-//     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-//       - batchKey: '__default__'
-//         itemIds: ['api1-item1', 'api1-item2', 'api2-item1']
-//         results:
-//           - data: { v: 1 }
-//             itemId: 'api1-item1'
-//           - data: { v: 2 }
-//             itemId: 'api1-item2'
-//           - data: { v: 10 }
-//             itemId: 'api2-item1'
-//         type: 'list'
-//     `);
-//   });
+    // All items should go into a single batch (default key)
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - batchKey: '__default__'
+        itemIds: ['api1-item1', 'api1-item2', 'api2-item1']
+        results:
+          - data: { v: 1 }
+            itemId: 'api1-item1'
+          - data: { v: 2 }
+            itemId: 'api1-item2'
+          - data: { v: 10 }
+            itemId: 'api2-item1'
+        type: 'list'
+    `);
+  });
 
 //   test('single item in a batch key group uses fetchFn', async () => {
 //     const env = createCollectionStoreTestEnv(
