@@ -347,3 +347,56 @@ describe('list then load item: cross-source field accumulation', () => {
     `);
   });
 });
+
+describe('concurrent fetches with different fields', () => {
+  test('two items with different fields fetched concurrently', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const item1Renders = createLoggerStore();
+    const item2Renders = createLoggerStore();
+
+    renderHook(() => {
+      const result1 = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'name'],
+      });
+
+      const result2 = env.apiStore.useItem('users||2', {
+        returnRefetchingStatus: true,
+        fields: ['id', 'address', 'country'],
+      });
+
+      item1Renders.add(pick(result1, ['status', 'data']));
+      item2Renders.add(pick(result2, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    expect(item1Renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
+      "
+    `);
+
+    expect(item2Renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:2, address:Address 2, country:Country 2}
+      "
+    `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - fields: ['id', 'name']
+        itemId: 'users||1'
+        result: { id: 1, name: 'User 1' }
+        type: 'fetch'
+      - fields: ['id', 'address', 'country']
+        itemId: 'users||2'
+        result: { address: 'Address 2', country: 'Country 2', id: 2 }
+        type: 'fetch'
+    `);
+  });
+});
