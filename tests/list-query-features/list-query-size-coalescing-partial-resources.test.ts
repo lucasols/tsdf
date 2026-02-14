@@ -309,6 +309,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
 
     await vi.advanceTimersByTimeAsync(60);
 
+    // 'loadMore' type wins over 'load' in size mode coalescePayload → status is 'loadingMore'
     const queryDuringFetch = env.apiStore.getQueryState({ tableId: 'table1' });
     expect(queryDuringFetch?.status).toBe('loadingMore');
 

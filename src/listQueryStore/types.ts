@@ -163,8 +163,13 @@ export type OptimisticListUpdate<
 export type QueryFetchPayload<QueryPayload extends ValidPayload> = {
   type: 'load' | 'loadMore';
   payload: QueryPayload;
-  size: number;
+  offset: number;
+  limit: number;
   fields?: string[];
+};
+
+export type OffsetPaginationConfig = {
+  maxInvalidationLimit: number;
 };
 
 export type PartialResourcesConfig<ItemState extends ValidStoreState> = {

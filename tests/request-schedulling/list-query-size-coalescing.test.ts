@@ -121,7 +121,7 @@ describe('query size coalescing', () => {
     // Advance past coalescing window to start the second fetch
     await vi.advanceTimersByTimeAsync(60);
 
-    // 'loadMore' type wins over 'load' in coalescePayload → status is 'loadingMore'
+    // 'loadMore' type wins over 'load' in size mode coalescePayload → status is 'loadingMore'
     const queryDuringFetch = env.apiStore.getQueryState({ tableId: 'table1' });
     expect(queryDuringFetch?.status).toBe('loadingMore');
 

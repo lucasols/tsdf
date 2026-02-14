@@ -19,6 +19,7 @@ import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
 import {
   type FieldsInput,
+  type OffsetPaginationConfig,
   type PartialResourcesConfig,
   type QueryFetchPayload,
   type TSFDListQuery,
@@ -41,6 +42,20 @@ type ItemFetchData<ItemPayload extends ValidPayload> = {
   fields?: string[];
 };
 
+export type NormalizedFetchListFn<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = (
+  payload: QueryPayload,
+  offset: number,
+  limit: number,
+  options: { signal: AbortSignal; fields?: string[] },
+) => Promise<{
+  items: { itemPayload: ItemPayload; data: ItemState }[];
+  hasMore: boolean;
+}>;
+
 export type CreateFetchApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -48,14 +63,12 @@ export type CreateFetchApiOptions<
   TPartialResources extends PartialResourcesConfig<ItemState> | undefined,
 > = {
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
-  fetchListFn: (
-    payload: QueryPayload,
-    size: number,
-    options: { signal: AbortSignal; fields?: string[] },
-  ) => Promise<{
-    items: { itemPayload: ItemPayload; data: ItemState }[];
-    hasMore: boolean;
-  }>;
+  normalizedFetchListFn: NormalizedFetchListFn<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >;
+  offsetPagination: OffsetPaginationConfig | undefined;
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
@@ -91,7 +104,8 @@ export function createFetchApi<
   TPartialResources extends PartialResourcesConfig<ItemState> | undefined,
 >({
   store,
-  fetchListFn,
+  normalizedFetchListFn,
+  offsetPagination,
   fetchItemFn,
   batchFetchItemFn,
   getItemsBatchKey,
@@ -187,11 +201,12 @@ export function createFetchApi<
             requests,
             fetchCtx,
             store,
-            fetchListFn,
+            normalizedFetchListFn,
             errorNormalizer,
             getItemKey,
             updateItemSchedulerTiming,
             partialResources,
+            offsetPagination,
           );
         },
         lowPriorityThrottleMs,
@@ -200,21 +215,34 @@ export function createFetchApi<
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime,
-        coalescePayload: (existing, incoming) => ({
-          ...incoming,
-          type:
+        coalescePayload: (existing, incoming) => {
+          const minOffset = Math.min(existing.offset, incoming.offset);
+          const maxEnd = Math.max(
+            existing.offset + existing.limit,
+            incoming.offset + incoming.limit,
+          );
+
+          // 'loadMore' wins: in size mode both are full re-fetches so loadMore has bigger size;
+          // in offset mode the combined range already covers the full extent.
+          const coalescedType =
             existing.type === 'loadMore' || incoming.type === 'loadMore'
               ? 'loadMore'
-              : 'load',
-          size: Math.max(existing.size, incoming.size),
-          // Preserve fields requested by all coalesced hooks.
-          fields:
-            !existing.fields || !incoming.fields
-              ? undefined
-              : Array.from(
-                  new Set([...existing.fields, ...incoming.fields]),
-                ).sort(),
-        }),
+              : 'load';
+
+          return {
+            ...incoming,
+            type: coalescedType,
+            offset: minOffset,
+            limit: maxEnd - minOffset,
+            // Preserve fields requested by all coalesced hooks.
+            fields:
+              !existing.fields || !incoming.fields
+                ? undefined
+                : Array.from(
+                    new Set([...existing.fields, ...incoming.fields]),
+                  ).sort(),
+          };
+        },
         usesRealTimeUpdates,
       });
       querySchedulers.set(queryKey, scheduler);
@@ -525,7 +553,8 @@ export function createFetchApi<
         {
           type: 'load',
           payload: param,
-          size: querySize,
+          offset: 0,
+          limit: querySize,
           fields,
         },
         options,
@@ -570,17 +599,27 @@ export function createFetchApi<
       typeof sizeOrOptions === 'number'
         ? sizeOrOptions
         : (sizeOrOptions?.size ?? defaultQuerySize);
-    const newSize = queryState.items.length + loadSize;
+
+    const fetchPayload: QueryFetchPayload<QueryPayload> = offsetPagination
+      ? {
+          type: 'loadMore',
+          payload: params,
+          offset: queryState.items.length,
+          limit: loadSize,
+          fields: fieldsToFetch,
+        }
+      : {
+          type: 'loadMore',
+          payload: params,
+          offset: 0,
+          limit: queryState.items.length + loadSize,
+          fields: fieldsToFetch,
+        };
 
     return getOrCreateQueryScheduler(queryKey).scheduleFetch(
       queryKey,
       'highPriority',
-      {
-        type: 'loadMore',
-        payload: params,
-        size: newSize,
-        fields: fieldsToFetch,
-      },
+      fetchPayload,
     );
   }
 
@@ -618,7 +657,7 @@ export function createFetchApi<
 
     const result = await getOrCreateQueryScheduler(queryKey).awaitFetch(
       queryKey,
-      { type: 'load', payload: params, size, fields },
+      { type: 'load', payload: params, offset: 0, limit: size, fields },
       { timeoutMs: options.timeoutMs },
     );
 
