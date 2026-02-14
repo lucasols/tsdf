@@ -313,6 +313,7 @@ test('load a query and a few ms after load a item with different data', async ()
 
   expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
     - limit: 50
+      offset: 0
       results:
         - data: { id: 1, name: 'User 1' }
           itemId: 'users||1'
@@ -399,6 +400,7 @@ test('load a item and a few ms after load a query with different data', async ()
       result: { id: 1, name: 'User 1' }
       type: 'fetch'
     - limit: 50
+      offset: 0
       results:
         - data: { id: 1, name: 'User 1 changed' }
           itemId: 'users||1'

@@ -108,6 +108,7 @@ describe('list query field accumulation edge cases', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -134,6 +135,7 @@ describe('list query field accumulation edge cases', () => {
         filters:
           - { field: 'id', op: 'gt', value: 5 }
         limit: 50
+        offset: 0
         results:
           - data: { id: 6, name: 'User 6' }
             itemId: 'users||6'
@@ -196,6 +198,7 @@ describe('list query field accumulation edge cases', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['address', 'id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -283,6 +286,7 @@ describe('list query field accumulation edge cases', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -307,6 +311,7 @@ describe('list query field accumulation edge cases', () => {
         type: 'list'
       - fields: ['id', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1 }
             itemId: 'users||1'

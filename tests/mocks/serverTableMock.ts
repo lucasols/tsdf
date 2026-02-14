@@ -142,6 +142,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     | {
         type: 'list';
         itemIds: string[] | undefined;
+        offset: number;
         limit: number | undefined;
         fields: string[] | undefined;
         filters: FilterOperator[] | undefined;
@@ -340,6 +341,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fetchHistory.push({
         type: 'list',
         itemIds: filterItemIds,
+        offset,
         limit,
         results: 'aborted',
         filters,
@@ -359,6 +361,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fetchHistory.push({
         type: 'list',
         itemIds: filterItemIds,
+        offset,
         limit,
         results: 'aborted',
         filters,
@@ -379,6 +382,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fetchHistory.push({
         type: 'list',
         itemIds: filterItemIds,
+        offset,
         results: 'aborted',
         limit,
         filters,
@@ -442,6 +446,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     fetchHistory.push({
       type: 'list',
       itemIds: filterItemIds,
+      offset,
       limit,
       results: resultItems.map(({ itemId, data }) => ({
         itemId,

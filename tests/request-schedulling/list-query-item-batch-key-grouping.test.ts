@@ -73,6 +73,7 @@ describe('batch key grouping', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
         itemIds: ['table1||1', 'table1||2', 'table1||3']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -111,6 +112,7 @@ describe('batch key grouping', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -119,6 +121,7 @@ describe('batch key grouping', () => {
         type: 'list'
       - batchKey: 'table2'
         itemIds: ['table2||10', 'table2||20']
+        offset: 0
         results:
           - data: { id: 10, name: 'Item 10' }
             itemId: 'table2||10'
@@ -158,6 +161,7 @@ describe('batch key grouping', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -209,6 +213,7 @@ describe('batch key grouping', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -241,6 +246,7 @@ describe('batch key grouping', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2', 'table2||10']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'

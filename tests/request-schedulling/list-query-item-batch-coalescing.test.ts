@@ -63,6 +63,7 @@ describe('batch coalescing basic behavior', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2', 'table1||3']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -134,6 +135,7 @@ describe('batch coalescing basic behavior', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2', 'table1||3']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -171,6 +173,7 @@ describe('maxItemBatchSize behavior', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -223,6 +226,7 @@ describe('maxItemBatchSize behavior', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -231,6 +235,7 @@ describe('maxItemBatchSize behavior', () => {
         type: 'list'
       - batchKey: '__default__'
         itemIds: ['table1||3', 'table1||4']
+        offset: 0
         results:
           - data: { id: 3, name: 'Item 3' }
             itemId: 'table1||3'
@@ -280,6 +285,7 @@ describe('requests during ongoing fetch', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -445,6 +451,7 @@ describe('awaitItemFetch with batch', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2', 'table1||3']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -558,6 +565,7 @@ describe('awaitItemFetch with batch', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -592,6 +600,7 @@ describe('priority handling in batch', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2', 'table1||3']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -628,6 +637,7 @@ describe('priority handling in batch', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2', 'table1||3']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -694,6 +704,7 @@ describe('batch with UI hooks', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -763,6 +774,7 @@ describe('duplicate item requests in batch', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
         itemIds: ['table1||1', 'table1||2']
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'

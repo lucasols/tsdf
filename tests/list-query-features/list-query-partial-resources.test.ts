@@ -296,6 +296,7 @@ describe('useListQuery with partial resources', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -395,6 +396,7 @@ describe('useListQuery with partial resources', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -409,6 +411,7 @@ describe('useListQuery with partial resources', () => {
         type: 'list'
       - fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -476,6 +479,7 @@ describe('useListQuery with partial resources', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -932,6 +936,7 @@ describe('invalidateQueryAndItems with fields', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -946,6 +951,7 @@ describe('invalidateQueryAndItems with fields', () => {
         type: 'list'
       - fields: ['id', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1 }
             itemId: 'users||1'
@@ -1008,6 +1014,7 @@ describe('invalidateQueryAndItems with fields', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -1022,6 +1029,7 @@ describe('invalidateQueryAndItems with fields', () => {
         type: 'list'
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'

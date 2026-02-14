@@ -126,6 +126,7 @@ describe('list then load item: cross-source field accumulation', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -230,6 +231,7 @@ describe('list then load item: cross-source field accumulation', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -321,6 +323,7 @@ describe('list then load item: cross-source field accumulation', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -414,6 +417,7 @@ describe('load more with partial resources', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 3
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -424,6 +428,7 @@ describe('load more with partial resources', () => {
         type: 'list'
       - fields: ['id', 'name']
         limit: 6
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'

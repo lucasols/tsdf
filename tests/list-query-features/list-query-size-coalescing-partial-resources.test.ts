@@ -82,6 +82,7 @@ describe('query coalescing with partial resources', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 4
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -126,6 +127,7 @@ describe('query coalescing with partial resources', () => {
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['address', 'id', 'name']
         limit: 5
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -179,6 +181,7 @@ describe('query coalescing with partial resources', () => {
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - limit: 5
+        offset: 0
         results:
           - data: { address: 'Address 1', country: 'Country 1', id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -257,6 +260,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id']
         limit: 2
+        offset: 0
         results:
           - data: { id: 1 }
             itemId: 'table1||1'
@@ -265,6 +269,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
         type: 'list'
       - fields: ['address', 'id', 'name']
         limit: 6
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -318,6 +323,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
         limit: 2
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -326,6 +332,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
         type: 'list'
       - fields: ['address', 'country', 'id']
         limit: 4
+        offset: 0
         results:
           - data: { address: 'Address 1', country: 'Country 1', id: 1 }
             itemId: 'table1||1'
