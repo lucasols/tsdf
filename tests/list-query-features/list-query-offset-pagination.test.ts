@@ -45,7 +45,9 @@ describe('offset pagination - basic loadMore', () => {
     const queryAfterInitial = env.apiStore.getQueryState({
       tableId: 'products',
     });
-    expect(queryAfterInitial?.items.length).toBe(5);
+    expect(queryAfterInitial?.items).toMatchInlineSnapshot(
+      `['"products||1', '"products||2', '"products||3', '"products||4', '"products||5']`,
+    );
     expect(queryAfterInitial?.hasMore).toBe(true);
 
     // loadMore: should fetch offset 5, limit 5 (only new page)
@@ -55,7 +57,18 @@ describe('offset pagination - basic loadMore', () => {
     const queryAfterLoadMore = env.apiStore.getQueryState({
       tableId: 'products',
     });
-    expect(queryAfterLoadMore?.items.length).toBe(10);
+    expect(queryAfterLoadMore?.items).toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+    `);
     expect(queryAfterLoadMore?.hasMore).toBe(true);
 
     // Verify server received offset-based requests
@@ -64,6 +77,7 @@ describe('offset pagination - basic loadMore', () => {
     );
     expect(listFetches).toMatchInlineSnapshot(`
       - limit: 5
+        offset: 0
         results:
           - data: { id: 1, name: 'Product 1' }
             itemId: 'products||1'
@@ -77,6 +91,7 @@ describe('offset pagination - basic loadMore', () => {
             itemId: 'products||5'
         type: 'list'
       - limit: 5
+        offset: 5
         results:
           - data: { id: 6, name: 'Product 6' }
             itemId: 'products||6'
@@ -130,6 +145,52 @@ describe('offset pagination - basic loadMore', () => {
       status: 'success'
       wasLoaded: '✅'
     `);
+  });
+
+  test('loadMore is skipped when hasMore is false', async () => {
+    const smallServerData = {
+      products: range(1, 3).map((id) => ({ id, name: `Product ${id}` })),
+    };
+
+    const env = createListQueryStoreTestEnv(smallServerData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+
+    // Load all 3 items (less than defaultQuerySize, so hasMore = false)
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+
+    const queryBefore = env.apiStore.getQueryState({ tableId: 'products' });
+    expect(queryBefore?.hasMore).toBe(false);
+    expect(queryBefore?.items).toMatchInlineSnapshot(
+      `['"products||1', '"products||2', '"products||3']`,
+    );
+
+    // Reset history to verify no new fetch is made
+    env.serverTable.fetchHistory.length = 0;
+
+    // loadMore should be skipped since hasMore is false
+    const result = env.apiStore.loadMore({ tableId: 'products' });
+    expect(result).toBe('skipped');
+
+    await flushAllTimers();
+
+    // No fetch should have been made
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches).toMatchInlineSnapshot('[]');
+
+    // Items unchanged
+    const queryAfter = env.apiStore.getQueryState({ tableId: 'products' });
+    expect(queryAfter?.items).toMatchInlineSnapshot(
+      `['"products||1', '"products||2', '"products||3']`,
+    );
   });
 
   test('loadMore deduplicates items that shifted between pages', async () => {
@@ -257,7 +318,23 @@ describe('offset pagination - chunked invalidation', () => {
     await flushAllTimers();
 
     const queryBefore = env.apiStore.getQueryState({ tableId: 'products' });
-    expect(queryBefore?.items.length).toBe(15);
+    expect(queryBefore?.items).toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+      - '"products||11'
+      - '"products||12'
+      - '"products||13'
+      - '"products||14'
+      - '"products||15'
+    `);
 
     // Reset history to track only invalidation fetches
     env.serverTable.fetchHistory.length = 0;
@@ -270,16 +347,16 @@ describe('offset pagination - chunked invalidation', () => {
 
     await flushAllTimers();
 
-    // Should have 3 chunk requests (15 / 5 = 3)
+    // Should have 3 chunk requests (15 / 5 = 3) with correct offset/limit
     const listFetches = env.serverTable.fetchHistory.filter(
       (h) => h.type === 'list',
     );
-    expect(listFetches.length).toBe(3);
-
-    // Verify chunks have correct offset/limit
-    expect(listFetches[0]?.limit).toBe(5);
-    expect(listFetches[1]?.limit).toBe(5);
-    expect(listFetches[2]?.limit).toBe(5);
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 5, offset: 0 }
+      - { limit: 5, offset: 5 }
+      - { limit: 5, offset: 10 }
+    `);
 
     const queryAfter = env.apiStore.getQueryState({ tableId: 'products' });
     expect(queryAfter).toMatchInlineSnapshot(`
@@ -334,8 +411,119 @@ describe('offset pagination - chunked invalidation', () => {
     const listFetches = env.serverTable.fetchHistory.filter(
       (h) => h.type === 'list',
     );
-    expect(listFetches.length).toBe(1);
-    expect(listFetches[0]?.limit).toBe(5);
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 5, offset: 0 }
+    `);
+  });
+
+  test('invalidation does NOT chunk when totalLoaded equals maxInvalidationLimit', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 5 },
+    });
+
+    // Load exactly 5 items (== maxInvalidationLimit)
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // Trigger invalidation — 5 items, maxInvalidationLimit = 5
+    // Condition is `limit > max` (strictly greater), so 5 == 5 should NOT chunk
+    env.apiStore.scheduleListQueryFetch('highPriority', {
+      tableId: 'products',
+    });
+    await flushAllTimers();
+
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 5, offset: 0 }
+    `);
+  });
+
+  test('chunked invalidation handles remainder chunk correctly', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 4,
+      offsetPagination: { maxInvalidationLimit: 5 },
+    });
+
+    // Load 12 items (3 loadMores of 4)
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      4,
+    );
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+
+    expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
+      .toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+      - '"products||11'
+      - '"products||12'
+    `);
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // Trigger invalidation — 12 items / maxInvalidationLimit 5
+    // Should produce 3 chunks: {0,5}, {5,5}, {10,2}
+    env.apiStore.scheduleListQueryFetch('highPriority', {
+      tableId: 'products',
+    });
+    await flushAllTimers();
+
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 5, offset: 0 }
+      - { limit: 5, offset: 5 }
+      - { limit: 2, offset: 10 }
+    `);
+
+    const queryAfter = env.apiStore.getQueryState({ tableId: 'products' });
+    expect(queryAfter).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '✅'
+      items:
+        - '"products||1'
+        - '"products||2'
+        - '"products||3'
+        - '"products||4'
+        - '"products||5'
+        - '"products||6'
+        - '"products||7'
+        - '"products||8'
+        - '"products||9'
+        - '"products||10'
+        - '"products||11'
+        - '"products||12'
+      payload: { tableId: 'products' }
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
   });
 
   test('chunks are fetched in parallel', async () => {
@@ -356,9 +544,24 @@ describe('offset pagination - chunked invalidation', () => {
     env.apiStore.loadMore({ tableId: 'products' });
     await flushAllTimers();
 
-    expect(
-      env.apiStore.getQueryState({ tableId: 'products' })?.items.length,
-    ).toBe(15);
+    expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
+      .toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+      - '"products||11'
+      - '"products||12'
+      - '"products||13'
+      - '"products||14'
+      - '"products||15'
+    `);
 
     // Store fetch counts before invalidation
     const startedBefore = env.serverTable.numOfStartedFetches;
@@ -442,9 +645,19 @@ describe('offset pagination - chunked invalidation', () => {
     env.apiStore.loadMore({ tableId: 'products' });
     await flushAllTimers();
 
-    expect(
-      env.apiStore.getQueryState({ tableId: 'products' })?.items.length,
-    ).toBe(10);
+    expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
+      .toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+    `);
 
     // Set error for next list fetch (will affect one of the chunks)
     env.serverTable.setNextListFetchError('chunk error');
@@ -498,6 +711,9 @@ describe('offset pagination - coalescing', () => {
     );
     await flushAllTimers();
 
+    // Reset history to track only coalesced fetch
+    env.serverTable.fetchHistory.length = 0;
+
     // Trigger loadMore and load in same coalescing window
     env.apiStore.loadMore({ tableId: 'products' });
     env.apiStore.scheduleListQueryFetch(
@@ -516,6 +732,28 @@ describe('offset pagination - coalescing', () => {
 
     const queryAfter = env.apiStore.getQueryState({ tableId: 'products' });
     expect(queryAfter?.status).toBe('success');
+    // Merged request should cover the combined range and fetch all 10 items
+    expect(queryAfter?.items).toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+    `);
+
+    // Verify a single coalesced fetch was made with the merged offset/limit
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 10, offset: 0 }
+    `);
   });
 
   test('coalesced offset ranges merge correctly', async () => {
@@ -533,15 +771,77 @@ describe('offset pagination - coalescing', () => {
     );
     await flushAllTimers();
 
+    // Reset history to track only the coalesced fetch
+    env.serverTable.fetchHistory.length = 0;
+
     // Multiple loadMores within coalescing window
+    // loadMore(..., 3) → offset 5, limit 3
+    // loadMore(..., 5) → offset 5, limit 5
+    // Merged result should be offset 5, limit 5 (max of the two limits)
     env.apiStore.loadMore({ tableId: 'products' }, 3);
     env.apiStore.loadMore({ tableId: 'products' }, 5);
 
     await flushAllTimers();
 
-    // The second loadMore is coalesced, result should use the larger range
+    // Verify the coalesced fetch used the merged (larger) limit
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 5, offset: 5 }
+    `);
+
     const query = env.apiStore.getQueryState({ tableId: 'products' });
-    // Items from offset 0..5 (initial) + offset 5..10 (loadMore with limit 5, coalesced max)
+    expect(query?.items).toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+    `);
+  });
+
+  test('coalesced merge uses larger limit regardless of order', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+      baseCoalescingWindowMs: 50,
+    });
+
+    // Load initial 5 items
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // Reverse order: larger limit first, smaller second
+    // loadMore(..., 5) → offset 5, limit 5
+    // loadMore(..., 3) → offset 5, limit 3
+    // Merge should still use limit 5 (not 3 from last-write-wins)
+    env.apiStore.loadMore({ tableId: 'products' }, 5);
+    env.apiStore.loadMore({ tableId: 'products' }, 3);
+
+    await flushAllTimers();
+
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 5, offset: 5 }
+    `);
+
+    const query = env.apiStore.getQueryState({ tableId: 'products' });
     expect(query?.items).toMatchInlineSnapshot(`
       - '"products||1'
       - '"products||2'
@@ -580,9 +880,19 @@ describe('offset pagination - refetch after loadMore keeps size', () => {
     env.apiStore.loadMore({ tableId: 'products' });
     await flushAllTimers();
 
-    expect(
-      env.apiStore.getQueryState({ tableId: 'products' })?.items.length,
-    ).toBe(10);
+    expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
+      .toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+    `);
 
     env.serverTable.fetchHistory.length = 0;
 
@@ -617,8 +927,10 @@ describe('offset pagination - refetch after loadMore keeps size', () => {
     const listFetches = env.serverTable.fetchHistory.filter(
       (h) => h.type === 'list',
     );
-    expect(listFetches.length).toBe(1);
-    expect(listFetches[0]?.limit).toBe(10);
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 10, offset: 0 }
+    `);
   });
 });
 
