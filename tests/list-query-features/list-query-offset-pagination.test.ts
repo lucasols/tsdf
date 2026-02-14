@@ -353,10 +353,10 @@ describe('offset pagination - chunked invalidation', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 5, offset: 0 }
-      - { limit: 5, offset: 5 }
-      - { limit: 5, offset: 10 }
-    `);
+        - { limit: 5, offset: 0 }
+        - { limit: 5, offset: 5 }
+        - { limit: 5, offset: 10 }
+      `);
 
     const queryAfter = env.apiStore.getQueryState({ tableId: 'products' });
     expect(queryAfter).toMatchInlineSnapshot(`
@@ -413,8 +413,8 @@ describe('offset pagination - chunked invalidation', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 5, offset: 0 }
-    `);
+        - { limit: 5, offset: 0 }
+      `);
   });
 
   test('invalidation does NOT chunk when totalLoaded equals maxInvalidationLimit', async () => {
@@ -445,8 +445,8 @@ describe('offset pagination - chunked invalidation', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 5, offset: 0 }
-    `);
+        - { limit: 5, offset: 0 }
+      `);
   });
 
   test('chunked invalidation handles remainder chunk correctly', async () => {
@@ -469,19 +469,19 @@ describe('offset pagination - chunked invalidation', () => {
 
     expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
       .toMatchInlineSnapshot(`
-      - '"products||1'
-      - '"products||2'
-      - '"products||3'
-      - '"products||4'
-      - '"products||5'
-      - '"products||6'
-      - '"products||7'
-      - '"products||8'
-      - '"products||9'
-      - '"products||10'
-      - '"products||11'
-      - '"products||12'
-    `);
+        - '"products||1'
+        - '"products||2'
+        - '"products||3'
+        - '"products||4'
+        - '"products||5'
+        - '"products||6'
+        - '"products||7'
+        - '"products||8'
+        - '"products||9'
+        - '"products||10'
+        - '"products||11'
+        - '"products||12'
+      `);
 
     env.serverTable.fetchHistory.length = 0;
 
@@ -497,10 +497,10 @@ describe('offset pagination - chunked invalidation', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 5, offset: 0 }
-      - { limit: 5, offset: 5 }
-      - { limit: 2, offset: 10 }
-    `);
+        - { limit: 5, offset: 0 }
+        - { limit: 5, offset: 5 }
+        - { limit: 2, offset: 10 }
+      `);
 
     const queryAfter = env.apiStore.getQueryState({ tableId: 'products' });
     expect(queryAfter).toMatchInlineSnapshot(`
@@ -546,22 +546,22 @@ describe('offset pagination - chunked invalidation', () => {
 
     expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
       .toMatchInlineSnapshot(`
-      - '"products||1'
-      - '"products||2'
-      - '"products||3'
-      - '"products||4'
-      - '"products||5'
-      - '"products||6'
-      - '"products||7'
-      - '"products||8'
-      - '"products||9'
-      - '"products||10'
-      - '"products||11'
-      - '"products||12'
-      - '"products||13'
-      - '"products||14'
-      - '"products||15'
-    `);
+        - '"products||1'
+        - '"products||2'
+        - '"products||3'
+        - '"products||4'
+        - '"products||5'
+        - '"products||6'
+        - '"products||7'
+        - '"products||8'
+        - '"products||9'
+        - '"products||10'
+        - '"products||11'
+        - '"products||12'
+        - '"products||13'
+        - '"products||14'
+        - '"products||15'
+      `);
 
     // Store fetch counts before invalidation
     const startedBefore = env.serverTable.numOfStartedFetches;
@@ -647,17 +647,17 @@ describe('offset pagination - chunked invalidation', () => {
 
     expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
       .toMatchInlineSnapshot(`
-      - '"products||1'
-      - '"products||2'
-      - '"products||3'
-      - '"products||4'
-      - '"products||5'
-      - '"products||6'
-      - '"products||7'
-      - '"products||8'
-      - '"products||9'
-      - '"products||10'
-    `);
+        - '"products||1'
+        - '"products||2'
+        - '"products||3'
+        - '"products||4'
+        - '"products||5'
+        - '"products||6'
+        - '"products||7'
+        - '"products||8'
+        - '"products||9'
+        - '"products||10'
+      `);
 
     // Set error for next list fetch (will affect one of the chunks)
     env.serverTable.setNextListFetchError('chunk error');
@@ -752,8 +752,8 @@ describe('offset pagination - coalescing', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 10, offset: 0 }
-    `);
+        - { limit: 10, offset: 0 }
+      `);
   });
 
   test('coalesced offset ranges merge correctly', async () => {
@@ -789,8 +789,8 @@ describe('offset pagination - coalescing', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 5, offset: 5 }
-    `);
+        - { limit: 5, offset: 5 }
+      `);
 
     const query = env.apiStore.getQueryState({ tableId: 'products' });
     expect(query?.items).toMatchInlineSnapshot(`
@@ -838,8 +838,8 @@ describe('offset pagination - coalescing', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 5, offset: 5 }
-    `);
+        - { limit: 5, offset: 5 }
+      `);
 
     const query = env.apiStore.getQueryState({ tableId: 'products' });
     expect(query?.items).toMatchInlineSnapshot(`
@@ -882,17 +882,17 @@ describe('offset pagination - refetch after loadMore keeps size', () => {
 
     expect(env.apiStore.getQueryState({ tableId: 'products' })?.items)
       .toMatchInlineSnapshot(`
-      - '"products||1'
-      - '"products||2'
-      - '"products||3'
-      - '"products||4'
-      - '"products||5'
-      - '"products||6'
-      - '"products||7'
-      - '"products||8'
-      - '"products||9'
-      - '"products||10'
-    `);
+        - '"products||1'
+        - '"products||2'
+        - '"products||3'
+        - '"products||4'
+        - '"products||5'
+        - '"products||6'
+        - '"products||7'
+        - '"products||8'
+        - '"products||9'
+        - '"products||10'
+      `);
 
     env.serverTable.fetchHistory.length = 0;
 
@@ -929,8 +929,8 @@ describe('offset pagination - refetch after loadMore keeps size', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 10, offset: 0 }
-    `);
+        - { limit: 10, offset: 0 }
+      `);
   });
 });
 
