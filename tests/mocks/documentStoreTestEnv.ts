@@ -1,3 +1,4 @@
+import { act } from 'react';
 import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
 import { createServerMock, type FetchErrorConfig } from './serverMock';
@@ -124,43 +125,45 @@ export function createDocumentStoreTestEnv<D>(
         updateStateWithMutationResult?: boolean;
       } = {},
     ) => {
-      const mutationId = getMutationEmoji();
+      return act(() => {
+        const mutationId = getMutationEmoji();
 
-      return documentStore.performMutation({
-        optimisticUpdate: withOptimisticUpdate
-          ? () => {
-              documentStore.updateState((draft) => {
+        return documentStore.performMutation({
+          optimisticUpdate: withOptimisticUpdate
+            ? () => {
+                documentStore.updateState((draft) => {
+                  draft.value = newValue;
+                });
+                addAction('optimistic-ui-commit', {
+                  uiValue: newValue,
+                  id: mutationId,
+                });
+              }
+            : undefined,
+          mutation: async ({ updateState }) => {
+            if (error) {
+              throw new Error(error);
+            }
+
+            await serverMock.mutateData(newValue, {
+              duration,
+              triggerRTUEvent: triggerRTU,
+              addServerDataChangeAction,
+              mutationId,
+            });
+
+            if (updateStateWithMutationResult) {
+              updateState((draft) => {
                 draft.value = newValue;
               });
-              addAction('optimistic-ui-commit', {
-                uiValue: newValue,
-                id: mutationId,
-              });
             }
-          : undefined,
-        mutation: async ({ updateState }) => {
-          if (error) {
-            throw new Error(error);
-          }
 
-          await serverMock.mutateData(newValue, {
-            duration,
-            triggerRTUEvent: triggerRTU,
-            addServerDataChangeAction,
-            mutationId,
-          });
-
-          if (updateStateWithMutationResult) {
-            updateState((draft) => {
-              draft.value = newValue;
-            });
-          }
-
-          return {
-            value: newValue,
-          };
-        },
-        revalidateOnSuccess: withRevalidation,
+            return {
+              value: newValue,
+            };
+          },
+          revalidateOnSuccess: withRevalidation,
+        });
       });
     },
     get timelineString() {

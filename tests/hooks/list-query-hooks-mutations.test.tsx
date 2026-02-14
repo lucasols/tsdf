@@ -15,8 +15,7 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { range } from '../utils/genericTestUtils';
-import { advanceTime, flushAllTimers } from '../utils/listQueryHooksTestUtils';
+import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),

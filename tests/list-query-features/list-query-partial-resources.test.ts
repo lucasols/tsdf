@@ -20,8 +20,12 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { pick, range } from '../utils/genericTestUtils';
-import { advanceTime, flushAllTimers } from '../utils/listQueryHooksTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  pick,
+  range,
+} from '../utils/genericTestUtils';
 
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
