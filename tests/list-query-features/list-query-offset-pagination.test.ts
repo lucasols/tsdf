@@ -242,6 +242,37 @@ describe('offset pagination - basic loadMore', () => {
       - '"products||6'
       - '"products||7'
     `);
+
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - limit: 5
+        offset: 0
+        results:
+          - data: { id: 1, name: 'Product 1' }
+            itemId: 'products||1'
+          - data: { id: 2, name: 'Product 2' }
+            itemId: 'products||2'
+          - data: { id: 3, name: 'Product 3' }
+            itemId: 'products||3'
+          - data: { id: 4, name: 'Product 4' }
+            itemId: 'products||4'
+          - data: { id: 5, name: 'Product 5' }
+            itemId: 'products||5'
+        type: 'list'
+      - limit: 5
+        offset: 5
+        results:
+          - data: { id: 3, name: 'Product 3' }
+            itemId: 'products||3'
+          - data: { id: 4, name: 'Product 4' }
+            itemId: 'products||4'
+          - data: { id: 5, name: 'Product 5' }
+            itemId: 'products||5'
+          - data: { id: 6, name: 'Product 6' }
+            itemId: 'products||6'
+          - data: { id: 7, name: 'Product 7' }
+            itemId: 'products||7'
+        type: 'list'
+    `);
   });
 
   test('loadMore shows loadingMore status', async () => {
@@ -688,6 +719,73 @@ describe('offset pagination - chunked invalidation', () => {
       status: 'error'
       wasLoaded: '✅'
     `);
+  });
+
+  test('chunked invalidation deduplicates items when data shifts between chunks', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 5 },
+    });
+
+    // Load 10 items
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+
+    expect(
+      env.apiStore.getQueryState({ tableId: 'products' })?.items.length,
+    ).toBe(10);
+
+    // Queue start delays: chunk 1 (offset 0) gets no delay, chunk 2 (offset 5)
+    // gets a 500ms delay. This creates a window between chunk completions where
+    // we can mutate server data to simulate items shifting.
+    env.serverTable.addListFetchStartDelay(0);
+    env.serverTable.addListFetchStartDelay(500);
+
+    // Trigger chunked invalidation (10 items / max 5 = 2 chunks)
+    env.apiStore.scheduleListQueryFetch('highPriority', {
+      tableId: 'products',
+    });
+
+    // Advance past coalescing window (15ms) + chunk 1 completion (800ms)
+    await vi.advanceTimersByTimeAsync(815);
+
+    // Chunk 1 (offset 0, limit 5) already resolved with original data: [1,2,3,4,5]
+    // Now prepend a new item, shifting all items right by 1 position
+    env.serverTable.setItem(
+      'products||99',
+      { id: 99, name: 'New Item' },
+      { prepend: true },
+    );
+
+    // Server order is now: [99, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]
+    // Chunk 2 (offset 5, limit 5) will read positions 5-9 = [5, 6, 7, 8, 9]
+    // Item 5 overlaps with chunk 1!
+
+    // Advance past chunk 2 completion (500ms delay + 800ms fetch = 1300ms total)
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAllTimers();
+
+    const query = env.apiStore.getQueryState({ tableId: 'products' });
+
+    // Items should be deduplicated — item 5 appears only once
+    expect(query?.items).toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+    `);
+    expect(query?.status).toBe('success');
   });
 });
 

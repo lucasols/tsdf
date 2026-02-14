@@ -125,6 +125,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   const defaultFetchDuration = DEFAULT_FETCH_DURATION_MS;
   const nextFetchErrors = new Map<string, FetchErrorConfig>();
   let nextListFetchError: FetchErrorConfig | null = null;
+  const listFetchStartDelays: number[] = [];
 
   // Fetch tracking state
   let numOfStartedFetches = 0;
@@ -323,6 +324,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     }
     signal?.addEventListener('abort', onAbort);
 
+    // Apply queued start delay (simulates network latency between requests)
+    const startDelay = listFetchStartDelays.shift();
+    if (startDelay !== undefined && startDelay > 0) {
+      await sleep(startDelay);
+    }
+
     // Calculate max duration from filtered items
     let maxDuration = defaultFetchDuration;
     if (filterItemIds) {
@@ -479,14 +486,24 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   function setItem(
     itemId: string,
     data: ItemData,
-    options?: { triggerRTUEvent?: boolean },
+    options?: { triggerRTUEvent?: boolean; prepend?: boolean },
   ): void {
     const tableId = getTableId(itemId);
     if (tableId) {
       knownTableIds.add(tableId);
     }
 
-    items.set(itemId, data);
+    if (options?.prepend) {
+      // Rebuild Map with new item first to maintain insertion-order semantics
+      const existing = new Map(items);
+      items.clear();
+      items.set(itemId, data);
+      for (const [key, value] of existing) {
+        if (key !== itemId) items.set(key, value);
+      }
+    } else {
+      items.set(itemId, data);
+    }
 
     const history = itemHistory.get(itemId);
     if (history) {
@@ -797,6 +814,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         typeof error === 'string' ? { message: error } : error,
       );
+    },
+    addListFetchStartDelay(delayMs: number) {
+      listFetchStartDelays.push(delayMs);
     },
     setNextListFetchError(error: FetchErrorConfig | string) {
       nextListFetchError =

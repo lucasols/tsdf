@@ -43,7 +43,7 @@ function applyFetchedItems<
     query.items = [];
   }
 
-  const existingItemKeys = appendToExisting ? new Set(query.items) : undefined;
+  const existingItemKeys = new Set(query.items);
 
   for (const { data, itemPayload } of items) {
     const itemKey = getItemKey(itemPayload);
@@ -70,10 +70,11 @@ function applyFetchedItems<
       });
     }
 
-    // Deduplicate: skip items already in the list when appending
-    if (!existingItemKeys || !existingItemKeys.has(itemKey)) {
+    // Deduplicate: skip items already in the list (handles both append
+    // and chunked invalidation where parallel chunks may return overlapping items)
+    if (!existingItemKeys.has(itemKey)) {
       query.items.push(itemKey);
-      existingItemKeys?.add(itemKey);
+      existingItemKeys.add(itemKey);
     }
 
     const itemQuery = draft.itemQueries[itemKey];
