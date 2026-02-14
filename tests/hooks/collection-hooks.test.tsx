@@ -13,6 +13,7 @@ import {
 } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -72,7 +73,7 @@ describe('useMultipleItems', () => {
     );
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
@@ -141,7 +142,7 @@ describe('useMultipleItems', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(env.serverTable.numOfFinishedFetches).toBe(2);
@@ -191,7 +192,7 @@ describe('useMultipleItems', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -262,7 +263,7 @@ describe('useMultipleItems', () => {
     rerender({ items: ['1', '3'] });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
@@ -319,7 +320,7 @@ describe('useMultipleItems isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
@@ -370,7 +371,7 @@ describe('useMultipleItems isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
@@ -420,7 +421,7 @@ describe('useMultipleItems isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
@@ -469,7 +470,7 @@ describe('useItem', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
@@ -521,7 +522,7 @@ describe('useItem', () => {
     rerender({ fetchParam: '1' });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
@@ -567,7 +568,7 @@ describe('useItem', () => {
     const { rerender } = render(<Comp showComp2={false} />);
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(compRenders.snapshot).toMatchInlineSnapshot(`
@@ -582,7 +583,7 @@ describe('useItem', () => {
     rerender(<Comp showComp2 />);
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(comp2Renders.snapshot).toMatchInlineSnapshot(`
@@ -624,7 +625,7 @@ describe('useItem', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -666,7 +667,7 @@ describe('useItem isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -681,7 +682,7 @@ describe('useItem isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
@@ -726,7 +727,7 @@ describe('useItem isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -756,7 +757,7 @@ describe('useItem isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -802,7 +803,7 @@ describe('useItem isolated tests', () => {
     rerender({ itemPayload: '1' });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -870,9 +871,7 @@ test('RTU update works', async () => {
     renders.add({ status, data: data?.value ?? null });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   // Trigger another RTU
   env.serverTable.setItem(
@@ -881,9 +880,7 @@ test('RTU update works', async () => {
     { triggerRTUEvent: true },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -916,9 +913,7 @@ test('fetch error then mount component without error', async () => {
     env.scheduleFetch('highPriority', '1');
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.apiStore.getItemState('1')).toMatchObject({
     data: null,
@@ -944,9 +939,7 @@ test('fetch error then mount component without error', async () => {
     renders.add({ status, data: data?.value ?? null });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -976,9 +969,7 @@ test('initial data is invalidated on first load', async () => {
     renders.add({ status, data: data?.value ?? null });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -1037,9 +1028,7 @@ test('emulate load resource during its mutation', async () => {
     void createItem();
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "

@@ -4,6 +4,7 @@ import { useCallback, useRef } from 'react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 type Todo = {
   title: string;
@@ -57,9 +58,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     { initialProps: { isOffScreen: false } },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('first update (✅)');
 
@@ -71,9 +70,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     );
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('set disabled');
 
@@ -81,9 +78,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     rerender({ isOffScreen: true });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('ignored update (❌)');
 
@@ -95,9 +90,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     );
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('enabled again');
 
@@ -105,9 +98,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     rerender({ isOffScreen: false });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -203,9 +194,7 @@ test('disable then enable isOffScreen', async () => {
     { initialProps: { isOffScreen: false } },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('set disabled');
 
@@ -213,9 +202,7 @@ test('disable then enable isOffScreen', async () => {
     rerender({ isOffScreen: true });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('enabled again');
 
@@ -223,9 +210,7 @@ test('disable then enable isOffScreen', async () => {
     rerender({ isOffScreen: false });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -285,9 +270,7 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
     { initialProps: { returnRefetchingStatus: false } },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
@@ -295,9 +278,7 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
     rerender({ returnRefetchingStatus: true });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
@@ -350,9 +331,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
     { initialProps: { items: ['1', '2'] } },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
@@ -362,9 +341,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
     rerender({ items: ['1', '2', '3'] });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
@@ -374,9 +351,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
     rerender({ items: ['2', '3'] });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
@@ -387,9 +362,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
     rerender({ items: ['2', '3', '1'] });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(4);
 
@@ -472,9 +445,7 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
     { initialProps: { externalDep: 'ok', selectorUsesExternalDeps: false } },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
@@ -484,9 +455,7 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
     rerender({ externalDep: 'changed', selectorUsesExternalDeps: false });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('change external dep');
 
@@ -494,9 +463,7 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
     rerender({ externalDep: 'changed', selectorUsesExternalDeps: true });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
@@ -506,9 +473,7 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
     rerender({ externalDep: 'changed again', selectorUsesExternalDeps: true });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
@@ -553,9 +518,7 @@ test('useItem with selector should not trigger a rerender', async () => {
     prevData = data;
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('Rerenders');
 

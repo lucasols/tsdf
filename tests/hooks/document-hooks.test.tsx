@@ -14,6 +14,7 @@ import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -48,9 +49,7 @@ test('load data', async () => {
   expect(result.current.isLoading).toBe(true);
   expect(result.current.data).toBeNull();
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(result.current.status).toBe('success');
   expect(result.current.isLoading).toBe(false);
@@ -74,9 +73,7 @@ test('invalidate data', async () => {
     env.apiStore.invalidateData();
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(result.current.data?.value).toEqual({
     hello: 'was invalidated',
@@ -100,9 +97,7 @@ test('revalidation with multiple components do not trigger multiple fetches', as
     env.apiStore.invalidateData();
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(result.current.data?.value).toEqual({
     hello: 'was invalidated',
@@ -137,7 +132,7 @@ describe('disable', () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000 * 60 * 3);
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(result.current.data).toBeNull();
@@ -183,7 +178,7 @@ describe('disable', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -239,9 +234,7 @@ test('disableRefetchOnMount', async () => {
 
   render(<Comp />);
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders).toMatchInlineSnapshot(`
     - { data: null, status: 'loading' }
@@ -253,9 +246,7 @@ test('disableRefetchOnMount', async () => {
 
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(comp2Renders).toMatchInlineSnapshot(`
     - data: { hello: 'world' }
@@ -284,9 +275,7 @@ test('do not return refetching status by default', async () => {
     env.apiStore.invalidateData();
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders).toMatchInlineSnapshot(`
     - ['world', 'success']
@@ -320,7 +309,7 @@ describe('action types', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders).toMatchInlineSnapshot(`
@@ -356,7 +345,7 @@ describe('action types', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders).toMatchInlineSnapshot(`
@@ -393,7 +382,7 @@ describe('action types', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders).toMatchInlineSnapshot(`
@@ -429,7 +418,7 @@ describe('action types', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders).toMatchInlineSnapshot(`
@@ -467,9 +456,7 @@ test('rollback on error', async () => {
     );
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders).toMatchInlineSnapshot(`
     - ['world', 'success', null]
@@ -486,7 +473,7 @@ describe('isolated tests', () => {
     // trigger a load before the hook is rendered
     env.apiStore.scheduleFetch('highPriority');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
@@ -505,7 +492,7 @@ describe('isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(renders.snapshot).toMatchInlineSnapshot(`
@@ -522,7 +509,7 @@ describe('isolated tests', () => {
     expect(env.apiStore.scheduleFetch('highPriority')).toBe('triggered');
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(env.serverMock.numOfFinishedFetches).toBe(3);
@@ -541,7 +528,7 @@ describe('isolated tests', () => {
     // trigger a load before the hook is rendered
     env.apiStore.scheduleFetch('highPriority');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
@@ -579,7 +566,7 @@ describe('isolated tests', () => {
     });
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await flushAllTimers();
     });
 
     expect(env.serverMock.numOfFinishedFetches).toBe(2);
@@ -633,16 +620,12 @@ test('RTU update works', async () => {
     renders.add({ status, data: data?.value ?? null });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   const rtuTriggeredAt = Date.now();
   env.emulateExternalRTU({ hello: 'Throttle update' });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -681,9 +664,7 @@ test('initial data is invalidated on first load', async () => {
     renders.add({ status, data: data?.value ?? null });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "

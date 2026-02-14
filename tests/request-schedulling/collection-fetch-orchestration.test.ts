@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -21,7 +22,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
     env.trackItemUI('item1', item.data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   void env.performClientUpdateAction(
     'item1',
@@ -32,7 +33,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
     },
   );
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([{ item1: { v: 0 } }, { item1: { v: 1 } }]);
 
@@ -60,7 +61,7 @@ test('simple mutation with optimistic update', async () => {
     env.trackItemUI('item1', item.data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   void env.performClientUpdateAction(
     'item1',
@@ -70,7 +71,7 @@ test('simple mutation with optimistic update', async () => {
     },
   );
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([{ item1: { v: 0 } }, { item1: { v: 1 } }]);
 
@@ -111,7 +112,7 @@ test('prevent overfetch of low priority fetches', async () => {
 
   env.scheduleFetch('lowPriority', 'item1');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
@@ -147,7 +148,7 @@ test('fetching one item does not interfere with another item', async () => {
 
   expect(env.serverTable.numOfStartedFetches).toBe(2);
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
   expect(env.uiChanges).toEqual([
@@ -181,7 +182,7 @@ test('mutation on one item does not affect fetch state of another item', async (
     env.trackItemUI('item2', item2.data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   void env.performClientUpdateAction(
     'item1',
@@ -199,7 +200,7 @@ test('mutation on one item does not affect fetch state of another item', async (
   ]);
   env.scheduleFetch('highPriority', 'item2');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([
     { item1: { v: 0 } },
@@ -239,7 +240,7 @@ test('low priority fetch on one item is independent of another item fetch state'
     env.trackItemUI('item2', item2.data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   env.scheduleFetch('highPriority', 'item1');
   await vi.advanceTimersByTimeAsync(15);
@@ -251,7 +252,7 @@ test('low priority fetch on one item is independent of another item fetch state'
   const result = env.scheduleFetch('lowPriority', 'item2');
   expect(result).toBe('triggered');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
@@ -282,7 +283,7 @@ test('error on one item does not affect other items', async () => {
   env.scheduleFetch('highPriority', 'item1');
   env.scheduleFetch('highPriority', 'item2');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const item1State = env.apiStore.getItemState('item1');
   const item2State = env.apiStore.getItemState('item2');
@@ -301,7 +302,7 @@ test('coalesces multiple fetches for the same item', async () => {
   env.scheduleFetch('highPriority', 'item1');
   env.scheduleFetch('highPriority', 'item1');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
   expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });

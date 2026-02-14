@@ -9,6 +9,7 @@ import {
 } from 'vitest';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -45,7 +46,7 @@ describe('query size coalescing', () => {
     // Schedule same query with size 5 (larger)
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 5);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // The fetch should have used size 5 (the max)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -76,7 +77,7 @@ describe('query size coalescing', () => {
     // Then schedule with small size
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 2);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // The fetch should still use size 5 (the max)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -104,7 +105,7 @@ describe('query size coalescing', () => {
 
     // Do initial fetch to load 3 items with hasMore: true
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 3);
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const queryAfterInitial = env.apiStore.getQueryState({
       tableId: 'table1',
@@ -124,7 +125,7 @@ describe('query size coalescing', () => {
     const queryDuringFetch = env.apiStore.getQueryState({ tableId: 'table1' });
     expect(queryDuringFetch?.status).toBe('loadingMore');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Second fetch should use size 6 (max of loadMore's 6, load's 3)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -178,7 +179,7 @@ describe('query size coalescing', () => {
     await vi.advanceTimersByTimeAsync(30);
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 3);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // The fetch should use size 4 (the max of 2, 4, 3)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -209,7 +210,7 @@ describe('query size coalescing', () => {
     // Schedule with explicit size 5
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 5);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // The fetch should use size 5 (max of default 3, explicit 5)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -240,7 +241,7 @@ describe('query size coalescing', () => {
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 3);
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 3);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - limit: 3
@@ -283,7 +284,7 @@ describe('size coalescing in scheduledRequests during active fetch (Call Site 2)
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 2);
 
     // 5. Let fetch complete and scheduled requests flush
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Assert: fetchHistory has 2 entries, second with limit: 5 (max of 5, 2)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -333,7 +334,7 @@ describe('size coalescing in scheduledRequests during active fetch (Call Site 2)
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 4);
 
     // 4. Let fetch complete and scheduled requests flush
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // First fetch used limit 2, second fetch uses limit 6 (max of 3, 6, 4)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`

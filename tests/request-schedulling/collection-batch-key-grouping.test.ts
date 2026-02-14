@@ -9,6 +9,7 @@ import {
 } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -47,7 +48,7 @@ describe('batch key grouping', () => {
     env.scheduleFetch('highPriority', 'api1-item2');
     env.scheduleFetch('highPriority', 'api1-item3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
       v: 1,
@@ -94,7 +95,7 @@ describe('batch key grouping', () => {
     env.scheduleFetch('highPriority', 'api2-item1');
     env.scheduleFetch('highPriority', 'api2-item2');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
       v: 1,
@@ -147,7 +148,7 @@ describe('batch key grouping', () => {
     env.scheduleFetch('highPriority', 'api1-item2');
     env.scheduleFetch('highPriority', 'api2-item1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
       v: 1,
@@ -197,7 +198,7 @@ describe('batch key grouping', () => {
     env.scheduleFetch('highPriority', 'api1-item2');
     env.scheduleFetch('highPriority', 'api2-item2');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getItemState('api1-item1')?.data?.value).toEqual({
       v: 1,
@@ -249,7 +250,7 @@ describe('batch key grouping', () => {
     env.scheduleFetch('highPriority', 'api1-item2');
     env.scheduleFetch('highPriority', 'api2-item1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // All items should go into a single batch (default key)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -278,7 +279,7 @@ describe('batch key grouping', () => {
 
     env.scheduleFetch('highPriority', 'api1-item1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Single item uses fetchFn, not batchFetchFn
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`

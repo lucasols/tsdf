@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -33,7 +34,7 @@ test('dynamically throttle realtime updates', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const slowDuration = 300;
   const fastDuration = 200;
@@ -43,7 +44,7 @@ test('dynamically throttle realtime updates', async () => {
   env.emulateExternalRTU(1);
 
   // t=320: second RTU
-  await vi.advanceTimersByTimeAsync(slowDuration + 20);
+  await advanceTime(slowDuration + 20);
   env.addTimelineComments({ id: '🔴', action: '<fetch-finished' }, [
     'vvv throttle window (100ms) vvv',
     { comment: '^^^ throttle window ^^^', deltaMs: 100 },
@@ -51,14 +52,14 @@ test('dynamically throttle realtime updates', async () => {
   env.emulateExternalRTU(2);
 
   // t=330: third RTU
-  await vi.advanceTimersByTimeAsync(10);
+  await advanceTime(10);
   env.emulateExternalRTU(3);
 
   // t=660: fourth RTU
-  await vi.advanceTimersByTimeAsync(330);
+  await advanceTime(330);
   env.emulateExternalRTU(4);
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 3, 4]);
   expect(env.serverMock.numOfFinishedFetches).toBe(3);
@@ -106,7 +107,7 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const shortFetch = 500;
   const mediumFetch = 1000;
@@ -116,7 +117,7 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   env.emulateExternalRTU(1);
 
   // t=700: second RTU after throttle window → immediate start
-  await vi.advanceTimersByTimeAsync(700);
+  await advanceTime(700);
   // t=500: first fetch completes (500ms < 700ms → short 100ms throttle starts after)
   env.addTimelineComments({ id: '🔴', action: '<fetch-finished' }, [
     { comment: 'vvv 100ms throttle (500ms fetch < 700ms) vvv', deltaMs: 1 },
@@ -125,10 +126,10 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   env.emulateExternalRTU(2);
 
   // t=900: third RTU while second fetch is in flight → coalesced
-  await vi.advanceTimersByTimeAsync(200);
+  await advanceTime(200);
   env.emulateExternalRTU(3);
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=1700: second fetch completes (1000ms >= 700ms → long 500ms throttle starts after)
   env.addTimelineComments({ id: '🟠', action: '<fetch-finished' }, [
@@ -178,14 +179,14 @@ test('simple mutation that triggers a RTU', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: schedule low priority fetch (short duration)
   env.setNextFetchDurations(20);
   env.scheduleFetch('lowPriority');
 
   // t=110: mutation with RTU
-  await vi.advanceTimersByTimeAsync(110);
+  await advanceTime(110);
   void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     duration: 200,
@@ -193,7 +194,7 @@ test('simple mutation that triggers a RTU', async () => {
     addServerDataChangeAction: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.history).toEqual([0, 1]);
   expect(env.uiChanges).toEqual([0, 1]);
@@ -232,13 +233,13 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: low priority fetch to set dynamic realtime last duration (800ms default)
   env.scheduleFetch('lowPriority');
 
   // t=1s: mutation with RTU (1200ms duration, data persisted at 840ms = 70%)
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceTime(1000);
   void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     duration: 1200,
@@ -247,7 +248,7 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
   });
 
   // t=2.3s: external RTU arrives while mutation's RTU fetch is running
-  await vi.advanceTimersByTimeAsync(1300);
+  await advanceTime(1300);
   // t=1.89s: RTU event triggers fetch scheduling (waits for mutation to complete)
   env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
     {
@@ -260,7 +261,7 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
     'external RTU coalesced, schedules follow-up fetch',
   ]);
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=3s: first RTU fetch finishes (800ms < 1000ms → 200ms throttle)
   env.addTimelineComments({ id: '🟠', action: '<fetch-finished' }, [
@@ -314,13 +315,13 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: low priority fetch to set dynamic realtime last duration (800ms default)
   env.scheduleFetch('lowPriority');
 
   // t=1s: mutation 1 with RTU (1200ms duration)
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceTime(1000);
   void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     duration: 1200,
@@ -328,7 +329,7 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
   });
 
   // t=2.5s: mutation 2 starts while mutation 1's RTU fetch is running
-  await vi.advanceTimersByTimeAsync(1500);
+  await advanceTime(1500);
   // mutation 1 completes at 2.2s, RTU fetch starts
   env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
     { comment: 'mutation 1 completes, RTU fetch starts' },
@@ -342,7 +343,7 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
     triggerRTU: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // mutation 2 completes at 3.7s, its RTU fetch runs
   env.addTimelineComments({ id: '⬛', action: '<mutation-data-persisted' }, [
@@ -395,13 +396,13 @@ test('slow mutation then new mutation while prev mutation is running', async () 
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: low priority fetch to set dynamic realtime last duration (800ms default)
   env.scheduleFetch('lowPriority');
 
   // t=1s: mutation 1 with RTU (1200ms duration)
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceTime(1000);
   void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     duration: 1200,
@@ -409,7 +410,7 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   });
 
   // t=1.5s: mutation 2 starts while mutation 1 is still running
-  await vi.advanceTimersByTimeAsync(500);
+  await advanceTime(500);
   env.addTimelineComments('afterLastAction', [
     'mutation 2 starts while mutation 1 running',
   ]);
@@ -419,7 +420,7 @@ test('slow mutation then new mutation while prev mutation is running', async () 
     triggerRTU: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Both mutations complete, RTU events coalesce, single RTU fetch runs
   env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [
@@ -470,13 +471,13 @@ test('rtu mutations without optimistic updates', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: low priority fetch (800ms default)
   env.scheduleFetch('lowPriority');
 
   // t=1s: mutation 1 without optimistic update, with RTU (1200ms duration)
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceTime(1000);
   void env.performClientUpdateAction(1, {
     withOptimisticUpdate: false,
     duration: 1200,
@@ -484,7 +485,7 @@ test('rtu mutations without optimistic updates', async () => {
   });
 
   // t=2.5s: mutation 2 starts while mutation 1's RTU fetch is running
-  await vi.advanceTimersByTimeAsync(1500);
+  await advanceTime(1500);
   // mutation 1 completes at 2.2s, RTU fetch starts
   env.addTimelineComments({ id: '⬜', action: '>mutation-started' }, [
     'no optimistic update, UI stays at 0',
@@ -501,7 +502,7 @@ test('rtu mutations without optimistic updates', async () => {
     triggerRTU: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // mutation 2 completes at 3.7s, its RTU fetch runs and finally updates UI
   env.addTimelineComments({ id: '⬛', action: '<mutation-data-persisted' }, [
@@ -555,13 +556,13 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: low priority fetch (800ms default)
   env.scheduleFetch('lowPriority');
 
   // t=1s: external RTU schedules fetch after 500ms throttle (would start at 1.5s)
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceTime(1000);
   env.emulateExternalRTU(1);
   env.addTimelineComments('afterLastAction', [
     'RTU received, fetch scheduled for 1.5s',
@@ -569,13 +570,13 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
   ]);
 
   // t=1.3s: low priority fetch scheduled before RTU throttle ends
-  await vi.advanceTimersByTimeAsync(300);
+  await advanceTime(300);
   env.addTimelineComments('afterLastAction', [
     'low priority fetch preempts RTU fetch',
   ]);
   env.scheduleFetch('lowPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // RTU fetch is skipped because low priority fetch already handles it
   env.addTimelineComments({ id: '🟠', action: '<fetch-finished' }, [
@@ -625,20 +626,20 @@ test('mutation that triggers multiple rtu updates', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: low priority fetch (800ms default)
   env.scheduleFetch('lowPriority');
 
   // t=1s: mutation (1200ms duration, data persisted at 840ms = 70%)
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceTime(1000);
   void env.performClientUpdateAction(1, {
     duration: 1200,
     addServerDataChangeAction: true,
   });
 
   // t=1.9s: burst of RTU requests after server data changed simulating multiple external RTU events (at 1.84s)
-  await vi.advanceTimersByTimeAsync(900);
+  await advanceTime(900);
   env.addTimelineComments('afterLastAction', [
     'burst of 6 RTU requests after data change',
   ]);
@@ -649,7 +650,7 @@ test('mutation that triggers multiple rtu updates', async () => {
   env.scheduleFetch('realtimeUpdate');
   env.scheduleFetch('realtimeUpdate');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // All RTU requests coalesce into single fetch after mutation completes
   env.addTimelineComments({ id: '⬜', action: '<mutation-data-persisted' }, [

@@ -3,6 +3,7 @@ import { createCollectionStore } from '../../src/collectionStore/collectionStore
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 import { normalizeError } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 type TodoItem = { title: string; completed: boolean };
 
@@ -106,7 +107,7 @@ describe('fetch lifecycle', () => {
         wasLoaded: '✅'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.store.state).toMatchInlineSnapshot(`
       "1:
@@ -127,7 +128,7 @@ describe('fetch lifecycle', () => {
 
     env.scheduleFetch('highPriority', '1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.store.state).toMatchInlineSnapshot(`
       "1:
@@ -163,7 +164,7 @@ test('multiple low priority fetches at same time trigger only one fetch', async 
       wasLoaded: '❌'
   `);
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
@@ -184,7 +185,7 @@ test('initialization fetch', async () => {
 
   env.scheduleFetch('lowPriority', '1');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.store.state).toMatchInlineSnapshot(`
     "1:
@@ -211,7 +212,7 @@ test('await fetch', async () => {
   });
 
   const fetchPromise = apiStore.awaitFetch('1');
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
   const result = await fetchPromise;
 
   expect(result).toEqual({
@@ -222,7 +223,7 @@ test('await fetch', async () => {
   serverTable.setNextFetchError('1', 'error');
 
   const errorFetchPromise = apiStore.awaitFetch('1');
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
   const errorResult = await errorFetchPromise;
 
   expect(errorResult).toMatchInlineSnapshot(`
@@ -265,7 +266,7 @@ test('multiple fetches with different payloads not cancel each other, but cancel
   env.scheduleFetch('lowPriority', '6');
   env.scheduleFetch('lowPriority', '7');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(7);
 
@@ -542,7 +543,7 @@ test('mutating a obj passed as payload does not break the store', async () => {
 
   collectionStore.scheduleFetch('highPriority', obj);
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   obj.id.id = '2';
 
@@ -611,7 +612,7 @@ test('bug reproduction: await fetch with error', async () => {
   env.serverTable.setNextFetchError('1', 'error');
 
   const fetchPromise = env.apiStore.awaitFetch('1');
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
   const result = await fetchPromise;
 
   expect(result.data).toBeNull();

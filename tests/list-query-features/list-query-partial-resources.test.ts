@@ -1062,17 +1062,19 @@ describe('RTU with partial resources', () => {
     renders.addMark('Server update + RTU');
 
     // Simulate a server update that triggers RTU
-    env.serverTable.setItem(
-      'users||1',
-      {
-        id: 1,
-        name: 'Updated User 1',
-        address: 'Address 1',
-        age: 10,
-        country: 'Country 1',
-      },
-      { triggerRTUEvent: true },
-    );
+    act(() => {
+      env.serverTable.setItem(
+        'users||1',
+        {
+          id: 1,
+          name: 'Updated User 1',
+          address: 'Address 1',
+          age: 10,
+          country: 'Country 1',
+        },
+        { triggerRTUEvent: true },
+      );
+    });
 
     await advanceTime(50);
     await flushAllTimers();

@@ -23,7 +23,7 @@
     "node": ">=16.0.0"
   },
   "scripts": {
-    "test": "vitest --mode development",
+    "test": "vitest --mode development --run",
     "test:ui": "vitest --ui --mode development",
     "test:changed": "vitest --changed --mode development",
     "lint": "pnpm tsc && pnpm eslint && pnpm format",

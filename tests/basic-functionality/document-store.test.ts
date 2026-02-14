@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -39,7 +40,7 @@ describe('basic fetch lifecycle', () => {
     `);
 
     // Wait for fetch to complete
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Should transition to success
     expect(env.store.state).toMatchInlineSnapshot(`
@@ -82,7 +83,7 @@ describe('basic fetch lifecycle', () => {
     `);
 
     // Wait for fetch to complete
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Should transition to success with new data
     expect(env.store.state).toMatchInlineSnapshot(`
@@ -102,7 +103,7 @@ describe('basic fetch lifecycle', () => {
     // First do a successful refetch to get new data
     env.setServerData(100);
     env.scheduleFetch('highPriority');
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.store.state).toMatchInlineSnapshot(`
       data: { value: 100 }
@@ -118,7 +119,7 @@ describe('basic fetch lifecycle', () => {
     env.scheduleFetch('highPriority');
 
     // Wait for fetch to complete
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Should have error but preserve previous data
     expect(env.store.state).toMatchInlineSnapshot(`
@@ -163,7 +164,7 @@ describe('testScenario: idle', () => {
     // Trigger a fetch (simulating what useDocument would do on mount)
     env.scheduleFetch('lowPriority');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
 

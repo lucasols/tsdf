@@ -15,6 +15,7 @@ import {
   Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
@@ -76,7 +77,7 @@ describe('query coalescing with partial resources', () => {
       { fields: ['name', 'id'] },
     );
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']
@@ -120,7 +121,7 @@ describe('query coalescing with partial resources', () => {
       { fields: ['id', 'address'] },
     );
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['address', 'id', 'name']
@@ -165,7 +166,7 @@ describe('query coalescing with partial resources', () => {
       { fields: ['id', 'address'] },
     );
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
@@ -251,7 +252,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
       { fields: ['id', 'address'] },
     );
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id']
@@ -294,7 +295,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
       2,
       { fields: ['id', 'name'] },
     );
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     env.apiStore.loadMore({ tableId: 'table1' }, 2, {
       fields: ['id', 'address'],
@@ -311,7 +312,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
     const queryDuringFetch = env.apiStore.getQueryState({ tableId: 'table1' });
     expect(queryDuringFetch?.status).toBe('loadingMore');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - fields: ['id', 'name']

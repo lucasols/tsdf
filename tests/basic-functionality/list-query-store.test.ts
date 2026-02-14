@@ -4,6 +4,7 @@ import {
   type ListQueryParams,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import { flushAllTimers, range } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -12,10 +13,6 @@ beforeAll(() => {
 afterEach(() => {
   vi.runOnlyPendingTimers();
 });
-
-function range(start: number, end: number): number[] {
-  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
-}
 
 const initialServerData: Tables = {
   users: range(1, 5).map((id) => ({ id, name: `User ${id}` })),
@@ -31,7 +28,7 @@ describe('test helpers', () => {
 
     loaded.forceListUpdate(usersQueryParams);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const withUserSnapshot = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
@@ -41,7 +38,7 @@ describe('test helpers', () => {
 
     loaded.forceListUpdate({ tableId: 'products' });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const withSnapshot = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users', 'products'] } },
@@ -58,7 +55,7 @@ describe('test helpers', () => {
       filters: [{ op: 'gt', field: 'id', value: 2 }],
     });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const withUserSnapshot = createListQueryStoreTestEnv(initialServerData, {
       testScenario: {
@@ -105,7 +102,7 @@ describe('fetch query', () => {
     `);
     expect(env.store.state.items).toEqual({});
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
@@ -156,7 +153,7 @@ describe('fetch query', () => {
       "users||5: { id: 5, name: 'User 5' }
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
@@ -188,7 +185,7 @@ describe('fetch query', () => {
 
     env.forceListUpdate(usersQueryParams);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: { code: 500, id: 'fetch-error', message: 'error' }
@@ -216,7 +213,7 @@ describe('fetch query', () => {
       wasLoaded: '✅'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
@@ -236,7 +233,7 @@ describe('fetch query', () => {
 
     env.forceListUpdate(usersQueryParams);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: { code: 500, id: 'fetch-error', message: 'error' }
@@ -264,7 +261,7 @@ describe('fetch query', () => {
       wasLoaded: '❌'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(usersQueryParams)).toMatchInlineSnapshot(`
       error: null
@@ -286,7 +283,7 @@ describe('fetch query', () => {
 
     env.scheduleFetch('highPriority', query, 5);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
       error: null
@@ -323,7 +320,7 @@ describe('fetch query', () => {
       wasLoaded: '✅'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
       error: null
@@ -360,7 +357,7 @@ describe('fetch query', () => {
     // refetch keep size
     env.forceListUpdate(query);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getQueryState(query)).toMatchInlineSnapshot(`
       error: null
@@ -409,7 +406,7 @@ describe('fetch query', () => {
     env.scheduleFetch('lowPriority', { tableId: 'products' });
     env.scheduleFetch('lowPriority', { tableId: 'orders' });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
@@ -421,7 +418,7 @@ describe('fetch query', () => {
     env.scheduleFetch('highPriority', { tableId: 'products' });
     env.scheduleFetch('highPriority', { tableId: 'orders' });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(6);
   });
@@ -436,7 +433,7 @@ test('ignore multiple load more made in sequence', async () => {
 
   env.scheduleFetch('highPriority', query, 5);
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.apiStore.getQueryState(query)?.items).toMatchInlineSnapshot(
     `['"products||1', '"products||2', '"products||3', '"products||4', '"products||5']`,
@@ -452,7 +449,7 @@ test('ignore multiple load more made in sequence', async () => {
   expect(env.apiStore.loadMore(query)).toBe('skipped');
   expect(env.apiStore.loadMore(query)).toBe('skipped');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.apiStore.getQueryState(query)?.items).toMatchInlineSnapshot(`
     - '"products||1'
@@ -470,7 +467,7 @@ test('ignore multiple load more made in sequence', async () => {
   expect(env.apiStore.loadMore(query)).toBe('triggered');
   expect(env.apiStore.loadMore(query)).toBe('coalesced');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.apiStore.getQueryState(query)?.items).toMatchInlineSnapshot(`
     - '"products||1'
@@ -504,7 +501,7 @@ test('await fetch', async () => {
 
   const fetchPromise = env.apiStore.awaitListQueryFetch({ tableId: 'users' });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const fetchResult = await fetchPromise;
 
@@ -527,7 +524,7 @@ test('await fetch', async () => {
     { size: 2 },
   );
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const errorResult = await errorFetchPromise;
 
@@ -563,7 +560,7 @@ describe('fetch item', () => {
       `undefined`,
     );
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
       error: null
@@ -593,7 +590,7 @@ describe('fetch item', () => {
 
     const fetchPromise = env.apiStore.awaitItemFetch('users||1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const fetchResult = await fetchPromise;
 
@@ -606,7 +603,7 @@ describe('fetch item', () => {
 
     const errorFetchPromise = env.apiStore.awaitItemFetch('users||1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const errorResult = await errorFetchPromise;
 
@@ -623,7 +620,7 @@ describe('fetch item', () => {
 
     loaded.scheduleItemFetch('lowPriority', 'users||1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const withStateSnapshot = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { items: ['users||1'] } },
@@ -638,7 +635,7 @@ describe('fetch item', () => {
     loaded.scheduleItemFetch('lowPriority', 'users||1');
     loaded.scheduleFetch('lowPriority', { tableId: 'users' });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const withStateSnapshot = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'], items: ['users||1'] } },
@@ -671,7 +668,7 @@ describe('fetch item', () => {
       name: 'User 1'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
       error: null
@@ -697,7 +694,7 @@ describe('fetch item', () => {
 
     env.scheduleItemFetch('highPriority', 'users||1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
       error: { code: 500, id: 'fetch-error', message: 'error' }
@@ -721,7 +718,7 @@ describe('fetch item', () => {
       wasLoaded: '✅'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
       error: null
@@ -742,7 +739,7 @@ describe('fetch item', () => {
 
     env.scheduleItemFetch('highPriority', 'users||1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
       error: { code: 500, id: 'fetch-error', message: 'error' }
@@ -767,7 +764,7 @@ describe('fetch item', () => {
       wasLoaded: '❌'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
       error: null
@@ -798,7 +795,7 @@ describe('fetch item', () => {
     env.scheduleItemFetch('lowPriority', 'users||2');
     env.scheduleItemFetch('lowPriority', 'users||3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(3);
 
@@ -810,7 +807,7 @@ describe('fetch item', () => {
     env.scheduleItemFetch('highPriority', 'users||2');
     env.scheduleItemFetch('highPriority', 'users||3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(6);
   });
@@ -833,7 +830,7 @@ describe('fetch item', () => {
       wasLoaded: '✅'
     `);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.getItemQueryState('users||1')).toMatchInlineSnapshot(`
       error: null
@@ -859,7 +856,7 @@ describe('fetch item', () => {
     env.scheduleFetch('highPriority', { tableId: 'users' });
 
     // Wait for fetch to complete
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // After list fetch completes, a lowPriority item fetch is triggered
     // because query and item schedulers have separate timing contexts
@@ -877,7 +874,7 @@ describe('fetch item', () => {
 
     env.scheduleFetch('highPriority', { tableId: 'users' });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = env.scheduleItemFetch('lowPriority', 'users||1');
 
@@ -893,7 +890,7 @@ describe('fetch item', () => {
 
     env.scheduleFetch('highPriority', { tableId: 'users' });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = env.scheduleItemFetch('lowPriority', 'users||1');
 

@@ -125,10 +125,11 @@ export function createDocumentStoreTestEnv<D>(
         updateStateWithMutationResult?: boolean;
       } = {},
     ) => {
-      return act(() => {
-        const mutationId = getMutationEmoji();
+      const mutationId = getMutationEmoji();
+      let mutationPromise!: ReturnType<typeof documentStore.performMutation>;
 
-        return documentStore.performMutation({
+      act(() => {
+        mutationPromise = documentStore.performMutation({
           optimisticUpdate: withOptimisticUpdate
             ? () => {
                 documentStore.updateState((draft) => {
@@ -165,6 +166,8 @@ export function createDocumentStoreTestEnv<D>(
           revalidateOnSuccess: withRevalidation,
         });
       });
+
+      return mutationPromise;
     },
     get timelineString() {
       return getTimelineString();

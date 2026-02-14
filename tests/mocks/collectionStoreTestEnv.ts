@@ -1,3 +1,4 @@
+import { act } from 'react';
 import {
   createCollectionStore,
   type CollectionInitialStateItem,
@@ -208,35 +209,40 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
+      let mutationPromise!: ReturnType<typeof collectionStore.performMutation>;
 
-      return collectionStore.performMutation(itemId, {
-        optimisticUpdate: withOptimisticUpdate
-          ? () => {
-              collectionStore.updateItemState(itemId, (draft) => {
-                draft.value = newValue;
-              });
-              addAction('optimistic-ui-commit', {
-                uiValue: newValue,
-                id: mutationId,
-                itemId,
-              });
-            }
-          : undefined,
-        mutation: async () => {
-          const result = await serverTable.emulateClientMutation(
-            itemId,
-            newValue,
-            {
-              duration,
-              triggerRTUEvent: triggerRTU,
-              addServerDataChangeAction,
-              mutationId,
-            },
-          );
-          return { value: result };
-        },
-        revalidateOnSuccess: withRevalidation,
+      act(() => {
+        mutationPromise = collectionStore.performMutation(itemId, {
+          optimisticUpdate: withOptimisticUpdate
+            ? () => {
+                collectionStore.updateItemState(itemId, (draft) => {
+                  draft.value = newValue;
+                });
+                addAction('optimistic-ui-commit', {
+                  uiValue: newValue,
+                  id: mutationId,
+                  itemId,
+                });
+              }
+            : undefined,
+          mutation: async () => {
+            const result = await serverTable.emulateClientMutation(
+              itemId,
+              newValue,
+              {
+                duration,
+                triggerRTUEvent: triggerRTU,
+                addServerDataChangeAction,
+                mutationId,
+              },
+            );
+            return { value: result };
+          },
+          revalidateOnSuccess: withRevalidation,
+        });
       });
+
+      return mutationPromise;
     },
     get timelineString() {
       return getTimelineString();

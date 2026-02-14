@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { StoreFetchError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -19,7 +20,7 @@ describe('awaitFetch basic behavior', () => {
 
     const resultPromise = env.apiStore.awaitFetch();
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await resultPromise;
 
@@ -46,7 +47,7 @@ describe('awaitFetch basic behavior', () => {
 
     const resultPromise = env.apiStore.awaitFetch();
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await resultPromise;
 
@@ -73,7 +74,7 @@ describe('awaitFetch basic behavior', () => {
 
     const resultPromise = env.apiStore.awaitFetch();
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await resultPromise;
 
@@ -97,7 +98,7 @@ describe('awaitFetch coalescing behavior', () => {
     const promise2 = env.apiStore.awaitFetch();
     const promise3 = env.apiStore.awaitFetch();
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const [result1, result2, result3] = await Promise.all([
       promise1,
@@ -138,7 +139,7 @@ describe('awaitFetch coalescing behavior', () => {
     // Second awaitFetch should join the coalescing window
     const promise2 = env.apiStore.awaitFetch();
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const [result1, result2] = await Promise.all([promise1, promise2]);
 
@@ -170,7 +171,7 @@ describe('awaitFetch coalescing behavior', () => {
     // Second awaitFetch during ongoing fetch
     const promise2 = env.apiStore.awaitFetch();
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const [result1, result2] = await Promise.all([promise1, promise2]);
 
@@ -201,7 +202,7 @@ describe('awaitFetch edge cases', () => {
 
     // First awaitFetch
     const promise1 = env.apiStore.awaitFetch();
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
     const result1 = await promise1;
 
     expect(result1).toEqual({ data: { value: 1 }, error: null });
@@ -211,7 +212,7 @@ describe('awaitFetch edge cases', () => {
 
     // Second awaitFetch - should trigger new fetch
     const promise2 = env.apiStore.awaitFetch();
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
     const result2 = await promise2;
 
     expect(result2).toEqual({ data: { value: 2 }, error: null });
@@ -233,7 +234,7 @@ describe('awaitFetch edge cases', () => {
     // Server data changes during fetch
     env.setServerData(999);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await fetchPromise;
 
@@ -259,7 +260,7 @@ describe('awaitFetch edge cases', () => {
 
     const resultPromise = env.apiStore.awaitFetch();
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await resultPromise;
 
@@ -280,7 +281,7 @@ describe('awaitFetch edge cases', () => {
 
     // First successful fetch
     const result1 = env.apiStore.awaitFetch();
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
     expect(await result1).toEqual({ data: { value: 42 }, error: null });
 
     // Verify data is in store
@@ -294,7 +295,7 @@ describe('awaitFetch edge cases', () => {
       code: 404,
     });
     const result2 = env.apiStore.awaitFetch();
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // awaitFetch returns error
     const errorResult = await result2;
@@ -335,7 +336,7 @@ describe('awaitFetch timing', () => {
     await vi.advanceTimersByTimeAsync(25);
     expect(env.serverMock.numOfStartedFetches).toBe(1);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
     await fetchPromise;
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -364,7 +365,7 @@ describe('awaitFetch timing', () => {
     expect(resolved).toBe(false);
 
     // Complete fetch
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
     await fetchPromise;
     expect(resolved).toBe(true);
   });
@@ -393,7 +394,7 @@ describe('awaitFetch timing', () => {
     await vi.advanceTimersByTimeAsync(1200);
     expect(resolved).toBe(false);
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await fetchPromise;
     await mutationPromise;
@@ -432,7 +433,7 @@ describe('awaitFetch timing', () => {
     await vi.advanceTimersByTimeAsync(55);
 
     // Now let all fetches complete
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const [result1, result2, result3] = await Promise.all([
       promise1,
@@ -515,7 +516,7 @@ describe('awaitFetch timeout', () => {
 
     const resultPromise = env.apiStore.awaitFetch({ timeoutMs: 5_000 });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await resultPromise;
 
@@ -567,7 +568,7 @@ describe('awaitFetch timeout', () => {
     expect(result1.error?.type).toBe('timeout');
 
     // Complete the fetch
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
     const result2 = await promise2;
     expect(result2).toEqual({ data: { value: 42 }, error: null });
   });

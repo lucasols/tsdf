@@ -6,6 +6,7 @@ import {
   DEFAULT_MUTATION_DURATION_MS,
 } from '../mocks/serverMock';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -30,14 +31,14 @@ test('simple mutation with revalidation and optimistic update', async () => {
   });
 
   // Wait for initial fetch
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   void env.performClientUpdateAction(1, {
     withRevalidation: true,
     withOptimisticUpdate: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1]);
 
@@ -67,13 +68,13 @@ test('simple mutation with optimistic update', async () => {
   });
 
   // Wait for initial fetch
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1]);
 
@@ -99,13 +100,13 @@ test('simple mutation without optimistic update', async () => {
   });
 
   // Wait for initial fetch
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   void env.performClientUpdateAction(1, {
     withRevalidation: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1]);
 
@@ -135,21 +136,21 @@ test('prevent overfetch of low priority fetches', async () => {
   // Initial data is already loaded, no fetch needed
 
   env.scheduleFetch('lowPriority');
-  await vi.advanceTimersByTimeAsync(10);
+  await advanceTime(10);
 
   env.addTimelineComments('afterLastAction', [
     'All fetches started after this point should be skipped',
   ]);
 
   env.scheduleFetch('lowPriority');
-  await vi.advanceTimersByTimeAsync(10);
+  await advanceTime(10);
 
   env.scheduleFetch('lowPriority');
-  await vi.advanceTimersByTimeAsync(10);
+  await advanceTime(10);
 
   env.scheduleFetch('lowPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
@@ -178,7 +179,7 @@ test('multiple mutations with revalidation in sequence', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const sequentialGapMs =
     DEFAULT_MUTATION_DURATION_MS + DEFAULT_FETCH_DURATION_MS + 50;
@@ -188,14 +189,14 @@ test('multiple mutations with revalidation in sequence', async () => {
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(sequentialGapMs);
+  await advanceTime(sequentialGapMs);
 
   void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -227,7 +228,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // First mutation
   void env.performClientUpdateAction(1, {
@@ -238,7 +239,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
   const duringRevalidationMs = DEFAULT_MUTATION_DURATION_MS + 50;
 
   // Wait for the server write (mutation-finished event), but not the revalidation fetch
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
 
   env.addTimelineComments('beforeNextAction', [
     'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
@@ -250,7 +251,7 @@ test('multiple mutations with revalidation in sequence, causing concurrent updat
     withRevalidation: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -285,7 +286,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const duringRevalidationMs = DEFAULT_MUTATION_DURATION_MS + 50;
 
@@ -293,14 +294,14 @@ test('multiple mutations with revalidation in sequence 2', async () => {
   env.scheduleFetch('lowPriority');
 
   // First mutation (start shortly after fetch begins)
-  await vi.advanceTimersByTimeAsync(100);
+  await advanceTime(100);
   void env.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
   // Wait for the server write (mutation-finished event) + small buffer, but not the full revalidation fetch
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
 
   env.addTimelineComments('beforeNextAction', [
     'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
@@ -312,7 +313,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
 
   // Third mutation
   void env.performClientUpdateAction(3, {
@@ -320,7 +321,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
 
   // Fourth mutation
   void env.performClientUpdateAction(4, {
@@ -328,7 +329,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
 
   // Fifth mutation with same value
   void env.performClientUpdateAction(4, {
@@ -336,7 +337,7 @@ test('multiple mutations with revalidation in sequence 2', async () => {
     withRevalidation: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -390,7 +391,7 @@ test('multiple mutations with revalidation in sequence 3', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   const duringRevalidationMs = DEFAULT_MUTATION_DURATION_MS + 50;
 
@@ -399,7 +400,7 @@ test('multiple mutations with revalidation in sequence 3', async () => {
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
   env.addTimelineComments('beforeNextAction', [
     'New mutation starts during revalidation; scheduler aborts in-flight fetch to prevent stale commit.',
   ]);
@@ -408,25 +409,25 @@ test('multiple mutations with revalidation in sequence 3', async () => {
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
   void env.performClientUpdateAction(3, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
   void env.performClientUpdateAction(4, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
-  await vi.advanceTimersByTimeAsync(duringRevalidationMs);
+  await advanceTime(duringRevalidationMs);
   void env.performClientUpdateAction(4, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 2, 3, 4]);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -477,7 +478,7 @@ test('high priority fetch during mutation', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Start a mutation (without revalidation to isolate the high priority fetch behavior)
   void env.performClientUpdateAction(1, {
@@ -485,14 +486,14 @@ test('high priority fetch during mutation', async () => {
   });
 
   // Trigger high priority fetch while mutation is in progress
-  await vi.advanceTimersByTimeAsync(100);
+  await advanceTime(100);
   env.addTimelineComments('beforeNextAction', [
     'High priority fetch during mutation; should be scheduled after mutation completes.',
   ]);
   const result = env.scheduleFetch('highPriority');
   expect(result).toBe('scheduled');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1]);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -523,7 +524,7 @@ test('multiple concurrent mutations with revalidation', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // First mutation
   void env.performClientUpdateAction(1, {
@@ -532,7 +533,7 @@ test('multiple concurrent mutations with revalidation', async () => {
   });
 
   // Second mutation starts 50ms after first (while first is still running)
-  await vi.advanceTimersByTimeAsync(50);
+  await advanceTime(50);
   env.addTimelineComments('beforeNextAction', [
     'Second mutation overlaps first',
   ]);
@@ -541,7 +542,7 @@ test('multiple concurrent mutations with revalidation', async () => {
     withRevalidation: true,
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.serverMock.history).toEqual([0, 1, 2]);
@@ -576,26 +577,26 @@ test('multiple high priority fetches', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // First high priority fetch starts immediately
   env.scheduleFetch('highPriority');
 
   // These are skipped (fetch already in progress, within throttle window)
-  await vi.advanceTimersByTimeAsync(40);
+  await advanceTime(40);
   env.scheduleFetch('highPriority');
 
-  await vi.advanceTimersByTimeAsync(50);
+  await advanceTime(50);
   env.scheduleFetch('highPriority');
 
   // These get scheduled (outside throttle window but fetch still in progress)
-  await vi.advanceTimersByTimeAsync(60);
+  await advanceTime(60);
   env.scheduleFetch('highPriority');
 
-  await vi.advanceTimersByTimeAsync(80);
+  await advanceTime(80);
   env.scheduleFetch('highPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -626,30 +627,30 @@ test('throttle low priority updates', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: first low priority fetch starts
   env.scheduleFetch('lowPriority');
 
   // t=100: skipped - first fetch in progress
-  await vi.advanceTimersByTimeAsync(100);
+  await advanceTime(100);
   env.scheduleFetch('lowPriority');
 
   // t=110: skipped - first fetch in progress
-  await vi.advanceTimersByTimeAsync(10);
+  await advanceTime(10);
   env.scheduleFetch('lowPriority');
 
   // t=120: skipped - first fetch in progress
-  await vi.advanceTimersByTimeAsync(10);
+  await advanceTime(10);
   env.scheduleFetch('lowPriority');
 
   // Wait for first fetch to complete
-  await vi.advanceTimersByTimeAsync(DEFAULT_FETCH_DURATION_MS + 10);
+  await advanceTime(DEFAULT_FETCH_DURATION_MS + 10);
 
   // Second fetch starts outside the throttle window from t=0
   env.scheduleFetch('lowPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
@@ -680,7 +681,7 @@ test('throttle low priority after a fast fetch completes', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   env.setNextFetchDurations(50, 50);
 
@@ -688,15 +689,15 @@ test('throttle low priority after a fast fetch completes', async () => {
   env.scheduleFetch('lowPriority');
 
   // t=60: first fetch finished (50ms), still within the throttle window
-  await vi.advanceTimersByTimeAsync(60);
+  await advanceTime(60);
   const result = env.scheduleFetch('lowPriority');
   expect(result).toBe('skipped');
 
   // t=210: outside throttle window
-  await vi.advanceTimersByTimeAsync(150);
+  await advanceTime(150);
   env.scheduleFetch('lowPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
   expect(env.timelineString).toMatchInlineSnapshot(`
@@ -726,7 +727,7 @@ test('multiple mutations with low priority fetch between', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // t=0: first mutation with revalidation
   void env.performClientUpdateAction(1, {
@@ -735,18 +736,18 @@ test('multiple mutations with low priority fetch between', async () => {
   });
 
   // t=50: second mutation with revalidation
-  await vi.advanceTimersByTimeAsync(50);
+  await advanceTime(50);
   void env.performClientUpdateAction(2, {
     withOptimisticUpdate: true,
     withRevalidation: true,
   });
 
   // t=70: low priority fetch (scheduled since no previous fetch = outside throttle window)
-  await vi.advanceTimersByTimeAsync(20);
+  await advanceTime(20);
   const result = env.scheduleFetch('lowPriority');
   expect(result).toBe('scheduled');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   // Mutation revalidations properly coalesce into 1 fetch
@@ -781,7 +782,7 @@ test('very slow mutation revalidation then mutation', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Set fetch durations: first revalidation slow (2000ms), second revalidation fast (200ms)
   env.setNextFetchDurations(2000, 200);
@@ -795,7 +796,7 @@ test('very slow mutation revalidation then mutation', async () => {
 
   // Wait for the mutation to resolve (200ms) so revalidation starts (2000ms)
   // Start second mutation while first revalidation is still in progress
-  await vi.advanceTimersByTimeAsync(300);
+  await advanceTime(300);
 
   env.addTimelineComments('beforeNextAction', [
     'Slow revalidation still running; scheduler aborts in-flight fetch after new mutation to prevent stale commit.',
@@ -809,7 +810,7 @@ test('very slow mutation revalidation then mutation', async () => {
     duration: 200, // Second mutation + revalidation = 200 + 200 = 400ms < 2000ms first revalidation
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1, 2]);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -845,7 +846,7 @@ test('fetch error', async () => {
   });
 
   // First fetch starts automatically with no initial state
-  await vi.advanceTimersByTimeAsync(DEFAULT_FETCH_DURATION_MS + 10);
+  await advanceTime(DEFAULT_FETCH_DURATION_MS + 10);
 
   // Mark next fetch as error (helper also mutates server data for timeline)
   env.errorInNextFetch();
@@ -853,7 +854,7 @@ test('fetch error', async () => {
   // Second fetch (will error)
   env.scheduleFetch('lowPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 'error']);
   expect(env.serverMock.numOfFinishedFetches).toBe(2);
@@ -884,7 +885,7 @@ test('low priority fetch during mutation outside throttle window', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Start a mutation (without revalidation to isolate the low priority fetch behavior)
   void env.performClientUpdateAction(1, {
@@ -892,14 +893,14 @@ test('low priority fetch during mutation outside throttle window', async () => {
   });
 
   // Trigger low priority fetch while mutation is in progress (no previous fetch, so outside throttle window)
-  await vi.advanceTimersByTimeAsync(100);
+  await advanceTime(100);
   env.addTimelineComments('beforeNextAction', [
     'Low priority fetch during mutation; should be scheduled after mutation completes.',
   ]);
   const result = env.scheduleFetch('lowPriority');
   expect(result).toBe('scheduled');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1]);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
@@ -930,12 +931,12 @@ test('low priority fetch during mutation inside throttle window', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Trigger a fast fetch first to establish the throttle window
   env.setNextFetchDurations(50);
   env.scheduleFetch('highPriority');
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Start a mutation immediately (we're at ~60ms, still inside 200ms throttle window)
   void env.performClientUpdateAction(1, {
@@ -943,14 +944,14 @@ test('low priority fetch during mutation inside throttle window', async () => {
   });
 
   // Trigger low priority fetch while mutation is in progress (within throttle window from fetch start at 10ms)
-  await vi.advanceTimersByTimeAsync(50);
+  await advanceTime(50);
   env.addTimelineComments('beforeNextAction', [
     'Low priority fetch during mutation inside throttle window; should be skipped.',
   ]);
   const result = env.scheduleFetch('lowPriority');
   expect(result).toBe('skipped');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.uiChanges).toEqual([0, 1]);
   expect(env.serverMock.numOfFinishedFetches).toBe(1);

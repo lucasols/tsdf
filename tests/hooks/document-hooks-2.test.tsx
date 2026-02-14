@@ -3,6 +3,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -47,9 +48,7 @@ test('disable should keep the selected data and not be affected by invalidation'
     { initialProps: { disabled: false } },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('first update (✅)');
 
@@ -57,9 +56,7 @@ test('disable should keep the selected data and not be affected by invalidation'
     env.emulateExternalRTU({ hello: '✅' });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('set disabled');
 
@@ -67,9 +64,7 @@ test('disable should keep the selected data and not be affected by invalidation'
     rerender({ disabled: true });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('ignored update (❌)');
 
@@ -77,9 +72,7 @@ test('disable should keep the selected data and not be affected by invalidation'
     env.emulateExternalRTU({ hello: '❌' });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('enabled again');
 
@@ -87,9 +80,7 @@ test('disable should keep the selected data and not be affected by invalidation'
     rerender({ disabled: false });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -141,9 +132,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     { initialProps: { isOffScreen: false } },
   );
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('first update (✅)');
 
@@ -151,9 +140,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     env.emulateExternalRTU({ hello: '✅' });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('set disabled');
 
@@ -161,9 +148,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     rerender({ isOffScreen: true });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('ignored update (❌)');
 
@@ -171,9 +156,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     env.emulateExternalRTU({ hello: '❌' });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('enabled again');
 
@@ -181,9 +164,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
     rerender({ isOffScreen: false });
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -228,9 +209,7 @@ test('useDocument selector result should remain stable across rerenders', async 
     prevData = data;
   });
 
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
+  await flushAllTimers();
 
   renders.addMark('Rerenders');
 

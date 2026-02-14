@@ -11,6 +11,7 @@ import {
 import { StoreFetchError } from '../../src/utils/storeShared';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -39,7 +40,7 @@ describe('batch coalescing basic behavior', () => {
     env.scheduleFetch('highPriority', 'item2');
     env.scheduleFetch('highPriority', 'item3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // All items should have data
     expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
@@ -80,7 +81,7 @@ describe('batch coalescing basic behavior', () => {
 
     env.scheduleFetch('highPriority', 'item1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
 
@@ -118,7 +119,7 @@ describe('batch coalescing basic behavior', () => {
     await vi.advanceTimersByTimeAsync(30);
     env.scheduleFetch('highPriority', 'item3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -159,7 +160,7 @@ describe('maxBatchSize behavior', () => {
     env.scheduleFetch('highPriority', 'item1');
     env.scheduleFetch('highPriority', 'item2');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -198,7 +199,7 @@ describe('maxBatchSize behavior', () => {
     env.scheduleFetch('highPriority', 'item3');
     env.scheduleFetch('highPriority', 'item4');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // All items should have data
     expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
@@ -263,7 +264,7 @@ describe('requests during ongoing fetch', () => {
     // Schedule another item during ongoing fetch
     env.scheduleFetch('highPriority', 'item3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // First list fetch, then item3 as individual fetch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -313,7 +314,7 @@ describe('mutation handling', () => {
       env.trackItemUI('item2', item2.data?.value);
     });
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Start mutation on item1
     void env.performClientUpdateAction(
@@ -329,7 +330,7 @@ describe('mutation handling', () => {
     env.apiStore.invalidateItem('item1', 'highPriority');
     env.apiStore.invalidateItem('item2', 'highPriority');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // item2 should have been fetched separately since item1 was under mutation
     expect(env.apiStore.getItemState('item2')?.data?.value).toEqual({ v: 2 });
@@ -376,7 +377,7 @@ describe('error handling in batch', () => {
     env.scheduleFetch('highPriority', 'item1');
     env.scheduleFetch('highPriority', 'item2');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Both items should have the same error
     expect(env.apiStore.getItemState('item1')?.status).toBe('error');
@@ -417,7 +418,7 @@ describe('awaitFetch with batch', () => {
     // Await for specific item
     const resultPromise = env.apiStore.awaitFetch('item3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await resultPromise;
 
@@ -464,7 +465,7 @@ describe('awaitFetch with batch', () => {
     env.scheduleFetch('highPriority', 'item1');
     const resultPromise = env.apiStore.awaitFetch('item2');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const result = await resultPromise;
 
@@ -501,7 +502,7 @@ describe('awaitFetch with batch', () => {
     const promise2 = env.apiStore.awaitFetch('item1');
     const promise3 = env.apiStore.awaitFetch('item1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const [result1, result2, result3] = await Promise.all([
       promise1,
@@ -541,7 +542,7 @@ describe('awaitFetch with batch', () => {
     const promise1 = env.apiStore.awaitFetch('item1');
     const promise2 = env.apiStore.awaitFetch('item2');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     const [result1, result2] = await Promise.all([promise1, promise2]);
 
@@ -584,7 +585,7 @@ describe('priority handling in batch', () => {
     env.scheduleFetch('highPriority', 'item2');
     env.scheduleFetch('highPriority', 'item3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -623,7 +624,7 @@ describe('priority handling in batch', () => {
     env.scheduleFetch('highPriority', 'item2');
     env.scheduleFetch('realtimeUpdate', 'item3');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -672,7 +673,7 @@ describe('batch with UI hooks', () => {
     env.apiStore.invalidateItem('item1', 'highPriority');
     env.apiStore.invalidateItem('item2', 'highPriority');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // UI should still show the values
     expect(env.apiStore.getItemState('item1')?.data?.value).toEqual({ v: 1 });
@@ -715,7 +716,7 @@ describe('duplicate item requests in batch', () => {
     env.scheduleFetch('highPriority', 'item1');
     env.scheduleFetch('highPriority', 'item1');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Single item, so uses fetchFn not batchFetchFn
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
@@ -750,7 +751,7 @@ describe('duplicate item requests in batch', () => {
     env.scheduleFetch('highPriority', 'item1');
     env.scheduleFetch('highPriority', 'item2');
 
-    await vi.runAllTimersAsync();
+    await flushAllTimers();
 
     // Should have exactly 2 items in batch (deduplicated)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`

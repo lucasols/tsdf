@@ -1,4 +1,5 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { act } from 'react';
 import { createListQueryStore } from '../../src/listQueryStore/listQueryStore';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
@@ -385,32 +386,37 @@ export function createListQueryStoreTestEnv<
       }
 
       const mergedValue: TRow = { ...baseValue, ...newValue };
+      let mutationPromise!: ReturnType<typeof listQueryStore.performMutation>;
 
-      return listQueryStore.performMutation(itemId, {
-        optimisticUpdate: withOptimisticUpdate
-          ? () => {
-              listQueryStore.updateItemState(itemId, (draft) => {
-                Object.assign(draft, newValue);
-              });
+      act(() => {
+        mutationPromise = listQueryStore.performMutation(itemId, {
+          optimisticUpdate: withOptimisticUpdate
+            ? () => {
+                listQueryStore.updateItemState(itemId, (draft) => {
+                  Object.assign(draft, newValue);
+                });
 
-              addAction('optimistic-ui-commit', {
-                uiValue: mergedValue,
-                id: mutationId,
-                itemId,
-              });
-            }
-          : undefined,
-        mutation: async () => {
-          return serverTable.emulateClientMutation(itemId, mergedValue, {
-            duration,
-            triggerRTUEvent: triggerRTU,
-            addServerDataChangeAction,
-            mutationId,
-          });
-        },
-        revalidateOnSuccess: withRevalidation,
-        getRelatedQueries: (payload) => payload.tableId === tableId,
+                addAction('optimistic-ui-commit', {
+                  uiValue: mergedValue,
+                  id: mutationId,
+                  itemId,
+                });
+              }
+            : undefined,
+          mutation: async () => {
+            return serverTable.emulateClientMutation(itemId, mergedValue, {
+              duration,
+              triggerRTUEvent: triggerRTU,
+              addServerDataChangeAction,
+              mutationId,
+            });
+          },
+          revalidateOnSuccess: withRevalidation,
+          getRelatedQueries: (payload) => payload.tableId === tableId,
+        });
       });
+
+      return mutationPromise;
     },
     get timelineString() {
       return getTimelineString();

@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -22,7 +23,7 @@ test('multiple high priority fetches within the same request base coalescing win
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // First high priority fetch starts coalescing window
   env.scheduleFetch('highPriority');
@@ -33,7 +34,7 @@ test('multiple high priority fetches within the same request base coalescing win
   await vi.advanceTimersByTimeAsync(10);
   env.scheduleFetch('highPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(1);
 
@@ -62,7 +63,7 @@ test('mixed priority fetches within the same request base coalescing window', as
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // First low priority fetch triggers coalescing window
   env.scheduleFetch('lowPriority');
@@ -79,7 +80,7 @@ test('mixed priority fetches within the same request base coalescing window', as
   await vi.advanceTimersByTimeAsync(5);
   env.scheduleFetch('lowPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(1);
 
@@ -109,7 +110,7 @@ test('multiple low priority fetches within the same request base coalescing wind
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // First low priority fetch triggers coalescing window
   env.scheduleFetch('lowPriority');
@@ -126,7 +127,7 @@ test('multiple low priority fetches within the same request base coalescing wind
   await vi.advanceTimersByTimeAsync(5);
   env.scheduleFetch('lowPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(1);
 
@@ -157,7 +158,7 @@ test('realtime update fetches mixed with other priority fetches within the same 
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // First low priority fetch triggers coalescing window
   env.scheduleFetch('lowPriority');
@@ -166,7 +167,7 @@ test('realtime update fetches mixed with other priority fetches within the same 
   await vi.advanceTimersByTimeAsync(5);
   env.scheduleFetch('realtimeUpdate');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(1);
 
@@ -195,7 +196,7 @@ test('realtime updates starts coalescing window', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Trigger realtime update fetch
   env.scheduleFetch('realtimeUpdate');
@@ -204,7 +205,7 @@ test('realtime updates starts coalescing window', async () => {
   // Trigger low priority fetch
   env.scheduleFetch('highPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(1);
 
@@ -233,7 +234,7 @@ test('delayed realtime update fetches also are coalesced', async () => {
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Trigger realtime update fetch
   env.scheduleFetch('realtimeUpdate');
@@ -246,7 +247,7 @@ test('delayed realtime update fetches also are coalesced', async () => {
   await vi.advanceTimersByTimeAsync(819);
   env.scheduleFetch('highPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(2);
 
@@ -279,7 +280,7 @@ test('delayed realtime update request also starts coalescing window', async () =
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Trigger realtime update fetch
   env.scheduleFetch('realtimeUpdate');
@@ -292,7 +293,7 @@ test('delayed realtime update request also starts coalescing window', async () =
   await vi.advanceTimersByTimeAsync(821);
   env.scheduleFetch('highPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(2);
 
@@ -325,7 +326,7 @@ test('medium priority triggers coalescing window after delay expires', async () 
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Medium priority fetch triggers delay
   env.scheduleFetch('mediumPriority');
@@ -334,7 +335,7 @@ test('medium priority triggers coalescing window after delay expires', async () 
   await vi.advanceTimersByTimeAsync(110);
   env.scheduleFetch('highPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(1);
 
@@ -364,7 +365,7 @@ test('medium priority is cancelled when fetch starts from active coalescing wind
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // High priority starts coalescing window
   env.scheduleFetch('highPriority');
@@ -375,7 +376,7 @@ test('medium priority is cancelled when fetch starts from active coalescing wind
 
   expect(result).toBe('medium-scheduled');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Only 1 fetch - medium priority was cancelled when coalescing fetch started
   expect(env.serverMock.numOfStartedFetches).toBe(1);
@@ -406,7 +407,7 @@ test('mixed medium and high priority fetches within coalescing window', async ()
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Medium priority triggers delay
   env.scheduleFetch('mediumPriority');
@@ -418,7 +419,7 @@ test('mixed medium and high priority fetches within coalescing window', async ()
   await vi.advanceTimersByTimeAsync(20);
   env.scheduleFetch('highPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Only one fetch because high priority coalesced
   expect(env.serverMock.numOfStartedFetches).toBe(1);
@@ -449,7 +450,7 @@ test('medium priority with short delay is cancelled by fetch from coalescing win
     env.trackUIChanges(env.apiStore.useDocument().data?.value);
   });
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // High priority starts coalescing window
   env.scheduleFetch('highPriority');
@@ -458,7 +459,7 @@ test('medium priority with short delay is cancelled by fetch from coalescing win
   await vi.advanceTimersByTimeAsync(5);
   env.scheduleFetch('mediumPriority');
 
-  await vi.runAllTimersAsync();
+  await flushAllTimers();
 
   // Only 1 fetch - medium priority was cancelled when fetch started
   expect(env.serverMock.numOfStartedFetches).toBe(1);
