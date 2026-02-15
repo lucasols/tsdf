@@ -220,9 +220,11 @@ export async function executeQueryFetch<
           return;
         }
 
-        // In offset mode, loadMore appends to existing items
+        // In offset mode, append only when loadMore range starts after head.
+        // Coalesced loadMore+load can produce type='loadMore' with offset=0,
+        // which must replace the list to avoid stale head items.
         const appendToExisting =
-          !!offsetPagination && fetchPayload.type === 'loadMore';
+          !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
 
         store.produceState(
           (draft) => {

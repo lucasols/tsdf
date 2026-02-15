@@ -945,7 +945,7 @@ describe('offset pagination - coalescing', () => {
       5,
     );
 
-    await vi.advanceTimersByTimeAsync(60);
+    await advanceTime(60);
 
     // 'loadMore' wins → status should be 'loadingMore' (not 'refetching')
     const queryDuring = env.apiStore.getQueryState({ tableId: 'products' });
@@ -970,6 +970,73 @@ describe('offset pagination - coalescing', () => {
     `);
 
     // Verify a single coalesced fetch was made with the merged offset/limit
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+        - { limit: 10, offset: 0 }
+      `);
+  });
+
+  test('coalesced loadMore+load replaces list when merged range starts at offset 0', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+      baseCoalescingWindowMs: 50,
+    });
+
+    // Initial page: [1,2,3,4,5]
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+
+    // Simulate 3 new items inserted at the head before coalesced fetch starts.
+    // Use reverse insertion order with prepend to get final order: 21, 22, 23.
+    env.serverTable.setItem(
+      'products||23',
+      { id: 23, name: 'New 23' },
+      { prepend: true },
+    );
+    env.serverTable.setItem(
+      'products||22',
+      { id: 22, name: 'New 22' },
+      { prepend: true },
+    );
+    env.serverTable.setItem(
+      'products||21',
+      { id: 21, name: 'New 21' },
+      { prepend: true },
+    );
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // Coalesced payload becomes offset 0, limit 10.
+    env.apiStore.loadMore({ tableId: 'products' });
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+
+    const query = env.apiStore.getQueryState({ tableId: 'products' });
+    expect(query?.items).toMatchInlineSnapshot(`
+      - '"products||21'
+      - '"products||22'
+      - '"products||23'
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+    `);
+
     const listFetches = env.serverTable.fetchHistory.filter(
       (h) => h.type === 'list',
     );
@@ -1255,10 +1322,10 @@ describe('offset pagination - awaitListQueryFetch', () => {
     );
     expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
       .toMatchInlineSnapshot(`
-      - { limit: 5, offset: 10 }
-      - { limit: 5, offset: 5 }
-      - { limit: 5, offset: 0 }
-    `);
+        - { limit: 5, offset: 10 }
+        - { limit: 5, offset: 5 }
+        - { limit: 5, offset: 0 }
+      `);
 
     // Despite chunks completing in reverse order (10, 5, 0),
     // the result must have items in the correct sequential order (1..15)
