@@ -9,7 +9,7 @@ import {
 } from 'vitest';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, range } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, range } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -76,7 +76,8 @@ describe('offset pagination - basic loadMore', () => {
       (h) => h.type === 'list',
     );
     expect(listFetches).toMatchInlineSnapshot(`
-      - limit: 5
+      - duration: 800
+        limit: 5
         offset: 0
         results:
           - data: { id: 1, name: 'Product 1' }
@@ -89,8 +90,10 @@ describe('offset pagination - basic loadMore', () => {
             itemId: 'products||4'
           - data: { id: 5, name: 'Product 5' }
             itemId: 'products||5'
+        startedAt: 10
         type: 'list'
-      - limit: 5
+      - duration: 800
+        limit: 5
         offset: 5
         results:
           - data: { id: 6, name: 'Product 6' }
@@ -103,6 +106,7 @@ describe('offset pagination - basic loadMore', () => {
             itemId: 'products||9'
           - data: { id: 10, name: 'Product 10' }
             itemId: 'products||10'
+        startedAt: 820
         type: 'list'
     `);
   });
@@ -244,7 +248,8 @@ describe('offset pagination - basic loadMore', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 5
+      - duration: 800
+        limit: 5
         offset: 0
         results:
           - data: { id: 1, name: 'Product 1' }
@@ -257,8 +262,10 @@ describe('offset pagination - basic loadMore', () => {
             itemId: 'products||4'
           - data: { id: 5, name: 'Product 5' }
             itemId: 'products||5'
+        startedAt: 10
         type: 'list'
-      - limit: 5
+      - duration: 800
+        limit: 5
         offset: 5
         results:
           - data: { id: 3, name: 'Product 3' }
@@ -271,6 +278,7 @@ describe('offset pagination - basic loadMore', () => {
             itemId: 'products||6'
           - data: { id: 7, name: 'Product 7' }
             itemId: 'products||7'
+        startedAt: 820
         type: 'list'
     `);
   });
@@ -594,26 +602,30 @@ describe('offset pagination - chunked invalidation', () => {
         - '"products||15'
       `);
 
-    // Store fetch counts before invalidation
-    const startedBefore = env.serverTable.numOfStartedFetches;
-    const finishedBefore = env.serverTable.numOfFinishedFetches;
+    env.serverTable.fetchHistory.length = 0;
 
     // Trigger chunked invalidation (15 items / maxInvalidationLimit 5 = 3 chunks)
     env.apiStore.scheduleListQueryFetch('highPriority', {
       tableId: 'products',
     });
-
-    // Advance past coalescing window to start the fetch
-    await vi.advanceTimersByTimeAsync(15);
-
-    // All 3 chunks should have started in parallel (none finished yet)
-    expect(env.serverTable.numOfStartedFetches - startedBefore).toBe(3);
-    expect(env.serverTable.numOfFinishedFetches - finishedBefore).toBe(0);
-
     await flushAllTimers();
 
-    // All 3 chunks should be complete
-    expect(env.serverTable.numOfFinishedFetches - finishedBefore).toBe(3);
+    // All 3 chunks started at the same time (parallel) with default maxParallel: 3
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(
+      listFetches.map(({ offset, limit, startedAt, duration }) => ({
+        offset,
+        limit,
+        startedAt,
+        duration,
+      })),
+    ).toMatchInlineSnapshot(`
+      - { duration: 800, limit: 5, offset: 0, startedAt: 2440 }
+      - { duration: 800, limit: 5, offset: 5, startedAt: 2440 }
+      - { duration: 800, limit: 5, offset: 10, startedAt: 2440 }
+    `);
   });
 
   test('chunked invalidation preserves deterministic item ordering', async () => {
@@ -786,6 +798,119 @@ describe('offset pagination - chunked invalidation', () => {
       - '"products||9'
     `);
     expect(query?.status).toBe('success');
+  });
+
+  test('maxParallel limits concurrent chunk requests', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 5, maxParallel: 2 },
+    });
+
+    // Load 15 items (3 loadMores)
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+
+    expect(
+      env.apiStore.getQueryState({ tableId: 'products' })?.items.length,
+    ).toBe(15);
+
+    env.serverTable.fetchHistory.length = 0;
+
+    // Trigger chunked invalidation (15 items / maxInvalidationLimit 5 = 3 chunks)
+    env.apiStore.scheduleListQueryFetch('highPriority', {
+      tableId: 'products',
+    });
+    await flushAllTimers();
+
+    // With maxParallel: 2, chunks 1 & 2 start together, chunk 3 starts after they finish
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(
+      listFetches.map(({ offset, limit, startedAt, duration }) => ({
+        offset,
+        limit,
+        startedAt,
+        duration,
+      })),
+    ).toMatchInlineSnapshot(`
+      - { duration: 800, limit: 5, offset: 0, startedAt: 2440 }
+      - { duration: 800, limit: 5, offset: 5, startedAt: 2440 }
+      - { duration: 800, limit: 5, offset: 10, startedAt: 3240 }
+    `);
+
+    const query = env.apiStore.getQueryState({ tableId: 'products' });
+    expect(query?.items).toMatchInlineSnapshot(`
+      - '"products||1'
+      - '"products||2'
+      - '"products||3'
+      - '"products||4'
+      - '"products||5'
+      - '"products||6'
+      - '"products||7'
+      - '"products||8'
+      - '"products||9'
+      - '"products||10'
+      - '"products||11'
+      - '"products||12'
+      - '"products||13'
+      - '"products||14'
+      - '"products||15'
+    `);
+    expect(query?.status).toBe('success');
+  });
+
+  test('chunk error skips remaining chunks', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 5, maxParallel: 1 },
+    });
+
+    // Load 15 items (3 pages)
+    env.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'products' },
+      5,
+    );
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+    env.apiStore.loadMore({ tableId: 'products' });
+    await flushAllTimers();
+
+    expect(
+      env.apiStore.getQueryState({ tableId: 'products' })?.items.length,
+    ).toBe(15);
+
+    const startedBefore = env.serverTable.numOfStartedFetches;
+
+    // Make the first chunk fail
+    env.serverTable.setNextListFetchError('chunk error');
+
+    // Trigger chunked invalidation (3 chunks, maxParallel: 1 → sequential)
+    env.apiStore.scheduleListQueryFetch('highPriority', {
+      tableId: 'products',
+    });
+    await flushAllTimers();
+
+    // Only 1 chunk should have been started — the remaining 2 were skipped
+    expect(env.serverTable.numOfStartedFetches - startedBefore).toBe(1);
+
+    const query = env.apiStore.getQueryState({ tableId: 'products' });
+    expect(query?.status).toBe('error');
+    expect(query?.error).toMatchInlineSnapshot(`
+      code: 500
+      id: 'fetch-error'
+      message: 'chunk error'
+    `);
   });
 });
 
@@ -1098,6 +1223,79 @@ describe('offset pagination - awaitListQueryFetch', () => {
           itemPayload: 'products||2'
         - data: { id: 3, name: 'Product 3' }
           itemPayload: 'products||3'
+    `);
+  });
+
+  test('awaitListQueryFetch with chunked requests preserves order when chunks resolve out of order', async () => {
+    const env = createListQueryStoreTestEnv(serverData, {
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 5 },
+    });
+
+    // Stagger chunk start delays so they finish in reverse order:
+    // Chunk 0 (offset 0, limit 5): 600ms delay + 800ms fetch = finishes at 1400ms
+    // Chunk 1 (offset 5, limit 5): 300ms delay + 800ms fetch = finishes at 1100ms
+    // Chunk 2 (offset 10, limit 5): no delay + 800ms fetch = finishes at 800ms
+    env.serverTable.addListFetchStartDelay(600);
+    env.serverTable.addListFetchStartDelay(300);
+
+    const fetchPromise = env.apiStore.awaitListQueryFetch(
+      { tableId: 'products' },
+      { size: 15 },
+    );
+
+    await flushAllTimers();
+
+    const result = await fetchPromise;
+
+    // fetchHistory records entries at completion time, so the order reflects
+    // the actual completion order (reverse): chunk 2 first, chunk 0 last
+    const listFetches = env.serverTable.fetchHistory.filter(
+      (h) => h.type === 'list',
+    );
+    expect(listFetches.map(({ offset, limit }) => ({ offset, limit })))
+      .toMatchInlineSnapshot(`
+      - { limit: 5, offset: 10 }
+      - { limit: 5, offset: 5 }
+      - { limit: 5, offset: 0 }
+    `);
+
+    // Despite chunks completing in reverse order (10, 5, 0),
+    // the result must have items in the correct sequential order (1..15)
+    expect(result).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '✅'
+      items:
+        - data: { id: 1, name: 'Product 1' }
+          itemPayload: 'products||1'
+        - data: { id: 2, name: 'Product 2' }
+          itemPayload: 'products||2'
+        - data: { id: 3, name: 'Product 3' }
+          itemPayload: 'products||3'
+        - data: { id: 4, name: 'Product 4' }
+          itemPayload: 'products||4'
+        - data: { id: 5, name: 'Product 5' }
+          itemPayload: 'products||5'
+        - data: { id: 6, name: 'Product 6' }
+          itemPayload: 'products||6'
+        - data: { id: 7, name: 'Product 7' }
+          itemPayload: 'products||7'
+        - data: { id: 8, name: 'Product 8' }
+          itemPayload: 'products||8'
+        - data: { id: 9, name: 'Product 9' }
+          itemPayload: 'products||9'
+        - data: { id: 10, name: 'Product 10' }
+          itemPayload: 'products||10'
+        - data: { id: 11, name: 'Product 11' }
+          itemPayload: 'products||11'
+        - data: { id: 12, name: 'Product 12' }
+          itemPayload: 'products||12'
+        - data: { id: 13, name: 'Product 13' }
+          itemPayload: 'products||13'
+        - data: { id: 14, name: 'Product 14' }
+          itemPayload: 'products||14'
+        - data: { id: 15, name: 'Product 15' }
+          itemPayload: 'products||15'
     `);
   });
 

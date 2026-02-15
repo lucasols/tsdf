@@ -3,7 +3,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
 import { evtmitter } from 'evtmitter';
 import type { StoreError } from '../../src/utils/storeShared';
-import { FetchError } from './testEnvUtils';
+import { FetchError, TEST_INITIAL_TIME } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
 export const DEFAULT_MUTATION_DURATION_MS = 1200;
@@ -139,6 +139,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId: string;
         fields: string[] | undefined;
         result: ItemData | 'error' | 'aborted';
+        startedAt: number;
+        duration: number;
       }
     | {
         type: 'list';
@@ -148,6 +150,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         fields: string[] | undefined;
         filters: FilterOperator[] | undefined;
         batchKey: string | undefined;
+        startedAt: number;
+        duration: number;
         results:
           | Array<{ itemId: string; data: ItemData | 'error' }>
           | 'aborted';
@@ -191,6 +195,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     options?: { fields?: string[] },
   ): Promise<ItemData> {
     const fetchId = addAction ? getFetchId() : undefined;
+    const fetchStartedAt = Date.now() - TEST_INITIAL_TIME;
 
     if (addAction) {
       addAction('>fetch-started', { id: fetchId, itemId });
@@ -215,6 +220,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         fields: options?.fields,
         result: 'error',
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -248,6 +255,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         fields: options?.fields,
         result: 'aborted',
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -262,6 +271,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         fields: options?.fields,
         result: 'error',
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -279,6 +290,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       itemId,
       fields: options?.fields,
       result,
+      startedAt: fetchStartedAt,
+      duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
     });
     if (addAction) {
       numOfFinishedFetches++;
@@ -306,6 +319,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       batchKey,
     } = options ?? {};
     const listId = addAction ? getFetchId() : undefined;
+    const fetchStartedAt = Date.now() - TEST_INITIAL_TIME;
 
     if (addAction) {
       const filterInfo = filterItemIds ? { itemIds: filterItemIds } : undefined;
@@ -354,6 +368,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         filters,
         fields,
         batchKey,
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -374,6 +390,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         filters,
         fields,
         batchKey,
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -395,6 +413,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         filters,
         fields,
         batchKey,
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
 
       if (addAction) {
@@ -462,6 +482,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fields,
       filters,
       batchKey,
+      startedAt: fetchStartedAt,
+      duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
     });
 
     if (addAction) {

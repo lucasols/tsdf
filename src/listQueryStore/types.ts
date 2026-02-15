@@ -170,6 +170,8 @@ export type QueryFetchPayload<QueryPayload extends ValidPayload> = {
 
 export type OffsetPaginationConfig = {
   maxInvalidationLimit: number;
+  /** Max parallel chunk requests during chunked invalidation (default: 3) */
+  maxParallel?: number;
 };
 
 export type PartialResourcesConfig<ItemState extends ValidStoreState> = {

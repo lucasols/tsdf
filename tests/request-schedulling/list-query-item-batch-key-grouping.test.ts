@@ -72,6 +72,7 @@ describe('batch key grouping', () => {
     // All items with same batch key should be in one batch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
+        duration: 800
         itemIds: ['table1||1', 'table1||2', 'table1||3']
         offset: 0
         results:
@@ -81,6 +82,7 @@ describe('batch key grouping', () => {
             itemId: 'table1||2'
           - data: { id: 3, name: 'Item 3' }
             itemId: 'table1||3'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -111,6 +113,7 @@ describe('batch key grouping', () => {
     // Items should be split into two separate batch fetches by table
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
+        duration: 800
         itemIds: ['table1||1', 'table1||2']
         offset: 0
         results:
@@ -118,8 +121,10 @@ describe('batch key grouping', () => {
             itemId: 'table1||1'
           - data: { id: 2, name: 'Item 2' }
             itemId: 'table1||2'
+        startedAt: 50
         type: 'list'
       - batchKey: 'table2'
+        duration: 800
         itemIds: ['table2||10', 'table2||20']
         offset: 0
         results:
@@ -127,6 +132,7 @@ describe('batch key grouping', () => {
             itemId: 'table2||10'
           - data: { id: 20, name: 'Item 20' }
             itemId: 'table2||20'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -160,6 +166,7 @@ describe('batch key grouping', () => {
     // table1 items batched, table2||10 individual fetch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
+        duration: 800
         itemIds: ['table1||1', 'table1||2']
         offset: 0
         results:
@@ -167,9 +174,12 @@ describe('batch key grouping', () => {
             itemId: 'table1||1'
           - data: { id: 2, name: 'Item 2' }
             itemId: 'table1||2'
+        startedAt: 50
         type: 'list'
-      - itemId: 'table2||10'
+      - duration: 800
+        itemId: 'table2||10'
         result: { id: 10, name: 'Item 10' }
+        startedAt: 50
         type: 'fetch'
     `);
   });
@@ -212,6 +222,7 @@ describe('batch key grouping', () => {
     // table1 items batched together, table2 items fetched individually
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'table1'
+        duration: 800
         itemIds: ['table1||1', 'table1||2']
         offset: 0
         results:
@@ -219,12 +230,17 @@ describe('batch key grouping', () => {
             itemId: 'table1||1'
           - data: { id: 2, name: 'Item 2' }
             itemId: 'table1||2'
+        startedAt: 50
         type: 'list'
-      - itemId: 'table2||10'
+      - duration: 800
+        itemId: 'table2||10'
         result: { id: 10, name: 'Item 10' }
+        startedAt: 50
         type: 'fetch'
-      - itemId: 'table2||20'
+      - duration: 800
+        itemId: 'table2||20'
         result: { id: 20, name: 'Item 20' }
+        startedAt: 50
         type: 'fetch'
     `);
   });
@@ -245,6 +261,7 @@ describe('batch key grouping', () => {
     // All items should go into a single batch (default key)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
+        duration: 800
         itemIds: ['table1||1', 'table1||2', 'table2||10']
         offset: 0
         results:
@@ -254,6 +271,7 @@ describe('batch key grouping', () => {
             itemId: 'table1||2'
           - data: { id: 10, name: 'Item 10' }
             itemId: 'table2||10'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -271,8 +289,10 @@ describe('batch key grouping', () => {
 
     // Single item uses fetchItemFn, not batchFetchItemFn
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemId: 'table1||1'
+      - duration: 800
+        itemId: 'table1||1'
         result: { id: 1, name: 'Item 1' }
+        startedAt: 50
         type: 'fetch'
     `);
   });

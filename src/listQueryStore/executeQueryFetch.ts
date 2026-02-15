@@ -1,3 +1,4 @@
+import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
@@ -181,8 +182,16 @@ export async function executeQueryFetch<
             });
           }
 
-          const chunkResults = await Promise.all(
-            chunks.map((chunk) =>
+          const queue = createAsyncQueue<
+            FetchListFnReturn<ItemState, ItemPayload>
+          >({
+            concurrency: offsetPagination.maxParallel ?? 3,
+            stopOnError: true,
+            rejectPendingOnError: true,
+          });
+
+          const chunkResultPromises = chunks.map((chunk) =>
+            queue.resultifyAdd(() =>
               normalizedFetchListFn(payload, chunk.offset, chunk.limit, {
                 signal: fetchCtx.signal,
                 fields,
@@ -190,8 +199,11 @@ export async function executeQueryFetch<
             ),
           );
 
-          allItems = chunkResults.flatMap((r) => r.items);
-          const lastChunk = chunkResults[chunkResults.length - 1];
+          const chunkResults = await Promise.all(chunkResultPromises);
+          const successResults = chunkResults.map((r) => r.unwrap());
+
+          allItems = successResults.flatMap((r) => r.items);
+          const lastChunk = successResults[successResults.length - 1];
           hasMore = lastChunk ? lastChunk.hasMore : false;
         } else {
           const result = await normalizedFetchListFn(payload, offset, limit, {

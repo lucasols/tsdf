@@ -80,7 +80,8 @@ describe('query coalescing with partial resources', () => {
     await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 4
         offset: 0
         results:
@@ -92,6 +93,7 @@ describe('query coalescing with partial resources', () => {
             itemId: 'table1||3'
           - data: { id: 4, name: 'Item 4' }
             itemId: 'table1||4'
+        startedAt: 50
         type: 'list'
     `);
     expect(env.serverTable.numOfFinishedFetches).toBe(1);
@@ -125,7 +127,8 @@ describe('query coalescing with partial resources', () => {
     await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['address', 'id', 'name']
+      - duration: 800
+        fields: ['address', 'id', 'name']
         limit: 5
         offset: 0
         results:
@@ -139,6 +142,7 @@ describe('query coalescing with partial resources', () => {
             itemId: 'table1||4'
           - data: { address: 'Address 5', id: 5, name: 'Item 5' }
             itemId: 'table1||5'
+        startedAt: 50
         type: 'list'
     `);
 
@@ -180,7 +184,8 @@ describe('query coalescing with partial resources', () => {
     }
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 5
+      - duration: 800
+        limit: 5
         offset: 0
         results:
           - data: { address: 'Address 1', country: 'Country 1', id: 1, name: 'Item 1' }
@@ -193,6 +198,7 @@ describe('query coalescing with partial resources', () => {
             itemId: 'table1||4'
           - data: { address: 'Address 5', country: 'Country 5', id: 5, name: 'Item 5' }
             itemId: 'table1||5'
+        startedAt: 50
         type: 'list'
     `);
 
@@ -258,7 +264,8 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
     await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id']
+      - duration: 800
+        fields: ['id']
         limit: 2
         offset: 0
         results:
@@ -266,8 +273,10 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
             itemId: 'table1||1'
           - data: { id: 2 }
             itemId: 'table1||2'
+        startedAt: 50
         type: 'list'
-      - fields: ['address', 'id', 'name']
+      - duration: 800
+        fields: ['address', 'id', 'name']
         limit: 6
         offset: 0
         results:
@@ -283,6 +292,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
             itemId: 'table1||5'
           - data: { address: 'Address 6', id: 6, name: 'Item 6' }
             itemId: 'table1||6'
+        startedAt: 900
         type: 'list'
     `);
   });
@@ -321,7 +331,8 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
     await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 2
         offset: 0
         results:
@@ -329,8 +340,10 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
             itemId: 'table1||1'
           - data: { id: 2, name: 'Item 2' }
             itemId: 'table1||2'
+        startedAt: 50
         type: 'list'
-      - fields: ['address', 'country', 'id']
+      - duration: 800
+        fields: ['address', 'country', 'id']
         limit: 4
         offset: 0
         results:
@@ -342,6 +355,7 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
             itemId: 'table1||3'
           - data: { address: 'Address 4', country: 'Country 4', id: 4 }
             itemId: 'table1||4'
+        startedAt: 900
         type: 'list'
     `);
 
