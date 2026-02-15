@@ -41,18 +41,6 @@ export type {
   TSFDUseListQueryReturn,
 } from './listQueryStore/types';
 
-// Request Scheduler types
-export type {
-  BatchRequest,
-  FetchContext,
-  FetchType,
-  PendingRequest,
-  RequestSchedulerEvents,
-  RequestSchedulerOptions,
-  ScheduleFetchOptions,
-  ScheduleFetchResults,
-} from './requestScheduler';
-
 // Shared types
 export type {
   StoreError,
