@@ -18,7 +18,6 @@ export async function executeBatchFetch<
   requests: BatchRequest<ItemPayload>[],
   fetchCtx: FetchContext,
   store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
-  itemKeyToPayload: Map<string, ItemPayload>,
   fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>,
   batchFetchFn:
     | ((
@@ -31,11 +30,6 @@ export async function executeBatchFetch<
   batchKey?: string,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
-
-  // Store payloads for later lookup
-  for (const { requestId, payload } of requests) {
-    itemKeyToPayload.set(requestId, payload);
-  }
 
   // Set loading state for all items
   store.produceState(

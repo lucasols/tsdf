@@ -446,6 +446,7 @@ export function createListQueryStore<
     awaitItemFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
+    deleteItemFetchResources,
     resetSchedulers,
   } = createFetchApi<ItemState, QueryPayload, ItemPayload>({
     store,
@@ -480,6 +481,7 @@ export function createListQueryStore<
     updateItemState,
     addItemToState,
     deleteItemState,
+    resetInvalidationTracking,
     performMutation,
   } = createMutationApi<ItemState, QueryPayload, ItemPayload>({
     store,
@@ -495,6 +497,7 @@ export function createListQueryStore<
     getItemsKeyArray,
     getOrCreateItemScheduler,
     getOrCreateQueryScheduler,
+    deleteItemFetchResources,
     emitInvalidateQuery: (event) => {
       events.emit('invalidateQuery', event);
     },
@@ -637,6 +640,7 @@ export function createListQueryStore<
 
   function reset() {
     resetSchedulers();
+    resetInvalidationTracking();
 
     store.setState({
       items: {},

@@ -407,6 +407,50 @@ export function createFetchApi<
     return scheduler;
   }
 
+  function getBatchKeyForPayload(payload: ItemPayload): string | false {
+    if (!useBatchSchedulers) return false;
+    if (!getItemsBatchKey) return '__default__';
+    return getItemsBatchKey(payload);
+  }
+
+  function maybeDisposeBatchScheduler(payload: ItemPayload): void {
+    const batchKey = getBatchKeyForPayload(payload);
+    if (batchKey === false) return;
+
+    const scheduler = batchKeySchedulers.get(batchKey);
+    if (!scheduler) return;
+
+    const hasRelatedItems = Object.values(store.state.itemQueries).some(
+      (itemQuery) => {
+        if (!itemQuery) return false;
+        return getBatchKeyForPayload(itemQuery.payload) === batchKey;
+      },
+    );
+
+    if (!hasRelatedItems) {
+      scheduler.reset();
+      batchKeySchedulers.delete(batchKey);
+      batchInitialFetchStartTime.delete(batchKey);
+    }
+  }
+
+  function deleteItemFetchResources(
+    items: { itemKey: string; payload: ItemPayload }[],
+  ): void {
+    for (const { itemKey, payload } of items) {
+      itemKeyToPayload.delete(itemKey);
+      itemInitialFetchStartTime.delete(itemKey);
+
+      const itemScheduler = perItemSchedulers.get(itemKey);
+      if (itemScheduler) {
+        itemScheduler.reset();
+        perItemSchedulers.delete(itemKey);
+      }
+
+      maybeDisposeBatchScheduler(payload);
+    }
+  }
+
   function getQueryState(params: QueryPayload): Query | undefined {
     return store.state.queries[getQueryKey(params)];
   }
@@ -819,6 +863,7 @@ export function createFetchApi<
       scheduler.reset();
     }
     querySchedulers.clear();
+    queryInitialFetchStartTime.clear();
 
     for (const scheduler of batchKeySchedulers.values()) {
       scheduler.reset();
@@ -830,6 +875,8 @@ export function createFetchApi<
       scheduler.reset();
     }
     perItemSchedulers.clear();
+    itemInitialFetchStartTime.clear();
+    itemKeyToPayload.clear();
   }
 
   return {
@@ -846,6 +893,7 @@ export function createFetchApi<
     awaitItemFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
+    deleteItemFetchResources,
     resetSchedulers,
   };
 }

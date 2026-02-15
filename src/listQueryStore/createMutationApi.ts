@@ -72,6 +72,9 @@ export type CreateMutationApiOptions<
     payload: ItemPayload,
   ) => SchedulerWithMutation;
   getOrCreateQueryScheduler: (queryKey: string) => SchedulerWithMutation;
+  deleteItemFetchResources: (
+    items: { itemKey: string; payload: ItemPayload }[],
+  ) => void;
   emitInvalidateQuery: (event: InvalidateQueryEvent) => void;
   emitInvalidateItem: (event: InvalidateItemEvent) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
@@ -95,6 +98,7 @@ export function createMutationApi<
   getItemsKeyArray,
   getOrCreateItemScheduler,
   getOrCreateQueryScheduler,
+  deleteItemFetchResources,
   emitInvalidateQuery,
   emitInvalidateItem,
   blockWindowClose,
@@ -489,6 +493,17 @@ export function createMutationApi<
       },
       { action: 'delete-item-state' },
     );
+
+    for (const { itemKey } of itemsId) {
+      itemInvalidationWasTriggered.delete(itemKey);
+    }
+
+    deleteItemFetchResources(itemsId);
+  }
+
+  function resetInvalidationTracking() {
+    queryInvalidationWasTriggered.clear();
+    itemInvalidationWasTriggered.clear();
   }
 
   async function performMutation<T>(
@@ -573,6 +588,7 @@ export function createMutationApi<
     updateItemState,
     addItemToState,
     deleteItemState,
+    resetInvalidationTracking,
     performMutation,
   };
 }

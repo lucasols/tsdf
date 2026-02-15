@@ -228,9 +228,6 @@ export function createCollectionStore<
 
   const events = evtmitter<CollectionStoreEvents>();
 
-  // Map to track itemKey -> payload for batch fetch results
-  const itemKeyToPayload = new Map<string, ItemPayload>();
-
   const useBatchSchedulers = !!batchFetchFn;
 
   const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
@@ -316,12 +313,47 @@ export function createCollectionStore<
       requests,
       fetchCtx,
       store,
-      itemKeyToPayload,
       fetchFn,
       batchFetchFn,
       errorNormalizer,
       batchKey,
     );
+  }
+
+  function getBatchKey(payload: ItemPayload): string | false {
+    if (!useBatchSchedulers) return false;
+    if (!getItemsBatchKey) return '__default__';
+    return getItemsBatchKey(payload);
+  }
+
+  function maybeDisposeBatchScheduler(payload: ItemPayload): void {
+    const batchKey = getBatchKey(payload);
+    if (batchKey === false) return;
+
+    const scheduler = batchKeySchedulers.get(batchKey);
+    if (!scheduler) return;
+
+    const hasRelatedItems = Object.values(store.state).some((item) => {
+      if (!item) return false;
+      return getBatchKey(item.payload) === batchKey;
+    });
+
+    if (!hasRelatedItems) {
+      scheduler.reset();
+      batchKeySchedulers.delete(batchKey);
+    }
+  }
+
+  function cleanupItemResources(itemKey: string, payload: ItemPayload): void {
+    invalidationWasTriggered.delete(itemKey);
+
+    const itemScheduler = perItemSchedulers.get(itemKey);
+    if (itemScheduler) {
+      itemScheduler.reset();
+      perItemSchedulers.delete(itemKey);
+    }
+
+    maybeDisposeBatchScheduler(payload);
   }
 
   type FilterItemsFn = (params: ItemPayload, data: ItemState | null) => boolean;
@@ -586,6 +618,10 @@ export function createCollectionStore<
       },
       { action: 'delete-item-state' },
     );
+
+    for (const { itemKey, payload } of itemKeys) {
+      cleanupItemResources(itemKey, payload);
+    }
   }
 
   function updateItemState(
@@ -694,6 +730,8 @@ export function createCollectionStore<
       scheduler.reset();
     }
     perItemSchedulers.clear();
+
+    invalidationWasTriggered.clear();
 
     store.setState({});
   }

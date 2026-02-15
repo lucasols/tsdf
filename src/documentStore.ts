@@ -18,7 +18,10 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
-import { performMutationWithLifecycle, type BlockWindowCloseHandler } from './utils/performMutation';
+import {
+  performMutationWithLifecycle,
+  type BlockWindowCloseHandler,
+} from './utils/performMutation';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import {
   fetchTypePriority,
