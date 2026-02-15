@@ -253,7 +253,7 @@ test('mounting after medium priority invalidation on idle store loads data', asy
 
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
-  expect(env.serverMock.fetches[0]?.startTime).toBe(10);
+  expect(env.serverMock.fetchHistory[0]?.startTime).toBe(10);
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "
@@ -289,7 +289,7 @@ test('mounting after medium priority invalidation on loaded store triggers a med
 
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
-  expect(env.serverMock.fetches[0]?.startTime).toBe(300 + 10);
+  expect(env.serverMock.fetchHistory[0]?.startTime).toBe(300 + 10);
 
   expect(renders.snapshot).toMatchInlineSnapshot(`
     "

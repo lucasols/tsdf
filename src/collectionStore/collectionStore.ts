@@ -1,3 +1,4 @@
+import { isWindowFocused, onWindowFocus } from '@ls-stack/browser-utils/window';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
@@ -117,7 +118,12 @@ export type CollectionStoreOptions<
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
-  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (params: {
+    lastFetchDuration: number;
+    windowIsNotFocused: boolean;
+  }) => number;
+  revalidateOnWindowFocus?: boolean | (() => boolean);
+  backgroundCoalescingWindowMultiplier: number;
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (
@@ -159,6 +165,8 @@ export function createCollectionStore<
   errorNormalizer,
   mediumPriorityDelayMs,
   dynamicRealtimeThrottleMs,
+  revalidateOnWindowFocus,
+  backgroundCoalescingWindowMultiplier,
   getCollectionItemKey: filterCollectionItemObjKey,
   onInvalidate,
   onSchedulerEvent,
@@ -228,6 +236,17 @@ export function createCollectionStore<
 
   const events = evtmitter<CollectionStoreEvents>();
 
+  const wrappedDynamicRealtimeThrottleMs = dynamicRealtimeThrottleMs
+    ? (lastFetchDuration: number) =>
+        dynamicRealtimeThrottleMs({
+          lastFetchDuration,
+          windowIsNotFocused: !isWindowFocused(),
+        })
+    : undefined;
+
+  const getCoalescingWindowMultiplier = (): number =>
+    !isWindowFocused() ? backgroundCoalescingWindowMultiplier : 1;
+
   const useBatchSchedulers = !!batchFetchFn;
 
   const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
@@ -246,12 +265,13 @@ export function createCollectionStore<
         },
         lowPriorityThrottleMs,
         baseCoalescingWindowMs,
-        dynamicRealtimeThrottleMs,
+        dynamicRealtimeThrottleMs: wrappedDynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         maxBatchSize,
         on: onSchedulerEvent,
         initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
         usesRealTimeUpdates,
+        getCoalescingWindowMultiplier,
       });
       batchKeySchedulers.set(batchKey, scheduler);
     }
@@ -275,11 +295,12 @@ export function createCollectionStore<
         },
         lowPriorityThrottleMs,
         baseCoalescingWindowMs,
-        dynamicRealtimeThrottleMs,
+        dynamicRealtimeThrottleMs: wrappedDynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
         usesRealTimeUpdates,
+        getCoalescingWindowMultiplier,
       });
       perItemSchedulers.set(itemKey, itemScheduler);
     }
@@ -720,6 +741,29 @@ export function createCollectionStore<
     });
   }
 
+  // Set up window focus listener for non-realtime stores
+  let cleanupFocusListener: (() => void) | null = null;
+
+  function setupFocusListener() {
+    cleanupFocusListener?.();
+    cleanupFocusListener = null;
+
+    if (!revalidateOnWindowFocus || usesRealTimeUpdates) return;
+
+    cleanupFocusListener = onWindowFocus(() => {
+      const enabled =
+        typeof revalidateOnWindowFocus === 'function'
+          ? revalidateOnWindowFocus()
+          : revalidateOnWindowFocus;
+
+      if (enabled) {
+        invalidateItem(() => true, 'lowPriority');
+      }
+    });
+  }
+
+  setupFocusListener();
+
   function reset() {
     for (const scheduler of batchKeySchedulers.values()) {
       scheduler.reset();
@@ -734,6 +778,7 @@ export function createCollectionStore<
     invalidationWasTriggered.clear();
 
     store.setState({});
+    setupFocusListener();
   }
 
   return {

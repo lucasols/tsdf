@@ -625,8 +625,8 @@ test('RTU throttling', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     testScenario: { loaded: { tables: ['users'] } },
     usesRealTimeUpdates: true,
-    dynamicRealtimeThrottleMs(lastDuration) {
-      if (lastDuration < 500) return 500;
+    dynamicRealtimeThrottleMs({ lastFetchDuration }) {
+      if (lastFetchDuration < 500) return 500;
 
       return 1000;
     },

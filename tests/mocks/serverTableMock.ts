@@ -857,8 +857,6 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     get numOfFinishedFetches() {
       return numOfFinishedFetches;
     },
-    get fetchHistory() {
-      return fetchHistory;
-    },
+    fetchHistory,
   };
 }

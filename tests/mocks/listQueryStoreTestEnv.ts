@@ -11,6 +11,10 @@ import type {
 } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+import {
+  simulateWindowBlur,
+  simulateWindowFocus,
+} from '../utils/genericTestUtils';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
   createActionTracker,
@@ -68,6 +72,8 @@ export function createListQueryStoreTestEnv<
   serverInitialData: Tables<TRow>,
   {
     dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    backgroundCoalescingWindowMultiplier,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
@@ -83,7 +89,12 @@ export function createListQueryStoreTestEnv<
     offsetPagination,
     blockWindowClose,
   }: {
-    dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+    dynamicRealtimeThrottleMs?: (params: {
+      lastFetchDuration: number;
+      windowIsNotFocused: boolean;
+    }) => number;
+    revalidateOnWindowFocus?: boolean | (() => boolean);
+    backgroundCoalescingWindowMultiplier?: number;
     baseCoalescingWindowMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
@@ -238,6 +249,8 @@ export function createListQueryStoreTestEnv<
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     defaultQuerySize,
     usesRealTimeUpdates,
@@ -497,6 +510,14 @@ export function createListQueryStoreTestEnv<
     },
     get timelineString() {
       return getTimelineString();
+    },
+    simulateWindowFocus() {
+      addAction('window-focused');
+      simulateWindowFocus();
+    },
+    simulateWindowBlur() {
+      addAction('window-blurred');
+      simulateWindowBlur();
     },
   };
 }

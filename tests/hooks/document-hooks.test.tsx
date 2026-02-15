@@ -637,7 +637,7 @@ test('RTU update works', async () => {
     "
   `);
 
-  const secondFetch = env.serverMock.fetches[1];
+  const secondFetch = env.serverMock.fetchHistory[1];
 
   expect(secondFetch).toBeDefined();
   expect(

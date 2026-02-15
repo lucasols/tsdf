@@ -5,6 +5,10 @@ import {
 } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+import {
+  simulateWindowBlur,
+  simulateWindowFocus,
+} from '../utils/genericTestUtils';
 import { createServerTableMock } from './serverTableMock';
 import {
   createActionTracker,
@@ -28,7 +32,12 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   | { loadedWithStaleData: Record<string, D> };
 
 export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
-  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (params: {
+    lastFetchDuration: number;
+    windowIsNotFocused: boolean;
+  }) => number;
+  revalidateOnWindowFocus?: boolean | (() => boolean);
+  backgroundCoalescingWindowMultiplier?: number;
   baseCoalescingWindowMs?: number;
   mediumPriorityDelayMs?: number;
   /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
@@ -46,6 +55,8 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
     dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    backgroundCoalescingWindowMultiplier = 1,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     useBatchFetch,
@@ -154,6 +165,8 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     '~test': testOptions,
@@ -250,6 +263,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     },
     get timelineString() {
       return getTimelineString();
+    },
+    simulateWindowFocus() {
+      addAction('window-focused');
+      simulateWindowFocus();
+    },
+    simulateWindowBlur() {
+      addAction('window-blurred');
+      simulateWindowBlur();
     },
   };
 }

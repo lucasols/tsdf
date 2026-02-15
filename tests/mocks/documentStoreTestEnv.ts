@@ -4,6 +4,10 @@ import type { FetchType } from '../../src/requestScheduler';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import { createServerMock, type FetchErrorConfig } from './serverMock';
 import {
+  simulateWindowBlur,
+  simulateWindowFocus,
+} from '../utils/genericTestUtils';
+import {
   createActionTracker,
   createEmojiCyclers,
   createUITracker,
@@ -23,7 +27,12 @@ export type DocumentStoreTestScenario<D> =
   | { loadedWithStaleData: D };
 
 export type DocumentStoreTestEnvOptions<D> = {
-  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (params: {
+    lastFetchDuration: number;
+    windowIsNotFocused: boolean;
+  }) => number;
+  revalidateOnWindowFocus?: boolean | (() => boolean);
+  backgroundCoalescingWindowMultiplier?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
@@ -36,6 +45,8 @@ export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
     dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    backgroundCoalescingWindowMultiplier = 1,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = 200,
     mediumPriorityDelayMs,
@@ -72,6 +83,8 @@ export function createDocumentStoreTestEnv<D>(
     },
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     '~test': testOptions,
@@ -194,6 +207,14 @@ export function createDocumentStoreTestEnv<D>(
     },
     setServerData(value: D) {
       serverMock.setData(value);
+    },
+    simulateWindowFocus() {
+      addAction('window-focused');
+      simulateWindowFocus();
+    },
+    simulateWindowBlur() {
+      addAction('window-blurred');
+      simulateWindowBlur();
     },
   };
 }
