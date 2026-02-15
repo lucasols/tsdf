@@ -1,4 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
@@ -125,5 +124,5 @@ export function useListQuery<
       });
   });
 
-  return __LEGIT_CAST__(useModifyResult(result));
+  return useModifyResult(result);
 }

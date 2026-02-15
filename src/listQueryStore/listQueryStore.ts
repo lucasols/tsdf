@@ -1,5 +1,4 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
 import {
@@ -61,9 +60,8 @@ export type ListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
-    undefined,
-  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
+  TPartialResources extends boolean = false,
+  TOffsetPagination extends boolean = false,
 > = ReturnType<
   typeof createListQueryStore<
     ItemState,
@@ -102,8 +100,7 @@ type ListQueryStoreOptionsBase<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
-    undefined,
+  TPartialResources extends boolean = false,
 > = {
   debugName?: string;
   fetchItemFn?: (
@@ -147,101 +144,93 @@ type ListQueryStoreOptionsBase<
   blockWindowClose: BlockWindowCloseHandler | null;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
-  partialResources?: TPartialResources;
-};
+} & ([TPartialResources] extends [true]
+  ? { partialResources: PartialResourcesConfig<ItemState> }
+  : { partialResources?: undefined });
 
 export type ListQueryStoreOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
-    undefined,
-  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
+  TPartialResources extends boolean = false,
+  TOffsetPagination extends boolean = false,
 > = ListQueryStoreOptionsBase<
   ItemState,
   QueryPayload,
   ItemPayload,
   TPartialResources
 > &
-  ([TOffsetPagination] extends [undefined]
+  ([TOffsetPagination] extends [true]
     ? {
-        fetchListFn: FetchListFnSizeMode<ItemState, QueryPayload, ItemPayload>;
-        offsetPagination?: undefined;
-      }
-    : {
         fetchListFn: FetchListFnOffsetMode<
           ItemState,
           QueryPayload,
           ItemPayload
         >;
-        offsetPagination: TOffsetPagination;
+        offsetPagination: OffsetPaginationConfig;
+      }
+    : {
+        fetchListFn: FetchListFnSizeMode<ItemState, QueryPayload, ItemPayload>;
+        offsetPagination?: undefined;
       });
 
 export function createListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
-    undefined,
-  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
->({
-  debugName,
-  fetchListFn,
-  fetchItemFn,
-  batchFetchItemFn,
-  getItemsBatchKey,
-  errorNormalizer,
-  defaultQuerySize = 50,
-  maxItemBatchSize,
-  usesRealTimeUpdates = false,
-  '~test': testOptions,
-  lowPriorityThrottleMs,
-  baseCoalescingWindowMs,
-  mediumPriorityDelayMs,
-  dynamicRealtimeThrottleMs,
-  optimisticListUpdates,
-  onInvalidateQuery,
-  onInvalidateItem,
-  onSchedulerEvent,
-  onMutationError,
-  blockWindowClose,
-  getQueryKey: customGetQueryKey,
-  getItemKey: customGetItemKey,
-  partialResources,
-  ...rest
-}: ListQueryStoreOptions<
-  ItemState,
-  QueryPayload,
-  ItemPayload,
-  TPartialResources,
-  TOffsetPagination
->) {
-  type HasPR = [TPartialResources] extends [undefined] ? false : true;
+  TPartialResources extends boolean = false,
+  TOffsetPagination extends boolean = false,
+>(
+  storeOptions: ListQueryStoreOptions<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TPartialResources,
+    TOffsetPagination
+  >,
+) {
+  const {
+    debugName,
+    fetchItemFn,
+    batchFetchItemFn,
+    getItemsBatchKey,
+    errorNormalizer,
+    defaultQuerySize = 50,
+    maxItemBatchSize,
+    usesRealTimeUpdates = false,
+    '~test': testOptions,
+    lowPriorityThrottleMs,
+    baseCoalescingWindowMs,
+    mediumPriorityDelayMs,
+    dynamicRealtimeThrottleMs,
+    optimisticListUpdates,
+    onInvalidateQuery,
+    onInvalidateItem,
+    onSchedulerEvent,
+    onMutationError,
+    blockWindowClose,
+    getQueryKey: customGetQueryKey,
+    getItemKey: customGetItemKey,
+    partialResources,
+  } = storeOptions;
+
+  type HasPR = [TPartialResources] extends [true] ? true : false;
   const offsetPagination: OffsetPaginationConfig | undefined =
-    'offsetPagination' in rest ? rest.offsetPagination : undefined;
+    storeOptions.offsetPagination;
 
-  // Normalize fetchListFn to internal form: (payload, offset, limit, options) => Promise<...>
-  // We use __LEGIT_CAST__ because the conditional union type of fetchListFn
-  // (size mode vs offset mode) cannot be narrowed via 'offsetPagination' at runtime —
-  // TypeScript sees the union but the runtime check is on a separate option.
-  const fetchListFnAsUnknown =
-    __LEGIT_CAST__<
-      (...args: unknown[]) => Promise<FetchListFnReturn<ItemState, ItemPayload>>
-    >(fetchListFn);
-
-  const normalizedFetchListFn = offsetPagination
+  const normalizedFetchListFn = storeOptions.offsetPagination
     ? (
         payload: QueryPayload,
         offset: number,
         limit: number,
-        options: { signal: AbortSignal; fields?: string[] },
-      ) => fetchListFnAsUnknown(payload, { offset, limit }, options)
+        fetchOptions: { signal: AbortSignal; fields?: string[] },
+      ) => storeOptions.fetchListFn(payload, { offset, limit }, fetchOptions)
     : (
         payload: QueryPayload,
         _offset: number,
         limit: number,
-        options: { signal: AbortSignal; fields?: string[] },
-      ) => fetchListFnAsUnknown(payload, limit, options);
+        fetchOptions: { signal: AbortSignal; fields?: string[] },
+      ) => storeOptions.fetchListFn(payload, limit, fetchOptions);
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
   type FetchFieldsOption = HasPR extends true
     ? { fields: FieldsInput }
@@ -302,29 +291,16 @@ export function createListQueryStore<
     ): ScheduleFetchResults[];
   };
 
-  type LoadMoreApi = HasPR extends true
-    ? {
-        (
-          params: QueryPayload,
-          size: number,
-          options: FetchFieldsOption,
-        ): ScheduleFetchResults;
-        (
-          params: QueryPayload,
-          options: LoadMoreWithFieldsOptions,
-        ): ScheduleFetchResults;
-      }
-    : {
-        (
-          params: QueryPayload,
-          size?: number,
-          options?: FetchFieldsOption,
-        ): ScheduleFetchResults;
-        (
-          params: QueryPayload,
-          options?: LoadMoreWithFieldsOptions,
-        ): ScheduleFetchResults;
-      };
+  type LoadMoreApi = (
+    params: QueryPayload,
+    ...args: HasPR extends true
+      ?
+          | [size: number, options: FetchFieldsOption]
+          | [options: LoadMoreWithFieldsOptions]
+      :
+          | [size?: number, options?: FetchFieldsOption]
+          | [options?: LoadMoreWithFieldsOptions]
+  ) => ScheduleFetchResults;
 
   type AwaitListQueryFetchApi = (
     params: QueryPayload,
@@ -348,6 +324,47 @@ export function createListQueryStore<
   ) => Promise<
     { data: null; error: StoreFetchError } | { data: ItemState; error: null }
   >;
+
+  type UseMultipleListQueriesApi = {
+    <
+      SelectedItem = ItemState,
+      QueryMetadata extends undefined | Record<string, unknown> = undefined,
+    >(
+      queries: (ListQueryUseMultipleListQueriesQuery<
+        QueryPayload,
+        QueryMetadata
+      > &
+        FieldsOption<HasPR>)[],
+      options?: UseMultipleListQueriesOptions<
+        ItemState,
+        ItemPayload,
+        SelectedItem
+      >,
+    ): readonly TSFDUseListQueryReturn<
+      SelectedItem,
+      QueryPayload,
+      QueryMetadata
+    >[];
+    <S = ItemState>(
+      queries: ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[],
+      options: UseMultipleListQueriesOptions<ItemState, ItemPayload, S>,
+    ): readonly TSFDUseListQueryReturn<S, QueryPayload, undefined>[];
+  };
+
+  type UseMultipleItemsApi = {
+    <
+      Selected = ItemState | null,
+      QueryMetadata extends undefined | Record<string, unknown> = undefined,
+    >(
+      items: (ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata> &
+        FieldsOption<HasPR>)[],
+      options?: UseMultipleItemsOptions<ItemState, Selected>,
+    ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[];
+    <S = ItemState | null>(
+      items: ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[],
+      options: UseMultipleItemsOptions<ItemState, S>,
+    ): readonly TSFDUseListItemReturn<S, ItemPayload, undefined>[];
+  };
 
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
 
@@ -430,7 +447,7 @@ export function createListQueryStore<
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
     resetSchedulers,
-  } = createFetchApi<ItemState, QueryPayload, ItemPayload, TPartialResources>({
+  } = createFetchApi<ItemState, QueryPayload, ItemPayload>({
     store,
     normalizedFetchListFn,
     offsetPagination,
@@ -464,12 +481,7 @@ export function createListQueryStore<
     addItemToState,
     deleteItemState,
     performMutation,
-  } = createMutationApi<
-    ItemState,
-    QueryPayload,
-    ItemPayload,
-    TPartialResources
-  >({
+  } = createMutationApi<ItemState, QueryPayload, ItemPayload>({
     store,
     fetchItemFn,
     partialResources,
@@ -491,63 +503,44 @@ export function createListQueryStore<
     },
     blockWindowClose,
   });
-  const useMultipleListQueries: {
-    <
+  const useMultipleListQueries: UseMultipleListQueriesApi =
+    function useMultipleListQueries<
       SelectedItem = ItemState,
       QueryMetadata extends undefined | Record<string, unknown> = undefined,
     >(
-      queries: (ListQueryUseMultipleListQueriesQuery<
+      queries: ListQueryUseMultipleListQueriesQuery<
         QueryPayload,
         QueryMetadata
-      > &
-        FieldsOption<HasPR>)[],
-      options?: UseMultipleListQueriesOptions<
+      >[],
+      options: UseMultipleListQueriesOptions<
         ItemState,
         ItemPayload,
         SelectedItem
-      >,
+      > = {},
     ): readonly TSFDUseListQueryReturn<
       SelectedItem,
       QueryPayload,
       QueryMetadata
-    >[];
-  } = __LEGIT_CAST__(function useMultipleListQueries<
-    SelectedItem = ItemState,
-    QueryMetadata extends undefined | Record<string, unknown> = undefined,
-  >(
-    queries: ListQueryUseMultipleListQueriesQuery<
-      QueryPayload,
-      QueryMetadata
-    >[],
-    options: UseMultipleListQueriesOptions<
-      ItemState,
-      ItemPayload,
-      SelectedItem
-    > = {},
-  ): readonly TSFDUseListQueryReturn<
-    SelectedItem,
-    QueryPayload,
-    QueryMetadata
-  >[] {
-    return useMultipleListQueriesHook<
-      ItemState,
-      QueryPayload,
-      ItemPayload,
-      SelectedItem,
-      QueryMetadata
-    >(
-      queries,
-      options,
-      store,
-      events,
-      getQueryKey,
-      getQueryState,
-      scheduleListQueryFetch,
-      queryInvalidationWasTriggered,
-      globalDisableRefetchOnMount,
-      partialResources,
-    );
-  });
+    >[] {
+      return useMultipleListQueriesHook<
+        ItemState,
+        QueryPayload,
+        ItemPayload,
+        SelectedItem,
+        QueryMetadata
+      >(
+        queries,
+        options,
+        store,
+        events,
+        getQueryKey,
+        getQueryState,
+        scheduleListQueryFetch,
+        queryInvalidationWasTriggered,
+        globalDisableRefetchOnMount,
+        partialResources,
+      );
+    };
 
   const useListQuery: {
     <SelectedItem = ItemState>(
@@ -563,11 +556,11 @@ export function createListQueryStore<
             },
           ]
         : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
-    ): TSFDUseListQueryReturn<SelectedItem, QueryPayload>;
+    ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;
   } = function useListQuery<SelectedItem = ItemState>(
     payload: QueryPayload | false | null | undefined,
     options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> = {},
-  ): TSFDUseListQueryReturn<SelectedItem, QueryPayload> {
+  ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined> {
     return useListQueryHook<ItemState, QueryPayload, ItemPayload, SelectedItem>(
       payload,
       options,
@@ -578,16 +571,7 @@ export function createListQueryStore<
     );
   };
 
-  const useMultipleItems: {
-    <
-      Selected = ItemState | null,
-      QueryMetadata extends undefined | Record<string, unknown> = undefined,
-    >(
-      items: (ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata> &
-        FieldsOption<HasPR>)[],
-      options?: UseMultipleItemsOptions<ItemState, Selected>,
-    ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[];
-  } = function useMultipleItems<
+  const useMultipleItems: UseMultipleItemsApi = function useMultipleItems<
     Selected = ItemState | null,
     QueryMetadata extends undefined | Record<string, unknown> = undefined,
   >(
@@ -663,12 +647,90 @@ export function createListQueryStore<
     });
   }
 
+  function scheduleListQueryFetchApiImpl(
+    fetchType: FetchType,
+    payload: QueryPayload,
+    ...args: HasPR extends true
+      ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
+      : [size?: number, options?: ScheduleFetchWithFieldsOption]
+  ): ScheduleFetchResults;
+  function scheduleListQueryFetchApiImpl(
+    fetchType: FetchType,
+    payload: QueryPayload[],
+    ...args: HasPR extends true
+      ? [size: number | undefined, options: ScheduleFetchWithFieldsOption]
+      : [size?: number, options?: ScheduleFetchWithFieldsOption]
+  ): ScheduleFetchResults[];
+  function scheduleListQueryFetchApiImpl(
+    fetchType: FetchType,
+    payload: QueryPayload | QueryPayload[],
+    ...args: [size?: number, options?: ScheduleFetchWithFieldsOption]
+  ): ScheduleFetchResults | ScheduleFetchResults[] {
+    const [size, options] = args;
+    if (Array.isArray(payload)) {
+      return scheduleListQueryFetch(fetchType, payload, size, options);
+    }
+    return scheduleListQueryFetch(fetchType, payload, size, options);
+  }
+
   const scheduleListQueryFetchApi: ScheduleListQueryFetchApi =
-    scheduleListQueryFetch;
-  const loadMoreApi: LoadMoreApi = loadMore;
-  const scheduleItemFetchApi: ScheduleItemFetchApi = scheduleItemFetch;
-  const awaitListQueryFetchApi: AwaitListQueryFetchApi = awaitListQueryFetch;
-  const awaitItemFetchApi: AwaitItemFetchApi = awaitItemFetch;
+    scheduleListQueryFetchApiImpl;
+
+  function loadMoreApiImpl(
+    params: QueryPayload,
+    ...args: HasPR extends true
+      ?
+          | [size: number, options: FetchFieldsOption]
+          | [options: LoadMoreWithFieldsOptions]
+      :
+          | [size?: number, options?: FetchFieldsOption]
+          | [options?: LoadMoreWithFieldsOptions]
+  ): ScheduleFetchResults {
+    if (typeof args[0] === 'number') {
+      return loadMore(params, args[0], args[1]);
+    }
+    return loadMore(params, args[0]);
+  }
+
+  const loadMoreApi: LoadMoreApi = loadMoreApiImpl;
+
+  function scheduleItemFetchApiImpl(
+    fetchType: FetchType,
+    itemPayload: ItemPayload,
+    ...args: HasPR extends true
+      ? [options: ScheduleFetchWithFieldsOption]
+      : [options?: ScheduleFetchWithFieldsOption]
+  ): ScheduleFetchResults;
+  function scheduleItemFetchApiImpl(
+    fetchType: FetchType,
+    itemPayload: ItemPayload[],
+    ...args: HasPR extends true
+      ? [options: ScheduleFetchWithFieldsOption]
+      : [options?: ScheduleFetchWithFieldsOption]
+  ): ScheduleFetchResults[];
+  function scheduleItemFetchApiImpl(
+    fetchType: FetchType,
+    itemPayload: ItemPayload | ItemPayload[],
+    ...args: [options?: ScheduleFetchWithFieldsOption]
+  ): ScheduleFetchResults | ScheduleFetchResults[] {
+    const [options] = args;
+    if (Array.isArray(itemPayload)) {
+      return scheduleItemFetch(fetchType, itemPayload, options);
+    }
+    return scheduleItemFetch(fetchType, itemPayload, options);
+  }
+
+  const scheduleItemFetchApi: ScheduleItemFetchApi = scheduleItemFetchApiImpl;
+
+  const awaitListQueryFetchApi: AwaitListQueryFetchApi = (params, ...args) => {
+    const [options] = args;
+    return awaitListQueryFetch(params, options);
+  };
+
+  const awaitItemFetchApi: AwaitItemFetchApi = (itemPayload, ...args) => {
+    const [options] = args;
+    return awaitItemFetch(itemPayload, options);
+  };
 
   return {
     store,

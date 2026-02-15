@@ -83,7 +83,9 @@ export function useItem<
         error: null,
         isLoading: false,
         status: 'idle',
-        data: selector ? selector(null, null) : __LEGIT_CAST__<Selected>(null),
+        data: selector
+          ? selector(null, null)
+          : __LEGIT_CAST__<Selected, null>(null),
         payload: itemPayload || null,
         itemStateKey: '',
         queryMetadata: undefined,
@@ -113,5 +115,5 @@ export function useItem<
       });
   });
 
-  return __LEGIT_CAST__(useModifyResult(result));
+  return useModifyResult(result);
 }

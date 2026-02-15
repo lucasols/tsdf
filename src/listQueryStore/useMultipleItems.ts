@@ -9,7 +9,6 @@ import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
-  type FieldsOption,
   type FieldsInput,
   type ListQueryUseMultipleItemsQuery,
   type PartialResourcesConfig,
@@ -41,10 +40,8 @@ export function useMultipleItems<
   ItemPayload extends ValidPayload,
   Selected = ItemState | null,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
-  HasPartialResources extends boolean = false,
 >(
-  items: (ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata> &
-    FieldsOption<HasPartialResources>)[],
+  items: ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
   {
     selector,
     loadFromStateOnly,

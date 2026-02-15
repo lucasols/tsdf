@@ -140,7 +140,7 @@ export function useMultipleListQueries<
         if (itemSelector) {
           return itemSelector(item, itemPayload, itemKey);
         }
-        return __LEGIT_CAST__<SelectedItem>(item);
+        return __LEGIT_CAST__<SelectedItem, ItemState>(item);
       });
     },
     [itemSelector, partialResources],
@@ -175,7 +175,10 @@ export function useMultipleListQueries<
               fields,
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
-              queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+              queryMetadata: __LEGIT_CAST__<
+                QueryMetadata,
+                QueryMetadata | undefined
+              >(queryMetadata),
             };
           }
 
@@ -227,7 +230,10 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
-            queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+            queryMetadata: __LEGIT_CAST__<
+              QueryMetadata,
+              QueryMetadata | undefined
+            >(queryMetadata),
           };
         },
       );
