@@ -30,3 +30,23 @@ export async function advanceTime(ms: number) {
     await vi.advanceTimersByTimeAsync(ms);
   });
 }
+
+export function simulateWindowBlur() {
+  Object.defineProperty(document, 'hidden', {
+    value: true,
+    writable: true,
+    configurable: true,
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+  window.dispatchEvent(new Event('blur'));
+}
+
+export function simulateWindowFocus() {
+  Object.defineProperty(document, 'hidden', {
+    value: false,
+    writable: true,
+    configurable: true,
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+  window.dispatchEvent(new Event('focus'));
+}

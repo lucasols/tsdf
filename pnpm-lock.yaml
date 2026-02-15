@@ -11,6 +11,9 @@ importers:
       '@evtmitter/react':
         specifier: ^0.1.0
         version: 0.1.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@ls-stack/browser-utils':
+        specifier: ^0.3.0
+        version: 0.3.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/react-utils':
         specifier: ^0.9.0
         version: 0.9.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)

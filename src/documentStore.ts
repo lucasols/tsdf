@@ -1,4 +1,5 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
+import { isWindowFocused, onWindowFocus } from '@ls-stack/browser-utils/window';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import {
   __LEGIT_CAST__,
@@ -63,7 +64,12 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
-  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (params: {
+    lastFetchDuration: number;
+    windowIsNotFocused: boolean;
+  }) => number;
+  revalidateOnWindowFocus?: boolean | (() => boolean);
+  backgroundCoalescingWindowMultiplier: number;
   mediumPriorityDelayMs?: number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (
@@ -96,6 +102,8 @@ export function createDocumentStore<State extends ValidStoreState>({
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   dynamicRealtimeThrottleMs,
+  revalidateOnWindowFocus,
+  backgroundCoalescingWindowMultiplier,
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
@@ -194,6 +202,14 @@ export function createDocumentStore<State extends ValidStoreState>({
     }
   }
 
+  const wrappedDynamicRealtimeThrottleMs = dynamicRealtimeThrottleMs
+    ? (lastFetchDuration: number) =>
+        dynamicRealtimeThrottleMs({
+          lastFetchDuration,
+          windowIsNotFocused: !isWindowFocused(),
+        })
+    : undefined;
+
   // Scheduler with batch-aware fetchFn (but we always use single item)
   const scheduler = new RequestScheduler<null>({
     fetchFn: async (
@@ -210,12 +226,37 @@ export function createDocumentStore<State extends ValidStoreState>({
     },
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
-    dynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs: wrappedDynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     on: onSchedulerEvent,
     initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
     usesRealTimeUpdates,
+    getCoalescingWindowMultiplier: () =>
+      !isWindowFocused() ? backgroundCoalescingWindowMultiplier : 1,
   });
+
+  // Set up window focus listener for non-realtime stores
+  let cleanupFocusListener: (() => void) | null = null;
+
+  function setupFocusListener() {
+    cleanupFocusListener?.();
+    cleanupFocusListener = null;
+
+    if (!revalidateOnWindowFocus || usesRealTimeUpdates) return;
+
+    cleanupFocusListener = onWindowFocus(() => {
+      const enabled =
+        typeof revalidateOnWindowFocus === 'function'
+          ? revalidateOnWindowFocus()
+          : revalidateOnWindowFocus;
+
+      if (enabled) {
+        invalidateData('lowPriority');
+      }
+    });
+  }
+
+  setupFocusListener();
 
   function scheduleFetch(
     fetchType: FetchType,
@@ -313,6 +354,7 @@ export function createDocumentStore<State extends ValidStoreState>({
       status: 'idle',
       refetchOnMount: 'lowPriority',
     });
+    setupFocusListener();
   }
 
   function startMutation(): () => boolean {

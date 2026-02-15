@@ -151,7 +151,7 @@ test('realtime update fetches mixed with other priority fetches within the same 
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
-    dynamicRealtimeThrottleMs: () => 2_000,
+    dynamicRealtimeThrottleMs: () => 2000,
   });
 
   renderHook(() => {
@@ -189,7 +189,7 @@ test('realtime updates starts coalescing window', async () => {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
-    dynamicRealtimeThrottleMs: () => 2_000,
+    dynamicRealtimeThrottleMs: () => 2000,
   });
 
   renderHook(() => {
@@ -227,7 +227,7 @@ test('delayed realtime update fetches also are coalesced', async () => {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
-    dynamicRealtimeThrottleMs: () => 2_000,
+    dynamicRealtimeThrottleMs: () => 2000,
   });
 
   renderHook(() => {
@@ -273,7 +273,7 @@ test('delayed realtime update request also starts coalescing window', async () =
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     baseCoalescingWindowMs: 20,
-    dynamicRealtimeThrottleMs: () => 2_000,
+    dynamicRealtimeThrottleMs: () => 2000,
   });
 
   renderHook(() => {

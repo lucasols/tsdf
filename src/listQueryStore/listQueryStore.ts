@@ -1,3 +1,4 @@
+import { isWindowFocused, onWindowFocus } from '@ls-stack/browser-utils/window';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
@@ -7,13 +8,13 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from '../requestScheduler';
+import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import {
   StoreError,
   StoreFetchError,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import {
@@ -128,7 +129,12 @@ type ListQueryStoreOptionsBase<
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
-  dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  dynamicRealtimeThrottleMs?: (params: {
+    lastFetchDuration: number;
+    windowIsNotFocused: boolean;
+  }) => number;
+  revalidateOnWindowFocus?: boolean | (() => boolean);
+  backgroundCoalescingWindowMultiplier: number;
   optimisticListUpdates?: OptimisticListUpdate<
     ItemState,
     QueryPayload,
@@ -203,6 +209,8 @@ export function createListQueryStore<
     baseCoalescingWindowMs,
     mediumPriorityDelayMs,
     dynamicRealtimeThrottleMs,
+    revalidateOnWindowFocus,
+    backgroundCoalescingWindowMultiplier,
     optimisticListUpdates,
     onInvalidateQuery,
     onInvalidateItem,
@@ -432,6 +440,17 @@ export function createListQueryStore<
 
   const events = evtmitter<ListQueryStoreEvents>();
 
+  const wrappedDynamicRealtimeThrottleMs = dynamicRealtimeThrottleMs
+    ? (lastFetchDuration: number) =>
+        dynamicRealtimeThrottleMs({
+          lastFetchDuration,
+          windowIsNotFocused: !isWindowFocused(),
+        })
+    : undefined;
+
+  const getCoalescingWindowMultiplier = (): number =>
+    !isWindowFocused() ? backgroundCoalescingWindowMultiplier : 1;
+
   const {
     getQueryState,
     getQueriesKeyArray,
@@ -460,7 +479,8 @@ export function createListQueryStore<
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     mediumPriorityDelayMs,
-    dynamicRealtimeThrottleMs,
+    dynamicRealtimeThrottleMs: wrappedDynamicRealtimeThrottleMs,
+    getCoalescingWindowMultiplier,
     onSchedulerEvent,
     usesRealTimeUpdates,
     defaultQuerySize,
@@ -638,6 +658,33 @@ export function createListQueryStore<
     );
   }
 
+  // Set up window focus listener for non-realtime stores
+  let cleanupFocusListener: (() => void) | null = null;
+
+  function setupFocusListener() {
+    cleanupFocusListener?.();
+    cleanupFocusListener = null;
+
+    if (!revalidateOnWindowFocus || usesRealTimeUpdates) return;
+
+    cleanupFocusListener = onWindowFocus(() => {
+      const enabled =
+        typeof revalidateOnWindowFocus === 'function'
+          ? revalidateOnWindowFocus()
+          : revalidateOnWindowFocus;
+
+      if (enabled) {
+        invalidateQueryAndItems({
+          queryPayload: () => true,
+          itemPayload: () => true,
+          type: 'lowPriority',
+        });
+      }
+    });
+  }
+
+  setupFocusListener();
+
   function reset() {
     resetSchedulers();
     resetInvalidationTracking();
@@ -649,6 +696,7 @@ export function createListQueryStore<
       itemLoadedFields: {},
       itemFieldInvalidationFields: {},
     });
+    setupFocusListener();
   }
 
   function scheduleListQueryFetchApiImpl(

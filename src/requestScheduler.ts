@@ -132,6 +132,9 @@ export type RequestSchedulerOptions<T> = {
   coalescePayload?: (existing: T, incoming: T) => T;
   /** for validation of realtimeUpdate fetch type */
   usesRealTimeUpdates: boolean;
+  /** Returns a multiplier for the coalescing window duration.
+   * E.g. return 3 when tab is in background to reduce network pressure. */
+  getCoalescingWindowMultiplier?: () => number;
 };
 
 export type ScheduleFetchOptions = {
@@ -170,6 +173,7 @@ export class RequestScheduler<T> {
     | ((existing: T, incoming: T) => T)
     | undefined;
   private readonly usesRealTimeUpdates: boolean;
+  private readonly getCoalescingWindowMultiplier: (() => number) | undefined;
 
   private state: SchedulerState<T>;
 
@@ -183,6 +187,7 @@ export class RequestScheduler<T> {
     this.maxBatchSize = options.maxBatchSize;
     this.coalescePayload = options.coalescePayload;
     this.usesRealTimeUpdates = options.usesRealTimeUpdates;
+    this.getCoalescingWindowMultiplier = options.getCoalescingWindowMultiplier;
 
     this.state = this.createInitialState();
 
@@ -459,6 +464,15 @@ export class RequestScheduler<T> {
   }
 
   // ==========================================================================
+  // Coalescing Window
+  // ==========================================================================
+
+  private getEffectiveCoalescingWindowMs(): number {
+    const multiplier = this.getCoalescingWindowMultiplier?.() ?? 1;
+    return this.baseCoalescingWindowMs * multiplier;
+  }
+
+  // ==========================================================================
   // Phase Transitions
   // ==========================================================================
 
@@ -480,7 +494,7 @@ export class RequestScheduler<T> {
 
     const timeoutId = setTimeout(() => {
       this.onCoalescingTimeout();
-    }, this.baseCoalescingWindowMs);
+    }, this.getEffectiveCoalescingWindowMs());
 
     this.state.phase = {
       type: 'coalescing',
@@ -834,7 +848,7 @@ export class RequestScheduler<T> {
     // Start coalescing window with scheduled requests
     const timeoutId = setTimeout(() => {
       this.onCoalescingTimeout();
-    }, this.baseCoalescingWindowMs);
+    }, this.getEffectiveCoalescingWindowMs());
 
     this.state.phase = {
       type: 'coalescing',

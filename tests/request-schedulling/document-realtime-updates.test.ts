@@ -16,8 +16,12 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
 });
 
-function dynamicRealtimeThrottleMs(lastDuration: number): number {
-  if (lastDuration > 300) return 300;
+function dynamicRealtimeThrottleMs({
+  lastFetchDuration,
+}: {
+  lastFetchDuration: number;
+}): number {
+  if (lastFetchDuration > 300) return 300;
   return 100;
 }
 
@@ -98,7 +102,7 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
-    dynamicRealtimeThrottleMs(lastFetchDuration: number) {
+    dynamicRealtimeThrottleMs({ lastFetchDuration }) {
       return lastFetchDuration < 700 ? 100 : 500;
     },
   });
@@ -171,8 +175,8 @@ test('simple mutation that triggers a RTU', async () => {
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
-    dynamicRealtimeThrottleMs: (lastDuration) =>
-      lastDuration > 300 ? 300 : 100,
+    dynamicRealtimeThrottleMs: ({ lastFetchDuration }) =>
+      lastFetchDuration > 300 ? 300 : 100,
   });
 
   renderHook(() => {
@@ -225,8 +229,8 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
-    dynamicRealtimeThrottleMs: (lastDuration) =>
-      lastDuration > 1000 ? 500 : 200,
+    dynamicRealtimeThrottleMs: ({ lastFetchDuration }) =>
+      lastFetchDuration > 1000 ? 500 : 200,
   });
 
   renderHook(() => {
@@ -307,8 +311,8 @@ test('slow mutation then new mutation while prev mutation RTU is running', async
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
-    dynamicRealtimeThrottleMs: (lastDuration) =>
-      lastDuration > 1000 ? 500 : 200,
+    dynamicRealtimeThrottleMs: ({ lastFetchDuration }) =>
+      lastFetchDuration > 1000 ? 500 : 200,
   });
 
   renderHook(() => {
@@ -388,8 +392,8 @@ test('slow mutation then new mutation while prev mutation is running', async () 
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
-    dynamicRealtimeThrottleMs: (lastDuration) =>
-      lastDuration > 1000 ? 500 : 200,
+    dynamicRealtimeThrottleMs: ({ lastFetchDuration }) =>
+      lastFetchDuration > 1000 ? 500 : 200,
   });
 
   renderHook(() => {
@@ -463,8 +467,8 @@ test('rtu mutations without optimistic updates', async () => {
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
-    dynamicRealtimeThrottleMs: (lastDuration) =>
-      lastDuration > 1000 ? 500 : 200,
+    dynamicRealtimeThrottleMs: ({ lastFetchDuration }) =>
+      lastFetchDuration > 1000 ? 500 : 200,
   });
 
   renderHook(() => {

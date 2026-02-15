@@ -83,6 +83,7 @@ export type CreateFetchApiOptions<
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
+  getCoalescingWindowMultiplier?: () => number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   usesRealTimeUpdates: boolean;
   defaultQuerySize: number;
@@ -113,6 +114,7 @@ export function createFetchApi<
   baseCoalescingWindowMs,
   mediumPriorityDelayMs,
   dynamicRealtimeThrottleMs,
+  getCoalescingWindowMultiplier,
   onSchedulerEvent,
   usesRealTimeUpdates,
   defaultQuerySize,
@@ -237,6 +239,7 @@ export function createFetchApi<
           };
         },
         usesRealTimeUpdates,
+        getCoalescingWindowMultiplier,
       });
       querySchedulers.set(queryKey, scheduler);
     }
@@ -309,6 +312,7 @@ export function createFetchApi<
         initialLastFetchStartTime,
         coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
+        getCoalescingWindowMultiplier,
       });
       batchKeySchedulers.set(batchKey, scheduler);
     }
@@ -401,6 +405,7 @@ export function createFetchApi<
         initialLastFetchStartTime,
         coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
+        getCoalescingWindowMultiplier,
       });
       perItemSchedulers.set(itemKey, scheduler);
     }

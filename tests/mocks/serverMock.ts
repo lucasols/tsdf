@@ -45,7 +45,7 @@ export function createServerMock<Data>(
   let numOfStartedFetches = 0;
   let numOfFinishedFetches = 0;
   let fetchIdCounter = 0;
-  const fetches: FetchHistoryEntry<Data>[] = [];
+  const fetchHistory: FetchHistoryEntry<Data>[] = [];
 
   function getFetchId() {
     return notNullish(fetchEmojis[fetchIdCounter++ % fetchEmojis.length]);
@@ -149,7 +149,7 @@ export function createServerMock<Data>(
             })
           : new Error(nextFetchError.message);
 
-        fetches.push({
+        fetchHistory.push({
           id: fetchId,
           startTime,
           endTime,
@@ -176,7 +176,7 @@ export function createServerMock<Data>(
       if (signal?.aborted) {
         onAbort();
         const endTime = Date.now() - TEST_INITIAL_TIME;
-        fetches.push({
+        fetchHistory.push({
           id: fetchId,
           startTime,
           endTime,
@@ -194,7 +194,7 @@ export function createServerMock<Data>(
       }
 
       const endTime = Date.now() - TEST_INITIAL_TIME;
-      fetches.push({
+      fetchHistory.push({
         id: fetchId,
         startTime,
         endTime,
@@ -222,6 +222,6 @@ export function createServerMock<Data>(
     get numOfFinishedFetches() {
       return numOfFinishedFetches;
     },
-    fetches,
+    fetchHistory,
   };
 }
