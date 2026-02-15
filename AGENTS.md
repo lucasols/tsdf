@@ -98,5 +98,8 @@ Tests use Vitest with `happy-dom` environment. Test files follow the pattern `sr
 When adding a new feature, or adjust a existing one:
 
 - add comprehensive tests covering the new behavior, relevant edge cases and potential regressions
+  - follow existing test patterns — see `tests/` for examples and `tests/mocks/` for test
+    utilities
 - add jsdoc comments to the public API available to library users
   - when adding jsdoc to function arguments prefer adding them to the types/interfaces instead of the implementation, to ensure they are visible in IDEs when users hover the relevant types
+- if adding new public exports, update the relevant barrel file (`src/main.ts`)

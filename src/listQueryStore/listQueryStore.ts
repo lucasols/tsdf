@@ -493,6 +493,7 @@ export function createListQueryStore<
   });
 
   const {
+    storeEvents,
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
     invalidateQueryAndItems,
@@ -787,6 +788,7 @@ export function createListQueryStore<
   return {
     store,
     events,
+    storeEvents,
     get queryInvalidationWasTriggered() {
       return queryInvalidationWasTriggered;
     },

@@ -13,6 +13,7 @@ import {
   BatchRequest,
   FetchContext,
   FetchType,
+  getAutoIncrementId,
   RequestScheduler,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
@@ -98,6 +99,13 @@ export type CollectionInitialStateItem<
 > = {
   payload: ItemPayload;
   data: ItemState;
+};
+
+export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
+  /** Emitted when a mutation begins executing */
+  mutationStart: { mutationId: number; payload: ItemPayload };
+  /** Emitted when a mutation completes or fails */
+  mutationEnd: { mutationId: number; payload: ItemPayload; success: boolean };
 };
 
 export type CollectionStoreOptions<
@@ -238,7 +246,6 @@ export function createCollectionStore<
   }
 
   const events = evtmitter<CollectionStoreEvents>();
-
   const wrappedDynamicRealtimeThrottleMs = dynamicRealtimeThrottleMs
     ? (lastFetchDuration: number) =>
         dynamicRealtimeThrottleMs({
@@ -249,6 +256,7 @@ export function createCollectionStore<
 
   const getCoalescingWindowMultiplier = (): number =>
     !isWindowFocused() ? backgroundCoalescingWindowMultiplier : 1;
+  const storeEvents = evtmitter<CollectionStoreStoreEvents<ItemPayload>>();
 
   const useBatchSchedulers = !!batchFetchFn;
 
@@ -713,7 +721,10 @@ export function createCollectionStore<
       debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
     },
   ): Promise<Result<Awaited<T>, StoreError | true>> {
-    return performMutationWithLifecycle({
+    const mutationId = getAutoIncrementId();
+    storeEvents.emit('mutationStart', { mutationId, payload });
+
+    const result = await performMutationWithLifecycle({
       startMutation: () => startMutation(payload),
       optimisticUpdate: optimisticUpdate
         ? () => optimisticUpdate(payload)
@@ -742,6 +753,14 @@ export function createCollectionStore<
         return error;
       },
     });
+
+    storeEvents.emit('mutationEnd', {
+      mutationId,
+      payload,
+      success: result.ok,
+    });
+
+    return result;
   }
 
   // Set up window focus listener for non-realtime stores
@@ -909,6 +928,7 @@ export function createCollectionStore<
   return {
     store,
     events,
+    storeEvents,
     scheduler: null,
     get invalidationWasTriggered() {
       return invalidationWasTriggered;

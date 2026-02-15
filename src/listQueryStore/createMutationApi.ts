@@ -1,9 +1,10 @@
 import { filterAndMap, sortBy } from '@ls-stack/utils/arrayUtils';
 import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { type Result, unknownToError } from 't-result';
+import { unknownToError, type Result } from 't-result';
 import { Store } from 't-state';
-import { FetchType } from '../requestScheduler';
+import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
@@ -22,6 +23,17 @@ import {
   type PartialResourcesConfig,
   type TSFDListQueryState,
 } from './types';
+
+export type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
+  /** Emitted when a mutation begins executing */
+  mutationStart: { mutationId: number; items: ItemPayload[] };
+  /** Emitted when a mutation completes or fails */
+  mutationEnd: {
+    mutationId: number;
+    items: ItemPayload[];
+    success: boolean;
+  };
+};
 
 type InvalidateQueryEvent = { priority: FetchType; queryKey: string };
 type InvalidateItemEvent = {
@@ -112,6 +124,16 @@ export function createMutationApi<
     | undefined
     | null;
   type MutationPayloadToUse = ItemPayload | ItemPayload[] | FilterItem;
+
+  const storeEvents = evtmitter<ListQueryStoreStoreEvents<ItemPayload>>();
+
+  function resolveAffectedItems(payload: MutationPayloadToUse): ItemPayload[] {
+    if (Array.isArray(payload)) return payload;
+    if (typeof payload === 'function') {
+      return getItemsKeyArray(payload).map((item) => item.payload);
+    }
+    return [payload];
+  }
 
   const queryInvalidationWasTriggered = new Set<string>();
   const itemInvalidationWasTriggered = new Set<string>();
@@ -535,7 +557,12 @@ export function createMutationApi<
     const matchAllItems: FilterItem = () => true;
     const payloadToUse: MutationPayloadToUse = payload ?? matchAllItems;
 
-    return performMutationWithLifecycle({
+    const affectedItems = resolveAffectedItems(payloadToUse);
+    const mutationId = getAutoIncrementId();
+
+    storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
+
+    const result = await performMutationWithLifecycle({
       startMutation: () => startItemMutation(payloadToUse),
       optimisticUpdate: optimisticUpdate
         ? () => optimisticUpdate(payloadToUse)
@@ -577,9 +604,18 @@ export function createMutationApi<
         return error;
       },
     });
+
+    storeEvents.emit('mutationEnd', {
+      mutationId,
+      items: affectedItems,
+      success: result.ok,
+    });
+
+    return result;
   }
 
   return {
+    storeEvents,
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
     invalidateQueryAndItems,

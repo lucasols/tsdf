@@ -17,6 +17,7 @@ import {
   BatchRequest,
   FetchContext,
   FetchType,
+  getAutoIncrementId,
   RequestScheduler,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
@@ -57,6 +58,13 @@ type DocumentStoreEvents = {
 };
 
 export type OnDocumentInvalidate = (priority: FetchType) => void;
+
+export type DocumentStoreStoreEvents = {
+  /** Emitted when a mutation begins executing */
+  mutationStart: { mutationId: number };
+  /** Emitted when a mutation completes or fails */
+  mutationEnd: { mutationId: number; success: boolean };
+};
 
 export type DocumentStoreOptions<State extends ValidStoreState> = {
   debugName?: string;
@@ -148,6 +156,8 @@ export function createDocumentStore<State extends ValidStoreState>({
   });
 
   const events = evtmitter<DocumentStoreEvents>();
+
+  const storeEvents = evtmitter<DocumentStoreStoreEvents>();
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
@@ -377,7 +387,10 @@ export function createDocumentStore<State extends ValidStoreState>({
     }) => Promise<T>;
     revalidateOnSuccess?: boolean;
   }): Promise<Result<Awaited<T>, StoreError | true>> {
-    return performMutationWithLifecycle({
+    const mutationId = getAutoIncrementId();
+    storeEvents.emit('mutationStart', { mutationId });
+
+    const result = await performMutationWithLifecycle({
       startMutation,
       optimisticUpdate: optimisticUpdate
         ? () => optimisticUpdate(store.state.data)
@@ -404,6 +417,10 @@ export function createDocumentStore<State extends ValidStoreState>({
         return errorNormalizer(unknownToError(exception));
       },
     });
+
+    storeEvents.emit('mutationEnd', { mutationId, success: result.ok });
+
+    return result;
   }
 
   function useDocument<Selected = State | null>({
@@ -620,6 +637,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   return {
     store,
     events,
+    storeEvents,
     get invalidationWasTriggered() {
       return invalidationWasTriggered;
     },
