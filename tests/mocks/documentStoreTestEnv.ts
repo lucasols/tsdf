@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import { createServerMock, type FetchErrorConfig } from './serverMock';
 import {
   createActionTracker,
@@ -28,6 +29,7 @@ export type DocumentStoreTestEnvOptions<D> = {
   mediumPriorityDelayMs?: number;
   testScenario?: DocumentStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
+  blockWindowClose?: BlockWindowCloseHandler;
 };
 
 export function createDocumentStoreTestEnv<D>(
@@ -39,6 +41,7 @@ export function createDocumentStoreTestEnv<D>(
     mediumPriorityDelayMs,
     testScenario,
     usesRealTimeUpdates,
+    blockWindowClose,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
   const {
@@ -70,6 +73,7 @@ export function createDocumentStoreTestEnv<D>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
+    blockWindowClose: blockWindowClose ?? null,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);

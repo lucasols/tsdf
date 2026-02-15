@@ -4,6 +4,7 @@ import {
   type CollectionInitialStateItem,
 } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import { createServerTableMock } from './serverTableMock';
 import {
   createActionTracker,
@@ -38,6 +39,7 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   getItemsBatchKey?: (payload: string) => string | false;
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
+  blockWindowClose?: BlockWindowCloseHandler;
 };
 
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
@@ -51,6 +53,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     getItemsBatchKey,
     testScenario,
     usesRealTimeUpdates,
+    blockWindowClose,
   }: CollectionStoreTestEnvOptions<D> = {},
 ) {
   const {
@@ -152,6 +155,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
+    blockWindowClose: blockWindowClose ?? null,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);

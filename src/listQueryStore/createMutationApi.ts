@@ -4,7 +4,10 @@ import { klona } from 'klona/json';
 import { type Result, unknownToError } from 't-result';
 import { Store } from 't-state';
 import { FetchType } from '../requestScheduler';
-import { performMutationWithLifecycle } from '../utils/performMutation';
+import {
+  performMutationWithLifecycle,
+  type BlockWindowCloseHandler,
+} from '../utils/performMutation';
 import {
   fetchTypePriority,
   StoreError,
@@ -72,7 +75,7 @@ export type CreateMutationApiOptions<
   getOrCreateQueryScheduler: (queryKey: string) => SchedulerWithMutation;
   emitInvalidateQuery: (event: InvalidateQueryEvent) => void;
   emitInvalidateItem: (event: InvalidateItemEvent) => void;
-  blockWindowClose: () => { unblock: () => void };
+  blockWindowClose: BlockWindowCloseHandler | null;
 };
 
 export function createMutationApi<
@@ -530,7 +533,7 @@ export function createMutationApi<
         ? () => optimisticUpdate(payloadToUse)
         : undefined,
       debounce,
-      blockWindowClose,
+      blockWindowClose: blockWindowClose ?? undefined,
       mutation: () => mutation(payloadToUse),
       onSuccess: (result) => {
         if (revalidateOnSuccess) {

@@ -22,7 +22,10 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
-import { performMutationWithLifecycle } from '../utils/performMutation';
+import {
+  performMutationWithLifecycle,
+  type BlockWindowCloseHandler,
+} from '../utils/performMutation';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -121,6 +124,7 @@ export type CollectionStoreOptions<
     error: unknown,
     options: { silentErrors?: boolean },
   ) => void;
+  blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
   /** @internal */
   '~test'?: {
@@ -159,6 +163,7 @@ export function createCollectionStore<
   onInvalidate,
   onSchedulerEvent,
   onMutationError,
+  blockWindowClose,
   usesRealTimeUpdates = false,
   '~test': testOptions,
 }: CollectionStoreOptions<ItemState, ItemPayload>) {
@@ -171,7 +176,6 @@ export function createCollectionStore<
   let initialRefetchOnMount: FetchType | false = false;
   let initialStatus: CollectionItemStatus = 'success';
   let initialError: StoreError | null = null;
-
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
 
   if (import.meta.env.TEST && testOptions) {
@@ -658,7 +662,7 @@ export function createCollectionStore<
         ? () => optimisticUpdate(payload)
         : undefined,
       debounce: _debounce,
-      blockWindowClose,
+      blockWindowClose: blockWindowClose ?? undefined,
       mutation: () => mutation(payload),
       onSuccess: (result) => {
         if (revalidateOnSuccess) {
@@ -717,13 +721,5 @@ export function createCollectionStore<
     addItemToState,
     deleteItemState,
     performMutation,
-  };
-}
-
-function blockWindowClose() {
-  return {
-    unblock: () => {
-      // FIX: Implement unblock
-    },
   };
 }

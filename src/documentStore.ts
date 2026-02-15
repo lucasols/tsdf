@@ -27,6 +27,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
+import { type BlockWindowCloseHandler } from './utils/performMutation';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -64,6 +65,7 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     error: unknown,
     options: { dontShowToast?: boolean },
   ) => void;
+  blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
   /** @internal */
   '~test'?: {
@@ -92,6 +94,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
+  blockWindowClose,
   usesRealTimeUpdates = false,
   '~test': testOptions,
 }: DocumentStoreOptions<State>) {
@@ -101,7 +104,6 @@ export function createDocumentStore<State extends ValidStoreState>({
   let initialRefetchOnMount: FetchType | false = false;
   let initialStatus: DocumentStatus = 'idle';
   let initialError: StoreError | null = null;
-
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
 
   if (import.meta.env.TEST && testOptions) {
@@ -334,7 +336,7 @@ export function createDocumentStore<State extends ValidStoreState>({
         ? () => optimisticUpdate(store.state.data)
         : undefined,
       debounce,
-      blockWindowClose,
+      blockWindowClose: blockWindowClose ?? undefined,
       mutation: () =>
         mutation({
           updateState,
@@ -472,13 +474,5 @@ export function createDocumentStore<State extends ValidStoreState>({
     startMutation,
     useDocument,
     performMutation,
-  };
-}
-
-function blockWindowClose() {
-  return {
-    unblock: () => {
-      // FIX: Implement unblock
-    },
   };
 }

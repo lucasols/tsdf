@@ -534,6 +534,7 @@ test('mutating a obj passed as payload does not break the store', async () => {
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
     fetchFn: () => {
       return Promise.resolve({ value: defaultTodo });
     },

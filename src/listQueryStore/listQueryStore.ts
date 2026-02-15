@@ -14,6 +14,7 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import {
@@ -143,6 +144,7 @@ type ListQueryStoreOptionsBase<
     error: unknown,
     options: { silentErrors?: boolean },
   ) => void;
+  blockWindowClose: BlockWindowCloseHandler | null;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   partialResources?: TPartialResources;
@@ -202,6 +204,7 @@ export function createListQueryStore<
   onInvalidateItem,
   onSchedulerEvent,
   onMutationError,
+  blockWindowClose,
   getQueryKey: customGetQueryKey,
   getItemKey: customGetItemKey,
   partialResources,
@@ -214,7 +217,6 @@ export function createListQueryStore<
   TOffsetPagination
 >) {
   type HasPR = [TPartialResources] extends [undefined] ? false : true;
-
   const offsetPagination: OffsetPaginationConfig | undefined =
     'offsetPagination' in rest ? rest.offsetPagination : undefined;
 
@@ -701,13 +703,5 @@ export function createListQueryStore<
     useMultipleItems,
     useItem,
     useFindItem,
-  };
-}
-
-function blockWindowClose() {
-  return {
-    unblock: () => {
-      // FIX: Implement unblock
-    },
   };
 }

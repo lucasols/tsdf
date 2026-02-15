@@ -10,6 +10,7 @@ import type {
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
   createActionTracker,
@@ -81,6 +82,7 @@ export function createListQueryStoreTestEnv<
     optimisticListUpdates,
     partialResources,
     offsetPagination,
+    blockWindowClose,
   }: {
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
@@ -101,6 +103,7 @@ export function createListQueryStoreTestEnv<
     >[0]['optimisticListUpdates'];
     partialResources?: TPartialResources;
     offsetPagination?: TOffsetPagination;
+    blockWindowClose?: BlockWindowCloseHandler;
   } = {},
 ) {
   const {
@@ -242,6 +245,7 @@ export function createListQueryStoreTestEnv<
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
+    blockWindowClose: blockWindowClose ?? null,
     optimisticListUpdates,
     partialResources,
     '~test': testOptions,
