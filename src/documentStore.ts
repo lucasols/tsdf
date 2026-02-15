@@ -1,5 +1,4 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
-import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import {
   __LEGIT_CAST__,
@@ -8,7 +7,7 @@ import {
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useEffect } from 'react';
-import { Result, unknownToError } from 't-result';
+import { type Result, unknownToError } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import {
   BatchRequest,
@@ -20,6 +19,7 @@ import {
   ScheduleFetchResults,
 } from './requestScheduler';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
+import { performMutationWithLifecycle } from './utils/performMutation';
 import {
   fetchTypePriority,
   StoreFetchError,
@@ -328,57 +328,33 @@ export function createDocumentStore<State extends ValidStoreState>({
     }) => Promise<T>;
     revalidateOnSuccess?: boolean;
   }): Promise<Result<Awaited<T>, StoreError | true>> {
-    const endMutation = startMutation();
-
-    if (optimisticUpdate) {
-      if (optimisticUpdate(store.state.data) === false) {
-        endMutation();
-        return Result.err(true);
-      }
-    }
-
-    let unblockWindowClose: VoidFunction | null = null;
-
-    try {
-      if (debounce) {
-        unblockWindowClose = blockWindowClose().unblock;
-
-        const debounceResult = await awaitDebounce({
-          callId: [debounce.context, debounce.payload],
-          debounce: debounce.ms,
-        });
-
-        if (debounceResult === 'skip') {
-          endMutation();
-          return Result.err(true);
+    return performMutationWithLifecycle({
+      startMutation,
+      optimisticUpdate: optimisticUpdate
+        ? () => optimisticUpdate(store.state.data)
+        : undefined,
+      debounce,
+      blockWindowClose,
+      mutation: () =>
+        mutation({
+          updateState,
+          currentState: store.state.data,
+        }),
+      onSuccess: () => {
+        if (revalidateOnSuccess) {
+          invalidateData();
         }
-      }
+      },
+      onError: (exception) => {
+        if (onMutationError) {
+          onMutationError(exception, { dontShowToast: dontShowErrorToast });
+        }
 
-      const result = await mutation({
-        updateState,
-        currentState: store.state.data,
-      });
-
-      endMutation();
-
-      if (revalidateOnSuccess) {
         invalidateData();
-      }
 
-      return Result.ok(result);
-    } catch (exception) {
-      endMutation();
-
-      if (onMutationError) {
-        onMutationError(exception, { dontShowToast: dontShowErrorToast });
-      }
-
-      invalidateData();
-
-      return Result.err(errorNormalizer(unknownToError(exception)));
-    } finally {
-      unblockWindowClose?.();
-    }
+        return errorNormalizer(unknownToError(exception));
+      },
+    });
   }
 
   function useDocument<Selected = State | null>({

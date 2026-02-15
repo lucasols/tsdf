@@ -1,10 +1,9 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
-import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { Result, unknownToError } from 't-result';
+import { type Result, unknownToError } from 't-result';
 import { Store } from 't-state';
 import {
   BatchRequest,
@@ -23,6 +22,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
+import { performMutationWithLifecycle } from '../utils/performMutation';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -652,60 +652,35 @@ export function createCollectionStore<
       debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
     },
   ): Promise<Result<Awaited<T>, StoreError | true>> {
-    const endMutation = startMutation(payload);
-
-    if (optimisticUpdate) {
-      if (optimisticUpdate(payload) === false) {
-        endMutation();
-        return Result.err(true);
-      }
-    }
-
-    let unblockWindowClose: VoidFunction | null = null;
-
-    try {
-      if (_debounce) {
-        unblockWindowClose = blockWindowClose().unblock;
-
-        const debounceResult = await awaitDebounce({
-          callId: [_debounce.context, _debounce.payload],
-          debounce: _debounce.ms,
-        });
-
-        if (debounceResult === 'skip') {
-          endMutation();
-          return Result.err(true);
+    return performMutationWithLifecycle({
+      startMutation: () => startMutation(payload),
+      optimisticUpdate: optimisticUpdate
+        ? () => optimisticUpdate(payload)
+        : undefined,
+      debounce: _debounce,
+      blockWindowClose,
+      mutation: () => mutation(payload),
+      onSuccess: (result) => {
+        if (revalidateOnSuccess) {
+          invalidateItem(payload);
         }
-      }
 
-      const result = await mutation(payload);
+        if (onSuccess) {
+          onSuccess(result, payload);
+        }
+      },
+      onError: (exception) => {
+        const error = errorNormalizer(unknownToError(exception));
 
-      endMutation();
+        if (!silentErrors && onMutationError) {
+          onMutationError(exception, { silentErrors });
+        }
 
-      if (revalidateOnSuccess) {
         invalidateItem(payload);
-      }
 
-      if (onSuccess) {
-        onSuccess(result, payload);
-      }
-
-      return Result.ok(result);
-    } catch (exception) {
-      endMutation();
-
-      const error = errorNormalizer(unknownToError(exception));
-
-      if (!silentErrors && onMutationError) {
-        onMutationError(exception, { silentErrors });
-      }
-
-      invalidateItem(payload);
-
-      return Result.err(error);
-    } finally {
-      unblockWindowClose?.();
-    }
+        return error;
+      },
+    });
   }
 
   function reset() {

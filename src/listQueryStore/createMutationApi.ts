@@ -1,10 +1,10 @@
 import { filterAndMap, sortBy } from '@ls-stack/utils/arrayUtils';
-import { awaitDebounce } from '@ls-stack/utils/awaitDebounce';
 import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { klona } from 'klona/json';
-import { Result, unknownToError } from 't-result';
+import { type Result, unknownToError } from 't-result';
 import { Store } from 't-state';
 import { FetchType } from '../requestScheduler';
+import { performMutationWithLifecycle } from '../utils/performMutation';
 import {
   fetchTypePriority,
   StoreError,
@@ -524,72 +524,48 @@ export function createMutationApi<
     const matchAllItems: FilterItem = () => true;
     const payloadToUse: MutationPayloadToUse = payload ?? matchAllItems;
 
-    const endMutation = startItemMutation(payloadToUse);
-
-    if (optimisticUpdate) {
-      if (optimisticUpdate(payloadToUse) === false) {
-        endMutation();
-        return Result.err(true);
-      }
-    }
-
-    let unblockWindowClose: VoidFunction | null = null;
-
-    try {
-      if (debounce) {
-        unblockWindowClose = blockWindowClose().unblock;
-
-        const debounceResult = await awaitDebounce({
-          callId: [debounce.context, debounce.payload],
-          debounce: debounce.ms,
-        });
-
-        if (debounceResult === 'skip') {
-          endMutation();
-          return Result.err(true);
+    return performMutationWithLifecycle({
+      startMutation: () => startItemMutation(payloadToUse),
+      optimisticUpdate: optimisticUpdate
+        ? () => optimisticUpdate(payloadToUse)
+        : undefined,
+      debounce,
+      blockWindowClose,
+      mutation: () => mutation(payloadToUse),
+      onSuccess: (result) => {
+        if (revalidateOnSuccess) {
+          invalidateQueryAndItems({
+            itemPayload:
+              revalidateOnSuccess === 'queries' ? false : payloadToUse,
+            queryPayload: getRevalidateOnSuccessQueries,
+          });
         }
-      }
 
-      const result = await mutation(payloadToUse);
+        if (onSuccess) {
+          onSuccess(result, payloadToUse);
+        }
+      },
+      onError: (exception) => {
+        const error = errorNormalizer(unknownToError(exception));
 
-      endMutation();
+        if (!silentErrors && onMutationError) {
+          onMutationError(exception, { silentErrors });
+        }
 
-      if (revalidateOnSuccess) {
-        invalidateQueryAndItems({
-          itemPayload: revalidateOnSuccess === 'queries' ? false : payloadToUse,
-          queryPayload: getRevalidateOnSuccessQueries,
-        });
-      }
+        if (!dontRevalidateOnError) {
+          invalidateQueryAndItems({
+            itemPayload: payloadToUse,
+            queryPayload: getRelatedQueries,
+          });
+        }
 
-      if (onSuccess) {
-        onSuccess(result, payloadToUse);
-      }
+        if (onError) {
+          onError(error);
+        }
 
-      return Result.ok(result);
-    } catch (exception) {
-      endMutation();
-
-      const error = errorNormalizer(unknownToError(exception));
-
-      if (!silentErrors && onMutationError) {
-        onMutationError(exception, { silentErrors });
-      }
-
-      if (!dontRevalidateOnError) {
-        invalidateQueryAndItems({
-          itemPayload: payloadToUse,
-          queryPayload: getRelatedQueries,
-        });
-      }
-
-      if (onError) {
-        onError(error);
-      }
-
-      return Result.err(error);
-    } finally {
-      unblockWindowClose?.();
-    }
+        return error;
+      },
+    });
   }
 
   return {
