@@ -6,8 +6,6 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 
-export type FieldsInput = string[] | '*';
-
 export type QueryStatus = TSDFStatus | 'loadingMore';
 
 export type TSFDListQuery<QueryPayload extends ValidPayload> = {
@@ -40,15 +38,20 @@ export type TSFDListQueryState<
   itemFieldInvalidationFields: Record<string, string[]>;
 };
 
+export type FieldsInput = string[] | '*';
+
 export type TSFDUseListQueryReturn<
   Selected,
   QueryPayload,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  HasPartialResources extends boolean = false,
 > = {
   items: Selected[];
   status: QueryStatus | 'idle';
   payload: QueryPayload | undefined;
-  fields: FieldsInput | undefined;
+  fields: HasPartialResources extends true
+    ? FieldsInput
+    : FieldsInput | undefined;
   error: StoreError | null;
   queryKey: string;
   hasMore: boolean;

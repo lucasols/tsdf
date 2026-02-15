@@ -72,7 +72,7 @@ export function useItem<
     (): TSFDUseCollectionItemReturn<Selected, ItemPayload> =>
       item[0] ?? {
         payload: undefined,
-        data: selector ? selector(null) : __LEGIT_CAST__<Selected>(null),
+        data: selector ? selector(null) : __LEGIT_CAST__<Selected, null>(null),
         error: null,
         status: 'idle',
         itemStateKey: '',

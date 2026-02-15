@@ -7,7 +7,7 @@ import {
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useEffect } from 'react';
-import { type Result, unknownToError } from 't-result';
+import { unknownToError, type Result } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import {
   BatchRequest,
@@ -18,8 +18,8 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
+import { performMutationWithLifecycle, type BlockWindowCloseHandler } from './utils/performMutation';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
-import { performMutationWithLifecycle } from './utils/performMutation';
 import {
   fetchTypePriority,
   StoreFetchError,
@@ -27,7 +27,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
-import { type BlockWindowCloseHandler } from './utils/performMutation';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -382,7 +381,7 @@ export function createDocumentStore<State extends ValidStoreState>({
 
         const data = selector
           ? selector(state.data)
-          : __LEGIT_CAST__<Selected>(state.data);
+          : __LEGIT_CAST__<Selected, State | null>(state.data);
 
         let status = state.status;
 

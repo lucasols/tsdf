@@ -123,7 +123,7 @@ export function useMultipleItems<
 
           const data = selector
             ? selector(item?.data ?? null)
-            : __LEGIT_CAST__<Selected>(item?.data ?? null);
+            : __LEGIT_CAST__<Selected, ItemState | null>(item?.data ?? null);
 
           if (item === null) {
             return {
@@ -133,7 +133,10 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: false,
-              queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+              queryMetadata: __LEGIT_CAST__<
+                QueryMetadata,
+                QueryMetadata | undefined
+              >(queryMetadata),
             };
           }
 
@@ -145,7 +148,10 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: !returnIdleStatus,
-              queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+              queryMetadata: __LEGIT_CAST__<
+                QueryMetadata,
+                QueryMetadata | undefined
+              >(queryMetadata),
             };
           }
 
@@ -162,7 +168,10 @@ export function useMultipleItems<
             error: item.error,
             isLoading: status === 'loading',
             payload: omitPayload ? undefined : item.payload,
-            queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+            queryMetadata: __LEGIT_CAST__<
+              QueryMetadata,
+              QueryMetadata | undefined
+            >(queryMetadata),
           };
         },
       );

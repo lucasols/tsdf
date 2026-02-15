@@ -60,7 +60,6 @@ export type CreateFetchApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined,
 > = {
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
   normalizedFetchListFn: NormalizedFetchListFn<
@@ -79,7 +78,7 @@ export type CreateFetchApiOptions<
   ) => Promise<Map<ItemPayload, ItemState | Error>>;
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   errorNormalizer: (exception: Error) => StoreError;
-  partialResources?: TPartialResources;
+  partialResources?: PartialResourcesConfig<ItemState>;
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
   mediumPriorityDelayMs?: number;
@@ -101,7 +100,6 @@ export function createFetchApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined,
 >({
   store,
   normalizedFetchListFn,
@@ -124,12 +122,7 @@ export function createFetchApi<
   normalizeFieldsOption,
   testInitialLastFetchStartTime,
   noFetchItemFnError,
-}: CreateFetchApiOptions<
-  ItemState,
-  QueryPayload,
-  ItemPayload,
-  TPartialResources
->) {
+}: CreateFetchApiOptions<ItemState, QueryPayload, ItemPayload>) {
   type Query = TSFDListQuery<QueryPayload>;
 
   const querySchedulers = new Map<

@@ -1,9 +1,9 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { type Result, unknownToError } from 't-result';
+import { unknownToError, type Result } from 't-result';
 import { Store } from 't-state';
 import {
   BatchRequest,
@@ -15,6 +15,10 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  performMutationWithLifecycle,
+  type BlockWindowCloseHandler,
+} from '../utils/performMutation';
+import {
   fetchTypePriority,
   StoreFetchError,
   TSDFStatus,
@@ -22,10 +26,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
-import {
-  performMutationWithLifecycle,
-  type BlockWindowCloseHandler,
-} from '../utils/performMutation';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -617,13 +617,10 @@ export function createCollectionStore<
             const originalItem = store.state[itemKey];
             if (!originalItem) continue;
 
-            const result = produceNewData(
-              __LEGIT_CAST__<ItemState>(item.data),
-              originalItem,
-            );
+            const result = produceNewData(item.data, originalItem);
 
             if (result !== undefined) {
-              item.data = __LEGIT_CAST__(result);
+              item.data = result;
             }
           }
         },

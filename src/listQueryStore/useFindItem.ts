@@ -42,6 +42,6 @@ export function useFindItem<
       return selector(selectedItem.item, selectedItem.itemQuery.payload);
     }
 
-    return __LEGIT_CAST__<SelectedItem>(selectedItem.item);
+    return __LEGIT_CAST__<SelectedItem, ItemState>(selectedItem.item);
   });
 }

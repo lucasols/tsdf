@@ -38,14 +38,13 @@ export type CreateMutationApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined,
 > = {
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
   ) => Promise<ItemState>;
-  partialResources?: TPartialResources;
+  partialResources?: PartialResourcesConfig<ItemState>;
   optimisticListUpdates?: OptimisticListUpdate<
     ItemState,
     QueryPayload,
@@ -82,7 +81,6 @@ export function createMutationApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TPartialResources extends PartialResourcesConfig<ItemState> | undefined,
 >({
   store,
   fetchItemFn,
@@ -100,12 +98,7 @@ export function createMutationApi<
   emitInvalidateQuery,
   emitInvalidateItem,
   blockWindowClose,
-}: CreateMutationApiOptions<
-  ItemState,
-  QueryPayload,
-  ItemPayload,
-  TPartialResources
->) {
+}: CreateMutationApiOptions<ItemState, QueryPayload, ItemPayload>) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
   type MutationPayload =
