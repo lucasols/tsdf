@@ -229,3 +229,78 @@ test('useDocument selector result should remain stable across rerenders', async 
     "
   `);
 });
+
+test('mounting after medium priority invalidation on idle store loads data', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    { testScenario: 'idle', mediumPriorityDelayMs: 300 },
+  );
+
+  const renders = createLoggerStore();
+
+  env.apiStore.invalidateData('mediumPriority');
+
+  renders.addMark('mount after invalidation');
+
+  renderHook(() => {
+    const { data, status } = env.apiStore.useDocument({
+      returnRefetchingStatus: true,
+    });
+    renders.add({ data: data?.value ?? null, status });
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+  expect(env.serverMock.fetches[0]?.startTime).toBe(TEST_INITIAL_TIME + 10);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> mount after invalidation
+
+    -> data: null ⋅ status: loading
+    -> data: {hello:world} ⋅ status: success
+    "
+  `);
+});
+
+test('mounting after medium priority invalidation on loaded store triggers a medium priority fetch', async () => {
+  const env = createDocumentStoreTestEnv<StoreValue>(
+    { hello: 'world' },
+    { testScenario: 'loaded', mediumPriorityDelayMs: 300 },
+  );
+
+  const renders = createLoggerStore();
+
+  env.apiStore.invalidateData('mediumPriority');
+
+  renders.addMark('mount after invalidation');
+
+  renderHook(() => {
+    const { data, status } = env.apiStore.useDocument({
+      returnRefetchingStatus: true,
+    });
+    renders.add({ data: data?.value ?? null, status });
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfFinishedFetches).toBe(1);
+
+  expect(env.serverMock.fetches[0]?.startTime).toBe(
+    TEST_INITIAL_TIME + 300 + 10,
+  );
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> mount after invalidation
+
+    -> data: {hello:world} ⋅ status: success
+    -> data: {hello:world} ⋅ status: refetching
+    -> data: {hello:world} ⋅ status: success
+    "
+  `);
+});

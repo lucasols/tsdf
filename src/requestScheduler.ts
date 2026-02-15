@@ -1013,6 +1013,11 @@ export class RequestScheduler<T> {
       );
     }
 
+    // If the store has never been fetched, skip the delay and fetch immediately
+    if (!this.state.timing.lastFetchStartTime) {
+      return this.scheduleFetch(requestId, 'highPriority', payload);
+    }
+
     // Cancel existing medium priority
     if (this.state.pending.mediumPriorityDelayed) {
       clearTimeout(this.state.pending.mediumPriorityDelayed.timeoutId);
