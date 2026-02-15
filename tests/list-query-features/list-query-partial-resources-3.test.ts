@@ -33,7 +33,7 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
         result[field] = item[field];
       }
     }
-    return __LEGIT_CAST__<Row>(result);
+    return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
 };
 

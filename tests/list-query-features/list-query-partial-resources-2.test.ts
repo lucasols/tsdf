@@ -33,7 +33,7 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
         result[field] = item[field];
       }
     }
-    return __LEGIT_CAST__<Row>(result);
+    return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
 };
 
@@ -360,7 +360,7 @@ describe('list then load item: cross-source field accumulation', () => {
 
 describe('load more with partial resources', () => {
   test('load list with fields then load more: new items also have fields', async () => {
-    const env = createListQueryStoreTestEnv(initialServerData, {
+    const env = createListQueryStoreTestEnv<Row, true>(initialServerData, {
       partialResources: partialResourcesConfig,
       defaultQuerySize: 3,
     });

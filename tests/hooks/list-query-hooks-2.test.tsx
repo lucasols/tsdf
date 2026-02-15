@@ -44,7 +44,7 @@ afterAll(() => {
 });
 
 type ListQueryStoreApi = ReturnType<
-  typeof createListQueryStoreTestEnv<Row, undefined>
+  typeof createListQueryStoreTestEnv<Row>
 >['apiStore'];
 
 function CompWithItemLoaded({

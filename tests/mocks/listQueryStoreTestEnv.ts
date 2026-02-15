@@ -29,12 +29,12 @@ export type Row = {
 
 export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
 
+type ListQueryItemPayload = string;
+
 export type ListQueryParams = {
   tableId: string;
   filters?: FilterOperator[];
 };
-
-type ListQueryItemPayload = string;
 
 type ListQuerySnapshotConfig = {
   tables?: string[];
@@ -62,9 +62,8 @@ function getStoreItemKey(tableId: string, id: number): string {
 
 export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
-  TPartialResources extends PartialResourcesConfig<TRow> | undefined =
-    undefined,
-  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
+  TPartialResources extends boolean = false,
+  TOffsetPagination extends boolean = false,
 >(
   serverInitialData: Tables<TRow>,
   {
@@ -101,8 +100,8 @@ export function createListQueryStoreTestEnv<
     optimisticListUpdates?: Parameters<
       typeof createListQueryStore<TRow, ListQueryParams, ListQueryItemPayload>
     >[0]['optimisticListUpdates'];
-    partialResources?: TPartialResources;
-    offsetPagination?: TOffsetPagination;
+    partialResources?: PartialResourcesConfig<TRow>;
+    offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
   } = {},
 ) {
@@ -299,9 +298,33 @@ export function createListQueryStoreTestEnv<
         ListQueryItemPayload,
         TPartialResources,
         TOffsetPagination
-      >
+      >,
+      unknown
     >(storeOptions),
   );
+
+  // Simplified method references for internal test helpers.
+  // The store methods have deferred conditional rest params (from boolean generics)
+  // that TypeScript can't resolve in a generic context. These casts provide concrete
+  // signatures for the internal wrapper functions.
+  const internalScheduleListQueryFetch = __LEGIT_CAST__<
+    (
+      fetchType: FetchType,
+      payload: ListQueryParams,
+      size?: number,
+      options?: { fields?: string[]; mediumPriorityDelayMs?: number },
+    ) => 'started' | 'skipped' | 'triggered' | 'scheduled',
+    unknown
+  >(listQueryStore.scheduleListQueryFetch);
+
+  const internalScheduleItemFetch = __LEGIT_CAST__<
+    (
+      fetchType: FetchType,
+      payload: string,
+      options?: { fields?: string[]; mediumPriorityDelayMs?: number },
+    ) => 'started' | 'skipped' | 'triggered' | 'scheduled',
+    unknown
+  >(listQueryStore.scheduleItemFetch);
 
   if (usesRealTimeUpdates) {
     serverTable.wsEvents.on('data_changed', ({ payload }) => {
@@ -377,7 +400,7 @@ export function createListQueryStoreTestEnv<
       size?: number,
       options?: { mediumPriorityDelayMs?: number },
     ) => {
-      const result = listQueryStore.scheduleListQueryFetch(
+      const result = internalScheduleListQueryFetch(
         fetchType,
         params,
         size,
@@ -393,11 +416,7 @@ export function createListQueryStoreTestEnv<
       itemPayload: ListQueryItemPayload,
       options?: { mediumPriorityDelayMs?: number },
     ) => {
-      const result = listQueryStore.scheduleItemFetch(
-        fetchType,
-        itemPayload,
-        options,
-      );
+      const result = internalScheduleItemFetch(fetchType, itemPayload, options);
 
       logScheduleFetchResult(result, (action) =>
         addAction(action, { itemId: itemPayload }),
@@ -406,10 +425,7 @@ export function createListQueryStoreTestEnv<
       return result;
     },
     forceListUpdate: (params: ListQueryParams) => {
-      const result = listQueryStore.scheduleListQueryFetch(
-        'highPriority',
-        params,
-      );
+      const result = internalScheduleListQueryFetch('highPriority', params);
 
       if (result !== 'started' && result !== 'triggered') {
         throw new Error(`error forceListUpdate: ${result}`);

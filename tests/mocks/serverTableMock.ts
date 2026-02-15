@@ -77,7 +77,7 @@ function selectFields<T extends Record<string, unknown>>(
       result[field] = item[field];
     }
   }
-  return __LEGIT_CAST__<T>(result);
+  return __LEGIT_CAST__<T, Record<string, unknown>>(result);
 }
 
 export type ListQueryResult<ItemData> = {

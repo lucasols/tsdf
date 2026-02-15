@@ -39,7 +39,7 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
         result[field] = item[field];
       }
     }
-    return __LEGIT_CAST__<Row>(result);
+    return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
 };
 
@@ -1308,25 +1308,31 @@ describe('await* preload with partial resources', () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
     });
-    const apiStore = __LEGIT_CAST__<{
-      scheduleItemFetch: (
-        fetchType: string,
-        payload: string,
-        options?: unknown,
-      ) => unknown;
-      scheduleListQueryFetch: (
-        fetchType: string,
-        payload: { tableId: string },
-        size?: number,
-        options?: unknown,
-      ) => unknown;
-      awaitItemFetch: (payload: string, options?: unknown) => Promise<unknown>;
-      awaitListQueryFetch: (
-        payload: { tableId: string },
-        options?: unknown,
-      ) => Promise<unknown>;
-      loadMore: (...args: unknown[]) => unknown;
-    }>(env.apiStore);
+    const apiStore = __LEGIT_CAST__<
+      {
+        scheduleItemFetch: (
+          fetchType: string,
+          payload: string,
+          options?: unknown,
+        ) => unknown;
+        scheduleListQueryFetch: (
+          fetchType: string,
+          payload: { tableId: string },
+          size?: number,
+          options?: unknown,
+        ) => unknown;
+        awaitItemFetch: (
+          payload: string,
+          options?: unknown,
+        ) => Promise<unknown>;
+        awaitListQueryFetch: (
+          payload: { tableId: string },
+          options?: unknown,
+        ) => Promise<unknown>;
+        loadMore: (...args: unknown[]) => unknown;
+      },
+      unknown
+    >(env.apiStore);
 
     expect(() =>
       apiStore.scheduleItemFetch('highPriority', 'users||1'),
@@ -1368,10 +1374,10 @@ describe('await* preload with partial resources', () => {
 
 describe('type safety: fields requirement with partialResources', () => {
   test('fields is required in hooks when partialResources is enabled', () => {
-    const store =
-      __LEGIT_CAST__<
-        ListQueryStore<Row, string, string, PartialResourcesConfig<Row>>
-      >(undefined);
+    const store = __LEGIT_CAST__<
+      ListQueryStore<Row, string, string, true>,
+      undefined
+    >(undefined);
 
     // Type-only test: function is never called to avoid React hook errors
     function typeCheck_() {
@@ -1443,8 +1449,10 @@ describe('type safety: fields requirement with partialResources', () => {
   });
 
   test('fields is optional in hooks when partialResources is not enabled', () => {
-    const store =
-      __LEGIT_CAST__<ListQueryStore<Row, string, string>>(undefined);
+    const store = __LEGIT_CAST__<
+      ListQueryStore<Row, string, string>,
+      undefined
+    >(undefined);
 
     function typeCheck_() {
       store.useItem('id');

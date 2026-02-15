@@ -29,7 +29,7 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
         result[field] = item[field];
       }
     }
-    return __LEGIT_CAST__<Row>(result);
+    return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
 };
 
@@ -214,14 +214,17 @@ describe('query coalescing with partial resources', () => {
       defaultQuerySize: 2,
       partialResources: partialResourcesConfig,
     });
-    const apiStore = __LEGIT_CAST__<{
-      scheduleListQueryFetch: (
-        fetchType: string,
-        payload: { tableId: string },
-        size?: number,
-        options?: unknown,
-      ) => unknown;
-    }>(env.apiStore);
+    const apiStore = __LEGIT_CAST__<
+      {
+        scheduleListQueryFetch: (
+          fetchType: string,
+          payload: { tableId: string },
+          size?: number,
+          options?: unknown,
+        ) => unknown;
+      },
+      unknown
+    >(env.apiStore);
 
     expect(() =>
       apiStore.scheduleListQueryFetch('highPriority', { tableId: 'table1' }, 4),

@@ -9,6 +9,7 @@ import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
+  type FieldsOption,
   type FieldsInput,
   type ListQueryUseMultipleItemsQuery,
   type PartialResourcesConfig,
@@ -40,8 +41,10 @@ export function useMultipleItems<
   ItemPayload extends ValidPayload,
   Selected = ItemState | null,
   QueryMetadata extends undefined | Record<string, unknown> = undefined,
+  HasPartialResources extends boolean = false,
 >(
-  items: ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
+  items: (ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata> &
+    FieldsOption<HasPartialResources>)[],
   {
     selector,
     loadFromStateOnly,
@@ -132,7 +135,7 @@ export function useMultipleItems<
 
           const data = selector
             ? selector(itemState ?? null, itemQuery?.payload ?? null)
-            : __LEGIT_CAST__<Selected>(itemState ?? null);
+            : __LEGIT_CAST__<Selected, ItemState | null>(itemState ?? null);
 
           if (itemQuery === null) {
             return {
@@ -142,7 +145,10 @@ export function useMultipleItems<
               isLoading: false,
               payload,
               data,
-              queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+              queryMetadata: __LEGIT_CAST__<
+                QueryMetadata,
+                QueryMetadata | undefined
+              >(queryMetadata),
             };
           }
 
@@ -155,7 +161,10 @@ export function useMultipleItems<
                 isLoading: false,
                 payload,
                 data,
-                queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+                queryMetadata: __LEGIT_CAST__<
+                  QueryMetadata,
+                  QueryMetadata | undefined
+                >(queryMetadata),
               };
             }
 
@@ -166,7 +175,10 @@ export function useMultipleItems<
               isLoading: !returnIdleStatus,
               payload,
               data,
-              queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+              queryMetadata: __LEGIT_CAST__<
+                QueryMetadata,
+                QueryMetadata | undefined
+              >(queryMetadata),
             };
           }
 
@@ -233,10 +245,13 @@ export function useMultipleItems<
               status === 'loading' && partialResources
                 ? selector
                   ? selector(null, itemQuery.payload)
-                  : __LEGIT_CAST__<Selected>(null)
+                  : __LEGIT_CAST__<Selected, null>(null)
                 : data,
             payload,
-            queryMetadata: __LEGIT_CAST__<QueryMetadata>(queryMetadata),
+            queryMetadata: __LEGIT_CAST__<
+              QueryMetadata,
+              QueryMetadata | undefined
+            >(queryMetadata),
           };
         },
       );
