@@ -765,6 +765,7 @@ export function createCollectionStore<
 
   // Set up window focus listener for non-realtime stores
   let cleanupFocusListener: (() => void) | null = null;
+  let cleanupReconnectFocusListener: (() => void) | null = null;
 
   function setupFocusListener() {
     cleanupFocusListener?.();
@@ -786,6 +787,35 @@ export function createCollectionStore<
 
   setupFocusListener();
 
+  /**
+   * Signals that the real-time transport (e.g. WebSocket) has reconnected after
+   * a disconnection. Events may have been missed during the outage, so all
+   * items need to be revalidated.
+   *
+   * - No-op when `usesRealTimeUpdates` is `false`.
+   * - If the window is focused, invalidates all items immediately with
+   *   `realtimeUpdate` priority.
+   * - If the window is **not** focused, defers invalidation until the next
+   *   window focus event. Multiple calls while unfocused are coalesced (only
+   *   one invalidation fires on focus).
+   */
+  function onTransportReconnect(): void {
+    if (!usesRealTimeUpdates) return;
+
+    cleanupReconnectFocusListener?.();
+    cleanupReconnectFocusListener = null;
+
+    if (isWindowFocused()) {
+      invalidateItem(() => true, 'realtimeUpdate');
+    } else {
+      cleanupReconnectFocusListener = onWindowFocus(() => {
+        cleanupReconnectFocusListener?.();
+        cleanupReconnectFocusListener = null;
+        invalidateItem(() => true, 'realtimeUpdate');
+      });
+    }
+  }
+
   function reset() {
     for (const scheduler of batchKeySchedulers.values()) {
       scheduler.reset();
@@ -798,6 +828,9 @@ export function createCollectionStore<
     perItemSchedulers.clear();
 
     invalidationWasTriggered.clear();
+
+    cleanupReconnectFocusListener?.();
+    cleanupReconnectFocusListener = null;
 
     store.setState({});
     setupFocusListener();
@@ -949,5 +982,6 @@ export function createCollectionStore<
     addItemToState,
     deleteItemState,
     performMutation,
+    onTransportReconnect,
   };
 }

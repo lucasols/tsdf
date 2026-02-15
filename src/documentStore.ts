@@ -247,6 +247,7 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   // Set up window focus listener for non-realtime stores
   let cleanupFocusListener: (() => void) | null = null;
+  let cleanupReconnectFocusListener: (() => void) | null = null;
 
   function setupFocusListener() {
     cleanupFocusListener?.();
@@ -356,8 +357,38 @@ export function createDocumentStore<State extends ValidStoreState>({
     return true;
   }
 
+  /**
+   * Signals that the real-time transport (e.g. WebSocket) has reconnected after
+   * a disconnection. Events may have been missed during the outage, so data
+   * needs to be revalidated.
+   *
+   * - No-op when `usesRealTimeUpdates` is `false`.
+   * - If the window is focused, invalidates immediately with `realtimeUpdate` priority.
+   * - If the window is **not** focused, defers invalidation until the next window
+   *   focus event. Multiple calls while unfocused are coalesced (only one
+   *   invalidation fires on focus).
+   */
+  function onTransportReconnect(): void {
+    if (!usesRealTimeUpdates) return;
+
+    cleanupReconnectFocusListener?.();
+    cleanupReconnectFocusListener = null;
+
+    if (isWindowFocused()) {
+      invalidateData('realtimeUpdate');
+    } else {
+      cleanupReconnectFocusListener = onWindowFocus(() => {
+        cleanupReconnectFocusListener?.();
+        cleanupReconnectFocusListener = null;
+        invalidateData('realtimeUpdate');
+      });
+    }
+  }
+
   function reset(): void {
     scheduler.reset();
+    cleanupReconnectFocusListener?.();
+    cleanupReconnectFocusListener = null;
     store.setState({
       data: null,
       error: null,
@@ -655,5 +686,6 @@ export function createDocumentStore<State extends ValidStoreState>({
     useListItemIsDeleted,
     useListItem,
     performMutation,
+    onTransportReconnect,
   };
 }
