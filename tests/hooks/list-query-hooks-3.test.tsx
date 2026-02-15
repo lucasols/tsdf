@@ -950,3 +950,81 @@ test('useListQuery with selector should not trigger a rerender', async () => {
     "
   `);
 });
+
+test('medium priority on idle list query skips delay', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    mediumPriorityDelayMs: 300,
+  });
+
+  const renders = createLoggerStore();
+
+  env.scheduleFetch('mediumPriority', { tableId: 'users' });
+
+  renders.addMark('mount after scheduling');
+
+  renderHook(() => {
+    const { items, status } = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { returnRefetchingStatus: true },
+    );
+    renders.add({ itemCount: items.length, status });
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+  expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(10);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> mount after scheduling
+
+    -> itemCount: 0 ⋅ status: loading
+    -> itemCount: 5 ⋅ status: success
+    "
+  `);
+});
+
+test('medium priority on loaded list query applies delay', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    testScenario: { loaded: { tables: ['users'] } },
+    mediumPriorityDelayMs: 300,
+  });
+
+  const renders = createLoggerStore();
+
+  env.apiStore.invalidateQueryAndItems({
+    queryPayload: { tableId: 'users' },
+    itemPayload: false,
+    type: 'mediumPriority',
+  });
+
+  renders.addMark('mount after invalidation');
+
+  renderHook(() => {
+    const { items, status } = env.apiStore.useListQuery(
+      { tableId: 'users' },
+      { returnRefetchingStatus: true },
+    );
+    renders.add({ itemCount: items.length, status });
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+  expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(300 + 10);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> mount after invalidation
+
+    -> itemCount: 5 ⋅ status: success
+    -> itemCount: 5 ⋅ status: refetching
+    -> itemCount: 5 ⋅ status: success
+    "
+  `);
+});

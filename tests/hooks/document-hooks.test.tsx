@@ -622,7 +622,7 @@ test('RTU update works', async () => {
 
   await flushAllTimers();
 
-  const rtuTriggeredAt = Date.now();
+  const rtuTriggeredAt = Date.now() - TEST_INITIAL_TIME;
   env.emulateExternalRTU({ hello: 'Throttle update' });
 
   await flushAllTimers();

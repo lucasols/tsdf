@@ -2,7 +2,7 @@ import { notNullish } from '@ls-stack/utils/assertions';
 import { sleep } from '@ls-stack/utils/sleep';
 import { evtmitter } from 'evtmitter';
 import type { StoreError } from '../../src/utils/storeShared';
-import { FetchError } from './testEnvUtils';
+import { FetchError, TEST_INITIAL_TIME } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
 export const DEFAULT_MUTATION_DURATION_MS = 1200;
@@ -122,7 +122,7 @@ export function createServerMock<Data>(
       duration = DEFAULT_FETCH_DURATION_MS,
     ): Promise<Data> => {
       const fetchId = getFetchId();
-      const startTime = Date.now();
+      const startTime = Date.now() - TEST_INITIAL_TIME;
 
       if (addAction) {
         addAction('>fetch-started', { id: fetchId });
@@ -140,7 +140,7 @@ export function createServerMock<Data>(
       // Check for scheduled error first (simulates immediate request failure)
       if (nextFetchError) {
         signal?.removeEventListener('abort', onAbort);
-        const endTime = Date.now();
+        const endTime = Date.now() - TEST_INITIAL_TIME;
         const error = nextFetchError.path
           ? new FetchError(nextFetchError.message, {
               path: nextFetchError.path,
@@ -175,7 +175,7 @@ export function createServerMock<Data>(
       // Check for abort after network delay
       if (signal?.aborted) {
         onAbort();
-        const endTime = Date.now();
+        const endTime = Date.now() - TEST_INITIAL_TIME;
         fetches.push({
           id: fetchId,
           startTime,
@@ -193,7 +193,7 @@ export function createServerMock<Data>(
         throw new Error('Server data history is empty');
       }
 
-      const endTime = Date.now();
+      const endTime = Date.now() - TEST_INITIAL_TIME;
       fetches.push({
         id: fetchId,
         startTime,

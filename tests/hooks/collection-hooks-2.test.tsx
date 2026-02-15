@@ -496,6 +496,79 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
   `);
 });
 
+test('medium priority on idle collection item skips delay', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo },
+    { mediumPriorityDelayMs: 300 },
+  );
+
+  const renders = createLoggerStore();
+
+  env.scheduleFetch('mediumPriority', '1');
+
+  renders.addMark('mount after scheduling');
+
+  renderHook(() => {
+    const { data, status } = env.apiStore.useItem('1', {
+      returnRefetchingStatus: true,
+    });
+    renders.add({ data: data?.value ?? null, status });
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+  expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(10);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> mount after scheduling
+
+    -> data: null ⋅ status: loading
+    -> data: {title:todo, completed:❌} ⋅ status: success
+    "
+  `);
+});
+
+test('medium priority on loaded collection item applies delay', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    { '1': defaultTodo },
+    { testScenario: 'loaded', mediumPriorityDelayMs: 300 },
+  );
+
+  const renders = createLoggerStore();
+
+  env.apiStore.invalidateItem('1', 'mediumPriority');
+
+  renders.addMark('mount after invalidation');
+
+  renderHook(() => {
+    const { data, status } = env.apiStore.useItem('1', {
+      returnRefetchingStatus: true,
+    });
+    renders.add({ data: data?.value ?? null, status });
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+
+  expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(300 + 10);
+
+  expect(renders.snapshot).toMatchInlineSnapshot(`
+    "
+
+    >>> mount after invalidation
+
+    -> data: {title:todo, completed:❌} ⋅ status: success
+    -> data: {title:todo, completed:❌} ⋅ status: refetching
+    -> data: {title:todo, completed:❌} ⋅ status: success
+    "
+  `);
+});
+
 test('useItem with selector should not trigger a rerender', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
