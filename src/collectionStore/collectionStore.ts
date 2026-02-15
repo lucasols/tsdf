@@ -5,6 +5,9 @@ import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { unknownToError, type Result } from 't-result';
 import { Store } from 't-state';
+import { useListItem as useListItemBase } from '../hooks/useListItem';
+import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
+import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
 import {
   BatchRequest,
   FetchContext,
@@ -698,6 +701,128 @@ export function createCollectionStore<
     store.setState({});
   }
 
+  /** Detects whether a specific item inside a collection item's data is still loading.
+   * Useful when a collection item holds a list/record of sub-items and a component
+   * displays one that may not be present yet. */
+  function useListItemIsLoading(
+    payload: ItemPayload,
+    {
+      itemId,
+      selector,
+      loadItemFallback,
+      ensureIsLoaded,
+    }: {
+      /** Unique identifier of the sub-item within the collection item */
+      itemId: string;
+      /** Extracts the sub-item from the collection item data; returning `null`/`undefined` means "not found" */
+      selector: (data: ItemState | null) => unknown;
+      /** Called after a timeout if the sub-item is still missing and no refetch is in progress. Defaults to `invalidateItem(payload)`. */
+      loadItemFallback?: () => void;
+      /** If true, forces a high-priority fetch and shows loading until the data is loaded */
+      ensureIsLoaded?: boolean;
+    },
+  ): boolean {
+    const item = useItem(payload, {
+      returnRefetchingStatus: true,
+      selector,
+      ensureIsLoaded,
+    });
+
+    const itemExists = item.data != null;
+    const listIsLoading = item.isLoading;
+    const isRefetching = item.status === 'refetching';
+
+    return useListItemIsLoadingBase({
+      itemId,
+      isRefetching,
+      listIsLoading,
+      itemExists,
+      loadItemFallback: loadItemFallback ?? (() => invalidateItem(payload)),
+    });
+  }
+
+  /** Detects when a specific item inside a collection item's data has been deleted.
+   * Only triggers after the sub-item was previously found and then disappears — not
+   * during initial loading. */
+  function useListItemIsDeleted(
+    payload: ItemPayload,
+    {
+      itemId,
+      selector,
+      onDelete,
+      ensureIsLoaded,
+    }: {
+      /** Unique identifier of the sub-item within the collection item */
+      itemId: string;
+      /** Extracts the sub-item from the collection item data; returning `null`/`undefined` means "not found" */
+      selector: (data: ItemState | null) => unknown;
+      /** Called once when the deletion is detected */
+      onDelete?: () => void;
+      /** If true, forces a high-priority fetch and shows loading until the data is loaded */
+      ensureIsLoaded?: boolean;
+    },
+  ): boolean {
+    const item = useItem(payload, {
+      returnRefetchingStatus: true,
+      selector,
+      ensureIsLoaded,
+    });
+
+    const itemExists = item.data != null;
+    const listIsLoading = item.isLoading;
+
+    return useListItemIsDeletedBase({
+      itemId,
+      itemExists,
+      listIsLoading,
+      onDelete,
+    });
+  }
+
+  /** Combined hook that returns `{ isLoading, isDeleted, data }` for a specific item
+   * inside a collection item's data. Composes `useListItemIsLoading` and `useListItemIsDeleted`. */
+  function useListItem<Selected>(
+    payload: ItemPayload,
+    {
+      itemId,
+      selector,
+      loadItemFallback,
+      onDelete,
+      ensureIsLoaded,
+    }: {
+      /** Unique identifier of the sub-item within the collection item */
+      itemId: string;
+      /** Extracts and maps the sub-item from the collection item data */
+      selector: (data: ItemState | null) => Selected;
+      /** Called after a timeout if the sub-item is still missing. Defaults to `invalidateItem(payload)`. */
+      loadItemFallback?: () => void;
+      /** Called once when the deletion is detected */
+      onDelete?: () => void;
+      /** If true, forces a high-priority fetch and shows loading until the data is loaded */
+      ensureIsLoaded?: boolean;
+    },
+  ): { isLoading: boolean; isDeleted: boolean; data: Selected } {
+    const item = useItem(payload, {
+      returnRefetchingStatus: true,
+      selector,
+      ensureIsLoaded,
+    });
+
+    const itemExists = item.data != null;
+    const listIsLoading = item.isLoading;
+    const isRefetching = item.status === 'refetching';
+
+    return useListItemBase({
+      itemId,
+      isRefetching,
+      listIsLoading,
+      itemExists,
+      loadItemFallback: loadItemFallback ?? (() => invalidateItem(payload)),
+      data: item.data,
+      onDelete,
+    });
+  }
+
   return {
     store,
     events,
@@ -709,6 +834,9 @@ export function createCollectionStore<
     awaitFetch,
     useMultipleItems,
     useItem,
+    useListItemIsLoading,
+    useListItemIsDeleted,
+    useListItem,
     reset,
     getItemKey,
     getItemState,

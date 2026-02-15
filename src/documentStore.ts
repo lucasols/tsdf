@@ -9,6 +9,9 @@ import { produce } from 'immer';
 import { useCallback, useEffect } from 'react';
 import { unknownToError, type Result } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
+import { useListItem as useListItemBase } from './hooks/useListItem';
+import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
+import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
 import {
   BatchRequest,
   FetchContext,
@@ -18,7 +21,10 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
-import { performMutationWithLifecycle, type BlockWindowCloseHandler } from './utils/performMutation';
+import {
+  performMutationWithLifecycle,
+  type BlockWindowCloseHandler,
+} from './utils/performMutation';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import {
   fetchTypePriority,
@@ -456,6 +462,119 @@ export function createDocumentStore<State extends ValidStoreState>({
     return useModifyResult(storeState);
   }
 
+  /** Detects whether a specific item inside the document's data is still loading.
+   * Useful when the document holds a list/record of items and a component displays
+   * an individual item that may not be present yet. */
+  function useListItemIsLoading({
+    itemId,
+    selector,
+    loadItemFallback,
+    ensureIsLoaded,
+  }: {
+    /** Unique identifier of the item within the document */
+    itemId: string;
+    /** Extracts the item from the document data; returning `null`/`undefined` means "not found" */
+    selector: (data: State | null) => unknown;
+    /** Called after a timeout if the item is still missing and no refetch is in progress. Defaults to `invalidateData()`. */
+    loadItemFallback?: () => void;
+    /** If true, forces a high-priority fetch and shows loading until the data is loaded */
+    ensureIsLoaded?: boolean;
+  }): boolean {
+    const doc = useDocument({
+      returnRefetchingStatus: true,
+      selector,
+      ensureIsLoaded,
+    });
+
+    const itemExists = doc.data != null;
+    const listIsLoading = doc.isLoading;
+    const isRefetching = doc.status === 'refetching';
+
+    return useListItemIsLoadingBase({
+      itemId,
+      isRefetching,
+      listIsLoading,
+      itemExists,
+      loadItemFallback: loadItemFallback ?? (() => invalidateData()),
+    });
+  }
+
+  /** Detects when a specific item inside the document's data has been deleted.
+   * Only triggers after the item was previously found and then disappears — not
+   * during initial loading. */
+  function useListItemIsDeleted({
+    itemId,
+    selector,
+    onDelete,
+    ensureIsLoaded,
+  }: {
+    /** Unique identifier of the item within the document */
+    itemId: string;
+    /** Extracts the item from the document data; returning `null`/`undefined` means "not found" */
+    selector: (data: State | null) => unknown;
+    /** Called once when the deletion is detected */
+    onDelete?: () => void;
+    /** If true, forces a high-priority fetch and shows loading until the data is loaded */
+    ensureIsLoaded?: boolean;
+  }): boolean {
+    const doc = useDocument({
+      returnRefetchingStatus: true,
+      selector,
+      ensureIsLoaded,
+    });
+
+    const itemExists = doc.data != null;
+    const listIsLoading = doc.isLoading;
+
+    return useListItemIsDeletedBase({
+      itemId,
+      itemExists,
+      listIsLoading,
+      onDelete,
+    });
+  }
+
+  /** Combined hook that returns `{ isLoading, isDeleted, data }` for a specific item
+   * inside the document's data. Composes `useListItemIsLoading` and `useListItemIsDeleted`. */
+  function useListItem<Selected>({
+    itemId,
+    selector,
+    loadItemFallback,
+    onDelete,
+    ensureIsLoaded,
+  }: {
+    /** Unique identifier of the item within the document */
+    itemId: string;
+    /** Extracts and maps the item from the document data */
+    selector: (data: State | null) => Selected;
+    /** Called after a timeout if the item is still missing. Defaults to `invalidateData()`. */
+    loadItemFallback?: () => void;
+    /** Called once when the deletion is detected */
+    onDelete?: () => void;
+    /** If true, forces a high-priority fetch and shows loading until the data is loaded */
+    ensureIsLoaded?: boolean;
+  }): { isLoading: boolean; isDeleted: boolean; data: Selected } {
+    const doc = useDocument({
+      returnRefetchingStatus: true,
+      selector,
+      ensureIsLoaded,
+    });
+
+    const itemExists = doc.data != null;
+    const listIsLoading = doc.isLoading;
+    const isRefetching = doc.status === 'refetching';
+
+    return useListItemBase({
+      itemId,
+      isRefetching,
+      listIsLoading,
+      itemExists,
+      loadItemFallback: loadItemFallback ?? (() => invalidateData()),
+      data: doc.data,
+      onDelete,
+    });
+  }
+
   return {
     store,
     events,
@@ -472,6 +591,9 @@ export function createDocumentStore<State extends ValidStoreState>({
     reset,
     startMutation,
     useDocument,
+    useListItemIsLoading,
+    useListItemIsDeleted,
+    useListItem,
     performMutation,
   };
 }
