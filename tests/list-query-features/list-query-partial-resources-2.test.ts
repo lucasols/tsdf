@@ -124,8 +124,10 @@ describe('list then load item: cross-source field accumulation', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name', 'address']
+      - duration: 800
+        fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -147,6 +149,7 @@ describe('list then load item: cross-source field accumulation', () => {
             itemId: 'users||9'
           - data: { address: 'Address 10', id: 10, name: 'User 10' }
             itemId: 'users||10'
+        startedAt: 10
         type: 'list'
     `);
   });
@@ -228,8 +231,10 @@ describe('list then load item: cross-source field accumulation', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -251,10 +256,13 @@ describe('list then load item: cross-source field accumulation', () => {
             itemId: 'users||9'
           - data: { id: 10, name: 'User 10' }
             itemId: 'users||10'
+        startedAt: 10
         type: 'list'
-      - fields: ['id', 'name', 'address', 'country']
+      - duration: 800
+        fields: ['id', 'name', 'address', 'country']
         itemId: 'users||1'
         result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
+        startedAt: 820
         type: 'fetch'
     `);
   });
@@ -319,8 +327,10 @@ describe('list then load item: cross-source field accumulation', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -342,6 +352,7 @@ describe('list then load item: cross-source field accumulation', () => {
             itemId: 'users||9'
           - data: { id: 10, name: 'User 10' }
             itemId: 'users||10'
+        startedAt: 10
         type: 'list'
     `);
   });
@@ -412,8 +423,10 @@ describe('load more with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 3
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -421,9 +434,12 @@ describe('load more with partial resources', () => {
             itemId: 'users||2'
           - data: { id: 3, name: 'User 3' }
             itemId: 'users||3'
+        startedAt: 10
         type: 'list'
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 6
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -437,6 +453,7 @@ describe('load more with partial resources', () => {
             itemId: 'users||5'
           - data: { id: 6, name: 'User 6' }
             itemId: 'users||6'
+        startedAt: 820
         type: 'list'
     `);
   });
@@ -483,13 +500,17 @@ describe('concurrent fetches with different fields', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         itemId: 'users||1'
         result: { id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
-      - fields: ['id', 'address', 'country']
+      - duration: 800
+        fields: ['id', 'address', 'country']
         itemId: 'users||2'
         result: { address: 'Address 2', country: 'Country 2', id: 2 }
+        startedAt: 10
         type: 'fetch'
     `);
   });

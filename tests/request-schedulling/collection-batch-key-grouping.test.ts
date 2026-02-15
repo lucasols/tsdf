@@ -63,7 +63,9 @@ describe('batch key grouping', () => {
     // All items with same batch key should be in one batch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'api1'
+        duration: 800
         itemIds: ['api1-item1', 'api1-item2', 'api1-item3']
+        offset: 0
         results:
           - data: { v: 1 }
             itemId: 'api1-item1'
@@ -71,6 +73,7 @@ describe('batch key grouping', () => {
             itemId: 'api1-item2'
           - data: { v: 3 }
             itemId: 'api1-item3'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -107,20 +110,26 @@ describe('batch key grouping', () => {
     // Items should be split into two separate batch fetches
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'api1'
+        duration: 800
         itemIds: ['api1-item1', 'api1-item2']
+        offset: 0
         results:
           - data: { v: 1 }
             itemId: 'api1-item1'
           - data: { v: 2 }
             itemId: 'api1-item2'
+        startedAt: 50
         type: 'list'
       - batchKey: 'api2'
+        duration: 800
         itemIds: ['api2-item1', 'api2-item2']
+        offset: 0
         results:
           - data: { v: 10 }
             itemId: 'api2-item1'
           - data: { v: 20 }
             itemId: 'api2-item2'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -160,15 +169,20 @@ describe('batch key grouping', () => {
     // api1 items batched, api2-item1 individual fetch
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'api1'
+        duration: 800
         itemIds: ['api1-item1', 'api1-item2']
+        offset: 0
         results:
           - data: { v: 1 }
             itemId: 'api1-item1'
           - data: { v: 2 }
             itemId: 'api1-item2'
+        startedAt: 50
         type: 'list'
-      - itemId: 'api2-item1'
+      - duration: 800
+        itemId: 'api2-item1'
         result: { v: 10 }
+        startedAt: 50
         type: 'fetch'
     `);
   });
@@ -216,18 +230,25 @@ describe('batch key grouping', () => {
     // api1 items batched, api2 items fetched individually
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: 'api1'
+        duration: 800
         itemIds: ['api1-item1', 'api1-item2']
+        offset: 0
         results:
           - data: { v: 1 }
             itemId: 'api1-item1'
           - data: { v: 2 }
             itemId: 'api1-item2'
+        startedAt: 50
         type: 'list'
-      - itemId: 'api2-item1'
+      - duration: 800
+        itemId: 'api2-item1'
         result: { v: 10 }
+        startedAt: 50
         type: 'fetch'
-      - itemId: 'api2-item2'
+      - duration: 800
+        itemId: 'api2-item2'
         result: { v: 20 }
+        startedAt: 50
         type: 'fetch'
     `);
   });
@@ -255,7 +276,9 @@ describe('batch key grouping', () => {
     // All items should go into a single batch (default key)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
+        duration: 800
         itemIds: ['api1-item1', 'api1-item2', 'api2-item1']
+        offset: 0
         results:
           - data: { v: 1 }
             itemId: 'api1-item1'
@@ -263,6 +286,7 @@ describe('batch key grouping', () => {
             itemId: 'api1-item2'
           - data: { v: 10 }
             itemId: 'api2-item1'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -283,8 +307,10 @@ describe('batch key grouping', () => {
 
     // Single item uses fetchFn, not batchFetchFn
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemId: 'api1-item1'
+      - duration: 800
+        itemId: 'api1-item1'
         result: { v: 1 }
+        startedAt: 50
         type: 'fetch'
     `);
   });

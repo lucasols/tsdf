@@ -1,8 +1,10 @@
+import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import { BatchRequest, FetchContext } from '../requestScheduler';
+import { NormalizedFetchListFn } from './createFetchApi';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
   StoreError,
@@ -11,10 +13,87 @@ import {
 } from '../utils/storeShared';
 import {
   type FetchListFnReturn,
+  type OffsetPaginationConfig,
   type PartialResourcesConfig,
   type QueryFetchPayload,
   type TSFDListQueryState,
 } from './types';
+
+function applyFetchedItems<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+>(
+  draft: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+  queryKey: string,
+  items: FetchListFnReturn<ItemState, ItemPayload>['items'],
+  hasMore: boolean,
+  fields: string[] | undefined,
+  getItemKey: (params: ItemPayload) => string,
+  partialResources: PartialResourcesConfig<ItemState> | undefined,
+  appendToExisting: boolean,
+) {
+  const query = draft.queries[queryKey];
+  if (!query) return;
+
+  query.status = 'success';
+  query.wasLoaded = true;
+  query.hasMore = hasMore;
+
+  if (!appendToExisting) {
+    query.items = [];
+  }
+
+  const existingItemKeys = new Set(query.items);
+
+  for (const { data, itemPayload } of items) {
+    const itemKey = getItemKey(itemPayload);
+
+    if (partialResources) {
+      const prev = draft.items[itemKey] ?? undefined;
+      const merged = partialResources.mergeItems(prev, data);
+      draft.items[itemKey] = reusePrevIfEqual({
+        current: merged,
+        prev,
+      });
+
+      if (fields && fields.length > 0) {
+        const existingFields = draft.itemLoadedFields[itemKey] ?? [];
+        const fieldSet = new Set([...existingFields, ...fields]);
+        draft.itemLoadedFields[itemKey] = Array.from(fieldSet).sort();
+      } else {
+        draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
+      }
+    } else {
+      draft.items[itemKey] = reusePrevIfEqual({
+        current: data,
+        prev: draft.items[itemKey] ?? undefined,
+      });
+    }
+
+    // Deduplicate: skip items already in the list (handles both append
+    // and chunked invalidation where parallel chunks may return overlapping items)
+    if (!existingItemKeys.has(itemKey)) {
+      query.items.push(itemKey);
+      existingItemKeys.add(itemKey);
+    }
+
+    const itemQuery = draft.itemQueries[itemKey];
+
+    if (
+      !itemQuery ||
+      (itemQuery.status !== 'loading' && itemQuery.status !== 'refetching')
+    ) {
+      draft.itemQueries[itemKey] = {
+        error: null,
+        refetchOnMount: false,
+        status: 'success',
+        wasLoaded: true,
+        payload: itemPayload,
+      };
+    }
+  }
+}
 
 export async function executeQueryFetch<
   ItemState extends ValidStoreState,
@@ -24,15 +103,16 @@ export async function executeQueryFetch<
   requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
   fetchCtx: FetchContext,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
-  fetchListFn: (
-    payload: QueryPayload,
-    size: number,
-    options: { signal: AbortSignal; fields?: string[] },
-  ) => Promise<FetchListFnReturn<ItemState, ItemPayload>>,
+  normalizedFetchListFn: NormalizedFetchListFn<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >,
   errorNormalizer: (exception: Error) => StoreError,
   getItemKey: (params: ItemPayload) => string,
   updateItemSchedulerTiming: (itemKey: string, startTime: number) => void,
   partialResources?: PartialResourcesConfig<ItemState>,
+  offsetPagination?: OffsetPaginationConfig,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
 
@@ -75,77 +155,94 @@ export async function executeQueryFetch<
 
   const fetchPromises = requests.map(
     async ({ requestId: queryKey, payload: fetchPayload }) => {
-      const { payload, size, fields } = fetchPayload;
+      const { payload, offset, limit, fields } = fetchPayload;
 
       try {
-        const { items, hasMore } = await fetchListFn(payload, size, {
-          signal: fetchCtx.signal,
-          fields,
-        });
+        // Determine if we need chunked invalidation (offset mode, load type, limit > maxInvalidationLimit)
+        const useChunkedInvalidation =
+          offsetPagination &&
+          fetchPayload.type === 'load' &&
+          limit > offsetPagination.maxInvalidationLimit;
+
+        let allItems: FetchListFnReturn<ItemState, ItemPayload>['items'];
+        let hasMore: boolean;
+
+        if (useChunkedInvalidation) {
+          // Split into multiple parallel chunk requests
+          const maxChunkLimit = offsetPagination.maxInvalidationLimit;
+          const chunks: { offset: number; limit: number }[] = [];
+          for (
+            let chunkOffset = offset;
+            chunkOffset < offset + limit;
+            chunkOffset += maxChunkLimit
+          ) {
+            chunks.push({
+              offset: chunkOffset,
+              limit: Math.min(maxChunkLimit, offset + limit - chunkOffset),
+            });
+          }
+
+          const queue = createAsyncQueue<
+            FetchListFnReturn<ItemState, ItemPayload>
+          >({
+            concurrency: offsetPagination.maxParallel ?? 3,
+            stopOnError: true,
+            rejectPendingOnError: true,
+          });
+
+          const chunkResultPromises = chunks.map((chunk) =>
+            queue.resultifyAdd(() =>
+              normalizedFetchListFn(payload, chunk.offset, chunk.limit, {
+                signal: fetchCtx.signal,
+                fields,
+              }),
+            ),
+          );
+
+          const chunkResults = await Promise.all(chunkResultPromises);
+          const successResults = chunkResults.map((r) => r.unwrap());
+
+          allItems = successResults.flatMap((r) => r.items);
+          const lastChunk = successResults[successResults.length - 1];
+          hasMore = lastChunk ? lastChunk.hasMore : false;
+        } else {
+          const result = await normalizedFetchListFn(payload, offset, limit, {
+            signal: fetchCtx.signal,
+            fields,
+          });
+
+          allItems = result.items;
+          hasMore = result.hasMore;
+        }
 
         if (fetchCtx.shouldAbort()) {
           results.set(queryKey, false);
           return;
         }
 
+        // In offset mode, append only when loadMore range starts after head.
+        // Coalesced loadMore+load can produce type='loadMore' with offset=0,
+        // which must replace the list to avoid stale head items.
+        const appendToExisting =
+          !!offsetPagination && fetchPayload.type === 'loadMore' && offset > 0;
+
         store.produceState(
           (draft) => {
-            const query = draft.queries[queryKey];
-            if (!query) return;
-
-            query.status = 'success';
-            query.wasLoaded = true;
-            query.hasMore = hasMore;
-            query.items = [];
-
-            for (const { data, itemPayload } of items) {
-              const itemKey = getItemKey(itemPayload);
-
-              if (partialResources) {
-                const prev = draft.items[itemKey] ?? undefined;
-                const merged = partialResources.mergeItems(prev, data);
-                draft.items[itemKey] = reusePrevIfEqual({
-                  current: merged,
-                  prev,
-                });
-
-                if (fields && fields.length > 0) {
-                  const existingFields = draft.itemLoadedFields[itemKey] ?? [];
-                  const fieldSet = new Set([...existingFields, ...fields]);
-                  draft.itemLoadedFields[itemKey] = Array.from(fieldSet).sort();
-                } else {
-                  draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
-                }
-              } else {
-                draft.items[itemKey] = reusePrevIfEqual({
-                  current: data,
-                  prev: draft.items[itemKey] ?? undefined,
-                });
-              }
-
-              query.items.push(itemKey);
-
-              const itemQuery = draft.itemQueries[itemKey];
-
-              if (
-                !itemQuery ||
-                (itemQuery.status !== 'loading' &&
-                  itemQuery.status !== 'refetching')
-              ) {
-                draft.itemQueries[itemKey] = {
-                  error: null,
-                  refetchOnMount: false,
-                  status: 'success',
-                  wasLoaded: true,
-                  payload: itemPayload,
-                };
-              }
-            }
+            applyFetchedItems(
+              draft,
+              queryKey,
+              allItems,
+              hasMore,
+              fields,
+              getItemKey,
+              partialResources,
+              appendToExisting,
+            );
           },
           { action: 'query-fetch-success' },
         );
 
-        for (const { itemPayload } of items) {
+        for (const { itemPayload } of allItems) {
           updateItemSchedulerTiming(
             getItemKey(itemPayload),
             fetchCtx.getStartTime(),

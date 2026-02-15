@@ -1,7 +1,14 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
-import { createListQueryStore } from '../../src/listQueryStore/listQueryStore';
-import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
+import {
+  createListQueryStore,
+  type ListQueryStoreOptions,
+} from '../../src/listQueryStore/listQueryStore';
+import type {
+  OffsetPaginationConfig,
+  PartialResourcesConfig,
+} from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
@@ -56,6 +63,7 @@ export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends PartialResourcesConfig<TRow> | undefined =
     undefined,
+  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
 >(
   serverInitialData: Tables<TRow>,
   {
@@ -72,6 +80,7 @@ export function createListQueryStoreTestEnv<
     disableFetchItemFn,
     optimisticListUpdates,
     partialResources,
+    offsetPagination,
   }: {
     dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
     baseCoalescingWindowMs?: number;
@@ -91,6 +100,7 @@ export function createListQueryStoreTestEnv<
       typeof createListQueryStore<TRow, ListQueryParams, ListQueryItemPayload>
     >[0]['optimisticListUpdates'];
     partialResources?: TPartialResources;
+    offsetPagination?: TOffsetPagination;
   } = {},
 ) {
   const {
@@ -194,12 +204,34 @@ export function createListQueryStoreTestEnv<
 
   const testOptions = resolveTestOptions(testScenario, serverTable);
 
-  const listQueryStore = createListQueryStore<
-    TRow,
-    ListQueryParams,
-    ListQueryItemPayload,
-    TPartialResources
-  >({
+  async function fetchFromServer(
+    { tableId, filters }: ListQueryParams,
+    offset: number | undefined,
+    limit: number,
+    signal: AbortSignal,
+    fields: string[] | undefined,
+  ) {
+    const result = await serverTable.list(
+      {
+        tableId,
+        filters,
+        fields: partialResources ? fields : undefined,
+        offset,
+        limit,
+      },
+      signal,
+    );
+
+    return {
+      items: result.items.map(({ itemId, data }) => ({
+        itemPayload: itemId,
+        data,
+      })),
+      hasMore: result.hasMore,
+    };
+  }
+
+  const baseOptions = {
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
@@ -213,34 +245,59 @@ export function createListQueryStoreTestEnv<
     optimisticListUpdates,
     partialResources,
     '~test': testOptions,
-    onSchedulerEvent: (event) => {
+    onSchedulerEvent: (
+      event: import('../../src/requestScheduler').RequestSchedulerEvents,
+    ) => {
       logSchedulerEvent(event, addAction);
-    },
-    fetchListFn: async ({ tableId, filters }, size, { signal, fields }) => {
-      const result = await serverTable.list(
-        {
-          tableId,
-          filters,
-          fields: partialResources ? fields : undefined,
-          limit: size,
-        },
-        signal,
-      );
-
-      return {
-        items: result.items.map(({ itemId, data }) => ({
-          itemPayload: itemId,
-          data,
-        })),
-        hasMore: result.hasMore,
-      };
     },
     fetchItemFn: disableFetchItemFn
       ? undefined
-      : async (payload, { signal, fields }) => {
+      : async (
+          payload: ListQueryItemPayload,
+          { signal, fields }: { signal: AbortSignal; fields?: string[] },
+        ) => {
           return serverTable.fetch(payload, signal, { fields });
         },
-  });
+  };
+
+  // TypeScript cannot narrow generic params from a runtime check, so we use
+  // __LEGIT_CAST__ on the options object to satisfy the conditional type.
+  const storeOptions = offsetPagination
+    ? {
+        ...baseOptions,
+        offsetPagination,
+        fetchListFn: async (
+          payload: ListQueryParams,
+          { offset, limit }: { offset: number; limit: number },
+          { signal, fields }: { signal: AbortSignal; fields?: string[] },
+        ) => fetchFromServer(payload, offset, limit, signal, fields),
+      }
+    : {
+        ...baseOptions,
+        fetchListFn: async (
+          payload: ListQueryParams,
+          size: number,
+          { signal, fields }: { signal: AbortSignal; fields?: string[] },
+        ) => fetchFromServer(payload, undefined, size, signal, fields),
+      };
+
+  const listQueryStore = createListQueryStore<
+    TRow,
+    ListQueryParams,
+    ListQueryItemPayload,
+    TPartialResources,
+    TOffsetPagination
+  >(
+    __LEGIT_CAST__<
+      ListQueryStoreOptions<
+        TRow,
+        ListQueryParams,
+        ListQueryItemPayload,
+        TPartialResources,
+        TOffsetPagination
+      >
+    >(storeOptions),
+  );
 
   if (usesRealTimeUpdates) {
     serverTable.wsEvents.on('data_changed', ({ payload }) => {

@@ -3,7 +3,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
 import { evtmitter } from 'evtmitter';
 import type { StoreError } from '../../src/utils/storeShared';
-import { FetchError } from './testEnvUtils';
+import { FetchError, TEST_INITIAL_TIME } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
 export const DEFAULT_MUTATION_DURATION_MS = 1200;
@@ -125,6 +125,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   const defaultFetchDuration = DEFAULT_FETCH_DURATION_MS;
   const nextFetchErrors = new Map<string, FetchErrorConfig>();
   let nextListFetchError: FetchErrorConfig | null = null;
+  const listFetchStartDelays: number[] = [];
 
   // Fetch tracking state
   let numOfStartedFetches = 0;
@@ -138,14 +139,19 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId: string;
         fields: string[] | undefined;
         result: ItemData | 'error' | 'aborted';
+        startedAt: number;
+        duration: number;
       }
     | {
         type: 'list';
         itemIds: string[] | undefined;
+        offset: number;
         limit: number | undefined;
         fields: string[] | undefined;
         filters: FilterOperator[] | undefined;
         batchKey: string | undefined;
+        startedAt: number;
+        duration: number;
         results:
           | Array<{ itemId: string; data: ItemData | 'error' }>
           | 'aborted';
@@ -189,6 +195,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     options?: { fields?: string[] },
   ): Promise<ItemData> {
     const fetchId = addAction ? getFetchId() : undefined;
+    const fetchStartedAt = Date.now() - TEST_INITIAL_TIME;
 
     if (addAction) {
       addAction('>fetch-started', { id: fetchId, itemId });
@@ -213,6 +220,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         fields: options?.fields,
         result: 'error',
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -246,6 +255,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         fields: options?.fields,
         result: 'aborted',
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -260,6 +271,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         fields: options?.fields,
         result: 'error',
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -277,6 +290,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       itemId,
       fields: options?.fields,
       result,
+      startedAt: fetchStartedAt,
+      duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
     });
     if (addAction) {
       numOfFinishedFetches++;
@@ -304,6 +319,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       batchKey,
     } = options ?? {};
     const listId = addAction ? getFetchId() : undefined;
+    const fetchStartedAt = Date.now() - TEST_INITIAL_TIME;
 
     if (addAction) {
       const filterInfo = filterItemIds ? { itemIds: filterItemIds } : undefined;
@@ -321,6 +337,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       addAction('<list-fetch-aborted 🚫', { id: listId });
     }
     signal?.addEventListener('abort', onAbort);
+
+    // Apply queued start delay (simulates network latency between requests)
+    const startDelay = listFetchStartDelays.shift();
+    if (startDelay !== undefined && startDelay > 0) {
+      await sleep(startDelay);
+    }
 
     // Calculate max duration from filtered items
     let maxDuration = defaultFetchDuration;
@@ -340,11 +362,14 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fetchHistory.push({
         type: 'list',
         itemIds: filterItemIds,
+        offset,
         limit,
         results: 'aborted',
         filters,
         fields,
         batchKey,
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -359,11 +384,14 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fetchHistory.push({
         type: 'list',
         itemIds: filterItemIds,
+        offset,
         limit,
         results: 'aborted',
         filters,
         fields,
         batchKey,
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
       if (addAction) {
         numOfFinishedFetches++;
@@ -379,11 +407,14 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fetchHistory.push({
         type: 'list',
         itemIds: filterItemIds,
+        offset,
         results: 'aborted',
         limit,
         filters,
         fields,
         batchKey,
+        startedAt: fetchStartedAt,
+        duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
       });
 
       if (addAction) {
@@ -442,6 +473,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     fetchHistory.push({
       type: 'list',
       itemIds: filterItemIds,
+      offset,
       limit,
       results: resultItems.map(({ itemId, data }) => ({
         itemId,
@@ -450,6 +482,8 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       fields,
       filters,
       batchKey,
+      startedAt: fetchStartedAt,
+      duration: Date.now() - TEST_INITIAL_TIME - fetchStartedAt,
     });
 
     if (addAction) {
@@ -474,14 +508,24 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   function setItem(
     itemId: string,
     data: ItemData,
-    options?: { triggerRTUEvent?: boolean },
+    options?: { triggerRTUEvent?: boolean; prepend?: boolean },
   ): void {
     const tableId = getTableId(itemId);
     if (tableId) {
       knownTableIds.add(tableId);
     }
 
-    items.set(itemId, data);
+    if (options?.prepend) {
+      // Rebuild Map with new item first to maintain insertion-order semantics
+      const existing = new Map(items);
+      items.clear();
+      items.set(itemId, data);
+      for (const [key, value] of existing) {
+        if (key !== itemId) items.set(key, value);
+      }
+    } else {
+      items.set(itemId, data);
+    }
 
     const history = itemHistory.get(itemId);
     if (history) {
@@ -792,6 +836,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         itemId,
         typeof error === 'string' ? { message: error } : error,
       );
+    },
+    addListFetchStartDelay(delayMs: number) {
+      listFetchStartDelays.push(delayMs);
     },
     setNextListFetchError(error: FetchErrorConfig | string) {
       nextListFetchError =

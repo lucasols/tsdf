@@ -96,9 +96,11 @@ describe('useItem with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name', 'address']
+      - duration: 800
+        fields: ['id', 'name', 'address']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
     `);
   });
@@ -139,8 +141,10 @@ describe('useItem with partial resources', () => {
     }
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - itemId: 'users||1'
+      - duration: 800
+        itemId: 'users||1'
         result: { address: 'Address 1', age: 10, country: 'Country 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
     `);
   });
@@ -198,13 +202,17 @@ describe('useItem with partial resources', () => {
     ).toMatchInlineSnapshot(`['address', 'country', 'id', 'name']`);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name', 'address']
+      - duration: 800
+        fields: ['id', 'name', 'address']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
-      - fields: ['id', 'name', 'address', 'country']
+      - duration: 800
+        fields: ['id', 'name', 'address', 'country']
         itemId: 'users||1'
         result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
+        startedAt: 820
         type: 'fetch'
     `);
   });
@@ -259,9 +267,11 @@ describe('useItem with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name', 'address', 'country']
+      - duration: 800
+        fields: ['id', 'name', 'address', 'country']
         itemId: 'users||1'
         result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
     `);
   });
@@ -294,8 +304,10 @@ describe('useListQuery with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -307,6 +319,7 @@ describe('useListQuery with partial resources', () => {
             itemId: 'users||4'
           - data: { id: 5, name: 'User 5' }
             itemId: 'users||5'
+        startedAt: 10
         type: 'list'
     `);
   });
@@ -393,8 +406,10 @@ describe('useListQuery with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -406,9 +421,12 @@ describe('useListQuery with partial resources', () => {
             itemId: 'users||4'
           - data: { id: 5, name: 'User 5' }
             itemId: 'users||5'
+        startedAt: 10
         type: 'list'
-      - fields: ['id', 'name', 'address']
+      - duration: 800
+        fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -420,6 +438,7 @@ describe('useListQuery with partial resources', () => {
             itemId: 'users||4'
           - data: { address: 'Address 5', id: 5, name: 'User 5' }
             itemId: 'users||5'
+        startedAt: 820
         type: 'list'
     `);
   });
@@ -474,8 +493,10 @@ describe('useListQuery with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name', 'address']
+      - duration: 800
+        fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -487,6 +508,7 @@ describe('useListQuery with partial resources', () => {
             itemId: 'users||4'
           - data: { address: 'Address 5', id: 5, name: 'User 5' }
             itemId: 'users||5'
+        startedAt: 10
         type: 'list'
     `);
   });
@@ -554,13 +576,17 @@ describe('cross-hook field loading', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         itemId: 'users||1'
         result: { id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
-      - fields: ['id', 'address']
+      - duration: 800
+        fields: ['id', 'address']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1 }
+        startedAt: 820
         type: 'fetch'
     `);
   });
@@ -617,9 +643,11 @@ describe('cross-hook field loading', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['address', 'id', 'name']
+      - duration: 800
+        fields: ['address', 'id', 'name']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
     `);
   });
@@ -654,9 +682,11 @@ describe('deleteItemState with partial resources', () => {
     expect(env.store.state.items[storeItemKey]).toBeNull();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         itemId: 'users||1'
         result: { id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
     `);
   });
@@ -696,9 +726,11 @@ describe('updateItemState with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name', 'address']
+      - duration: 800
+        fields: ['id', 'name', 'address']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
     `);
   });
@@ -772,13 +804,17 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['address', 'id', 'name']
+      - duration: 800
+        fields: ['address', 'id', 'name']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
-      - fields: ['address']
+      - duration: 800
+        fields: ['address']
         itemId: 'users||1'
         result: { address: 'Address 1' }
+        startedAt: 820
         type: 'fetch'
     `);
   });
@@ -845,13 +881,17 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['address', 'id', 'name']
+      - duration: 800
+        fields: ['address', 'id', 'name']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
-      - fields: ['address', 'id', 'name']
+      - duration: 800
+        fields: ['address', 'id', 'name']
         itemId: 'users||1'
         result: { address: 'Address 1', id: 1, name: 'User 1' }
+        startedAt: 820
         type: 'fetch'
     `);
   });
@@ -930,8 +970,10 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name', 'address']
+      - duration: 800
+        fields: ['id', 'name', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -943,9 +985,12 @@ describe('invalidateQueryAndItems with fields', () => {
             itemId: 'users||4'
           - data: { address: 'Address 5', id: 5, name: 'User 5' }
             itemId: 'users||5'
+        startedAt: 10
         type: 'list'
-      - fields: ['id', 'address']
+      - duration: 800
+        fields: ['id', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1 }
             itemId: 'users||1'
@@ -957,6 +1002,7 @@ describe('invalidateQueryAndItems with fields', () => {
             itemId: 'users||4'
           - data: { address: 'Address 5', id: 5 }
             itemId: 'users||5'
+        startedAt: 820
         type: 'list'
     `);
   });
@@ -1006,8 +1052,10 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -1019,9 +1067,12 @@ describe('invalidateQueryAndItems with fields', () => {
             itemId: 'users||4'
           - data: { id: 5, name: 'User 5' }
             itemId: 'users||5'
+        startedAt: 10
         type: 'list'
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -1033,6 +1084,7 @@ describe('invalidateQueryAndItems with fields', () => {
             itemId: 'users||4'
           - data: { id: 5, name: 'User 5' }
             itemId: 'users||5'
+        startedAt: 820
         type: 'list'
     `);
   });
@@ -1092,13 +1144,17 @@ describe('RTU with partial resources', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         itemId: 'users||1'
         result: { id: 1, name: 'User 1' }
+        startedAt: 10
         type: 'fetch'
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         itemId: 'users||1'
         result: { id: 1, name: 'Updated User 1' }
+        startedAt: 820
         type: 'fetch'
     `);
   });

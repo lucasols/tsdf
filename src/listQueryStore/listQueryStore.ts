@@ -23,6 +23,7 @@ import {
   type ListQueryStoreInitialData,
   type ListQueryUseMultipleItemsQuery,
   type ListQueryUseMultipleListQueriesQuery,
+  type OffsetPaginationConfig,
   type OnListQueryInvalidate,
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
@@ -61,12 +62,14 @@ export type ListQueryStore<
   ItemPayload extends ValidPayload,
   TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
     undefined,
+  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
 > = ReturnType<
   typeof createListQueryStore<
     ItemState,
     QueryPayload,
     ItemPayload,
-    TPartialResources
+    TPartialResources,
+    TOffsetPagination
   >
 >;
 
@@ -74,7 +77,27 @@ const noFetchItemFnError = 'No fetchItemFn was provided';
 const noPartialResourcesFieldsOptionError =
   'fields option is required when partialResources is enabled';
 
-export type ListQueryStoreOptions<
+type FetchListFnSizeMode<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = (
+  payload: QueryPayload,
+  size: number,
+  options: { signal: AbortSignal; fields?: string[] },
+) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
+
+type FetchListFnOffsetMode<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = (
+  payload: QueryPayload,
+  pagination: { offset: number; limit: number },
+  options: { signal: AbortSignal; fields?: string[] },
+) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
+
+type ListQueryStoreOptionsBase<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
@@ -82,11 +105,6 @@ export type ListQueryStoreOptions<
     undefined,
 > = {
   debugName?: string;
-  fetchListFn: (
-    payload: QueryPayload,
-    size: number,
-    options: { signal: AbortSignal; fields?: string[] },
-  ) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
@@ -130,12 +148,40 @@ export type ListQueryStoreOptions<
   partialResources?: TPartialResources;
 };
 
+export type ListQueryStoreOptions<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
+    undefined,
+  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
+> = ListQueryStoreOptionsBase<
+  ItemState,
+  QueryPayload,
+  ItemPayload,
+  TPartialResources
+> &
+  ([TOffsetPagination] extends [undefined]
+    ? {
+        fetchListFn: FetchListFnSizeMode<ItemState, QueryPayload, ItemPayload>;
+        offsetPagination?: undefined;
+      }
+    : {
+        fetchListFn: FetchListFnOffsetMode<
+          ItemState,
+          QueryPayload,
+          ItemPayload
+        >;
+        offsetPagination: TOffsetPagination;
+      });
+
 export function createListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends PartialResourcesConfig<ItemState> | undefined =
     undefined,
+  TOffsetPagination extends OffsetPaginationConfig | undefined = undefined,
 >({
   debugName,
   fetchListFn,
@@ -159,13 +205,41 @@ export function createListQueryStore<
   getQueryKey: customGetQueryKey,
   getItemKey: customGetItemKey,
   partialResources,
+  ...rest
 }: ListQueryStoreOptions<
   ItemState,
   QueryPayload,
   ItemPayload,
-  TPartialResources
+  TPartialResources,
+  TOffsetPagination
 >) {
   type HasPR = [TPartialResources] extends [undefined] ? false : true;
+
+  const offsetPagination: OffsetPaginationConfig | undefined =
+    'offsetPagination' in rest ? rest.offsetPagination : undefined;
+
+  // Normalize fetchListFn to internal form: (payload, offset, limit, options) => Promise<...>
+  // We use __LEGIT_CAST__ because the conditional union type of fetchListFn
+  // (size mode vs offset mode) cannot be narrowed via 'offsetPagination' at runtime —
+  // TypeScript sees the union but the runtime check is on a separate option.
+  const fetchListFnAsUnknown =
+    __LEGIT_CAST__<
+      (...args: unknown[]) => Promise<FetchListFnReturn<ItemState, ItemPayload>>
+    >(fetchListFn);
+
+  const normalizedFetchListFn = offsetPagination
+    ? (
+        payload: QueryPayload,
+        offset: number,
+        limit: number,
+        options: { signal: AbortSignal; fields?: string[] },
+      ) => fetchListFnAsUnknown(payload, { offset, limit }, options)
+    : (
+        payload: QueryPayload,
+        _offset: number,
+        limit: number,
+        options: { signal: AbortSignal; fields?: string[] },
+      ) => fetchListFnAsUnknown(payload, limit, options);
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
   type FetchFieldsOption = HasPR extends true
     ? { fields: FieldsInput }
@@ -356,7 +430,8 @@ export function createListQueryStore<
     resetSchedulers,
   } = createFetchApi<ItemState, QueryPayload, ItemPayload, TPartialResources>({
     store,
-    fetchListFn,
+    normalizedFetchListFn,
+    offsetPagination,
     fetchItemFn,
     batchFetchItemFn,
     getItemsBatchKey,

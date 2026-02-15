@@ -106,8 +106,10 @@ describe('list query field accumulation edge cases', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -129,11 +131,14 @@ describe('list query field accumulation edge cases', () => {
             itemId: 'users||9'
           - data: { id: 10, name: 'User 10' }
             itemId: 'users||10'
+        startedAt: 10
         type: 'list'
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         filters:
           - { field: 'id', op: 'gt', value: 5 }
         limit: 50
+        offset: 0
         results:
           - data: { id: 6, name: 'User 6' }
             itemId: 'users||6'
@@ -145,6 +150,7 @@ describe('list query field accumulation edge cases', () => {
             itemId: 'users||9'
           - data: { id: 10, name: 'User 10' }
             itemId: 'users||10'
+        startedAt: 10
         type: 'list'
     `);
   });
@@ -194,8 +200,10 @@ describe('list query field accumulation edge cases', () => {
     ).toMatchInlineSnapshot(`['address', 'id', 'name']`);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['address', 'id', 'name']
+      - duration: 800
+        fields: ['address', 'id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -217,6 +225,7 @@ describe('list query field accumulation edge cases', () => {
             itemId: 'users||9'
           - data: { address: 'Address 10', id: 10, name: 'User 10' }
             itemId: 'users||10'
+        startedAt: 10
         type: 'list'
     `);
   });
@@ -281,8 +290,10 @@ describe('list query field accumulation edge cases', () => {
     `);
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - fields: ['id', 'name']
+      - duration: 800
+        fields: ['id', 'name']
         limit: 50
+        offset: 0
         results:
           - data: { id: 1, name: 'User 1' }
             itemId: 'users||1'
@@ -304,9 +315,12 @@ describe('list query field accumulation edge cases', () => {
             itemId: 'users||9'
           - data: { id: 10, name: 'User 10' }
             itemId: 'users||10'
+        startedAt: 10
         type: 'list'
-      - fields: ['id', 'address']
+      - duration: 800
+        fields: ['id', 'address']
         limit: 50
+        offset: 0
         results:
           - data: { address: 'Address 1', id: 1 }
             itemId: 'users||1'
@@ -328,6 +342,7 @@ describe('list query field accumulation edge cases', () => {
             itemId: 'users||9'
           - data: { address: 'Address 10', id: 10 }
             itemId: 'users||10'
+        startedAt: 820
         type: 'list'
     `);
   });

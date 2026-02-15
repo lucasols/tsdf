@@ -50,7 +50,9 @@ describe('query size coalescing', () => {
 
     // The fetch should have used size 5 (the max)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 5
+      - duration: 800
+        limit: 5
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -62,6 +64,7 @@ describe('query size coalescing', () => {
             itemId: 'table1||4'
           - data: { id: 5, name: 'Item 5' }
             itemId: 'table1||5'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -81,7 +84,9 @@ describe('query size coalescing', () => {
 
     // The fetch should still use size 5 (the max)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 5
+      - duration: 800
+        limit: 5
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -93,6 +98,7 @@ describe('query size coalescing', () => {
             itemId: 'table1||4'
           - data: { id: 5, name: 'Item 5' }
             itemId: 'table1||5'
+        startedAt: 50
         type: 'list'
     `);
   });
@@ -121,7 +127,7 @@ describe('query size coalescing', () => {
     // Advance past coalescing window to start the second fetch
     await vi.advanceTimersByTimeAsync(60);
 
-    // 'loadMore' type wins over 'load' in coalescePayload → status is 'loadingMore'
+    // 'loadMore' type wins over 'load' in size mode coalescePayload → status is 'loadingMore'
     const queryDuringFetch = env.apiStore.getQueryState({ tableId: 'table1' });
     expect(queryDuringFetch?.status).toBe('loadingMore');
 
@@ -129,7 +135,9 @@ describe('query size coalescing', () => {
 
     // Second fetch should use size 6 (max of loadMore's 6, load's 3)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 3
+      - duration: 800
+        limit: 3
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -137,8 +145,11 @@ describe('query size coalescing', () => {
             itemId: 'table1||2'
           - data: { id: 3, name: 'Item 3' }
             itemId: 'table1||3'
+        startedAt: 50
         type: 'list'
-      - limit: 6
+      - duration: 800
+        limit: 6
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -152,6 +163,7 @@ describe('query size coalescing', () => {
             itemId: 'table1||5'
           - data: { id: 6, name: 'Item 6' }
             itemId: 'table1||6'
+        startedAt: 900
         type: 'list'
     `);
 
@@ -183,7 +195,9 @@ describe('query size coalescing', () => {
 
     // The fetch should use size 4 (the max of 2, 4, 3)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 4
+      - duration: 800
+        limit: 4
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -193,6 +207,7 @@ describe('query size coalescing', () => {
             itemId: 'table1||3'
           - data: { id: 4, name: 'Item 4' }
             itemId: 'table1||4'
+        startedAt: 100
         type: 'list'
     `);
 
@@ -214,7 +229,9 @@ describe('query size coalescing', () => {
 
     // The fetch should use size 5 (max of default 3, explicit 5)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 5
+      - duration: 800
+        limit: 5
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -226,6 +243,7 @@ describe('query size coalescing', () => {
             itemId: 'table1||4'
           - data: { id: 5, name: 'Item 5' }
             itemId: 'table1||5'
+        startedAt: 50
         type: 'list'
     `);
 
@@ -244,7 +262,9 @@ describe('query size coalescing', () => {
     await flushAllTimers();
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 3
+      - duration: 800
+        limit: 3
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -252,6 +272,7 @@ describe('query size coalescing', () => {
             itemId: 'table1||2'
           - data: { id: 3, name: 'Item 3' }
             itemId: 'table1||3'
+        startedAt: 50
         type: 'list'
     `);
 
@@ -288,7 +309,9 @@ describe('size coalescing in scheduledRequests during active fetch (Call Site 2)
 
     // Assert: fetchHistory has 2 entries, second with limit: 5 (max of 5, 2)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 3
+      - duration: 800
+        limit: 3
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -296,8 +319,11 @@ describe('size coalescing in scheduledRequests during active fetch (Call Site 2)
             itemId: 'table1||2'
           - data: { id: 3, name: 'Item 3' }
             itemId: 'table1||3'
+        startedAt: 50
         type: 'list'
-      - limit: 5
+      - duration: 800
+        limit: 5
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -309,6 +335,7 @@ describe('size coalescing in scheduledRequests during active fetch (Call Site 2)
             itemId: 'table1||4'
           - data: { id: 5, name: 'Item 5' }
             itemId: 'table1||5'
+        startedAt: 900
         type: 'list'
     `);
   });
@@ -338,14 +365,19 @@ describe('size coalescing in scheduledRequests during active fetch (Call Site 2)
 
     // First fetch used limit 2, second fetch uses limit 6 (max of 3, 6, 4)
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - limit: 2
+      - duration: 800
+        limit: 2
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
           - data: { id: 2, name: 'Item 2' }
             itemId: 'table1||2'
+        startedAt: 50
         type: 'list'
-      - limit: 6
+      - duration: 800
+        limit: 6
+        offset: 0
         results:
           - data: { id: 1, name: 'Item 1' }
             itemId: 'table1||1'
@@ -359,6 +391,7 @@ describe('size coalescing in scheduledRequests during active fetch (Call Site 2)
             itemId: 'table1||5'
           - data: { id: 6, name: 'Item 6' }
             itemId: 'table1||6'
+        startedAt: 900
         type: 'list'
     `);
 

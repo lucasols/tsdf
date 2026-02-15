@@ -77,6 +77,11 @@ Tests use Vitest with `happy-dom` environment. Test files follow the pattern `sr
 - Prefer using vitest fake timers
 - Use `createLoggerStore` util for create a human readable values timelines for snapshot testing
 - Use realistic times to match real usage, use as reference the default fetch durations used in the server mocks
+- Use utility functions from `tests/utils/genericTestUtils.ts` when possible:
+  - `flushAllTimers()`: wraps `vi.runAllTimersAsync()` in `act()` — use instead of calling `vi.runAllTimersAsync()` directly
+  - `advanceTime(ms)`: wraps `vi.advanceTimersByTimeAsync(ms)` in `act()` — use instead of calling `vi.advanceTimersByTimeAsync()` directly
+  - `range(start, end)`: creates an array of numbers from start to end (inclusive)
+  - `pick(obj, keys)`: picks specific keys from an object
 
 ## TypeScript Configuration
 
