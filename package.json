@@ -38,7 +38,7 @@
     "hooks:uninstall": "git config --unset core.hooksPath || true && rm -rf .git/hooks/pre-commit"
   },
   "devDependencies": {
-    "@ls-stack/eslint-cfg": "^0.5.1",
+    "@ls-stack/eslint-cfg": "^0.6.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/node": "^25.0.3",

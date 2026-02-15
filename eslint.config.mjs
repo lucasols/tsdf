@@ -26,6 +26,12 @@ export default lsStackEslintCfg({
             ],
           },
         ],
+        '@ls-stack/no-call-with-inferred-generics': [
+          'error',
+          {
+            functions: [{ name: '__LEGIT_CAST__', minGenerics: 2 }],
+          },
+        ],
       },
     },
     {
