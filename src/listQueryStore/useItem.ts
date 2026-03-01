@@ -2,7 +2,11 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
-import { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  ValidPayload,
+  ValidStoreState,
+  invalidPayloadError,
+} from '../utils/storeShared';
 import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
 import type {
   FieldsInput,
@@ -48,9 +52,14 @@ export function useItem<
     options: UseMultipleItemsOptions<ItemState, S>,
   ) => readonly TSFDUseListItemReturn<S, ItemPayload, undefined>[],
 ): TSFDUseListItemReturn<Selected, ItemPayload> {
+  const isInvalidPayload = itemPayload === '';
+
   const query = useMemo(
     (): ListQueryUseMultipleItemsQuery<ItemPayload, undefined>[] =>
-      itemPayload === false || itemPayload === null || itemPayload === undefined
+      itemPayload === false ||
+      itemPayload === null ||
+      itemPayload === undefined ||
+      itemPayload === ''
         ? []
         : [
             {
@@ -79,18 +88,31 @@ export function useItem<
 
   const result = useMemo(
     (): TSFDUseListItemReturn<Selected, ItemPayload> =>
-      queryResult[0] ?? {
-        error: null,
-        isLoading: false,
-        status: 'idle',
-        data: selector
-          ? selector(null, null)
-          : __LEGIT_CAST__<Selected, null>(null),
-        payload: itemPayload || null,
-        itemStateKey: '',
-        queryMetadata: undefined,
-      },
-    [itemPayload, queryResult, selector],
+      queryResult[0] ??
+      (isInvalidPayload
+        ? {
+            error: invalidPayloadError,
+            isLoading: false,
+            status: 'error',
+            data: selector
+              ? selector(null, null)
+              : __LEGIT_CAST__<Selected, null>(null),
+            payload: itemPayload || null,
+            itemStateKey: '',
+            queryMetadata: undefined,
+          }
+        : {
+            error: null,
+            isLoading: false,
+            status: 'idle',
+            data: selector
+              ? selector(null, null)
+              : __LEGIT_CAST__<Selected, null>(null),
+            payload: itemPayload || null,
+            itemStateKey: '',
+            queryMetadata: undefined,
+          }),
+    [itemPayload, queryResult, selector, isInvalidPayload],
   );
 
   const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
