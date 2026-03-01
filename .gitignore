@@ -16,3 +16,4 @@ dist
 .quokka.ts
 .DS_Store
 .vscode/settings.json
+test-results/.last-run.json

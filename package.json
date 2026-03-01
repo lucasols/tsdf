@@ -26,6 +26,7 @@
     "test": "vitest --mode development --run",
     "test:ui": "vitest --ui --mode development",
     "test:changed": "vitest --changed --mode development",
+    "test:playwright": "playwright test",
     "lint": "pnpm tsc && pnpm eslint && pnpm format",
     "eslint": "eslint src/ tests/ --fix",
     "format": "oxfmt src/ tests/",
@@ -39,6 +40,7 @@
   },
   "devDependencies": {
     "@ls-stack/eslint-cfg": "^0.7.0",
+    "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/node": "^25.0.3",
