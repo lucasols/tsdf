@@ -1,11 +1,12 @@
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { createCollectionStore } from '../../src/collectionStore/collectionStore';
 import type {
   PersistedCollectionData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import type { StoreError } from '../../src/utils/storeShared';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -19,22 +20,7 @@ function normalizeError(exception: Error): StoreError {
 
 type ItemState = { id: string; name: string };
 
-const itemSchema = {
-  parse: (input: unknown) => {
-    if (
-      input &&
-      typeof input === 'object' &&
-      'id' in input &&
-      'name' in input
-    ) {
-      return {
-        ok: true as const,
-        value: __LEGIT_CAST__<ItemState, object>(input),
-      };
-    }
-    return { ok: false as const };
-  },
-};
+const itemSchema = rc_object({ id: rc_string, name: rc_string });
 
 type ItemPayload = string;
 

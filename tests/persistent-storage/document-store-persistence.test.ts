@@ -1,5 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
+import { rc_number, rc_object, rc_string, rc_to_standard } from 'runcheck';
 import { Store } from 't-state';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import type { DocumentStoreState } from '../../src/documentStore';
@@ -22,22 +23,7 @@ function normalizeError(exception: Error): StoreError {
 
 type TestData = { name: string; value: number };
 
-const testSchema = {
-  parse: (input: unknown) => {
-    if (
-      input &&
-      typeof input === 'object' &&
-      'name' in input &&
-      'value' in input
-    ) {
-      return {
-        ok: true as const,
-        value: __LEGIT_CAST__<TestData, object>(input),
-      };
-    }
-    return { ok: false as const };
-  },
-};
+const testSchema = rc_object({ name: rc_string, value: rc_number });
 
 function createTestDocumentStore(options: {
   fetchFn?: (signal: AbortSignal) => Promise<TestData>;
@@ -523,22 +509,8 @@ describe('localStorage: document store persistence', () => {
 });
 
 describe('standard schema support', () => {
-  test('works with Standard Schema v1 (zod-like) schemas', () => {
-    const zodLikeSchema = {
-      '~standard': {
-        validate: (input: unknown) => {
-          if (
-            input &&
-            typeof input === 'object' &&
-            'name' in input &&
-            'value' in input
-          ) {
-            return { value: __LEGIT_CAST__<TestData, object>(input) };
-          }
-          return { issues: [{ message: 'Invalid data' }] };
-        },
-      },
-    };
+  test('works with Standard Schema v1 via rc_to_standard', () => {
+    const standardSchema = rc_to_standard(testSchema);
 
     const key = 'tsdf.sess-std.std-doc';
     const entry: StorageCacheEntry<{ data: TestData }> = {
@@ -558,7 +530,7 @@ describe('standard schema support', () => {
       persistentStorage: {
         storeName: 'std-doc',
         backend: 'localStorage',
-        schema: zodLikeSchema,
+        schema: standardSchema,
         getSessionKey: () => 'sess-std',
       },
     });

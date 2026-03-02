@@ -1,8 +1,10 @@
+import { isPromise } from '@ls-stack/utils/typeGuards';
+import { rc_parse } from 'runcheck';
 import type { PersistentStorageSchema } from './types';
 
 /**
- * Validates data against a schema using duck typing to detect the schema type.
- * Supports runcheck (.parse()) and Standard Schema v1 (~standard.validate()).
+ * Validates data against a schema.
+ * Supports runcheck (RcType) and Standard Schema v1 (~standard.validate()).
  *
  * @returns The validated data if valid, or null if validation fails.
  */
@@ -13,7 +15,7 @@ export function validateWithSchema<T>(
   if ('~standard' in schema) {
     const result = schema['~standard'].validate(data);
 
-    if (result instanceof Promise) {
+    if (isPromise(result)) {
       // Async schemas are not supported
       return null;
     }
@@ -23,7 +25,7 @@ export function validateWithSchema<T>(
     return result.value;
   }
 
-  const result = schema.parse(data);
+  const result = rc_parse(data, schema);
 
   return result.ok ? result.value : null;
 }

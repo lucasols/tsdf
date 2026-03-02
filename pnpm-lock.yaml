@@ -75,6 +75,9 @@ importers:
       react-dom:
         specifier: ^19.2.3
         version: 19.2.3(react@19.2.3)
+      runcheck:
+        specifier: ^1.15.0
+        version: 1.15.0
       simple-git-hooks:
         specifier: ^2.13.1
         version: 2.13.1
@@ -1631,6 +1634,10 @@ packages:
 
   run-parallel@1.2.0:
     resolution: {integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==}
+
+  runcheck@1.15.0:
+    resolution: {integrity: sha512-Ysv2X3FWkrD2dLd/53Hl9FIw1+gTfaG7a7mGsEqbm+IU2yFV6gJkmkpI6/MFMEbCEhioL16wdVsq5g8qFP0fhA==}
+    engines: {node: '>=14.6.0'}
 
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
@@ -3387,6 +3394,8 @@ snapshots:
   run-parallel@1.2.0:
     dependencies:
       queue-microtask: 1.2.3
+
+  runcheck@1.15.0: {}
 
   scheduler@0.27.0: {}
 

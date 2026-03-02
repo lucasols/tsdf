@@ -37,7 +37,7 @@ export type PersistentStorageHandle<T> = {
  *   items within collections/queries.
  */
 export function createPersistentStorageHandle<T>(
-  config: PersistentStorageBaseConfig<unknown>,
+  config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
   {
     adapter: adapterOverride,
   }: {

@@ -5,6 +5,7 @@ import type {
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { rc_object, rc_string } from 'runcheck';
 import type { StoreError } from '../../src/utils/storeShared';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -21,22 +22,7 @@ type ItemPayload = string;
 
 type ItemState = { id: string; title: string };
 
-const itemSchema = {
-  parse: (input: unknown) => {
-    if (
-      input &&
-      typeof input === 'object' &&
-      'id' in input &&
-      'title' in input
-    ) {
-      return {
-        ok: true as const,
-        value: __LEGIT_CAST__<ItemState, object>(input),
-      };
-    }
-    return { ok: false as const };
-  },
-};
+const itemSchema = rc_object({ id: rc_string, title: rc_string });
 
 function createTestListQueryStore(options: {
   storeName?: string;

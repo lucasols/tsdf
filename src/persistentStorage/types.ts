@@ -1,3 +1,4 @@
+import { type RcType } from 'runcheck';
 import type { ValidStoreState } from '../utils/storeShared';
 
 // --- Storage Adapter ---
@@ -15,11 +16,6 @@ export type StorageBackend = 'localStorage' | 'opfs';
 
 // --- Schema Types ---
 
-/** Runcheck-compatible schema (has .parse() method) */
-export type RcLikeSchema<T> = {
-  parse: (input: unknown) => { ok: true; value: T } | { ok: false };
-};
-
 /** Standard Schema v1 (zod, valibot, arktype, etc.) */
 export type StandardSchemaLike<T> = {
   '~standard': {
@@ -27,14 +23,16 @@ export type StandardSchemaLike<T> = {
       value: unknown,
     ) =>
       | { value: T; issues?: undefined }
-      | { issues: readonly { message: string }[] };
+      | { issues: readonly { message: string }[] }
+      | Promise<
+          | { value: T; issues?: undefined }
+          | { issues: readonly { message: string }[] }
+        >;
   };
 };
 
 /** Union of supported schema types for persistent storage validation. */
-export type PersistentStorageSchema<T> =
-  | RcLikeSchema<T>
-  | StandardSchemaLike<T>;
+export type PersistentStorageSchema<T> = RcType<T> | StandardSchemaLike<T>;
 
 // --- Cache Entry ---
 
