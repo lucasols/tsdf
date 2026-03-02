@@ -356,12 +356,7 @@ export function createCollectionStore<
   }
 
   function getAutomaticCoalescingWindowMs(): number {
-    const rank = browserTabsPriority.getPriorityRank();
-    if (rank <= 1 || baseCoalescingWindowMs <= 0) {
-      return baseCoalescingWindowMs;
-    }
-
-    return baseCoalescingWindowMs + (rank - 1) * 1_000;
+    return browserTabsPriority.getCoalescingWindowMs(baseCoalescingWindowMs);
   }
 
   function publishFetchStart(

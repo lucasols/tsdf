@@ -545,12 +545,10 @@ export function createListQueryStore<
     : undefined;
 
   function getCoalescingWindowMs(): number {
-    const rank = browserTabsPriority?.getPriorityRank() ?? 1;
-    if (rank <= 1 || baseCoalescingWindowMs <= 0) {
-      return baseCoalescingWindowMs;
-    }
-
-    return baseCoalescingWindowMs + (rank - 1) * 1_000;
+    return (
+      browserTabsPriority?.getCoalescingWindowMs(baseCoalescingWindowMs) ??
+      baseCoalescingWindowMs
+    );
   }
   type BrowserTabsSyncCoordinator = ReturnType<
     typeof createBrowserTabsCoordinator<

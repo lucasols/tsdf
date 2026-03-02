@@ -158,7 +158,7 @@ test('document store: reset() cleans up and re-registers focus listener', async 
 
 // -- DocumentStore: background coalescing window -------------------------------
 
-test('document store: a single background tab keeps the base coalescing window', async () => {
+test('document store: a single background tab increases the coalescing window by 1 second', async () => {
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     baseCoalescingWindowMs: 20,
@@ -184,6 +184,9 @@ test('document store: a single background tab keeps the base coalescing window',
   await advanceTime(9);
   expect(env.serverMock.numOfStartedFetches).toBe(initialFetches);
 
+  await advanceTime(1_000);
+  expect(env.serverMock.numOfStartedFetches).toBe(initialFetches);
+
   await advanceTime(2);
   await flushAllTimers();
 
@@ -196,8 +199,8 @@ test('document store: a single background tab keeps the base coalescing window',
     20ms  | 0  | 🔴 >fetch-started
     820ms | 0  | 🔴 <fetch-finished (value: 0)
     .     | 0  | window-blurred
-    840ms | 0  | 🟠 >fetch-started
-    1.64s | 0  | 🟠 <fetch-finished (value: 0)
+    1.84s | 0  | 🟠 >fetch-started
+    2.64s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });

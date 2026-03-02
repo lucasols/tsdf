@@ -425,12 +425,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     : undefined;
 
   function getAutomaticCoalescingWindowMs(): number {
-    const rank = browserTabsPriority.getPriorityRank();
-    if (rank <= 1 || baseCoalescingWindowMs <= 0) {
-      return baseCoalescingWindowMs;
-    }
-
-    return baseCoalescingWindowMs + (rank - 1) * 1_000;
+    return browserTabsPriority.getCoalescingWindowMs(baseCoalescingWindowMs);
   }
 
   // Scheduler with batch-aware fetchFn (but we always use single item)

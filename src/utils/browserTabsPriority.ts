@@ -35,6 +35,7 @@ export type BrowserTabsPriorityOptions = {
 const DEFAULT_HEARTBEAT_MS = 5_000;
 const DEFAULT_PRESENCE_TTL_MS = 15_000;
 const DEFAULT_FETCH_LEASE_MS = 10_000;
+const COALESCING_WINDOW_STEP_MS = 1_000;
 
 export function createBrowserTabsPriority({
   enabled,
@@ -147,9 +148,35 @@ export function createBrowserTabsPriority({
   }
 
   function getPriorityRank(): number {
+    const localTabIndex = getLocalTabIndex();
+    return localTabIndex >= 0 ? localTabIndex + 1 : 1;
+  }
+
+  function getCoalescingRank(): number {
     const tabs = getRankedLiveTabs();
-    const index = tabs.findIndex((presence) => presence.tabId === tabId);
-    return index >= 0 ? index + 1 : 1;
+    const localTabIndex = tabs.findIndex(
+      (presence) => presence.tabId === tabId,
+    );
+    if (localTabIndex < 0) return 0;
+
+    if (tabs[localTabIndex]?.isFocused) return localTabIndex;
+
+    const hasFocusedTab = tabs.some((presence) => presence.isFocused);
+    return hasFocusedTab ? localTabIndex : localTabIndex + 1;
+  }
+
+  function getCoalescingWindowMs(baseCoalescingWindowMs: number): number {
+    if (baseCoalescingWindowMs <= 0) return baseCoalescingWindowMs;
+
+    const coalescingRank = getCoalescingRank();
+    if (coalescingRank <= 0) return baseCoalescingWindowMs;
+
+    return baseCoalescingWindowMs + coalescingRank * COALESCING_WINDOW_STEP_MS;
+  }
+
+  function getLocalTabIndex(): number {
+    const tabs = getRankedLiveTabs();
+    return tabs.findIndex((presence) => presence.tabId === tabId);
   }
 
   function onTabStatusMessage(
@@ -259,6 +286,7 @@ export function createBrowserTabsPriority({
     publishLocalStatus,
     noteLocalFocusState,
     getPriorityRank,
+    getCoalescingWindowMs,
     onTabStatusMessage,
     noteRemoteFetchStart,
     noteRemoteFetchSuccess,
