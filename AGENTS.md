@@ -75,6 +75,6 @@ When adding a new feature, or adjust a existing one:
 ## Bug fix instructions
 
 When fixing a bug:
-- add a test that asserts the correct behavior and reproduces the issue, if possible. Only create a test if the test simulates a realistic scenario that could happen in real usage.
-- confirm that the test fails before applying the fix, to ensure the test is valid
-- apply the fix and confirm that the test passes after the fix is applied
+1. add a test that asserts the correct behavior and reproduces the issue, if possible. Only create a test if the test simulates a realistic scenario that could happen in real usage.
+2. confirm that the test fails before applying the fix, to ensure the test is valid
+3. apply the fix and confirm that the test passes after the fix is applied
