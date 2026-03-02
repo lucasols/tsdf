@@ -302,12 +302,13 @@ export function setupListQueryPersistence<
   }
 
   let unsubscribe: (() => void) | null = null;
+  let disposed = false;
 
   function attach(store: Store<State>): void {
     // Async hydration for OPFS
     if (backend === 'opfs') {
       void handle.load().then((cached) => {
-        if (!cached) return;
+        if (!cached || disposed) return;
 
         const currentState = store.state;
         const hasExistingData =
@@ -385,6 +386,7 @@ export function setupListQueryPersistence<
   }
 
   function dispose(): void {
+    disposed = true;
     unsubscribe?.();
     unsubscribe = null;
     handle.dispose();

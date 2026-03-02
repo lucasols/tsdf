@@ -187,6 +187,7 @@ export function setupCollectionPersistence<
   }
 
   let unsubscribe: (() => void) | null = null;
+  let disposed = false;
 
   function attach(
     store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
@@ -194,7 +195,7 @@ export function setupCollectionPersistence<
     // Async hydration for OPFS
     if (backend === 'opfs') {
       void handle.load().then((cached) => {
-        if (!cached) return;
+        if (!cached || disposed) return;
 
         const currentState = store.state;
         const hasExistingData = Object.keys(currentState).length > 0;
@@ -243,6 +244,7 @@ export function setupCollectionPersistence<
   }
 
   function dispose(): void {
+    disposed = true;
     unsubscribe?.();
     unsubscribe = null;
     handle.dispose();

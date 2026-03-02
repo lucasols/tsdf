@@ -1,4 +1,12 @@
-import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import { createStorageAdapter } from '../../src/persistentStorage/storageAdapter';
 import type { StorageAdapter } from '../../src/persistentStorage/types';
 
@@ -92,5 +100,139 @@ describe('localStorage adapter', () => {
     expect(result).toBeNull();
 
     setItemSpy.mockRestore();
+  });
+});
+
+describe('opfs adapter', () => {
+  /**
+   * Creates an in-memory mock of the OPFS filesystem APIs
+   * so we can test the real OPFS adapter logic (encode/decode, prefix matching).
+   */
+  function setupMockOpfs() {
+    const files = new Map<string, string>();
+
+    const mockCacheDir = {
+      getFileHandle(name: string, options?: { create?: boolean }) {
+        if (!files.has(name) && !options?.create) {
+          return Promise.reject(
+            new DOMException('Not found', 'NotFoundError'),
+          );
+        }
+        if (!files.has(name)) {
+          files.set(name, '');
+        }
+        return Promise.resolve({
+          getFile: () =>
+            Promise.resolve({
+              text: () => Promise.resolve(files.get(name) ?? ''),
+            }),
+          createWritable: () => {
+            let content = '';
+            return Promise.resolve({
+              write: (data: string) => {
+                content = data;
+                return Promise.resolve();
+              },
+              close: () => {
+                files.set(name, content);
+                return Promise.resolve();
+              },
+            });
+          },
+        });
+      },
+      removeEntry(name: string) {
+        files.delete(name);
+        return Promise.resolve();
+      },
+      entries() {
+        const snapshot = [...files.keys()];
+        return (async function* (): AsyncGenerator<[string, unknown]> {
+          for (const name of snapshot) {
+            yield [name, {}];
+          }
+        })();
+      },
+    };
+
+    const mockRootDir = {
+      getDirectoryHandle: () => Promise.resolve(mockCacheDir),
+    };
+
+    const originalStorage = navigator.storage;
+
+    Object.defineProperty(navigator, 'storage', {
+      value: {
+        getDirectory: () => Promise.resolve(mockRootDir),
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    return {
+      files,
+      cleanup: () => {
+        Object.defineProperty(navigator, 'storage', {
+          value: originalStorage,
+          writable: true,
+          configurable: true,
+        });
+      },
+    };
+  }
+
+  test('write and read roundtrip', async () => {
+    const { cleanup } = setupMockOpfs();
+    try {
+      const adapter = createStorageAdapter('opfs');
+
+      await adapter.write('my-key', { name: 'Alice', age: 30 });
+      const result = await adapter.read('my-key');
+
+      expect(result).toMatchInlineSnapshot(`
+        age: 30
+        name: 'Alice'
+      `);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('removeByPrefix correctly matches keys sharing a prefix', async () => {
+    const { cleanup } = setupMockOpfs();
+    try {
+      const adapter = createStorageAdapter('opfs');
+
+      await adapter.write('tsdf.session1.store1', { a: 1 });
+      await adapter.write('tsdf.session1.store2', { b: 2 });
+      await adapter.write('tsdf.session2.store1', { c: 3 });
+
+      await adapter.removeByPrefix('tsdf.session1.');
+
+      expect(await adapter.read('tsdf.session1.store1')).toBeNull();
+      expect(await adapter.read('tsdf.session1.store2')).toBeNull();
+      expect(await adapter.read('tsdf.session2.store1')).toMatchInlineSnapshot(
+        `c: 3`,
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('listKeys correctly matches keys sharing a prefix', async () => {
+    const { cleanup } = setupMockOpfs();
+    try {
+      const adapter = createStorageAdapter('opfs');
+
+      await adapter.write('tsdf.s1.a', 1);
+      await adapter.write('tsdf.s1.b', 2);
+      await adapter.write('tsdf.s2.a', 3);
+
+      const keys = await adapter.listKeys('tsdf.s1.');
+
+      expect(keys).toHaveLength(2);
+    } finally {
+      cleanup();
+    }
   });
 });

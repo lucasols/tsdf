@@ -119,6 +119,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   }
 
   let unsubscribe: (() => void) | null = null;
+  let disposed = false;
 
   function attach(
     store: Store<DocumentStoreState<State>>,
@@ -127,7 +128,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
     // Async hydration for OPFS
     if (backend === 'opfs') {
       void handle.load().then((cached) => {
-        if (!cached) return;
+        if (!cached || disposed) return;
 
         const validated = validateWithSchema(config.schema, cached.data);
         if (validated === null) return;
@@ -164,6 +165,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   }
 
   function dispose(): void {
+    disposed = true;
     unsubscribe?.();
     unsubscribe = null;
     handle.dispose();

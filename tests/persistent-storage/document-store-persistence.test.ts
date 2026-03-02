@@ -1,8 +1,14 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { renderHook } from '@testing-library/react';
+import { Store } from 't-state';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import type { DocumentStoreState } from '../../src/documentStore';
 import { createDocumentStore } from '../../src/documentStore';
-import type { StorageCacheEntry } from '../../src/persistentStorage/types';
+import { setupDocumentPersistence } from '../../src/persistentStorage/documentStorePersistence';
+import type {
+  StorageAdapter,
+  StorageCacheEntry,
+} from '../../src/persistentStorage/types';
 import type { StoreError } from '../../src/utils/storeShared';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -561,5 +567,150 @@ describe('standard schema support', () => {
       name: 'standard'
       value: 99
     `);
+  });
+});
+
+describe('opfs: stale hydration guard', () => {
+  function createMockAdapter(readDelayMs: number) {
+    const storage = new Map<string, string>();
+
+    const adapter: StorageAdapter = {
+      async read<T>(key: string): Promise<T | null> {
+        if (readDelayMs > 0) {
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, readDelayMs),
+          );
+        }
+        const raw = storage.get(key);
+        if (!raw) return null;
+        return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
+      },
+      write<T>(key: string, value: T): Promise<void> {
+        storage.set(key, JSON.stringify(value));
+        return Promise.resolve();
+      },
+      remove(key: string): Promise<void> {
+        storage.delete(key);
+        return Promise.resolve();
+      },
+      removeByPrefix(prefix: string): Promise<void> {
+        for (const key of [...storage.keys()]) {
+          if (key.startsWith(prefix)) storage.delete(key);
+        }
+        return Promise.resolve();
+      },
+      listKeys(prefix: string): Promise<string[]> {
+        return Promise.resolve(
+          [...storage.keys()].filter((k) => k.startsWith(prefix)),
+        );
+      },
+    };
+
+    return { adapter, storage };
+  }
+
+  function populateStorage(
+    storage: Map<string, string>,
+    storeName: string,
+    sessionKey: string,
+    data: TestData,
+    version = 1,
+  ) {
+    const key = `tsdf.${sessionKey}.${storeName}`;
+    const entry: StorageCacheEntry<{ data: TestData }> = {
+      data: { data },
+      timestamp: Date.now(),
+      version,
+    };
+    storage.set(key, JSON.stringify(entry));
+  }
+
+  test('OPFS hydration works when persistence is still attached', async () => {
+    const { adapter, storage } = createMockAdapter(100);
+    populateStorage(storage, 'opfs-doc', 'sess1', {
+      name: 'cached',
+      value: 42,
+    });
+
+    const persistence = setupDocumentPersistence<TestData>(
+      {
+        storeName: 'opfs-doc',
+        backend: 'opfs',
+        schema: testSchema,
+        getSessionKey: () => 'sess1',
+      },
+      { adapter },
+    );
+
+    const store = new Store<DocumentStoreState<TestData>>({
+      state: () => ({
+        data: null,
+        error: null,
+        status: 'idle',
+        refetchOnMount: false,
+      }),
+    });
+
+    const invalidateSpy = vi.fn();
+    persistence.attach(store, invalidateSpy);
+
+    // Advance past the read delay so hydration completes
+    await advanceTime(200);
+
+    // Store should have been hydrated with cached data
+    expect(store.state).toMatchInlineSnapshot(`
+      data: { name: 'cached', value: 42 }
+      error: null
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+    `);
+    expect(invalidateSpy).toHaveBeenCalledWith('lowPriority');
+
+    persistence.dispose();
+  });
+
+  test('dispose prevents stale OPFS hydration from modifying store', async () => {
+    const { adapter, storage } = createMockAdapter(100);
+    populateStorage(storage, 'test-dispose', 'sess1', {
+      name: 'stale',
+      value: 999,
+    });
+
+    const persistence = setupDocumentPersistence<TestData>(
+      {
+        storeName: 'test-dispose',
+        backend: 'opfs',
+        schema: testSchema,
+        getSessionKey: () => 'sess1',
+      },
+      { adapter },
+    );
+
+    const store = new Store<DocumentStoreState<TestData>>({
+      state: () => ({
+        data: null,
+        error: null,
+        status: 'idle',
+        refetchOnMount: false,
+      }),
+    });
+
+    const invalidateSpy = vi.fn();
+    persistence.attach(store, invalidateSpy);
+
+    // Dispose BEFORE the delayed read resolves
+    persistence.dispose();
+
+    // Advance past the read delay so the load promise resolves
+    await advanceTime(200);
+
+    // Store should NOT have been modified by the stale hydration callback
+    expect(store.state).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      refetchOnMount: '❌'
+      status: 'idle'
+    `);
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });
