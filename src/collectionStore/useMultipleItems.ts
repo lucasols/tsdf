@@ -26,6 +26,8 @@ export type UseMultipleItemsOptions<
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
   omitPayload?: boolean;
+  /** Only loads the data if it is not already loaded and skip any other refetches */
+  disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   isOffScreen?: boolean;
 };
@@ -42,6 +44,7 @@ export function useMultipleItems<
     returnIdleStatus: allItemsReturnIdleStatus,
     returnRefetchingStatus: allItemsReturnRefetchingStatus,
     omitPayload: allItemsOmitPayload,
+    disableRefetches: allItemsDisableRefetches,
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
     isOffScreen: allItemsIsOffScreen,
   }: UseMultipleItemsOptions<ItemState, Selected>,
@@ -64,6 +67,7 @@ export function useMultipleItems<
   type QueryWithId = {
     itemKey: string;
     payload: ItemPayload;
+    disableRefetches: boolean;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -76,6 +80,8 @@ export function useMultipleItems<
     const newQueries = items.map((queryProps) => ({
       itemKey: getItemKey(queryProps.payload),
       payload: queryProps.payload,
+      disableRefetches:
+        queryProps.disableRefetches ?? allItemsDisableRefetches ?? false,
       disableRefetchOnMount:
         queryProps.disableRefetchOnMount ??
         allItemsDisableRefetchOnMount ??
@@ -95,6 +101,7 @@ export function useMultipleItems<
     return newQueries;
   }, [
     items,
+    allItemsDisableRefetches,
     allItemsDisableRefetchOnMount,
     allItemsIsOffScreen,
     allItemsOmitPayload,
@@ -184,10 +191,17 @@ export function useMultipleItems<
   });
 
   useOnEvtmitterEvent(events, 'invalidateData', ({ payload: event }) => {
-    for (const { itemKey, payload, isOffScreen } of queriesWithId) {
+    for (const {
+      itemKey,
+      payload,
+      isOffScreen,
+      disableRefetches,
+    } of queriesWithId) {
       if (isOffScreen) continue;
 
       if (itemKey !== event.itemKey) continue;
+
+      if (disableRefetches && store.state[itemKey]?.wasLoaded) continue;
 
       if (!invalidationWasTriggered.has(itemKey)) {
         store.produceState((draft) => {
@@ -212,6 +226,7 @@ export function useMultipleItems<
       itemKey: itemId,
       payload,
       isOffScreen,
+      disableRefetches,
       disableRefetchOnMount,
     } of queriesWithId) {
       removedQueries.delete(itemId);
@@ -230,7 +245,11 @@ export function useMultipleItems<
 
         ignoreItemsInRefetchOnMount.add(itemId);
 
-        if (disableRefetchOnMount) {
+        if (disableRefetches) {
+          if (!itemState?.wasLoaded) {
+            scheduleFetch(fetchType, payload);
+          }
+        } else if (disableRefetchOnMount) {
           if (shouldFetch) {
             scheduleFetch(fetchType, payload);
             continue;

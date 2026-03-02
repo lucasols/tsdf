@@ -78,6 +78,8 @@ export type CollectionUseMultipleItemsQuery<
   payload: ItemPayload;
   queryMetadata?: QueryMetadata;
   omitPayload?: boolean;
+  /** Only loads the data if it is not already loaded and skip any other refetches */
+  disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;

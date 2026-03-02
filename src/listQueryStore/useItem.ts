@@ -35,6 +35,7 @@ export function useItem<
     selector,
     ensureIsLoaded,
     loadFromStateOnly,
+    disableRefetches,
     disableRefetchOnMount,
     returnIdleStatus,
     returnRefetchingStatus,
@@ -65,6 +66,7 @@ export function useItem<
             {
               payload: itemPayload,
               fields,
+              disableRefetches,
               disableRefetchOnMount,
               isOffScreen,
               returnIdleStatus,
@@ -74,6 +76,7 @@ export function useItem<
     [
       itemPayload,
       fields,
+      disableRefetches,
       disableRefetchOnMount,
       isOffScreen,
       returnIdleStatus,

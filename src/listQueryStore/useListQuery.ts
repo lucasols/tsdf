@@ -34,6 +34,7 @@ export function useListQuery<
   {
     itemSelector,
     omitPayload,
+    disableRefetches,
     disableRefetchOnMount,
     returnIdleStatus,
     returnRefetchingStatus,
@@ -68,6 +69,7 @@ export function useListQuery<
             {
               payload,
               fields,
+              disableRefetches,
               disableRefetchOnMount,
               returnIdleStatus,
               returnRefetchingStatus,
@@ -77,6 +79,7 @@ export function useListQuery<
             },
           ],
     [
+      disableRefetches,
       disableRefetchOnMount,
       fields,
       isOffScreen,
