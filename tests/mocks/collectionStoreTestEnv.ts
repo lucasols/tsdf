@@ -5,6 +5,7 @@ import {
 } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
 import {
   simulateWindowBlur,
   simulateWindowFocus,
@@ -49,6 +50,7 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
+  persistentStorage?: CollectionPersistentStorageConfig<CollectionTestItem<D>>;
 };
 
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
@@ -65,6 +67,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
+    persistentStorage,
   }: CollectionStoreTestEnvOptions<D> = {},
 ) {
   const {
@@ -169,6 +172,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
+    persistentStorage,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);

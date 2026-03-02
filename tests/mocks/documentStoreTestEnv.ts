@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+import type { DocumentPersistentStorageConfig } from '../../src/persistentStorage/types';
 import { createServerMock, type FetchErrorConfig } from './serverMock';
 import {
   simulateWindowBlur,
@@ -39,6 +40,7 @@ export type DocumentStoreTestEnvOptions<D> = {
   testScenario?: DocumentStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
+  persistentStorage?: DocumentPersistentStorageConfig<{ value: D }>;
 };
 
 export function createDocumentStoreTestEnv<D>(
@@ -53,6 +55,7 @@ export function createDocumentStoreTestEnv<D>(
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
+    persistentStorage,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
   const {
@@ -87,6 +90,7 @@ export function createDocumentStoreTestEnv<D>(
     backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
+    persistentStorage,
     '~test': testOptions,
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
