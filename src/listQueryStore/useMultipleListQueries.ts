@@ -7,6 +7,7 @@ import { type Emitter } from 'evtmitter';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
+import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
@@ -365,17 +366,15 @@ export function useMultipleListQueries<
 
       ignoreQueriesInRefetchOnMount.add(queryId);
 
-      if (disableRefetches) {
-        if (!queryState?.wasLoaded) {
-          scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
-        }
-      } else if (disableRefetchOnMount) {
-        if (shouldFetch) {
-          scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
-            fields,
-          });
-        }
-      } else if (!partialResources || shouldFetch) {
+      if (
+        shouldScheduleAutomaticFetch({
+          wasLoaded: queryState?.wasLoaded,
+          shouldFetch: !!shouldFetch,
+          disableRefetches,
+          disableRefetchOnMount,
+          skipFreshFetch: !!partialResources,
+        })
+      ) {
         scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
           fields,
         });

@@ -1,4 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  createBrowserTabsPriority,
+  type BrowserTabsTabStatusMessage,
+  type BrowserTabsPriorityTimings,
+} from './browserTabsPriority';
 
 export type BrowserTabsStoreType = 'document' | 'collection' | 'listQuery';
 
@@ -129,6 +134,51 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>({
       lastSeenSeqByTab.clear();
       transport?.close();
     },
+  };
+}
+
+export type BrowserTabsCoordinatorWithPriorityOptions<
+  Message extends { kind: string },
+> = BrowserTabsCoordinatorOptions<Message> & {
+  getWindowIsFocused: () => boolean;
+  priorityTimings?: BrowserTabsPriorityTimings;
+};
+
+export function createBrowserTabsCoordinatorWithPriority<
+  Message extends { kind: string },
+>({
+  storeType,
+  storeKey,
+  onMessage,
+  transportFactory,
+  getWindowIsFocused,
+  priorityTimings,
+}: BrowserTabsCoordinatorWithPriorityOptions<Message>) {
+  const coordinator = createBrowserTabsCoordinator({
+    storeType,
+    storeKey,
+    onMessage,
+    transportFactory,
+  });
+
+  const priority = createBrowserTabsPriority({
+    enabled: coordinator.enabled,
+    tabId: coordinator.tabId,
+    getWindowIsFocused,
+    publishStatus: (status) => {
+      coordinator.publish(
+        __LEGIT_CAST__<
+          MessageWithoutMeta<Message>,
+          BrowserTabsTabStatusMessage
+        >(status),
+      );
+    },
+    timings: priorityTimings,
+  });
+
+  return {
+    coordinator,
+    priority,
   };
 }
 

@@ -1,4 +1,4 @@
-import { isWindowFocused, onWindowFocus } from '@ls-stack/browser-utils/window';
+import { isWindowFocused } from '@ls-stack/browser-utils/window';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
@@ -20,12 +20,11 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
-  createBrowserTabsPriority,
   type BrowserTabsPriorityTimings,
   type BrowserTabsTabStatusMessage,
 } from '../utils/browserTabsPriority';
 import {
-  createBrowserTabsCoordinator,
+  createBrowserTabsCoordinatorWithPriority,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
@@ -45,6 +44,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
+import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -699,26 +699,19 @@ export function createCollectionStore<
     applyRemoteItemSnapshot(message, candidateVersion);
   }
 
-  const browserTabsSync = createBrowserTabsCoordinator<
-    CollectionBrowserTabsMessage<ItemState, ItemPayload>
-  >({
-    storeType: 'collection',
-    storeKey: id,
-    onMessage: handleRemoteMessage,
-    transportFactory: testOptions?.browserTabsTransportFactory,
-  });
-
-  const browserTabsPriority = createBrowserTabsPriority({
-    enabled: browserTabsSync.enabled,
-    tabId: browserTabsSync.tabId,
-    getWindowIsFocused,
-    publishStatus: (status) => {
-      browserTabsSync.publish(status);
-    },
-    timings:
-      testOptions?.browserTabsPriorityTimings ??
-      testOptions?.browserTabsLeadershipTimings,
-  });
+  const { coordinator: browserTabsSync, priority: browserTabsPriority } =
+    createBrowserTabsCoordinatorWithPriority<
+      CollectionBrowserTabsMessage<ItemState, ItemPayload>
+    >({
+      storeType: 'collection',
+      storeKey: id,
+      onMessage: handleRemoteMessage,
+      transportFactory: testOptions?.browserTabsTransportFactory,
+      getWindowIsFocused,
+      priorityTimings:
+        testOptions?.browserTabsPriorityTimings ??
+        testOptions?.browserTabsLeadershipTimings,
+    });
 
   async function executeBatchFetch(
     requests: BatchRequest<ItemPayload>[],
@@ -1185,29 +1178,17 @@ export function createCollectionStore<
     return result;
   }
 
-  // Set up window focus listener for non-realtime stores
-  let cleanupFocusListener: (() => void) | null = null;
-  let cleanupReconnectFocusListener: (() => void) | null = null;
-
-  function setupFocusListener() {
-    cleanupFocusListener?.();
-    cleanupFocusListener = null;
-
-    if (!revalidateOnWindowFocus || usesRealTimeUpdates) return;
-
-    cleanupFocusListener = onWindowFocus(() => {
-      const enabled =
-        typeof revalidateOnWindowFocus === 'function'
-          ? revalidateOnWindowFocus()
-          : revalidateOnWindowFocus;
-
-      if (enabled) {
-        invalidateItem(() => true, 'lowPriority');
-      }
-    });
-  }
-
-  setupFocusListener();
+  const focusLifecycle = createStoreFocusLifecycle({
+    revalidateOnWindowFocus,
+    usesRealTimeUpdates,
+    getWindowIsFocused,
+    onWindowFocusRevalidate: () => {
+      invalidateItem(() => true, 'lowPriority');
+    },
+    onTransportReconnectRevalidate: () => {
+      invalidateItem(() => true, 'realtimeUpdate');
+    },
+  });
 
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
@@ -1222,20 +1203,7 @@ export function createCollectionStore<
    *   one invalidation fires on focus).
    */
   function onTransportReconnect(): void {
-    if (!usesRealTimeUpdates) return;
-
-    cleanupReconnectFocusListener?.();
-    cleanupReconnectFocusListener = null;
-
-    if (getWindowIsFocused()) {
-      invalidateItem(() => true, 'realtimeUpdate');
-    } else {
-      cleanupReconnectFocusListener = onWindowFocus(() => {
-        cleanupReconnectFocusListener?.();
-        cleanupReconnectFocusListener = null;
-        invalidateItem(() => true, 'realtimeUpdate');
-      });
-    }
+    focusLifecycle.onTransportReconnect();
   }
 
   function reset() {
@@ -1253,11 +1221,8 @@ export function createCollectionStore<
     lastCollectionSyncVersions.clear();
     browserTabsPriority.reset();
 
-    cleanupReconnectFocusListener?.();
-    cleanupReconnectFocusListener = null;
-
     store.setState({});
-    setupFocusListener();
+    focusLifecycle.reset();
   }
 
   /** Detects whether a specific item inside a collection item's data is still loading.

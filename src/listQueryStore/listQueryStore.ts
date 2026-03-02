@@ -1,4 +1,4 @@
-import { isWindowFocused, onWindowFocus } from '@ls-stack/browser-utils/window';
+import { isWindowFocused } from '@ls-stack/browser-utils/window';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
@@ -15,6 +15,7 @@ import {
 } from '../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinator,
+  createBrowserTabsCoordinatorWithPriority,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
@@ -23,6 +24,7 @@ import {
   toBrowserTabsSyncVersion,
 } from '../utils/browserTabsSync';
 import { type BlockWindowCloseHandler } from '../utils/performMutation';
+import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   StoreError,
   StoreFetchError,
@@ -1077,26 +1079,19 @@ export function createListQueryStore<
     applyRemoteQuerySnapshot(message);
   }
 
-  browserTabsSync = createBrowserTabsCoordinator<
-    ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>
-  >({
-    storeType: 'listQuery',
-    storeKey: id,
-    onMessage: handleRemoteBrowserTabsMessage,
-    transportFactory: testOptions?.browserTabsTransportFactory,
-  });
-
-  browserTabsPriority = createBrowserTabsPriority({
-    enabled: browserTabsSync.enabled,
-    tabId: browserTabsSync.tabId,
-    getWindowIsFocused,
-    publishStatus: (status) => {
-      browserTabsSync.publish(status);
-    },
-    timings:
-      testOptions?.browserTabsPriorityTimings ??
-      testOptions?.browserTabsLeadershipTimings,
-  });
+  ({ coordinator: browserTabsSync, priority: browserTabsPriority } =
+    createBrowserTabsCoordinatorWithPriority<
+      ListQueryBrowserTabsMessage<ItemState, QueryPayload, ItemPayload>
+    >({
+      storeType: 'listQuery',
+      storeKey: id,
+      onMessage: handleRemoteBrowserTabsMessage,
+      transportFactory: testOptions?.browserTabsTransportFactory,
+      getWindowIsFocused,
+      priorityTimings:
+        testOptions?.browserTabsPriorityTimings ??
+        testOptions?.browserTabsLeadershipTimings,
+    }));
 
   const useMultipleListQueries: UseMultipleListQueriesApi =
     function useMultipleListQueries<
@@ -1230,33 +1225,25 @@ export function createListQueryStore<
     );
   }
 
-  // Set up window focus listener for non-realtime stores
-  let cleanupFocusListener: (() => void) | null = null;
-  let cleanupReconnectFocusListener: (() => void) | null = null;
-
-  function setupFocusListener() {
-    cleanupFocusListener?.();
-    cleanupFocusListener = null;
-
-    if (!revalidateOnWindowFocus || usesRealTimeUpdates) return;
-
-    cleanupFocusListener = onWindowFocus(() => {
-      const enabled =
-        typeof revalidateOnWindowFocus === 'function'
-          ? revalidateOnWindowFocus()
-          : revalidateOnWindowFocus;
-
-      if (enabled) {
-        invalidateQueryAndItems({
-          queryPayload: () => true,
-          itemPayload: () => true,
-          type: 'lowPriority',
-        });
-      }
-    });
-  }
-
-  setupFocusListener();
+  const focusLifecycle = createStoreFocusLifecycle({
+    revalidateOnWindowFocus,
+    usesRealTimeUpdates,
+    getWindowIsFocused,
+    onWindowFocusRevalidate: () => {
+      invalidateQueryAndItems({
+        queryPayload: () => true,
+        itemPayload: () => true,
+        type: 'lowPriority',
+      });
+    },
+    onTransportReconnectRevalidate: () => {
+      invalidateQueryAndItems({
+        queryPayload: () => true,
+        itemPayload: () => true,
+        type: 'realtimeUpdate',
+      });
+    },
+  });
 
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
@@ -1271,28 +1258,7 @@ export function createListQueryStore<
    *   one invalidation fires on focus).
    */
   function onTransportReconnect(): void {
-    if (!usesRealTimeUpdates) return;
-
-    cleanupReconnectFocusListener?.();
-    cleanupReconnectFocusListener = null;
-
-    if (getWindowIsFocused()) {
-      invalidateQueryAndItems({
-        queryPayload: () => true,
-        itemPayload: () => true,
-        type: 'realtimeUpdate',
-      });
-    } else {
-      cleanupReconnectFocusListener = onWindowFocus(() => {
-        cleanupReconnectFocusListener?.();
-        cleanupReconnectFocusListener = null;
-        invalidateQueryAndItems({
-          queryPayload: () => true,
-          itemPayload: () => true,
-          type: 'realtimeUpdate',
-        });
-      });
-    }
+    focusLifecycle.onTransportReconnect();
   }
 
   function reset() {
@@ -1302,9 +1268,6 @@ export function createListQueryStore<
     lastItemSyncVersions.clear();
     browserTabsPriority?.reset();
 
-    cleanupReconnectFocusListener?.();
-    cleanupReconnectFocusListener = null;
-
     store.setState({
       items: {},
       queries: {},
@@ -1312,7 +1275,7 @@ export function createListQueryStore<
       itemLoadedFields: {},
       itemFieldInvalidationFields: {},
     });
-    setupFocusListener();
+    focusLifecycle.reset();
   }
 
   function scheduleListQueryFetchApiImpl(

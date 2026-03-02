@@ -16,6 +16,7 @@ import { createServerTableMock } from './serverTableMock';
 import {
   createActionTracker,
   createEmojiCyclers,
+  createPerItemUITracker,
   createUITracker,
   logScheduleFetchResult,
   logSchedulerEvent,
@@ -90,38 +91,11 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const serverTable = createServerTableMock<D>(serverInitialData, addAction);
 
-  // Per-item UI tracking
-  const itemUIValues: Record<string, unknown> = {};
-  const uiChanges: Array<Record<string, unknown>> = [];
-  let uiInitialized = false;
-
-  function trackItemUI(itemId: string, value: unknown) {
-    if (itemUIValues[itemId] === value) return;
-
-    itemUIValues[itemId] = value;
-    uiChanges.push({ ...itemUIValues });
-
-    const time = getRelativeTime();
-
-    // Skip if this was already recorded by optimistic-ui-commit
-    if (
-      actionsHistory.some(
-        (a) =>
-          a.action === 'optimistic-ui-commit' &&
-          a.time === time &&
-          a.uiValue === value &&
-          a.itemId === itemId,
-      )
-    ) {
-      return;
-    }
-
-    addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
-      uiValue: value,
-      itemId,
-    });
-    uiInitialized = true;
-  }
+  const { uiChanges, trackItemUI } = createPerItemUITracker(
+    addAction,
+    getRelativeTime,
+    actionsHistory,
+  );
 
   const { trackUIChanges } = createUITracker<
     Record<string, number | 'error' | undefined>

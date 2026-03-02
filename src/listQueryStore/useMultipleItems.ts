@@ -6,6 +6,7 @@ import { type Emitter } from 'evtmitter';
 import { useCallback, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
+import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
@@ -369,15 +370,15 @@ export function useMultipleItems<
 
       ignoreItemsInRefetchOnMount.add(itemKey);
 
-      if (disableRefetches) {
-        if (!itemState?.wasLoaded) {
-          scheduleItemFetch(fetchType, payload, { fields });
-        }
-      } else if (disableRefetchOnMount) {
-        if (shouldFetch) {
-          scheduleAutomaticItemFetch(fetchType, payload, { fields });
-        }
-      } else if (!partialResources || shouldFetch) {
+      if (
+        shouldScheduleAutomaticFetch({
+          wasLoaded: itemState?.wasLoaded,
+          shouldFetch: !!shouldFetch,
+          disableRefetches,
+          disableRefetchOnMount,
+          skipFreshFetch: !!partialResources,
+        })
+      ) {
         scheduleAutomaticItemFetch(fetchType, payload, { fields });
       }
     }

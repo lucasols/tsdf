@@ -1,5 +1,5 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
-import { isWindowFocused, onWindowFocus } from '@ls-stack/browser-utils/window';
+import { isWindowFocused } from '@ls-stack/browser-utils/window';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import {
   __LEGIT_CAST__,
@@ -24,12 +24,11 @@ import {
   ScheduleFetchResults,
 } from './requestScheduler';
 import {
-  createBrowserTabsPriority,
   type BrowserTabsPriorityTimings,
   type BrowserTabsTabStatusMessage,
 } from './utils/browserTabsPriority';
 import {
-  createBrowserTabsCoordinator,
+  createBrowserTabsCoordinatorWithPriority,
   SnapshotConsistency,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
@@ -49,6 +48,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
+import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -342,26 +342,19 @@ export function createDocumentStore<State extends ValidStoreState>({
     applyRemoteDocumentSnapshot(message, candidateVersion);
   }
 
-  const browserTabsSync = createBrowserTabsCoordinator<
-    DocumentBrowserTabsMessage<State>
-  >({
-    storeType: 'document',
-    storeKey: id,
-    onMessage: handleRemoteMessage,
-    transportFactory: testOptions?.browserTabsTransportFactory,
-  });
-
-  const browserTabsPriority = createBrowserTabsPriority({
-    enabled: browserTabsSync.enabled,
-    tabId: browserTabsSync.tabId,
-    getWindowIsFocused,
-    publishStatus: (status) => {
-      browserTabsSync.publish(status);
-    },
-    timings:
-      testOptions?.browserTabsPriorityTimings ??
-      testOptions?.browserTabsLeadershipTimings,
-  });
+  const { coordinator: browserTabsSync, priority: browserTabsPriority } =
+    createBrowserTabsCoordinatorWithPriority<DocumentBrowserTabsMessage<State>>(
+      {
+        storeType: 'document',
+        storeKey: id,
+        onMessage: handleRemoteMessage,
+        transportFactory: testOptions?.browserTabsTransportFactory,
+        getWindowIsFocused,
+        priorityTimings:
+          testOptions?.browserTabsPriorityTimings ??
+          testOptions?.browserTabsLeadershipTimings,
+      },
+    );
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
@@ -476,29 +469,17 @@ export function createDocumentStore<State extends ValidStoreState>({
     );
   }
 
-  // Set up window focus listener for non-realtime stores
-  let cleanupFocusListener: (() => void) | null = null;
-  let cleanupReconnectFocusListener: (() => void) | null = null;
-
-  function setupFocusListener() {
-    cleanupFocusListener?.();
-    cleanupFocusListener = null;
-
-    if (!revalidateOnWindowFocus || usesRealTimeUpdates) return;
-
-    cleanupFocusListener = onWindowFocus(() => {
-      const enabled =
-        typeof revalidateOnWindowFocus === 'function'
-          ? revalidateOnWindowFocus()
-          : revalidateOnWindowFocus;
-
-      if (enabled) {
-        invalidateData('lowPriority');
-      }
-    });
-  }
-
-  setupFocusListener();
+  const focusLifecycle = createStoreFocusLifecycle({
+    revalidateOnWindowFocus,
+    usesRealTimeUpdates,
+    getWindowIsFocused,
+    onWindowFocusRevalidate: () => {
+      invalidateData('lowPriority');
+    },
+    onTransportReconnectRevalidate: () => {
+      invalidateData('realtimeUpdate');
+    },
+  });
 
   function scheduleFetch(
     fetchType: FetchType,
@@ -605,35 +586,20 @@ export function createDocumentStore<State extends ValidStoreState>({
    *   invalidation fires on focus).
    */
   function onTransportReconnect(): void {
-    if (!usesRealTimeUpdates) return;
-
-    cleanupReconnectFocusListener?.();
-    cleanupReconnectFocusListener = null;
-
-    if (getWindowIsFocused()) {
-      invalidateData('realtimeUpdate');
-    } else {
-      cleanupReconnectFocusListener = onWindowFocus(() => {
-        cleanupReconnectFocusListener?.();
-        cleanupReconnectFocusListener = null;
-        invalidateData('realtimeUpdate');
-      });
-    }
+    focusLifecycle.onTransportReconnect();
   }
 
   function reset(): void {
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
     browserTabsPriority.reset();
-    cleanupReconnectFocusListener?.();
-    cleanupReconnectFocusListener = null;
     store.setState({
       data: null,
       error: null,
       status: 'idle',
       refetchOnMount: 'lowPriority',
     });
-    setupFocusListener();
+    focusLifecycle.reset();
   }
 
   function startMutation(): () => boolean {

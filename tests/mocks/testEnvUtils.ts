@@ -303,6 +303,51 @@ export function createUITracker<T>(
   };
 }
 
+export function createPerItemUITracker(
+  addAction: (
+    action: string,
+    options?: { uiValue?: unknown; time?: number; itemId?: string },
+  ) => void,
+  getRelativeTime: () => number,
+  actionsHistory: Action[],
+) {
+  const itemUIValues: Record<string, unknown> = {};
+  const uiChanges: Array<Record<string, unknown>> = [];
+  let uiInitialized = false;
+
+  function trackItemUI(itemId: string, value: unknown) {
+    if (itemUIValues[itemId] === value) return;
+
+    itemUIValues[itemId] = value;
+    uiChanges.push({ ...itemUIValues });
+
+    const time = getRelativeTime();
+
+    if (
+      actionsHistory.some(
+        (action) =>
+          action.action === 'optimistic-ui-commit' &&
+          action.time === time &&
+          action.uiValue === value &&
+          action.itemId === itemId,
+      )
+    ) {
+      return;
+    }
+
+    addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
+      uiValue: value,
+      itemId,
+    });
+    uiInitialized = true;
+  }
+
+  return {
+    uiChanges,
+    trackItemUI,
+  };
+}
+
 /**
  * Creates emoji cyclers for fetches and mutations
  */
