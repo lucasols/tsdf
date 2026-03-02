@@ -6,6 +6,12 @@ export type ValidPayload = number | string | Record<string, unknown>;
 
 export type ValidStoreState = Record<string, unknown> | unknown[];
 
+export const invalidPayloadError = {
+  code: 461,
+  id: 'invalid-payload',
+  message: 'Invalid payload',
+} as const;
+
 export const fetchTypePriority: Record<FetchType, number> = {
   lowPriority: 0,
   mediumPriority: 1,

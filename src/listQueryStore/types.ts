@@ -110,6 +110,8 @@ export type ListQueryUseMultipleItemsQuery<
   payload: ItemPayload;
   fields?: FieldsInput;
   queryMetadata?: QueryMetadata;
+  /** Only loads the data if it is not already loaded and skip any other refetches */
+  disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
@@ -124,6 +126,8 @@ export type ListQueryUseMultipleListQueriesQuery<
   fields?: FieldsInput;
   queryMetadata?: QueryMetadata;
   omitPayload?: boolean;
+  /** Only loads the data if it is not already loaded and skip any other refetches */
+  disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;

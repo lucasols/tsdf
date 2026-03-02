@@ -30,6 +30,8 @@ export type UseMultipleItemsOptions<
   loadFromStateOnly?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
+  /** Only loads the data if it is not already loaded and skip any other refetches */
+  disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   isOffScreen?: boolean;
 };
@@ -47,6 +49,7 @@ export function useMultipleItems<
     loadFromStateOnly,
     returnIdleStatus: allItemsReturnIdleStatus,
     returnRefetchingStatus: allItemsReturnRefetchingStatus,
+    disableRefetches: allItemsDisableRefetches,
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
     isOffScreen: allItemsIsOffScreen,
   }: UseMultipleItemsOptions<ItemState, Selected>,
@@ -69,6 +72,7 @@ export function useMultipleItems<
     itemKey: string;
     payload: ItemPayload;
     fields: FieldsInput | undefined;
+    disableRefetches: boolean;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -81,6 +85,8 @@ export function useMultipleItems<
       itemKey: getItemKey(itemProps.payload),
       payload: itemProps.payload,
       fields: itemProps.fields,
+      disableRefetches:
+        itemProps.disableRefetches ?? allItemsDisableRefetches ?? false,
       disableRefetchOnMount:
         itemProps.disableRefetchOnMount ??
         allItemsDisableRefetchOnMount ??
@@ -98,6 +104,7 @@ export function useMultipleItems<
   }, [
     items,
     getItemKey,
+    allItemsDisableRefetches,
     allItemsDisableRefetchOnMount,
     allItemsIsOffScreen,
     allItemsReturnIdleStatus,
@@ -270,6 +277,16 @@ export function useMultipleItems<
     if (matchingQueries.length === 0) return;
     if (itemInvalidationWasTriggered.has(event.itemKey)) return;
 
+    const allQueriesDisableRefetches = matchingQueries.every(
+      (q) => q.disableRefetches,
+    );
+    if (
+      allQueriesDisableRefetches &&
+      store.state.itemQueries[event.itemKey]?.wasLoaded
+    ) {
+      return;
+    }
+
     let fieldsToFetch: string[] | undefined;
     if (event.invalidateFields && event.invalidateFields.length > 0) {
       fieldsToFetch = Array.from(new Set(event.invalidateFields)).sort();
@@ -311,6 +328,7 @@ export function useMultipleItems<
       fields,
       itemKey,
       isOffScreen,
+      disableRefetches,
       disableRefetchOnMount,
     } of queriesWithId) {
       removedItems.delete(itemKey);
@@ -351,7 +369,11 @@ export function useMultipleItems<
 
       ignoreItemsInRefetchOnMount.add(itemKey);
 
-      if (disableRefetchOnMount) {
+      if (disableRefetches) {
+        if (!itemState?.wasLoaded) {
+          scheduleItemFetch(fetchType, payload, { fields });
+        }
+      } else if (disableRefetchOnMount) {
         if (shouldFetch) {
           scheduleAutomaticItemFetch(fetchType, payload, { fields });
         }
