@@ -539,10 +539,13 @@ export function createDocumentStore<State extends ValidStoreState>({
     disableRefetchOnMount = globalDisableRefetchOnMount,
     returnIdleStatus = !!disabled,
     ensureIsLoaded,
+    disableRefetches,
   }: {
     selector?: (data: State | null) => Selected;
     disabled?: boolean;
     isOffScreen?: boolean;
+    /** only loads the data if it is not already loaded and skip any other refetches */
+    disableRefetches?: boolean;
     disableRefetchOnMount?: boolean;
     returnIdleStatus?: boolean;
     ensureIsLoaded?: boolean;
@@ -582,6 +585,13 @@ export function createDocumentStore<State extends ValidStoreState>({
 
     useOnEvtmitterEvent(events, 'invalidateData', ({ payload: priority }) => {
       if (disabled) return;
+      if (
+        disableRefetches &&
+        store.state.status !== 'idle' &&
+        store.state.status !== 'error'
+      ) {
+        return;
+      }
 
       if (!invalidationWasTriggered) {
         store.setKey('refetchOnMount', false);
@@ -596,7 +606,11 @@ export function createDocumentStore<State extends ValidStoreState>({
 
       const fetchType = store.state.refetchOnMount || 'lowPriority';
 
-      if (disableRefetchOnMount) {
+      if (disableRefetches) {
+        if (store.state.status === 'idle' || store.state.status === 'error') {
+          scheduleFetch(fetchType);
+        }
+      } else if (disableRefetchOnMount) {
         const shouldFetch =
           store.state.refetchOnMount || store.state.status === 'idle';
 
@@ -606,7 +620,7 @@ export function createDocumentStore<State extends ValidStoreState>({
       } else {
         scheduleFetch(fetchType);
       }
-    }, [disableRefetchOnMount, disabled]);
+    }, [disableRefetchOnMount, disableRefetches, disabled]);
 
     const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
       ensureIsLoaded,

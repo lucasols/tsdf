@@ -2,7 +2,11 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType } from '../requestScheduler';
-import { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  ValidPayload,
+  ValidStoreState,
+  invalidPayloadError,
+} from '../utils/storeShared';
 import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
 import type {
   CollectionUseMultipleItemsQuery,
@@ -29,6 +33,7 @@ export function useItem<
     selector,
     ensureIsLoaded,
     returnRefetchingStatus,
+    disableRefetches,
     disableRefetchOnMount,
     returnIdleStatus,
     isOffScreen,
@@ -40,21 +45,28 @@ export function useItem<
     options: UseMultipleItemsOptions<ItemState, S>,
   ) => readonly TSFDUseCollectionItemReturn<S, ItemPayload, undefined>[],
 ): TSFDUseCollectionItemReturn<Selected, ItemPayload> {
+  const isInvalidPayload = payload === '';
+
   const query = useMemo(
     () =>
-      payload === false || payload === null || payload === undefined
+      payload === false ||
+      payload === null ||
+      payload === undefined ||
+      payload === ''
         ? []
         : [
             {
               payload,
               omitPayload,
               returnRefetchingStatus,
+              disableRefetches,
               disableRefetchOnMount,
               returnIdleStatus,
               isOffScreen,
             },
           ],
     [
+      disableRefetches,
       disableRefetchOnMount,
       isOffScreen,
       omitPayload,
@@ -70,16 +82,31 @@ export function useItem<
 
   const result = useMemo(
     (): TSFDUseCollectionItemReturn<Selected, ItemPayload> =>
-      item[0] ?? {
-        payload: undefined,
-        data: selector ? selector(null) : __LEGIT_CAST__<Selected, null>(null),
-        error: null,
-        status: 'idle',
-        itemStateKey: '',
-        isLoading: false,
-        queryMetadata: undefined,
-      },
-    [item, selector],
+      item[0] ??
+      (isInvalidPayload
+        ? {
+            payload: undefined,
+            data: selector
+              ? selector(null)
+              : __LEGIT_CAST__<Selected, null>(null),
+            error: invalidPayloadError,
+            status: 'error',
+            itemStateKey: '',
+            isLoading: false,
+            queryMetadata: undefined,
+          }
+        : {
+            payload: undefined,
+            data: selector
+              ? selector(null)
+              : __LEGIT_CAST__<Selected, null>(null),
+            error: null,
+            status: 'idle',
+            itemStateKey: '',
+            isLoading: false,
+            queryMetadata: undefined,
+          }),
+    [item, selector, isInvalidPayload],
   );
 
   const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(

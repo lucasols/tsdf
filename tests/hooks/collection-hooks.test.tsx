@@ -482,6 +482,42 @@ describe('useItem', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(0);
   });
 
+  test('return error state for empty string payload', async () => {
+    const env = createCollectionStoreTestEnv<Todo>({
+      '1': defaultTodo,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const selectionResult = env.apiStore.useItem('');
+
+      renders.add({
+        status: selectionResult.status,
+        payload: selectionResult.payload,
+        error: selectionResult.error,
+        data: selectionResult.data?.value ?? null,
+      });
+    });
+
+    await act(async () => {
+      await flushAllTimers();
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: error
+      ⋅ payload: undefined
+      ⋅ error: {code:461, id:invalid-payload, message:Invalid payload}
+      ⋅ data: null
+      └─
+      "
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
+
   test('enable the fetch after initial disable', async () => {
     const env = createCollectionStoreTestEnv<Todo>({
       '1': defaultTodo,

@@ -1,3 +1,4 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
@@ -532,6 +533,41 @@ describe('useMultipleItemsQuery isolated tests', () => {
 });
 
 describe('useQuery', () => {
+  test('return error state for empty string payload', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const queryResult = listQueryStore.useListQuery(
+        __LEGIT_CAST__<FetchQueryParams, string>(''),
+        {
+          itemSelector(data, _, itemKey) {
+            return { id: itemKey, data };
+          },
+        },
+      );
+
+      renders.add(pick(queryResult, ['status', 'payload', 'error', 'items']));
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: error
+      ⋅ payload: undefined
+      ⋅ error: {code:461, id:invalid-payload, message:Invalid payload}
+      ⋅ items: []
+      └─
+      "
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
+
   test('disable then enable the initial fetch', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;
@@ -743,6 +779,38 @@ describe('useQuery', () => {
 });
 
 describe('useItem', () => {
+  test('return error state for empty string payload', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+
+    const renders = createLoggerStore();
+
+    function Comp() {
+      const queryResult = listQueryStore.useItem('');
+
+      renders.add(pick(queryResult, ['status', 'payload', 'error', 'data']));
+
+      return <div />;
+    }
+
+    render(<Comp />);
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: error
+      ⋅ payload: null
+      ⋅ error: {code:461, id:invalid-payload, message:Invalid payload}
+      ⋅ data: null
+      └─
+      "
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
+
   test('disable then enable the initial fetch', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
     const listQueryStore = env.apiStore;

@@ -1,7 +1,11 @@
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
-import { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  ValidPayload,
+  ValidStoreState,
+  invalidPayloadError,
+} from '../utils/storeShared';
 import { useEnsureIsLoaded } from '../utils/useEnsureIsLoaded';
 import type {
   FieldsInput,
@@ -30,6 +34,7 @@ export function useListQuery<
   {
     itemSelector,
     omitPayload,
+    disableRefetches,
     disableRefetchOnMount,
     returnIdleStatus,
     returnRefetchingStatus,
@@ -51,14 +56,20 @@ export function useListQuery<
     options: UseMultipleListQueriesOptions<ItemState, ItemPayload, S>,
   ) => readonly TSFDUseListQueryReturn<S, QueryPayload, undefined>[],
 ): TSFDUseListQueryReturn<SelectedItem, QueryPayload> {
+  const isInvalidPayload = payload === '';
+
   const query = useMemo(
     (): ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[] =>
-      payload === false || payload === null || payload === undefined
+      payload === false ||
+      payload === null ||
+      payload === undefined ||
+      payload === ''
         ? []
         : [
             {
               payload,
               fields,
+              disableRefetches,
               disableRefetchOnMount,
               returnIdleStatus,
               returnRefetchingStatus,
@@ -68,6 +79,7 @@ export function useListQuery<
             },
           ],
     [
+      disableRefetches,
       disableRefetchOnMount,
       fields,
       isOffScreen,
@@ -85,19 +97,33 @@ export function useListQuery<
 
   const result = useMemo(
     (): TSFDUseListQueryReturn<SelectedItem, QueryPayload> =>
-      queryResult[0] ?? {
-        payload: undefined,
-        fields,
-        error: null,
-        hasMore: false,
-        isLoading: false,
-        status: 'idle',
-        queryKey: '',
-        items: [],
-        isLoadingMore: false,
-        queryMetadata: undefined,
-      },
-    [queryResult, fields],
+      queryResult[0] ??
+      (isInvalidPayload
+        ? {
+            payload: undefined,
+            fields,
+            error: invalidPayloadError,
+            hasMore: false,
+            isLoading: false,
+            status: 'error',
+            queryKey: '',
+            items: [],
+            isLoadingMore: false,
+            queryMetadata: undefined,
+          }
+        : {
+            payload: undefined,
+            fields,
+            error: null,
+            hasMore: false,
+            isLoading: false,
+            status: 'idle',
+            queryKey: '',
+            items: [],
+            isLoadingMore: false,
+            queryMetadata: undefined,
+          }),
+    [queryResult, fields, isInvalidPayload],
   );
 
   const queryKey = payload ? getQueryKey(payload) : '';

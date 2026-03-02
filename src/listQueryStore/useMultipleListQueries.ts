@@ -31,6 +31,8 @@ export type UseMultipleListQueriesOptions<
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
   omitPayload?: boolean;
+  /** Only loads the data if it is not already loaded and skip any other refetches */
+  disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   isOffScreen?: boolean;
   loadSize?: number;
@@ -49,6 +51,7 @@ export function useMultipleListQueries<
     returnIdleStatus: allItemsReturnIdleStatus,
     returnRefetchingStatus: allItemsReturnRefetchingStatus,
     omitPayload: allItemsOmitPayload,
+    disableRefetches: allItemsDisableRefetches,
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
     isOffScreen: allItemsIsOffScreen,
     loadSize: allItemsLoadSize,
@@ -79,6 +82,7 @@ export function useMultipleListQueries<
     key: string;
     payload: QueryPayload;
     fields: FieldsInput | undefined;
+    disableRefetches: boolean;
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
@@ -93,6 +97,8 @@ export function useMultipleListQueries<
       key: getQueryKey(queryProps.payload),
       payload: queryProps.payload,
       fields: queryProps.fields,
+      disableRefetches:
+        queryProps.disableRefetches ?? allItemsDisableRefetches ?? false,
       disableRefetchOnMount:
         queryProps.disableRefetchOnMount ??
         allItemsDisableRefetchOnMount ??
@@ -112,6 +118,7 @@ export function useMultipleListQueries<
   }, [
     queries,
     getQueryKey,
+    allItemsDisableRefetches,
     allItemsDisableRefetchOnMount,
     allItemsIsOffScreen,
     allItemsLoadSize,
@@ -246,10 +253,18 @@ export function useMultipleListQueries<
   });
 
   useOnEvtmitterEvent(events, 'invalidateQuery', ({ payload: event }) => {
-    for (const { key, payload, fields, isOffScreen } of queriesWithId) {
+    for (const {
+      key,
+      payload,
+      fields,
+      isOffScreen,
+      disableRefetches,
+    } of queriesWithId) {
       if (isOffScreen) continue;
 
       if (key !== event.queryKey) continue;
+
+      if (disableRefetches && store.state.queries[key]?.wasLoaded) continue;
 
       if (!queryInvalidationWasTriggered.has(key)) {
         store.produceState((draft) => {
@@ -276,6 +291,7 @@ export function useMultipleListQueries<
       fields,
       isOffScreen,
       loadSize,
+      disableRefetches,
       disableRefetchOnMount,
     } of queriesWithId) {
       removedQueries.delete(queryId);
@@ -347,7 +363,11 @@ export function useMultipleListQueries<
 
       ignoreQueriesInRefetchOnMount.add(queryId);
 
-      if (disableRefetchOnMount) {
+      if (disableRefetches) {
+        if (!queryState?.wasLoaded) {
+          scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
+        }
+      } else if (disableRefetchOnMount) {
         if (shouldFetch) {
           scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
         }
