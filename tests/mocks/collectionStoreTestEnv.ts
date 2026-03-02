@@ -4,11 +4,14 @@ import {
   type CollectionInitialStateItem,
 } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import {
   simulateWindowBlur,
   simulateWindowFocus,
 } from '../utils/genericTestUtils';
+import { getNextStoreId } from './browserTabsTestUtils';
 import { createServerTableMock } from './serverTableMock';
 import {
   createActionTracker,
@@ -32,13 +35,17 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   | { loadedWithStaleData: Record<string, D> };
 
 export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
+  id?: string;
+  browserTabsTransportFactory?: BrowserTabsTransportFactory;
+  browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+  getWindowIsFocused?: () => boolean;
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  backgroundCoalescingWindowMultiplier?: number;
   baseCoalescingWindowMs?: number;
+  lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
   /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
   useBatchFetch?: boolean;
@@ -54,10 +61,14 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
+    id = getNextStoreId('collection'),
+    browserTabsTransportFactory,
+    browserTabsLeadershipTimings,
+    getWindowIsFocused,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier = 1,
     baseCoalescingWindowMs = 10,
+    lowPriorityThrottleMs = 200,
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
@@ -153,8 +164,9 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
   const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
+    id,
     errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 200,
+    lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
@@ -166,10 +178,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
-    '~test': testOptions,
+    '~test': {
+      ...testOptions,
+      getWindowIsFocused,
+      browserTabsTransportFactory,
+      browserTabsLeadershipTimings,
+    },
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },

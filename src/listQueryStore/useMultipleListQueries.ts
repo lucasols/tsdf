@@ -59,7 +59,7 @@ export function useMultipleListQueries<
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
-  scheduleListQueryFetch: (
+  scheduleAutomaticListQueryFetch: (
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
@@ -259,7 +259,9 @@ export function useMultipleListQueries<
           query.refetchOnMount = false;
         });
 
-        scheduleListQueryFetch(event.priority, payload, undefined, { fields });
+        scheduleAutomaticListQueryFetch(event.priority, payload, undefined, {
+          fields,
+        });
         queryInvalidationWasTriggered.add(key);
       }
     }
@@ -349,10 +351,14 @@ export function useMultipleListQueries<
 
       if (disableRefetchOnMount) {
         if (shouldFetch) {
-          scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
+          scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
+            fields,
+          });
         }
       } else if (!partialResources || shouldFetch) {
-        scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
+        scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
+          fields,
+        });
       }
     }
 
@@ -363,7 +369,7 @@ export function useMultipleListQueries<
     getQueryState,
     ignoreQueriesInRefetchOnMount,
     queriesWithId,
-    scheduleListQueryFetch,
+    scheduleAutomaticListQueryFetch,
     partialResources,
     store.state.itemLoadedFields,
     store.state.itemFieldInvalidationFields,

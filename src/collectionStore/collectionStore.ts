@@ -20,6 +20,20 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  createBrowserTabsPriority,
+  type BrowserTabsPriorityTimings,
+  type BrowserTabsTabStatusMessage,
+} from '../utils/browserTabsPriority';
+import {
+  createBrowserTabsCoordinator,
+  type BrowserTabsMessageMeta,
+  type BrowserTabsSyncVersion,
+  type BrowserTabsTransportFactory,
+  isBrowserTabsSyncVersionNewer,
+  type SnapshotConsistency,
+  toBrowserTabsSyncVersion,
+} from '../utils/browserTabsSync';
+import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from '../utils/performMutation';
@@ -108,11 +122,46 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   mutationEnd: { mutationId: number; payload: ItemPayload; success: boolean };
 };
 
+type CollectionBrowserTabsMessage<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> =
+  | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage)
+  | (BrowserTabsMessageMeta & {
+      kind: 'collection-item-snapshot';
+      itemKey: string;
+      consistency: SnapshotConsistency;
+      item: TSFDCollectionItem<ItemState, ItemPayload> | null;
+    })
+  | (BrowserTabsMessageMeta & {
+      kind: 'fetch-start';
+      targetKey: string;
+      requestIds: string[];
+      startedAt: number;
+    })
+  | (BrowserTabsMessageMeta & {
+      kind: 'fetch-success';
+      targetKey: string;
+      requestIds: string[];
+      startedAt: number;
+      duration: number;
+    });
+
+type CollectionItemSnapshotMessage<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = Extract<
+  CollectionBrowserTabsMessage<ItemState, ItemPayload>,
+  { kind: 'collection-item-snapshot' }
+>;
+
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {
   debugName?: string;
+  /** Stable id shared by the same logical collection store across browser tabs. */
+  id: string;
   fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>;
   /** Optional batch fetch function for fetching multiple items at once */
   batchFetchFn?: (
@@ -134,7 +183,6 @@ export type CollectionStoreOptions<
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  backgroundCoalescingWindowMultiplier: number;
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (
@@ -150,6 +198,10 @@ export type CollectionStoreOptions<
     initialData?: CollectionInitialStateItem<ItemPayload, ItemState>[];
     initialError?: StoreError;
     initialLastFetchStartTime?: number;
+    getWindowIsFocused?: () => boolean;
+    browserTabsTransportFactory?: BrowserTabsTransportFactory;
+    browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
+    browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
   };
 };
 
@@ -167,6 +219,7 @@ export function createCollectionStore<
   ItemPayload extends ValidPayload,
 >({
   debugName,
+  id,
   fetchFn,
   batchFetchFn,
   getItemsBatchKey,
@@ -177,7 +230,6 @@ export function createCollectionStore<
   mediumPriorityDelayMs,
   dynamicRealtimeThrottleMs,
   revalidateOnWindowFocus,
-  backgroundCoalescingWindowMultiplier,
   getCollectionItemKey: filterCollectionItemObjKey,
   onInvalidate,
   onSchedulerEvent,
@@ -188,6 +240,10 @@ export function createCollectionStore<
 }: CollectionStoreOptions<ItemState, ItemPayload>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
+
+  let remoteApplyDepth = 0;
+  let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
+  const lastCollectionSyncVersions = new Map<string, BrowserTabsSyncVersion>();
 
   let initialData:
     | CollectionInitialStateItem<ItemPayload, ItemState>[]
@@ -245,20 +301,114 @@ export function createCollectionStore<
     );
   }
 
+  const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
+
+  function runWithoutBroadcast<T>(callback: () => T): T {
+    remoteApplyDepth++;
+    try {
+      return callback();
+    } finally {
+      remoteApplyDepth--;
+    }
+  }
+
+  function runWithBroadcastConsistency<T>(
+    consistency: SnapshotConsistency,
+    callback: () => T,
+  ): T {
+    const previousConsistency = currentBroadcastConsistency;
+    currentBroadcastConsistency = consistency;
+
+    try {
+      return callback();
+    } finally {
+      currentBroadcastConsistency = previousConsistency;
+    }
+  }
+
   const events = evtmitter<CollectionStoreEvents>();
   const wrappedDynamicRealtimeThrottleMs = dynamicRealtimeThrottleMs
     ? (lastFetchDuration: number) =>
         dynamicRealtimeThrottleMs({
           lastFetchDuration,
-          windowIsNotFocused: !isWindowFocused(),
+          windowIsNotFocused: !getWindowIsFocused(),
         })
     : undefined;
 
-  const getCoalescingWindowMultiplier = (): number =>
-    !isWindowFocused() ? backgroundCoalescingWindowMultiplier : 1;
   const storeEvents = evtmitter<CollectionStoreStoreEvents<ItemPayload>>();
 
   const useBatchSchedulers = !!batchFetchFn;
+
+  function getItemTargetKey(itemKey: string): string {
+    return `item:${itemKey}`;
+  }
+
+  function getBatchTargetKey(batchKey: string): string {
+    return `batch:${batchKey}`;
+  }
+
+  function getBatchKey(payload: ItemPayload): string | false {
+    if (!useBatchSchedulers) return false;
+    if (!getItemsBatchKey) return '__default__';
+    return getItemsBatchKey(payload);
+  }
+
+  function getAutomaticCoalescingWindowMs(): number {
+    const rank = browserTabsPriority.getPriorityRank();
+    if (rank <= 1 || baseCoalescingWindowMs <= 0) {
+      return baseCoalescingWindowMs;
+    }
+
+    return baseCoalescingWindowMs + (rank - 1) * 1_000;
+  }
+
+  function publishFetchStart(
+    targetKey: string,
+    requestIds: string[],
+    startedAt: number,
+  ): void {
+    browserTabsSync.publish({
+      kind: 'fetch-start',
+      targetKey,
+      requestIds,
+      startedAt,
+    });
+  }
+
+  function publishFetchSuccess(
+    targetKey: string,
+    requestIds: string[],
+    startedAt: number,
+    duration: number,
+  ): void {
+    browserTabsSync.publish({
+      kind: 'fetch-success',
+      targetKey,
+      requestIds,
+      startedAt,
+      duration,
+    });
+  }
+
+  function getInitialRequestStartTime(itemKey: string): number | undefined {
+    if (store.state[itemKey] === undefined) return undefined;
+    return testOptions?.initialLastFetchStartTime ?? 0;
+  }
+
+  function seedBatchSchedulerKnownRequests(
+    scheduler: RequestScheduler<ItemPayload>,
+    batchKey: string,
+  ): void {
+    for (const [itemKey, item] of Object.entries(store.state)) {
+      if (!item?.payload) continue;
+      if (getBatchKey(item.payload) !== batchKey) continue;
+
+      scheduler.setLastFetchStartTimeForRequest(
+        itemKey,
+        getInitialRequestStartTime(itemKey) ?? 0,
+      );
+    }
+  }
 
   const batchKeySchedulers = new Map<string, RequestScheduler<ItemPayload>>();
 
@@ -272,18 +422,38 @@ export function createCollectionStore<
           requests: BatchRequest<ItemPayload>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
-          return executeBatchFetch(requests, fetchCtx, batchKey);
+          publishFetchStart(
+            getBatchTargetKey(batchKey),
+            requests.map(({ requestId }) => requestId),
+            fetchCtx.getStartTime(),
+          );
+
+          const results = await executeBatchFetch(requests, fetchCtx, batchKey);
+          const successfulRequestIds = requests
+            .filter(({ requestId }) => results.get(requestId) === true)
+            .map(({ requestId }) => requestId);
+
+          if (successfulRequestIds.length > 0) {
+            publishFetchSuccess(
+              getBatchTargetKey(batchKey),
+              successfulRequestIds,
+              fetchCtx.getStartTime(),
+              Date.now() - fetchCtx.getStartTime(),
+            );
+          }
+
+          return results;
         },
         lowPriorityThrottleMs,
-        baseCoalescingWindowMs,
+        getCoalescingWindowMs: getAutomaticCoalescingWindowMs,
         dynamicRealtimeThrottleMs: wrappedDynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         maxBatchSize,
         on: onSchedulerEvent,
         initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
         usesRealTimeUpdates,
-        getCoalescingWindowMultiplier,
       });
+      seedBatchSchedulerKnownRequests(scheduler, batchKey);
       batchKeySchedulers.set(batchKey, scheduler);
     }
     return scheduler;
@@ -302,17 +472,43 @@ export function createCollectionStore<
           requests: BatchRequest<ItemPayload>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
-          return executeBatchFetch(requests, fetchCtx);
+          publishFetchStart(
+            getItemTargetKey(itemKey),
+            requests.map(({ requestId }) => requestId),
+            fetchCtx.getStartTime(),
+          );
+
+          const results = await executeBatchFetch(requests, fetchCtx);
+          const successfulRequestIds = requests
+            .filter(({ requestId }) => results.get(requestId) === true)
+            .map(({ requestId }) => requestId);
+
+          if (successfulRequestIds.length > 0) {
+            publishFetchSuccess(
+              getItemTargetKey(itemKey),
+              successfulRequestIds,
+              fetchCtx.getStartTime(),
+              Date.now() - fetchCtx.getStartTime(),
+            );
+          }
+
+          return results;
         },
         lowPriorityThrottleMs,
-        baseCoalescingWindowMs,
+        getCoalescingWindowMs: getAutomaticCoalescingWindowMs,
         dynamicRealtimeThrottleMs: wrappedDynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
         usesRealTimeUpdates,
-        getCoalescingWindowMultiplier,
       });
+      const initialStartTime = getInitialRequestStartTime(itemKey);
+      if (initialStartTime !== undefined) {
+        itemScheduler.setLastFetchStartTimeForRequest(
+          itemKey,
+          initialStartTime,
+        );
+      }
       perItemSchedulers.set(itemKey, itemScheduler);
     }
     return itemScheduler;
@@ -336,12 +532,203 @@ export function createCollectionStore<
     return getOrCreateItemScheduler(itemKey);
   }
 
+  function recordCollectionSyncVersion(
+    itemKey: string,
+    meta: Pick<BrowserTabsMessageMeta, 'tabId' | 'seq' | 'sentAt'>,
+    consistency: SnapshotConsistency,
+  ): void {
+    lastCollectionSyncVersions.set(
+      itemKey,
+      toBrowserTabsSyncVersion(meta, consistency),
+    );
+  }
+
+  function publishItemSnapshot(
+    itemKey: string,
+    consistency: SnapshotConsistency = currentBroadcastConsistency,
+  ): void {
+    if (remoteApplyDepth > 0) return;
+
+    const item = store.state[itemKey] ?? null;
+    const message = browserTabsSync.publish({
+      kind: 'collection-item-snapshot',
+      itemKey,
+      consistency,
+      item,
+    });
+    if (!message) return;
+
+    recordCollectionSyncVersion(itemKey, message, consistency);
+  }
+
+  function getSchedulerForTargetKey(
+    targetKey: string,
+  ): RequestScheduler<ItemPayload> | null {
+    if (targetKey.startsWith('batch:')) {
+      const batchKey = targetKey.slice('batch:'.length);
+      const existingScheduler = batchKeySchedulers.get(batchKey);
+      if (existingScheduler) return existingScheduler;
+
+      const hasKnownItems = Object.values(store.state).some((item) => {
+        if (!item?.payload) return false;
+        return getBatchKey(item.payload) === batchKey;
+      });
+      if (!hasKnownItems) return null;
+
+      return getOrCreateBatchKeyScheduler(batchKey);
+    }
+
+    const itemKey = targetKey.slice('item:'.length);
+    const existingScheduler = perItemSchedulers.get(itemKey);
+    if (existingScheduler) return existingScheduler;
+
+    const payload = store.state[itemKey]?.payload;
+    if (!payload) return null;
+
+    return getScheduler(itemKey, payload);
+  }
+
+  function applyRemoteItemSnapshot(
+    message: CollectionItemSnapshotMessage<ItemState, ItemPayload>,
+    candidateVersion: BrowserTabsSyncVersion,
+  ): void {
+    const existingItem = store.state[message.itemKey];
+    const schedulerPayload = message.item?.payload ?? existingItem?.payload;
+    const snapshotItem = message.item;
+
+    if (existingItem === undefined) {
+      if (snapshotItem !== null) {
+        runWithoutBroadcast(() => {
+          store.produceState(
+            (draft) => {
+              draft[message.itemKey] = {
+                data: snapshotItem.data,
+                status: 'success',
+                error: null,
+                payload: snapshotItem.payload,
+                refetchOnMount: false,
+                wasLoaded: snapshotItem.wasLoaded,
+              };
+            },
+            { action: 'browser-tabs-collection-item-snapshot' },
+          );
+        });
+      }
+
+      lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
+      return;
+    }
+
+    runWithoutBroadcast(() => {
+      store.produceState(
+        (draft) => {
+          draft[message.itemKey] =
+            snapshotItem === null
+              ? null
+              : {
+                  data: snapshotItem.data,
+                  status: 'success',
+                  error: null,
+                  payload: snapshotItem.payload,
+                  refetchOnMount: false,
+                  wasLoaded: snapshotItem.wasLoaded,
+                };
+        },
+        { action: 'browser-tabs-collection-item-snapshot' },
+      );
+
+      invalidationWasTriggered.delete(message.itemKey);
+    });
+
+    if (message.item === null && schedulerPayload) {
+      cleanupItemResources(message.itemKey, schedulerPayload);
+    }
+
+    lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
+  }
+
+  function shouldIgnoreConfirmedRemoteCollectionSnapshot(
+    message: CollectionItemSnapshotMessage<ItemState, ItemPayload>,
+  ): boolean {
+    if (message.consistency !== 'confirmed') return false;
+
+    const payload = store.state[message.itemKey]?.payload;
+    if (!payload) return false;
+
+    return getScheduler(message.itemKey, payload).isMutationInProgress(
+      message.itemKey,
+    );
+  }
+
+  function handleRemoteMessage(
+    message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
+  ): void {
+    if (message.kind === 'tab-status') {
+      browserTabsPriority.onTabStatusMessage(message.tabId, message);
+      return;
+    }
+
+    if (message.kind === 'fetch-start') {
+      const scheduler = getSchedulerForTargetKey(message.targetKey);
+      scheduler?.syncExternalFetchStart(message.requestIds, message.startedAt);
+      scheduler?.cancelCoalescingRequests(message.requestIds);
+      return;
+    }
+
+    if (message.kind === 'fetch-success') {
+      getSchedulerForTargetKey(message.targetKey)?.syncExternalFetchSuccess(
+        message.requestIds,
+        message.startedAt,
+        message.duration,
+      );
+      return;
+    }
+
+    const candidateVersion = toBrowserTabsSyncVersion(
+      message,
+      message.consistency,
+    );
+    const currentVersion = lastCollectionSyncVersions.get(message.itemKey);
+
+    if (!isBrowserTabsSyncVersionNewer(candidateVersion, currentVersion)) {
+      return;
+    }
+
+    if (shouldIgnoreConfirmedRemoteCollectionSnapshot(message)) {
+      lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
+      return;
+    }
+
+    applyRemoteItemSnapshot(message, candidateVersion);
+  }
+
+  const browserTabsSync = createBrowserTabsCoordinator<
+    CollectionBrowserTabsMessage<ItemState, ItemPayload>
+  >({
+    storeType: 'collection',
+    storeKey: id,
+    onMessage: handleRemoteMessage,
+    transportFactory: testOptions?.browserTabsTransportFactory,
+  });
+
+  const browserTabsPriority = createBrowserTabsPriority({
+    enabled: browserTabsSync.enabled,
+    tabId: browserTabsSync.tabId,
+    getWindowIsFocused,
+    publishStatus: (status) => {
+      browserTabsSync.publish(status);
+    },
+    timings:
+      testOptions?.browserTabsPriorityTimings ??
+      testOptions?.browserTabsLeadershipTimings,
+  });
+
   async function executeBatchFetch(
     requests: BatchRequest<ItemPayload>[],
     fetchCtx: FetchContext,
     batchKey?: string,
   ): Promise<Map<string, boolean>> {
-    return executeBatchFetchBase(
+    const results = await executeBatchFetchBase(
       requests,
       fetchCtx,
       store,
@@ -350,12 +737,17 @@ export function createCollectionStore<
       errorNormalizer,
       batchKey,
     );
-  }
 
-  function getBatchKey(payload: ItemPayload): string | false {
-    if (!useBatchSchedulers) return false;
-    if (!getItemsBatchKey) return '__default__';
-    return getItemsBatchKey(payload);
+    const successfulRequests = requests.filter(
+      ({ requestId }) => results.get(requestId) === true,
+    );
+    if (successfulRequests.length > 0) {
+      for (const { requestId } of successfulRequests) {
+        publishItemSnapshot(requestId, 'confirmed');
+      }
+    }
+
+    return results;
   }
 
   function maybeDisposeBatchScheduler(payload: ItemPayload): void {
@@ -424,6 +816,15 @@ export function createCollectionStore<
       throw new Error('Unexpected empty results array');
     }
     return firstResult;
+  }
+
+  function scheduleAutomaticFetch(
+    fetchType: FetchType,
+    payload: ItemPayload,
+  ): void {
+    const itemKey = getItemKey(payload);
+    const scheduler = getScheduler(itemKey, payload);
+    scheduler.scheduleFetch(itemKey, fetchType, payload);
   }
 
   async function awaitFetch(
@@ -579,7 +980,7 @@ export function createCollectionStore<
       events,
       getItemKey,
       getItemState,
-      scheduleFetch,
+      scheduleAutomaticFetch,
       invalidationWasTriggered,
       globalDisableRefetchOnMount,
     );
@@ -635,6 +1036,12 @@ export function createCollectionStore<
       },
       { action: 'create-item-state' },
     );
+
+    getScheduler(itemKey, fetchParams).setLastFetchStartTimeForRequest(
+      itemKey,
+      0,
+    );
+    publishItemSnapshot(itemKey);
   }
 
   function deleteItemState(
@@ -652,6 +1059,7 @@ export function createCollectionStore<
     );
 
     for (const { itemKey, payload } of itemKeys) {
+      publishItemSnapshot(itemKey);
       cleanupItemResources(itemKey, payload);
     }
   }
@@ -671,6 +1079,7 @@ export function createCollectionStore<
     const itemKeys = getItemsKeyArray(fetchParams);
 
     let someItemWasUpdated: boolean = false;
+    const updatedItemKeys = new Set<string>();
 
     store.batch(() => {
       store.produceState(
@@ -681,6 +1090,7 @@ export function createCollectionStore<
             if (!item?.data) continue;
 
             someItemWasUpdated = true;
+            updatedItemKeys.add(itemKey);
 
             const originalItem = store.state[itemKey];
             if (!originalItem) continue;
@@ -699,6 +1109,19 @@ export function createCollectionStore<
         ifNothingWasUpdated();
       }
     });
+
+    if (updatedItemKeys.size > 0) {
+      for (const itemKey of updatedItemKeys) {
+        const payload = store.state[itemKey]?.payload;
+        if (payload) {
+          getScheduler(itemKey, payload).setLastFetchStartTimeForRequest(
+            itemKey,
+            0,
+          );
+        }
+        publishItemSnapshot(itemKey);
+      }
+    }
 
     return someItemWasUpdated;
   }
@@ -723,11 +1146,13 @@ export function createCollectionStore<
   ): Promise<Result<Awaited<T>, StoreError | true>> {
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, payload });
-
     const result = await performMutationWithLifecycle({
       startMutation: () => startMutation(payload),
       optimisticUpdate: optimisticUpdate
-        ? () => optimisticUpdate(payload)
+        ? () =>
+            runWithBroadcastConsistency('optimistic', () =>
+              optimisticUpdate(payload),
+            )
         : undefined,
       debounce: _debounce,
       blockWindowClose: blockWindowClose ?? undefined,
@@ -805,7 +1230,7 @@ export function createCollectionStore<
     cleanupReconnectFocusListener?.();
     cleanupReconnectFocusListener = null;
 
-    if (isWindowFocused()) {
+    if (getWindowIsFocused()) {
       invalidateItem(() => true, 'realtimeUpdate');
     } else {
       cleanupReconnectFocusListener = onWindowFocus(() => {
@@ -828,6 +1253,8 @@ export function createCollectionStore<
     perItemSchedulers.clear();
 
     invalidationWasTriggered.clear();
+    lastCollectionSyncVersions.clear();
+    browserTabsPriority.reset();
 
     cleanupReconnectFocusListener?.();
     cleanupReconnectFocusListener = null;

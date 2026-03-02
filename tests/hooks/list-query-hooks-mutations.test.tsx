@@ -40,6 +40,7 @@ afterAll(() => {
 });
 
 type TestEnv = ReturnType<typeof createListQueryStoreTestEnv>;
+type TestRow = Tables[keyof Tables][number];
 
 async function addItemWithIdGeneratedByServer(
   env: TestEnv,
@@ -66,7 +67,7 @@ async function addItemWithIdGeneratedByServer(
         },
       );
     },
-    onSuccess: ({ itemId, data }) => {
+    onSuccess: ({ itemId, data }: { itemId: string; data: TestRow }) => {
       env.apiStore.addItemToState(itemId, data);
     },
     revalidateOnSuccess: revalidate ? 'queries' : false,

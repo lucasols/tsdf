@@ -53,7 +53,7 @@ export function useMultipleItems<
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   events: Emitter<ListQueryStoreEvents>,
   getItemKey: (params: ItemPayload) => string,
-  scheduleItemFetch: (
+  scheduleAutomaticItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
     options?: { fields?: FieldsInput },
@@ -293,7 +293,7 @@ export function useMultipleItems<
       query.refetchOnMount = false;
     });
 
-    scheduleItemFetch(event.priority, firstQuery.payload, {
+    scheduleAutomaticItemFetch(event.priority, firstQuery.payload, {
       fields: fieldsToFetch ?? firstQuery.fields,
     });
     itemInvalidationWasTriggered.add(event.itemKey);
@@ -353,10 +353,10 @@ export function useMultipleItems<
 
       if (disableRefetchOnMount) {
         if (shouldFetch) {
-          scheduleItemFetch(fetchType, payload, { fields });
+          scheduleAutomaticItemFetch(fetchType, payload, { fields });
         }
       } else if (!partialResources || shouldFetch) {
-        scheduleItemFetch(fetchType, payload, { fields });
+        scheduleAutomaticItemFetch(fetchType, payload, { fields });
       }
     }
 
@@ -367,7 +367,7 @@ export function useMultipleItems<
     ignoreItemsInRefetchOnMount,
     loadFromStateOnly,
     queriesWithId,
-    scheduleItemFetch,
+    scheduleAutomaticItemFetch,
     store.state.itemQueries,
     store.state.itemLoadedFields,
     fetchItemFn,

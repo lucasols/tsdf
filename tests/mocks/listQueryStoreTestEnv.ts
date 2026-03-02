@@ -10,11 +10,14 @@ import type {
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import {
   simulateWindowBlur,
   simulateWindowFocus,
 } from '../utils/genericTestUtils';
+import { getNextStoreId } from './browserTabsTestUtils';
 import { createServerTableMock, type FilterOperator } from './serverTableMock';
 import {
   createActionTracker,
@@ -71,9 +74,12 @@ export function createListQueryStoreTestEnv<
 >(
   serverInitialData: Tables<TRow>,
   {
+    id = getNextStoreId('list-query'),
+    browserTabsTransportFactory,
+    browserTabsLeadershipTimings,
+    getWindowIsFocused,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
@@ -89,12 +95,15 @@ export function createListQueryStoreTestEnv<
     offsetPagination,
     blockWindowClose,
   }: {
+    id?: string;
+    browserTabsTransportFactory?: BrowserTabsTransportFactory;
+    browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+    getWindowIsFocused?: () => boolean;
     dynamicRealtimeThrottleMs?: (params: {
       lastFetchDuration: number;
       windowIsNotFocused: boolean;
     }) => number;
     revalidateOnWindowFocus?: boolean | (() => boolean);
-    backgroundCoalescingWindowMultiplier?: number;
     baseCoalescingWindowMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
@@ -245,12 +254,12 @@ export function createListQueryStoreTestEnv<
   }
 
   const baseOptions = {
+    id,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     defaultQuerySize,
     usesRealTimeUpdates,
@@ -260,7 +269,12 @@ export function createListQueryStoreTestEnv<
     blockWindowClose: blockWindowClose ?? null,
     optimisticListUpdates,
     partialResources,
-    '~test': testOptions,
+    '~test': {
+      ...testOptions,
+      getWindowIsFocused,
+      browserTabsTransportFactory,
+      browserTabsLeadershipTimings,
+    },
     onSchedulerEvent: (
       event: import('../../src/requestScheduler').RequestSchedulerEvents,
     ) => {
@@ -400,9 +414,10 @@ export function createListQueryStoreTestEnv<
     trackUIChanges,
     trackItemUI,
     addTimelineComments,
-    getItemKey: (tableId: string, id: number) => getRawItemKey(tableId, id),
-    getStoreItemKey: (tableId: string, id: number) =>
-      getStoreItemKey(tableId, id),
+    getItemKey: (tableId: string, rowId: number) =>
+      getRawItemKey(tableId, rowId),
+    getStoreItemKey: (tableId: string, rowId: number) =>
+      getStoreItemKey(tableId, rowId),
     getStoreItemKeyFromRaw: (rawKey: string) => getCompositeKey(rawKey),
     getQueryKey: (params: ListQueryParams) => getCompositeKey(params),
     getItemQueryState: (rawItemKey: string) =>

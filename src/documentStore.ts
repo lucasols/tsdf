@@ -24,6 +24,20 @@ import {
   ScheduleFetchResults,
 } from './requestScheduler';
 import {
+  createBrowserTabsPriority,
+  type BrowserTabsPriorityTimings,
+  type BrowserTabsTabStatusMessage,
+} from './utils/browserTabsPriority';
+import {
+  createBrowserTabsCoordinator,
+  SnapshotConsistency,
+  type BrowserTabsMessageMeta,
+  type BrowserTabsSyncVersion,
+  type BrowserTabsTransportFactory,
+  isBrowserTabsSyncVersionNewer,
+  toBrowserTabsSyncVersion,
+} from './utils/browserTabsSync';
+import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from './utils/performMutation';
@@ -66,8 +80,36 @@ export type DocumentStoreStoreEvents = {
   mutationEnd: { mutationId: number; success: boolean };
 };
 
+type DocumentBrowserTabsMessage<State extends ValidStoreState> =
+  | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage)
+  | (BrowserTabsMessageMeta & {
+      kind: 'document-snapshot';
+      consistency: SnapshotConsistency;
+      data: State | null;
+    })
+  | (BrowserTabsMessageMeta & {
+      kind: 'fetch-start';
+      targetKey: 'document';
+      requestIds: string[];
+      startedAt: number;
+    })
+  | (BrowserTabsMessageMeta & {
+      kind: 'fetch-success';
+      targetKey: 'document';
+      requestIds: string[];
+      startedAt: number;
+      duration: number;
+    });
+
+type DocumentSnapshotMessage<State extends ValidStoreState> = Extract<
+  DocumentBrowserTabsMessage<State>,
+  { kind: 'document-snapshot' }
+>;
+
 export type DocumentStoreOptions<State extends ValidStoreState> = {
   debugName?: string;
+  /** Stable id shared by the same logical document store across browser tabs. */
+  id: string;
   fetchFn: (signal: AbortSignal) => Promise<State>;
   errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
@@ -77,7 +119,6 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  backgroundCoalescingWindowMultiplier: number;
   mediumPriorityDelayMs?: number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (
@@ -93,6 +134,10 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     initialData?: State;
     initialError?: StoreError;
     initialLastFetchStartTime?: number;
+    getWindowIsFocused?: () => boolean;
+    browserTabsTransportFactory?: BrowserTabsTransportFactory;
+    browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
+    browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
   };
 };
 
@@ -102,16 +147,17 @@ export type DocumentStore<State extends ValidStoreState> = ReturnType<
 
 // Constant requestId for document store (single-item mode)
 const DOC_REQUEST_ID = '_doc';
+const DOC_TARGET_KEY = 'document' as const;
 
 export function createDocumentStore<State extends ValidStoreState>({
   debugName,
+  id,
   fetchFn,
   errorNormalizer,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   dynamicRealtimeThrottleMs,
   revalidateOnWindowFocus,
-  backgroundCoalescingWindowMultiplier,
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
@@ -120,6 +166,9 @@ export function createDocumentStore<State extends ValidStoreState>({
   '~test': testOptions,
 }: DocumentStoreOptions<State>) {
   let invalidationWasTriggered = false;
+  let remoteApplyDepth = 0;
+  let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
+  let lastDocumentSyncVersion: BrowserTabsSyncVersion | undefined;
 
   let initialData: State | null = null;
   let initialRefetchOnMount: FetchType | false = false;
@@ -158,6 +207,161 @@ export function createDocumentStore<State extends ValidStoreState>({
   const events = evtmitter<DocumentStoreEvents>();
 
   const storeEvents = evtmitter<DocumentStoreStoreEvents>();
+  const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
+
+  function runWithoutBroadcast<T>(callback: () => T): T {
+    remoteApplyDepth++;
+    try {
+      return callback();
+    } finally {
+      remoteApplyDepth--;
+    }
+  }
+
+  function runWithBroadcastConsistency<T>(
+    consistency: SnapshotConsistency,
+    callback: () => T,
+  ): T {
+    const previousConsistency = currentBroadcastConsistency;
+    currentBroadcastConsistency = consistency;
+
+    try {
+      return callback();
+    } finally {
+      currentBroadcastConsistency = previousConsistency;
+    }
+  }
+
+  function recordDocumentSyncVersion(
+    meta: Pick<BrowserTabsMessageMeta, 'tabId' | 'seq' | 'sentAt'>,
+    consistency: SnapshotConsistency,
+  ): void {
+    lastDocumentSyncVersion = toBrowserTabsSyncVersion(meta, consistency);
+  }
+
+  function publishDocumentSnapshot(
+    consistency: SnapshotConsistency = currentBroadcastConsistency,
+  ): void {
+    if (remoteApplyDepth > 0) return;
+
+    const message = browserTabsSync.publish({
+      kind: 'document-snapshot',
+      consistency,
+      data: store.state.data,
+    });
+    if (!message) return;
+
+    recordDocumentSyncVersion(message, consistency);
+  }
+
+  function hasLocalDocumentState(): boolean {
+    return (
+      store.state.status !== 'idle' ||
+      store.state.data !== null ||
+      store.state.error !== null
+    );
+  }
+
+  function applyRemoteDocumentSnapshot(
+    message: DocumentSnapshotMessage<State>,
+    candidateVersion: BrowserTabsSyncVersion,
+  ): void {
+    if (!hasLocalDocumentState()) {
+      lastDocumentSyncVersion = candidateVersion;
+      return;
+    }
+
+    runWithoutBroadcast(() => {
+      store.setPartialState(
+        {
+          data: reusePrevIfEqual({
+            prev: store.state.data,
+            current: message.data,
+          }),
+          error: null,
+          status: 'success',
+          refetchOnMount: false,
+        },
+        { action: 'browser-tabs-document-snapshot' },
+      );
+    });
+
+    lastDocumentSyncVersion = candidateVersion;
+  }
+
+  function shouldIgnoreConfirmedRemoteDocumentSnapshot(
+    message: DocumentSnapshotMessage<State>,
+  ): boolean {
+    return (
+      message.consistency === 'confirmed' &&
+      scheduler.isMutationInProgress(DOC_REQUEST_ID)
+    );
+  }
+
+  function handleRemoteMessage(
+    message: DocumentBrowserTabsMessage<State>,
+  ): void {
+    if (message.kind === 'tab-status') {
+      browserTabsPriority.onTabStatusMessage(message.tabId, message);
+      return;
+    }
+
+    if (message.kind === 'fetch-start') {
+      if (!hasLocalDocumentState()) return;
+      scheduler.syncExternalFetchStart(message.requestIds, message.startedAt);
+      scheduler.cancelCoalescingRequests(message.requestIds);
+      return;
+    }
+
+    if (message.kind === 'fetch-success') {
+      if (!hasLocalDocumentState()) return;
+      scheduler.syncExternalFetchSuccess(
+        message.requestIds,
+        message.startedAt,
+        message.duration,
+      );
+      return;
+    }
+
+    const candidateVersion = toBrowserTabsSyncVersion(
+      message,
+      message.consistency,
+    );
+
+    if (
+      !isBrowserTabsSyncVersionNewer(candidateVersion, lastDocumentSyncVersion)
+    ) {
+      return;
+    }
+
+    if (shouldIgnoreConfirmedRemoteDocumentSnapshot(message)) {
+      lastDocumentSyncVersion = candidateVersion;
+      return;
+    }
+
+    applyRemoteDocumentSnapshot(message, candidateVersion);
+  }
+
+  const browserTabsSync = createBrowserTabsCoordinator<
+    DocumentBrowserTabsMessage<State>
+  >({
+    storeType: 'document',
+    storeKey: id,
+    onMessage: handleRemoteMessage,
+    transportFactory: testOptions?.browserTabsTransportFactory,
+  });
+
+  const browserTabsPriority = createBrowserTabsPriority({
+    enabled: browserTabsSync.enabled,
+    tabId: browserTabsSync.tabId,
+    getWindowIsFocused,
+    publishStatus: (status) => {
+      browserTabsSync.publish(status);
+    },
+    timings:
+      testOptions?.browserTabsPriorityTimings ??
+      testOptions?.browserTabsLeadershipTimings,
+  });
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
@@ -216,9 +420,18 @@ export function createDocumentStore<State extends ValidStoreState>({
     ? (lastFetchDuration: number) =>
         dynamicRealtimeThrottleMs({
           lastFetchDuration,
-          windowIsNotFocused: !isWindowFocused(),
+          windowIsNotFocused: !getWindowIsFocused(),
         })
     : undefined;
+
+  function getAutomaticCoalescingWindowMs(): number {
+    const rank = browserTabsPriority.getPriorityRank();
+    if (rank <= 1 || baseCoalescingWindowMs <= 0) {
+      return baseCoalescingWindowMs;
+    }
+
+    return baseCoalescingWindowMs + (rank - 1) * 1_000;
+  }
 
   // Scheduler with batch-aware fetchFn (but we always use single item)
   const scheduler = new RequestScheduler<null>({
@@ -226,8 +439,26 @@ export function createDocumentStore<State extends ValidStoreState>({
       requests: BatchRequest<null>[],
       fetchCtx: FetchContext,
     ): Promise<Map<string, boolean>> => {
+      browserTabsSync.publish({
+        kind: 'fetch-start',
+        targetKey: DOC_TARGET_KEY,
+        requestIds: requests.map(({ requestId }) => requestId),
+        startedAt: fetchCtx.getStartTime(),
+      });
+
       // Document store always has single request
       const success = await executeFetch(fetchCtx);
+      if (success) {
+        browserTabsSync.publish({
+          kind: 'fetch-success',
+          targetKey: DOC_TARGET_KEY,
+          requestIds: requests.map(({ requestId }) => requestId),
+          startedAt: fetchCtx.getStartTime(),
+          duration: Date.now() - fetchCtx.getStartTime(),
+        });
+        publishDocumentSnapshot('confirmed');
+      }
+
       const results = new Map<string, boolean>();
       for (const { requestId } of requests) {
         results.set(requestId, success);
@@ -235,15 +466,20 @@ export function createDocumentStore<State extends ValidStoreState>({
       return results;
     },
     lowPriorityThrottleMs,
-    baseCoalescingWindowMs,
+    getCoalescingWindowMs: getAutomaticCoalescingWindowMs,
     dynamicRealtimeThrottleMs: wrappedDynamicRealtimeThrottleMs,
     mediumPriorityDelayMs,
     on: onSchedulerEvent,
     initialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
     usesRealTimeUpdates,
-    getCoalescingWindowMultiplier: () =>
-      !isWindowFocused() ? backgroundCoalescingWindowMultiplier : 1,
   });
+
+  if (hasLocalDocumentState()) {
+    scheduler.setLastFetchStartTimeForRequest(
+      DOC_REQUEST_ID,
+      testOptions?.initialLastFetchStartTime ?? 0,
+    );
+  }
 
   // Set up window focus listener for non-realtime stores
   let cleanupFocusListener: (() => void) | null = null;
@@ -354,6 +590,11 @@ export function createDocumentStore<State extends ValidStoreState>({
       { action: 'update-state' },
     );
 
+    if (remoteApplyDepth === 0) {
+      scheduler.setLastFetchStartTimeForRequest(DOC_REQUEST_ID, 0);
+      publishDocumentSnapshot();
+    }
+
     return true;
   }
 
@@ -374,7 +615,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     cleanupReconnectFocusListener?.();
     cleanupReconnectFocusListener = null;
 
-    if (isWindowFocused()) {
+    if (getWindowIsFocused()) {
       invalidateData('realtimeUpdate');
     } else {
       cleanupReconnectFocusListener = onWindowFocus(() => {
@@ -387,6 +628,8 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   function reset(): void {
     scheduler.reset();
+    lastDocumentSyncVersion = undefined;
+    browserTabsPriority.reset();
     cleanupReconnectFocusListener?.();
     cleanupReconnectFocusListener = null;
     store.setState({
@@ -420,11 +663,13 @@ export function createDocumentStore<State extends ValidStoreState>({
   }): Promise<Result<Awaited<T>, StoreError | true>> {
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
-
     const result = await performMutationWithLifecycle({
       startMutation,
       optimisticUpdate: optimisticUpdate
-        ? () => optimisticUpdate(store.state.data)
+        ? () =>
+            runWithBroadcastConsistency('optimistic', () =>
+              optimisticUpdate(store.state.data),
+            )
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,

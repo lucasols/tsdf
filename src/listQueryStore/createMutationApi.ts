@@ -5,6 +5,7 @@ import { klona } from 'klona/json';
 import { unknownToError, type Result } from 't-result';
 import { Store } from 't-state';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
+import { type SnapshotConsistency } from '../utils/browserTabsSync';
 import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
@@ -73,6 +74,9 @@ export type CreateMutationApiOptions<
   getQueriesKeyArray: (
     payloads: QueryPayload | QueryPayload[] | FilterQueryFn<QueryPayload>,
   ) => { key: string; payload: QueryPayload }[];
+  getQueriesRelatedToItem: (
+    itemPayload: ItemPayload,
+  ) => { key: string; query: { items: string[] } }[];
   getItemsKeyArray: (
     itemsPayload:
       | ItemPayload
@@ -90,6 +94,18 @@ export type CreateMutationApiOptions<
   emitInvalidateQuery: (event: InvalidateQueryEvent) => void;
   emitInvalidateItem: (event: InvalidateItemEvent) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
+  runWithBroadcastConsistency: <T>(
+    consistency: SnapshotConsistency,
+    callback: () => T,
+  ) => T;
+  publishQuerySnapshot: (
+    queryKey: string,
+    consistency?: SnapshotConsistency,
+  ) => void;
+  publishItemSnapshot: (
+    itemKey: string,
+    consistency?: SnapshotConsistency,
+  ) => void;
 };
 
 export function createMutationApi<
@@ -107,6 +123,7 @@ export function createMutationApi<
   errorNormalizer,
   getItemKey,
   getQueriesKeyArray,
+  getQueriesRelatedToItem,
   getItemsKeyArray,
   getOrCreateItemScheduler,
   getOrCreateQueryScheduler,
@@ -114,6 +131,9 @@ export function createMutationApi<
   emitInvalidateQuery,
   emitInvalidateItem,
   blockWindowClose,
+  runWithBroadcastConsistency,
+  publishQuerySnapshot,
+  publishItemSnapshot,
 }: CreateMutationApiOptions<ItemState, QueryPayload, ItemPayload>) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
@@ -298,6 +318,7 @@ export function createMutationApi<
     if (!optimisticListUpdates) return;
 
     const queriesToInvalidate: QueryPayload[] = [];
+    const changedQueryKeys = new Set<string>();
 
     store.produceState((draftState) => {
       for (const itemKey of itemKeys) {
@@ -334,6 +355,8 @@ export function createMutationApi<
                     wasLoaded: true,
                   };
 
+                  changedQueryKeys.add(queryKey);
+
                   continue;
                 }
 
@@ -346,6 +369,7 @@ export function createMutationApi<
                 } else {
                   queryState.items.unshift(itemKey);
                 }
+                changedQueryKeys.add(queryKey);
               } else {
                 if (!queryState) continue;
 
@@ -356,6 +380,7 @@ export function createMutationApi<
                     queriesToInvalidate.push(queryState.payload);
 
                   queryState.items.splice(itemIndex, 1);
+                  changedQueryKeys.add(queryKey);
                 }
               }
             }
@@ -380,11 +405,16 @@ export function createMutationApi<
                 },
                 { order: sort.order },
               );
+              changedQueryKeys.add(queryKey);
             }
           }
         }
       }
     });
+
+    for (const queryKey of changedQueryKeys) {
+      publishQuerySnapshot(queryKey);
+    }
 
     if (queriesToInvalidate.length)
       invalidateQueryAndItems({
@@ -404,6 +434,7 @@ export function createMutationApi<
     const itemKeys = getItemsKeyArray(itemIds);
 
     let someItemWasUpdated = false;
+    const updatedItemKeys = new Set<string>();
 
     store.batch(
       () => {
@@ -414,6 +445,7 @@ export function createMutationApi<
             if (!item) continue;
 
             someItemWasUpdated = true;
+            updatedItemKeys.add(itemKey);
             const newData = produceNewData(item, payload);
 
             if (newData) {
@@ -432,6 +464,21 @@ export function createMutationApi<
       },
       { type: 'update-item-state' },
     );
+
+    if (updatedItemKeys.size > 0) {
+      const relatedQueryKeys = new Set<string>();
+      for (const { itemKey, payload } of itemKeys) {
+        if (!updatedItemKeys.has(itemKey)) continue;
+        publishItemSnapshot(itemKey);
+        for (const { key } of getQueriesRelatedToItem(payload)) {
+          relatedQueryKeys.add(key);
+        }
+      }
+
+      for (const queryKey of relatedQueryKeys) {
+        publishQuerySnapshot(queryKey);
+      }
+    }
 
     return someItemWasUpdated;
   }
@@ -493,10 +540,21 @@ export function createMutationApi<
 
       applyOptimisticListUpdates([itemKey]);
     });
+
+    publishItemSnapshot(itemKey);
+    for (const { key } of getQueriesRelatedToItem(itemPayload)) {
+      publishQuerySnapshot(key);
+    }
   }
 
   function deleteItemState(itemId: ItemPayload | ItemPayload[] | FilterItem) {
     const itemsId = getItemsKeyArray(itemId);
+    const relatedQueryKeys = new Set<string>();
+    for (const { payload } of itemsId) {
+      for (const { key } of getQueriesRelatedToItem(payload)) {
+        relatedQueryKeys.add(key);
+      }
+    }
 
     store.produceState(
       (draftState) => {
@@ -518,9 +576,14 @@ export function createMutationApi<
 
     for (const { itemKey } of itemsId) {
       itemInvalidationWasTriggered.delete(itemKey);
+      publishItemSnapshot(itemKey);
     }
 
     deleteItemFetchResources(itemsId);
+
+    for (const queryKey of relatedQueryKeys) {
+      publishQuerySnapshot(queryKey);
+    }
   }
 
   function resetInvalidationTracking() {
@@ -565,7 +628,10 @@ export function createMutationApi<
     const result = await performMutationWithLifecycle({
       startMutation: () => startItemMutation(payloadToUse),
       optimisticUpdate: optimisticUpdate
-        ? () => optimisticUpdate(payloadToUse)
+        ? () =>
+            runWithBroadcastConsistency('optimistic', () =>
+              optimisticUpdate(payloadToUse),
+            )
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,

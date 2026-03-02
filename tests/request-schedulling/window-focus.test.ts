@@ -156,13 +156,12 @@ test('document store: reset() cleans up and re-registers focus listener', async 
   expect(env.serverMock.numOfStartedFetches).toBeGreaterThan(fetchesBefore);
 });
 
-// -- DocumentStore: backgroundCoalescingWindowMultiplier -----------------------
+// -- DocumentStore: background coalescing window -------------------------------
 
-test('document store: coalescing window is multiplied when window is not focused', async () => {
+test('document store: a single background tab keeps the base coalescing window', async () => {
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     baseCoalescingWindowMs: 20,
-    backgroundCoalescingWindowMultiplier: 5,
   });
 
   renderHook(() => {
@@ -175,19 +174,17 @@ test('document store: coalescing window is multiplied when window is not focused
 
   env.simulateWindowBlur();
 
-  // Coalescing window should be 20 * 5 = 100ms
   env.apiStore.invalidateData('highPriority');
 
-  // At 50ms, still within the multiplied coalescing window
-  await advanceTime(50);
+  await advanceTime(10);
   expect(env.serverMock.numOfStartedFetches).toBe(initialFetches);
 
-  await advanceTime(20);
-  // trigger coalesced fetch
   env.apiStore.invalidateData('highPriority');
 
-  // At 110ms, past the multiplied coalescing window
-  await advanceTime(60);
+  await advanceTime(9);
+  expect(env.serverMock.numOfStartedFetches).toBe(initialFetches);
+
+  await advanceTime(2);
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(initialFetches + 1);
@@ -199,8 +196,8 @@ test('document store: coalescing window is multiplied when window is not focused
     20ms  | 0  | 🔴 >fetch-started
     820ms | 0  | 🔴 <fetch-finished (value: 0)
     .     | 0  | window-blurred
-    920ms | 0  | 🟠 >fetch-started
-    1.72s | 0  | 🟠 <fetch-finished (value: 0)
+    840ms | 0  | 🟠 >fetch-started
+    1.64s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });

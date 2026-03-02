@@ -1,8 +1,11 @@
 import { act } from 'react';
 import { createDocumentStore } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import { createServerMock, type FetchErrorConfig } from './serverMock';
+import { getNextStoreId } from './browserTabsTestUtils';
 import {
   simulateWindowBlur,
   simulateWindowFocus,
@@ -27,12 +30,15 @@ export type DocumentStoreTestScenario<D> =
   | { loadedWithStaleData: D };
 
 export type DocumentStoreTestEnvOptions<D> = {
+  id?: string;
+  browserTabsTransportFactory?: BrowserTabsTransportFactory;
+  browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+  getWindowIsFocused?: () => boolean;
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  backgroundCoalescingWindowMultiplier?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
@@ -44,9 +50,12 @@ export type DocumentStoreTestEnvOptions<D> = {
 export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
+    id = getNextStoreId('document'),
+    browserTabsTransportFactory,
+    browserTabsLeadershipTimings,
+    getWindowIsFocused,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier = 1,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = 200,
     mediumPriorityDelayMs,
@@ -74,6 +83,7 @@ export function createDocumentStoreTestEnv<D>(
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
   const documentStore = createDocumentStore<{ value: D }>({
+    id,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
@@ -84,10 +94,14 @@ export function createDocumentStoreTestEnv<D>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
-    '~test': testOptions,
+    '~test': {
+      ...testOptions,
+      getWindowIsFocused,
+      browserTabsTransportFactory,
+      browserTabsLeadershipTimings,
+    },
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },

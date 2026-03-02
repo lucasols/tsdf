@@ -694,6 +694,59 @@ describe('useItem isolated tests', () => {
     `);
   });
 
+  test('deleted items in useMultipleItems stay deleted until explicitly fetched', async () => {
+    const env = createCollectionStoreTestEnv<Todo>(
+      { '1': defaultTodo, '2': defaultTodo },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
+    );
+
+    act(() => {
+      env.apiStore.deleteItemState('2');
+      env.serverTable.removeItem('2');
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const [item] = env.apiStore.useMultipleItems([{ payload: '2' }], {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status: item?.status,
+        payload: item?.payload,
+        data: item?.data?.value ?? null,
+      });
+    });
+
+    await act(async () => {
+      await flushAllTimers();
+    });
+
+    expect(renders.snapshot).toMatchInlineSnapshot(`
+      "
+      -> status: deleted ⋅ payload: 2 ⋅ data: null
+      "
+    `);
+    expect(env.serverTable.fetchHistory).toHaveLength(0);
+
+    act(() => {
+      env.scheduleFetch('highPriority', '2');
+    });
+
+    await act(async () => {
+      await flushAllTimers();
+    });
+
+    expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
+      "
+      ⋅⋅⋅
+      -> status: loading ⋅ payload: 2 ⋅ data: null
+      -> status: error ⋅ payload: 2 ⋅ data: null
+      "
+    `);
+  });
+
   test('use ensureIsLoaded prop', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
       { '1': defaultTodo, '2': defaultTodo },
