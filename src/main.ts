@@ -54,3 +54,19 @@ export type {
   BlockWindowCloseHandler,
   MutationDebounce,
 } from './utils/performMutation';
+
+// Persistent Storage types
+export type {
+  PersistentStorageSchema,
+  StorageBackend,
+  PersistentStorageBaseConfig,
+  DocumentPersistentStorageConfig,
+  CollectionPersistentStorageConfig,
+  ListQueryPersistentStorageConfig,
+} from './persistentStorage/types';
+
+// Persistent Storage utilities
+export {
+  clearSessionStorage,
+  clearAllSessionStorage,
+} from './persistentStorage/persistentStorageManager';

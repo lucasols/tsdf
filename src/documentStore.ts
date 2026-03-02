@@ -35,6 +35,8 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
+import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
+import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -86,6 +88,9 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   ) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
+  /** Opt-in persistent storage configuration. When provided, cached data is loaded
+   * from storage on initialization and saved back on successful fetches. */
+  persistentStorage?: DocumentPersistentStorageConfig<State>;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -117,6 +122,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   onMutationError,
   blockWindowClose,
   usesRealTimeUpdates = false,
+  persistentStorage: persistentStorageConfig,
   '~test': testOptions,
 }: DocumentStoreOptions<State>) {
   let invalidationWasTriggered = false;
@@ -145,6 +151,29 @@ export function createDocumentStore<State extends ValidStoreState>({
     }
   }
 
+  // Persistent storage setup
+  const persistence = persistentStorageConfig
+    ? setupDocumentPersistence(persistentStorageConfig)
+    : null;
+
+  if (persistence?.initialState) {
+    initialData = persistence.initialState.data;
+    initialStatus = persistence.initialState.status;
+    initialRefetchOnMount = persistence.initialState.refetchOnMount;
+  }
+
+  // Track whether store was hydrated from persistent storage for refetch optimization
+  let hydratedFromStorage =
+    persistence !== null && persistence.initialState !== null;
+  let hydratedRefetchDelayTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearHydratedRefetchTimer() {
+    if (hydratedRefetchDelayTimer !== null) {
+      clearTimeout(hydratedRefetchDelayTimer);
+      hydratedRefetchDelayTimer = null;
+    }
+  }
+
   const store = new Store<DocumentStoreState<State>>({
     debugName,
     state: () => ({
@@ -161,25 +190,53 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
+    const isHydratedRefetch =
+      hydratedFromStorage && currentStatus === 'success';
 
-    store.setPartialState(
-      {
-        status: currentStatus === 'success' ? 'refetching' : 'loading',
-        error: null,
-        refetchOnMount: false,
-      },
-      {
-        action:
-          currentStatus === 'success'
-            ? 'fetch-start-refetching'
-            : 'fetch-start-loading',
-      },
-    );
+    if (isHydratedRefetch) {
+      // For the first fetch after hydration from persistent storage, delay showing
+      // 'refetching' status by 100ms. If the fetch completes within 100ms, the user
+      // never sees a loading indicator, providing a seamless experience.
+      hydratedFromStorage = false;
+      hydratedRefetchDelayTimer = setTimeout(() => {
+        hydratedRefetchDelayTimer = null;
+        if (store.state.status === 'success') {
+          store.setPartialState(
+            { status: 'refetching', error: null, refetchOnMount: false },
+            { action: 'fetch-start-refetching-delayed' },
+          );
+        }
+      }, 100);
+
+      store.setPartialState(
+        { error: null, refetchOnMount: false },
+        { action: 'fetch-start-hydrated-refetch' },
+      );
+    } else {
+      store.setPartialState(
+        {
+          status: currentStatus === 'success' ? 'refetching' : 'loading',
+          error: null,
+          refetchOnMount: false,
+        },
+        {
+          action:
+            currentStatus === 'success'
+              ? 'fetch-start-refetching'
+              : 'fetch-start-loading',
+        },
+      );
+    }
 
     try {
       const data = await fetchFn(fetchCtx.signal);
 
-      if (fetchCtx.shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) {
+        clearHydratedRefetchTimer();
+        return false;
+      }
+
+      clearHydratedRefetchTimer();
 
       store.setPartialState(
         {
@@ -194,7 +251,12 @@ export function createDocumentStore<State extends ValidStoreState>({
 
       return true;
     } catch (exception) {
-      if (fetchCtx.shouldAbort()) return false;
+      if (fetchCtx.shouldAbort()) {
+        clearHydratedRefetchTimer();
+        return false;
+      }
+
+      clearHydratedRefetchTimer();
 
       store.setPartialState(
         {
@@ -268,6 +330,9 @@ export function createDocumentStore<State extends ValidStoreState>({
   }
 
   setupFocusListener();
+
+  // Attach persistent storage after store creation
+  persistence?.attach(store, invalidateData);
 
   function scheduleFetch(
     fetchType: FetchType,
@@ -389,6 +454,17 @@ export function createDocumentStore<State extends ValidStoreState>({
     scheduler.reset();
     cleanupReconnectFocusListener?.();
     cleanupReconnectFocusListener = null;
+
+    if (hydratedRefetchDelayTimer !== null) {
+      clearTimeout(hydratedRefetchDelayTimer);
+      hydratedRefetchDelayTimer = null;
+    }
+
+    hydratedFromStorage = false;
+
+    persistence?.dispose();
+    void persistence?.clear();
+
     store.setState({
       data: null,
       error: null,
@@ -396,6 +472,7 @@ export function createDocumentStore<State extends ValidStoreState>({
       refetchOnMount: 'lowPriority',
     });
     setupFocusListener();
+    persistence?.attach(store, invalidateData);
   }
 
   function startMutation(): () => boolean {

@@ -15,6 +15,8 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
+import type { ListQueryPersistentStorageConfig } from '../persistentStorage/types';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import {
@@ -150,6 +152,9 @@ type ListQueryStoreOptionsBase<
   blockWindowClose: BlockWindowCloseHandler | null;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
+  /** Opt-in persistent storage configuration. When provided, cached items and queries
+   * are loaded from storage on initialization and saved back on successful fetches. */
+  persistentStorage?: ListQueryPersistentStorageConfig<ItemState>;
 } & ([TPartialResources] extends [true]
   ? { partialResources: PartialResourcesConfig<ItemState> }
   : { partialResources?: undefined });
@@ -220,6 +225,7 @@ export function createListQueryStore<
     getQueryKey: customGetQueryKey,
     getItemKey: customGetItemKey,
     partialResources,
+    persistentStorage: persistentStorageConfig,
   } = storeOptions;
 
   type HasPR = [TPartialResources] extends [true] ? true : false;
@@ -376,16 +382,28 @@ export function createListQueryStore<
 
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
 
+  // Persistent storage setup
+  const persistence = persistentStorageConfig
+    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
+        persistentStorageConfig,
+      )
+    : null;
+
   const store = new Store<State>({
     debugName,
     state: () => {
-      const initialState: State = {
+      let initialState: State = {
         items: {},
         queries: {},
         itemQueries: {},
         itemLoadedFields: {},
         itemFieldInvalidationFields: {},
       };
+
+      // Merge persisted state first (will be overridden by test data if both exist)
+      if (persistence?.initialState) {
+        initialState = { ...persistence.initialState };
+      }
 
       if (import.meta.env.TEST && testOptions) {
         const initialData = testOptions.initialData;
@@ -687,6 +705,9 @@ export function createListQueryStore<
 
   setupFocusListener();
 
+  // Attach persistent storage after store creation
+  persistence?.attach(store);
+
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
    * a disconnection. Events may have been missed during the outage, so all
@@ -731,6 +752,9 @@ export function createListQueryStore<
     cleanupReconnectFocusListener?.();
     cleanupReconnectFocusListener = null;
 
+    persistence?.dispose();
+    void persistence?.clear();
+
     store.setState({
       items: {},
       queries: {},
@@ -739,6 +763,7 @@ export function createListQueryStore<
       itemFieldInvalidationFields: {},
     });
     setupFocusListener();
+    persistence?.attach(store);
   }
 
   function scheduleListQueryFetchApiImpl(

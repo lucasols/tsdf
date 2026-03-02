@@ -31,6 +31,8 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
+import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
+import type { CollectionPersistentStorageConfig } from '../persistentStorage/types';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -143,6 +145,9 @@ export type CollectionStoreOptions<
   ) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
+  /** Opt-in persistent storage configuration. When provided, cached items are loaded
+   * from storage on initialization and saved back on successful fetches. */
+  persistentStorage?: CollectionPersistentStorageConfig<ItemState>;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -184,6 +189,7 @@ export function createCollectionStore<
   onMutationError,
   blockWindowClose,
   usesRealTimeUpdates = false,
+  persistentStorage: persistentStorageConfig,
   '~test': testOptions,
 }: CollectionStoreOptions<ItemState, ItemPayload>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
@@ -215,10 +221,22 @@ export function createCollectionStore<
     }
   }
 
+  // Persistent storage setup
+  const persistence = persistentStorageConfig
+    ? setupCollectionPersistence<ItemState, ItemPayload>(
+        persistentStorageConfig,
+      )
+    : null;
+
   const store = new Store<CollectionState>({
     debugName,
     state: () => {
       const initialState: CollectionState = {};
+
+      // Merge persisted items first (will be overridden by test data if both exist)
+      if (persistence?.initialItems) {
+        Object.assign(initialState, persistence.initialItems);
+      }
 
       if (initialData) {
         for (const item of initialData) {
@@ -787,6 +805,9 @@ export function createCollectionStore<
 
   setupFocusListener();
 
+  // Attach persistent storage after store creation
+  persistence?.attach(store);
+
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
    * a disconnection. Events may have been missed during the outage, so all
@@ -832,8 +853,12 @@ export function createCollectionStore<
     cleanupReconnectFocusListener?.();
     cleanupReconnectFocusListener = null;
 
+    persistence?.dispose();
+    void persistence?.clear();
+
     store.setState({});
     setupFocusListener();
+    persistence?.attach(store);
   }
 
   /** Detects whether a specific item inside a collection item's data is still loading.
