@@ -54,6 +54,7 @@ function getQueryParams(): {
   pageId: string;
   scenario: ScenarioName;
   storeId: string | null;
+  sessionKey: string | null;
 } {
   const searchParams = new URLSearchParams(window.location.search);
   const pageId =
@@ -61,11 +62,13 @@ function getQueryParams(): {
     `page-${Math.random().toString(36).slice(2, 8)}`;
   const scenario = (searchParams.get('scenario') ?? 'document') as ScenarioName;
   const storeId = searchParams.get('storeId');
+  const sessionKey = searchParams.get('sessionKey');
 
   return {
     pageId,
     scenario,
     storeId,
+    sessionKey,
   };
 }
 
@@ -126,9 +129,11 @@ type DocumentState = {
 function DocumentScenario({
   pageId,
   storeId,
+  sessionKey,
 }: {
   pageId: string;
   storeId: string;
+  sessionKey: string | false;
 }) {
   const { logicalFocus, focusRef, setLogicalFocus } = useLogicalFocus();
   const [lastScheduleResult, setLastScheduleResult] = useState('idle');
@@ -136,6 +141,7 @@ function DocumentScenario({
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
+      getSessionKey: () => sessionKey,
       fetchFn: (signal) =>
         requestJson<DocumentState>(pageId, '/api/document', { signal }),
       errorNormalizer: normalizeError,
@@ -242,15 +248,18 @@ type CollectionItem = {
 function CollectionScenario({
   pageId,
   storeId,
+  sessionKey,
 }: {
   pageId: string;
   storeId: string;
+  sessionKey: string | false;
 }) {
   const { logicalFocus, focusRef, setLogicalFocus } = useLogicalFocus();
 
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
+      getSessionKey: () => sessionKey,
       fetchFn: (payload, signal) =>
         requestJson<CollectionItem>(pageId, `/api/collection/${payload}`, {
           signal,
@@ -333,15 +342,18 @@ function CollectionScenario({
 function ListScenario({
   pageId,
   storeId,
+  sessionKey,
 }: {
   pageId: string;
   storeId: string;
+  sessionKey: string | false;
 }) {
   const { logicalFocus, focusRef, setLogicalFocus } = useLogicalFocus();
 
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
+      getSessionKey: () => sessionKey,
       fetchListFn: async (payload, size, { signal }) => {
         const searchParams = new URLSearchParams({
           tableId: payload.tableId,
@@ -467,31 +479,39 @@ function ListScenario({
 }
 
 function App() {
-  const { pageId, scenario, storeId } = getQueryParams();
+  const { pageId, scenario, storeId, sessionKey } = getQueryParams();
   const resolvedStoreId =
     storeId ?? `playwright-${scenario === 'list' ? 'list' : scenario}-sync`;
+  const resolvedSessionKey =
+    sessionKey === 'none' ? false : (sessionKey ?? 'playwright-session');
 
   return (
     <main>
       <div data-testid="page-id">{pageId}</div>
       <div data-testid="scenario">{scenario}</div>
       <div data-testid="store-id">{resolvedStoreId}</div>
+      <div data-testid="session-key">
+        {resolvedSessionKey === false ? 'none' : resolvedSessionKey}
+      </div>
       {scenario === 'document' ? (
         <DocumentScenario
           pageId={pageId}
           storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
         />
       ) : null}
       {scenario === 'collection' ? (
         <CollectionScenario
           pageId={pageId}
           storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
         />
       ) : null}
       {scenario === 'list' ? (
         <ListScenario
           pageId={pageId}
           storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
         />
       ) : null}
     </main>
