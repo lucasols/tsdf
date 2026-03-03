@@ -644,7 +644,7 @@ test('RTU throttling', async () => {
       },
     );
 
-    env.trackUIChanges(items[4], 'users||5');
+    env.trackItemUI('users||5', items[4]);
   });
 
   act(() => {
