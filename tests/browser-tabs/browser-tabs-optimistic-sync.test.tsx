@@ -1,51 +1,61 @@
 import { renderHook } from '@testing-library/react';
-import { act } from 'react';
-import { expect, test, vi } from 'vitest';
-import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { expect, test } from 'vitest';
 import {
   createInMemoryBrowserTabsTransportFactory,
   getNextStoreId,
 } from '../mocks/browserTabsTestUtils';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  createSharedListQueryServerTableState,
+} from '../mocks/listQueryStoreTestEnv';
+import { createSharedServerMockState } from '../mocks/serverMock';
+import { createSharedServerTableState } from '../mocks/serverTableMock';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   createCollectionItems,
-  createFocusFlag,
+  createFocusChangeCoordinator,
   createOptimisticSortConfig,
   createUsersTable,
   setupBrowserTabsTestLifecycle,
-  wait,
 } from './browser-tabs-test-helpers';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-
-vi.mock('@ls-stack/browser-utils/window', () => ({
-  onWindowFocus: (handler: () => void) => {
-    window.addEventListener('focus', handler);
-    return () => window.removeEventListener('focus', handler);
-  },
-  isWindowFocused: () => !document.hidden,
-}));
 
 setupBrowserTabsTestLifecycle();
 
 test('document optimistic updates propagate to another tab without a remote refetch', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-shared');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
+    lowPriorityThrottleMs: 60_000,
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
+    lowPriorityThrottleMs: 60_000,
   });
+
+  renderHook(() => {
+    const doc = envA.apiStore.useDocument();
+    envA.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
+
+  await advanceTime(10);
 
   void envA.performClientUpdateAction(1, {
     withOptimisticUpdate: true,
@@ -61,6 +71,23 @@ test('document optimistic updates propagate to another tab without a remote refe
 
   expect(envB.store.state.data?.value).toBe(1);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    10ms  | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ >mutation-started (value: 1)
+    710ms | 1  | ⬜ <mutation-data-persisted (value: 1)
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time | ui |
+    0    | 0  | ui-initialized
+    10ms | 0  | <optimistic-snapshot-received (value: 1)
+    .    | 1  | ui-changed
+    "
+  `);
 });
 
 test('document failed optimistic mutations revert the synced background state', async () => {

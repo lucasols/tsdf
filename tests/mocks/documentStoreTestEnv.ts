@@ -26,7 +26,10 @@ import {
 export type DocumentStoreTestScenario<D> =
   /** App just opened, no data fetched yet. */
   | 'idle'
-  /** App already opened before and data was fetched successfully. */
+  /**
+   * App already opened before and data was fetched successfully.
+   * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
+   */
   | 'loaded'
   /** App started with data restored from local cache, pending server revalidation. */
   | { idleWithLocalCache: 'sameAsServer' | D }

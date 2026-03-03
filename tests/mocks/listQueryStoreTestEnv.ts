@@ -47,7 +47,10 @@ type ListQuerySnapshotConfig = {
 export type ListQueryStoreTestScenario =
   /** App just opened, no data fetched yet. */
   | 'idle'
-  /** User already have the app loaded and data was fetched successfully. */
+  /**
+   * App already opened before and data was fetched successfully.
+   * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
+   */
   | { loaded: ListQuerySnapshotConfig }
   /** App started with data restored from local cache, pending server revalidation. */
   | { idleWithLocalCache: ListQuerySnapshotConfig };
