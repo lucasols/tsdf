@@ -287,29 +287,62 @@ test('document low-priority refetch-on-mount work is deduplicated when all tabs 
 test('document fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-timing-sync');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(true);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
     lowPriorityThrottleMs: 10_000,
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
     lowPriorityThrottleMs: 10_000,
+  });
+
+  renderHook(() => {
+    const doc = envA.apiStore.useDocument();
+    envA.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
   });
 
   envA.scheduleFetch('highPriority');
   await flushAllTimers();
 
+  await advanceTime(100);
+
   expect(envB.scheduleFetch('lowPriority')).toBe('skipped');
   expect(envB.serverMock.fetchHistory).toHaveLength(0);
+
+  await flushAllTimers();
+
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | scheduled-fetch-coalesced
+    10ms  | 0  | 🔴 >fetch-started
+    810ms | 0  | 🔴 <fetch-finished (value: 0)
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    810ms | 0  | <confirmed-snapshot-received (value: 0)
+    910ms | 0  | scheduled-fetch-skipped
+    "
+  `);
 });
 
 test('collection background scheduling falls back to the next-ranked tab when the primary tab never starts', async () => {
