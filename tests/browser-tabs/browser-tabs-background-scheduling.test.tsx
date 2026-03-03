@@ -937,31 +937,62 @@ test('list query low-priority refetch-on-mount work is deduplicated when all tab
 test('list query fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-timing-sync');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(true);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { loaded: { tables: ['users'] } },
     lowPriorityThrottleMs: 10_000,
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { loaded: { tables: ['users'] } },
     lowPriorityThrottleMs: 10_000,
+  });
+
+  renderHook(() => {
+    const query = envA.apiStore.useListQuery({ tableId: 'users' });
+    envA.trackItemUI('users||1', query.items[0]?.name);
+  });
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({ tableId: 'users' });
+    envB.trackItemUI('users||1', query.items[0]?.name);
   });
 
   envA.scheduleFetch('highPriority', { tableId: 'users' });
   await flushAllTimers();
 
+  await advanceTime(100);
+
   expect(envB.scheduleFetch('lowPriority', { tableId: 'users' })).toBe(
     'skipped',
   );
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | Alice    | ui-initialized
+    .     | Alice    | scheduled-fetch-coalesced
+    10ms  | Alice    | 🔴 >list-fetch-started
+    810ms | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | Alice    | ui-initialized
+    810ms | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    910ms | Alice    | scheduled-fetch-skipped
+    "
+  `);
 });
 
 test('list query first item fetch stays local after a sibling batch item fetch for the same batch', async () => {
