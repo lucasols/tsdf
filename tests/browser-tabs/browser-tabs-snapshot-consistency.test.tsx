@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react';
-import { expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test } from 'vitest';
 import {
   createInMemoryBrowserTabsTransportFactory,
   createInspectableInMemoryBrowserTabsTransportFactory,
@@ -10,26 +10,32 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
   createSharedListQueryServerTableState,
-  type Row,
 } from '../mocks/listQueryStoreTestEnv';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
+import { setDefaultLowPriorityThrottleMs } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   countFetchHistoryEntries,
   createCollectionItems,
   createFocusChangeCoordinator,
   createOptimisticSortConfig,
-  createThreeUsersTable,
   createUsersTable,
   getMessageKinds,
   getNonStatusMessages,
   getPublisherTabIds,
-  partialResourcesConfig,
   setupBrowserTabsTestLifecycle,
 } from './browser-tabs-test-helpers';
 
 setupBrowserTabsTestLifecycle();
+
+beforeEach(() => {
+  setDefaultLowPriorityThrottleMs(60_000);
+});
+
+afterEach(() => {
+  setDefaultLowPriorityThrottleMs(200);
+});
 
 test('collection snapshots do not re-broadcast after remote application', async () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
@@ -135,7 +141,10 @@ test('a fresh collection tab reuses the sibling snapshot without a first local f
   envA.scheduleFetch('highPriority', 'item1');
   await flushAllTimers();
 
-  renderHook(() => envB.apiStore.useItem('item1'));
+  renderHook(() => {
+    const item = envB.apiStore.useItem('item1');
+    envB.trackItemUI('item1', item.data?.value.name);
+  });
   await flushAllTimers();
 
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
@@ -145,16 +154,27 @@ test('a fresh collection tab reuses the sibling snapshot without a first local f
     data: { value: { name: 'Updated' } },
     status: 'success',
   });
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1   |
+    810ms | -       | <confirmed-snapshot-received (value: {"name":"Updated"})
+    .     | Updated | ui-initialized
+    "
+  `);
 });
 
 test('confirmed collection snapshots do not overwrite a local in-flight mutation', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-conflict');
+  const sharedServerTableState = createSharedServerTableState({
+    item1: { name: 'Initial' },
+  });
 
   const envA = createCollectionStoreTestEnv(
     { item1: { name: 'Initial' } },
     {
       id,
+      sharedServerTableState,
       browserTabsTransportFactory: transportFactory,
       testScenario: 'loaded',
     },
@@ -163,10 +183,16 @@ test('confirmed collection snapshots do not overwrite a local in-flight mutation
     { item1: { name: 'Initial' } },
     {
       id,
+      sharedServerTableState,
       browserTabsTransportFactory: transportFactory,
       testScenario: 'loaded',
     },
   );
+
+  renderHook(() => {
+    const item = envB.apiStore.useItem('item1');
+    envB.trackItemUI('item1', item.data?.value.name);
+  });
 
   void envB.performClientUpdateAction(
     'item1',
@@ -201,24 +227,38 @@ test('confirmed collection snapshots do not overwrite a local in-flight mutation
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     0,
   );
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1            |
+    0     | Initial          | ui-initialized
+    .     | {"name":"Local"} | ⬜ optimistic-ui-commit
+    .     | {"name":"Local"} | ⬜ >mutation-started (value: {"name":"Local"})
+    .     | Local            | ui-changed
+    700ms | Local            | ⬜ <mutation-data-persisted (value: {"name":"Local"})
+    "
+  `);
 });
 
 test('document snapshots do not re-broadcast after remote application', async () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-audit');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transport.transportFactory,
     testScenario: 'loaded',
   });
   createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transport.transportFactory,
     testScenario: 'loaded',
   });
   createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transport.transportFactory,
     testScenario: 'loaded',
   });
@@ -239,14 +279,17 @@ test('document snapshots do not re-broadcast after remote application', async ()
 test('document resets stay local to the tab that triggered them', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-reset');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
@@ -269,27 +312,32 @@ test('document resets stay local to the tab that triggered them', async () => {
 test('a fresh document tab still performs its first fetch after a sibling tab fetched earlier', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-first-fetch-after-sibling');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
     lowPriorityThrottleMs: 10_000,
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'idle',
     lowPriorityThrottleMs: 10_000,
   });
 
   envA.setServerData(7);
-  envB.setServerData(7);
 
   envA.scheduleFetch('highPriority');
   await flushAllTimers();
 
-  renderHook(() => envB.apiStore.useDocument());
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
   await flushAllTimers();
 
   expect(envB.serverMock.fetchHistory).toHaveLength(1);
@@ -297,21 +345,41 @@ test('a fresh document tab still performs its first fetch after a sibling tab fe
     data: { value: 7 },
     status: 'success',
   });
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    810ms | -  | <confirmed-snapshot-received (value: 7)
+    820ms | -  | 🔴 >fetch-started
+    1.62s | -  | 🔴 <fetch-finished (value: 7)
+    .     | 7  | ui-initialized
+    "
+  `);
 });
 
 test('confirmed document snapshots do not overwrite a local in-flight mutation', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-conflict');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
+  });
+
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
   });
 
   void envB.performClientUpdateAction(10, {
@@ -332,15 +400,37 @@ test('confirmed document snapshots do not overwrite a local in-flight mutation',
 
   expect(envB.store.state.data?.value).toBe(10);
   expect(envB.serverMock.fetchHistory).toHaveLength(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    0     | <optimistic-snapshot-received (value: 10)
+    1ms   | server-data-changed (value: 20)
+    .     | scheduled-fetch-triggered
+    11ms  | 🔴 >fetch-started
+    111ms | 🔴 <fetch-finished (value: 20)
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 10 | ⬜ optimistic-ui-commit
+    .     | 10 | ⬜ >mutation-started (value: 10)
+    700ms | 10 | ⬜ <mutation-data-persisted (value: 10)
+    "
+  `);
 });
 
 test('list query snapshots do not re-broadcast after remote application', async () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-audit');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const createEnv = () =>
     createListQueryStoreTestEnv(createUsersTable(), {
       id,
+      sharedServerTableState,
       browserTabsTransportFactory: transport.transportFactory,
       testScenario: { loaded: { tables: ['users'] } },
       optimisticListUpdates: createOptimisticSortConfig(),
@@ -370,220 +460,21 @@ test('list query snapshots do not re-broadcast after remote application', async 
   expect(getMessageKinds(messages)).not.toContain('stale-marker');
 });
 
-test('list query partial-resource snapshots do not seed an untouched sibling item tab', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-partial-background-item');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
-
-  const envA = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
-    partialResources: partialResourcesConfig,
-  });
-  const envB = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
-    partialResources: partialResourcesConfig,
-  });
-
-  await markLastActiveTab(envA, [focusA, focusB], 1);
-  await markLastActiveTab(envA, [focusA, focusB], 0);
-
-  renderHook(() => envA.apiStore.useItem('users||1', { fields: ['name'] }));
-
-  await flushAllTimers();
-
-  expect(countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch')).toBe(
-    1,
-  );
-  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
-    0,
-  );
-  expect(envA.serverTable.fetchHistory[0]).toMatchObject({
-    type: 'fetch',
-    fields: ['name'],
-  });
-  expect(
-    envB.store.state.itemLoadedFields[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toBeUndefined();
-  expect(
-    envB.store.state.itemQueries[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toBeUndefined();
-});
-
-test('list query partial-resources field metadata updates an already-loaded sibling tab', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-fields');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      browserTabsTransportFactory: transportFactory,
-      getWindowIsFocused: focusA.get,
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      browserTabsTransportFactory: transportFactory,
-      getWindowIsFocused: focusB.get,
-      partialResources: partialResourcesConfig,
-    },
-  );
-
-  void envB.apiStore.scheduleItemFetch('highPriority', 'users||1', {
-    fields: ['age'],
-  });
-  await flushAllTimers();
-
-  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
-    fields: ['name'],
-  });
-  await flushAllTimers();
-
-  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
-  expect(
-    [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
-
-  renderHook(() =>
-    envB.apiStore.useItem('users||1', {
-      fields: ['name'],
-    }),
-  );
-  await flushAllTimers();
-
-  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
-    1,
-  );
-});
-
-test('list query partial-resources remote snapshots clear satisfied local invalidation fields', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-field-invalidation');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      browserTabsTransportFactory: transportFactory,
-      getWindowIsFocused: focusA.get,
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      browserTabsTransportFactory: transportFactory,
-      getWindowIsFocused: focusB.get,
-      partialResources: partialResourcesConfig,
-    },
-  );
-
-  void envB.apiStore.scheduleItemFetch('highPriority', 'users||1', {
-    fields: ['name', 'age'],
-  });
-  await flushAllTimers();
-
-  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
-  expect(
-    [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
-
-  envB.apiStore.invalidateQueryAndItems({
-    queryPayload: false,
-    itemPayload: 'users||1',
-    type: 'highPriority',
-    fields: ['age'],
-  });
-  await advanceTime(0);
-
-  expect(envB.store.state.itemLoadedFields[itemKey]).toEqual(['name']);
-  expect(envB.store.state.itemFieldInvalidationFields[itemKey]).toEqual([
-    'age',
-  ]);
-
-  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
-    fields: ['age'],
-  });
-  await flushAllTimers();
-
-  expect(envB.serverTable.fetchHistory).toHaveLength(1);
-  expect(
-    [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
-  ).toEqual(['age', 'name']);
-  expect(envB.store.state.itemFieldInvalidationFields[itemKey]).toBeUndefined();
-});
-
-test('list query offset pagination syncs the merged query state to an already-loaded sibling tab', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-offset');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
-
-  const envA = createListQueryStoreTestEnv(createThreeUsersTable(), {
-    id,
-    browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
-    defaultQuerySize: 1,
-    offsetPagination: { maxInvalidationLimit: 10 },
-  });
-  const envB = createListQueryStoreTestEnv(createThreeUsersTable(), {
-    id,
-    browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
-    defaultQuerySize: 1,
-    offsetPagination: { maxInvalidationLimit: 10 },
-  });
-
-  envB.apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' }, 1);
-  await flushAllTimers();
-
-  envA.apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' }, 1);
-  await flushAllTimers();
-  void envA.apiStore.loadMore({ tableId: 'users' }, 1);
-  await flushAllTimers();
-
-  const queryKey = envB.getQueryKey({ tableId: 'users' });
-  expect(envB.store.state.queries[queryKey]?.items).toEqual([
-    envB.getStoreItemKeyFromRaw('users||1'),
-    envB.getStoreItemKeyFromRaw('users||2'),
-  ]);
-  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
-    1,
-  );
-});
-
 test('list query resets stay local to the tab that triggered them', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-reset');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: { loaded: { tables: ['users'] } },
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: { loaded: { tables: ['users'] } },
   });
@@ -609,15 +500,19 @@ test('list query resets stay local to the tab that triggered them', async () => 
 test('a fresh list-query tab still performs its first fetch after a sibling tab fetched earlier', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-first-fetch-after-sibling');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: { loaded: { tables: ['users'] } },
     lowPriorityThrottleMs: 10_000,
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'idle',
     lowPriorityThrottleMs: 10_000,
@@ -626,7 +521,10 @@ test('a fresh list-query tab still performs its first fetch after a sibling tab 
   envA.apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' });
   await flushAllTimers();
 
-  renderHook(() => envB.apiStore.useListQuery({ tableId: 'users' }));
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({ tableId: 'users' });
+    envB.trackItemUI('users||1', query.items[0]?.name);
+  });
   await flushAllTimers();
 
   const queryKey = envB.getQueryKey({ tableId: 'users' });
@@ -637,27 +535,52 @@ test('a fresh list-query tab still performs its first fetch after a sibling tab 
     envB.getStoreItemKeyFromRaw('users||1'),
     envB.getStoreItemKeyFromRaw('users||2'),
   ]);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    10ms  | 🔴 >list-fetch-started
+    810ms | 🔴 <list-fetch-finished (value: {"count":2})
+    1.62s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    810ms | ⋯        | ui-initialized
+    820ms | ⋯        | 🔴 >list-fetch-started
+    1.62s | ⋯        | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Alice    | ui-changed
+    "
+  `);
 });
 
 test('confirmed list query snapshots do not overwrite a local in-flight mutation', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-conflict');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { loaded: { tables: ['users'] } },
     optimisticListUpdates: createOptimisticSortConfig(),
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { loaded: { tables: ['users'] } },
     optimisticListUpdates: createOptimisticSortConfig(),
+  });
+
+  renderHook(() => {
+    const item = envB.apiStore.useItem('users||1');
+    envB.trackItemUI('users||1', item.data?.name);
   });
 
   void envB.performClientItemUpdateAction(
@@ -706,30 +629,59 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     0,
   );
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | -        | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | -        | <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
+    .     | -        | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    1ms   | -        | server-data-changed (value: {"id":1,"name":"Aaron"})
+    11ms  | -        | 🔴 >list-fetch-started
+    811ms | -        | 🔴 <list-fetch-finished (value: {"count":2})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1              |
+    0     | Alice                 | ui-initialized
+    .     | {"id":1,"name":"Zoe"} | ⬜ optimistic-ui-commit
+    .     | {"id":1,"name":"Zoe"} | ⬜ >mutation-started (value: {"id":1,"name":"Zoe"})
+    .     | Zoe                   | ui-changed
+    700ms | Zoe                   | ⬜ <mutation-data-persisted (value: {"id":1,"name":"Zoe"})
+    "
+  `);
 });
 
 test('confirmed sibling item fetches do not overwrite a local optimistic list item mutation', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-stale-item-fetch');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { loaded: { tables: ['users'] } },
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { loaded: { tables: ['users'] } },
+  });
+
+  renderHook(() => {
+    const item = envB.apiStore.useItem('users||1');
+    envB.trackItemUI('users||1', item.data?.name);
   });
 
   void envB.performClientItemUpdateAction(
     'users||1',
-    { name: 'Zoe' },
+    { name: 'Jane' },
     {
       withOptimisticUpdate: true,
       duration: 1_000,
@@ -738,7 +690,7 @@ test('confirmed sibling item fetches do not overwrite a local optimistic list it
   await advanceTime(0);
 
   const itemKey = envB.getStoreItemKeyFromRaw('users||1');
-  expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
+  expect(envB.store.state.items[itemKey]?.name).toBe('Jane');
 
   envA.apiStore.scheduleItemFetch('highPriority', 'users||1');
   await advanceTime(900);
@@ -749,12 +701,31 @@ test('confirmed sibling item fetches do not overwrite a local optimistic list it
       itemId: 'users||1',
     },
   ]);
-  expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
+  expect(envB.store.state.items[itemKey]?.name).toBe('Jane');
 
   await flushAllTimers();
 
-  expect(envB.store.state.items[itemKey]?.name).toBe('Zoe');
+  expect(envB.store.state.items[itemKey]?.name).toBe('Jane');
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     0,
   );
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | -        | <optimistic-item-snapshot-received (value: {"id":1,"name":"Jane"})
+    .     | -        | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    10ms  | -        | 🔴 >fetch-started
+    810ms | -        | 🔴 <fetch-finished (value: {"id":1,"name":"Jane"})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1               |
+    0     | Alice                  | ui-initialized
+    .     | {"id":1,"name":"Jane"} | ⬜ optimistic-ui-commit
+    .     | {"id":1,"name":"Jane"} | ⬜ >mutation-started (value: {"id":1,"name":"Jane"})
+    .     | Jane                   | ui-changed
+    700ms | Jane                   | ⬜ <mutation-data-persisted (value: {"id":1,"name":"Jane"})
+    "
+  `);
 });
