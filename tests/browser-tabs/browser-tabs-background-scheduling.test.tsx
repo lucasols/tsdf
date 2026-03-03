@@ -601,13 +601,16 @@ test('collection low-priority refetch-on-mount work is deduplicated when all tab
 test('collection fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-batch');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(true);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
     useBatchFetch: true,
     getItemsBatchKey: () => 'shared',
@@ -616,13 +619,27 @@ test('collection fetch timing sync suppresses redundant low-priority work after 
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
     useBatchFetch: true,
     getItemsBatchKey: () => 'shared',
     lowPriorityThrottleMs: 10_000,
     maxBatchSize: 10,
+  });
+
+  renderHook(() => {
+    const item1 = envA.apiStore.useItem('item1');
+    const item2 = envA.apiStore.useItem('item2');
+    envA.trackItemUI('item1', item1.data?.value.name);
+    envA.trackItemUI('item2', item2.data?.value.name);
+  });
+  renderHook(() => {
+    const item1 = envB.apiStore.useItem('item1');
+    const item2 = envB.apiStore.useItem('item2');
+    envB.trackItemUI('item1', item1.data?.value.name);
+    envB.trackItemUI('item2', item2.data?.value.name);
   });
 
   envA.scheduleFetch('highPriority', 'item1');
@@ -632,6 +649,26 @@ test('collection fetch timing sync suppresses redundant low-priority work after 
 
   expect(envB.scheduleFetch('lowPriority', 'item1')).toBe('skipped');
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1  | item2  |
+    0     | Item 1 | -      | [item1] ui-initialized
+    .     | Item 1 | Item 2 | [item2] ui-changed
+    .     | Item 1 | Item 2 | [item1] scheduled-fetch-coalesced
+    10ms  | Item 1 | Item 2 | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    810ms | Item 1 | Item 2 | 🔴 <list-fetch-finished (value: {"count":2})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1  | item2  |
+    0     | Item 1 | -      | [item1] ui-initialized
+    .     | Item 1 | Item 2 | [item2] ui-changed
+    810ms | Item 1 | Item 2 | [item1] <confirmed-snapshot-received (value: {"name":"Item 1"})
+    .     | Item 1 | Item 2 | [item2] <confirmed-snapshot-received (value: {"name":"Item 2"})
+    .     | Item 1 | Item 2 | [item1] scheduled-fetch-skipped
+    "
+  `);
 });
 
 test('list query background scheduling falls back to the next-ranked tab when the primary tab never starts', async () => {
