@@ -2,11 +2,13 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { afterEach, beforeEach, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { Row } from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 
 export function setupBrowserTabsTestLifecycle(): void {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.setSystemTime(TEST_INITIAL_TIME);
     Object.defineProperty(document, 'hidden', {
       value: false,
       writable: true,
