@@ -60,6 +60,7 @@ function TabPanel({ isActive, children }) {
 ```
 
 When `IsOffScreenContext` is `true`:
+
 - Hooks don't trigger fetches
 - Hooks don't respond to invalidation events
 - Individual hooks can override via their `isOffScreen` prop
@@ -71,10 +72,10 @@ Numeric mapping of fetch priorities for comparison:
 ```ts
 import { fetchTypePriority } from 'tsdf';
 
-fetchTypePriority.lowPriority    // 0
-fetchTypePriority.mediumPriority // 1
-fetchTypePriority.realtimeUpdate // 2
-fetchTypePriority.highPriority   // 3
+fetchTypePriority.lowPriority; // 0
+fetchTypePriority.mediumPriority; // 1
+fetchTypePriority.realtimeUpdate; // 2
+fetchTypePriority.highPriority; // 3
 ```
 
 ## BlockWindowCloseHandler
@@ -83,7 +84,9 @@ A function that blocks the browser window from closing during mutations. Returns
 
 ```ts
 const blockWindowClose = () => {
-  const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+  const handler = (e: BeforeUnloadEvent) => {
+    e.preventDefault();
+  };
   window.addEventListener('beforeunload', handler);
   return { unblock: () => window.removeEventListener('beforeunload', handler) };
 };

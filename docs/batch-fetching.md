@@ -26,6 +26,7 @@ const store = createCollectionStore<Product, string>({
 ```
 
 The `batchFetchFn` must return a `Map` where:
+
 - Keys are the original payloads
 - Values are either the fetched data or an `Error` for failed items
 
@@ -99,6 +100,7 @@ This is useful when you know your API has a limit on batch size.
 ## Scheduler Lifecycle
 
 When using batch fetching:
+
 - A single scheduler is created per batch key
 - All items with the same batch key share the scheduler's throttling and coalescing
 - When all items for a batch key are deleted from the store, the scheduler is cleaned up

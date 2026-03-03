@@ -90,7 +90,7 @@ When [Partial Resources](./partial-resources.md) is enabled, you can invalidate 
 store.invalidateQueryAndItems({
   queryPayload: false,
   itemPayload: 'task-1',
-  fields: ['name', 'description'],  // only these fields are refetched
+  fields: ['name', 'description'], // only these fields are refetched
 });
 ```
 
@@ -100,11 +100,11 @@ This removes the specified fields from the item's loaded fields tracking, causin
 
 Invalidation respects the [fetch priority system](./fetch-scheduling.md):
 
-| Priority | Typical use |
-|----------|-------------|
-| `highPriority` | User action, explicit refresh (default) |
-| `lowPriority` | Window focus revalidation, background updates |
-| `realtimeUpdate` | WebSocket push notifications |
+| Priority         | Typical use                                   |
+| ---------------- | --------------------------------------------- |
+| `highPriority`   | User action, explicit refresh (default)       |
+| `lowPriority`    | Window focus revalidation, background updates |
+| `realtimeUpdate` | WebSocket push notifications                  |
 
 If data already has a pending invalidation at equal or higher priority, a new invalidation at a lower priority is ignored.
 
@@ -117,6 +117,7 @@ When a hook has `disableRefetches: true`, it ignores invalidation events **unles
 ### disableRefetchOnMount
 
 When a hook has `disableRefetchOnMount: true`, it only fetches when:
+
 - The data has never been loaded (`status === 'idle'`)
 - The data was explicitly invalidated (`refetchOnMount` is set)
 

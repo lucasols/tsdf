@@ -23,24 +23,24 @@ const productStore = createCollectionStore<Product, string>({
 
 ## Options
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `fetchFn` | `(params: ItemPayload, signal: AbortSignal) => Promise<ItemState>` | Yes | Fetches a single item |
-| `batchFetchFn` | `(payloads: ItemPayload[], signal: AbortSignal, batchKey: string) => Promise<Map<ItemPayload, ItemState \| Error>>` | No | See [Batch Fetching](./batch-fetching.md) |
-| `getItemsBatchKey` | `(payload: ItemPayload) => string \| false` | No | Groups batch fetches by key. `false` falls back to per-item fetch |
-| `maxBatchSize` | `number` | No | Triggers immediate fetch when batch reaches this size |
-| `getCollectionItemKey` | `(params: ItemPayload) => ValidPayload \| unknown[]` | No | Custom key derivation from payload |
-| `errorNormalizer` | `(exception: Error) => StoreError` | Yes | Normalizes errors |
-| `lowPriorityThrottleMs` | `number` | Yes | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `baseCoalescingWindowMs` | `number` | Yes | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `backgroundCoalescingWindowMultiplier` | `number` | Yes | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `blockWindowClose` | `BlockWindowCloseHandler \| null` | Yes | See [Mutations](./mutations.md) |
-| `mediumPriorityDelayMs` | `number` | No | Delay for medium-priority fetches |
-| `dynamicRealtimeThrottleMs` | `(params) => number` | No | See [Real-Time Updates](./real-time-updates.md) |
-| `revalidateOnWindowFocus` | `boolean \| (() => boolean)` | No | Refetch on window focus |
-| `usesRealTimeUpdates` | `boolean` | No | See [Real-Time Updates](./real-time-updates.md) |
-| `onInvalidate` | `(props: { itemState, payload, priority }) => void` | No | Called when an item is invalidated |
-| `onMutationError` | `(error, options: { silentErrors? }) => void` | No | Global mutation error handler |
+| Option                                 | Type                                                                                                                | Required | Description                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| `fetchFn`                              | `(params: ItemPayload, signal: AbortSignal) => Promise<ItemState>`                                                  | Yes      | Fetches a single item                                             |
+| `batchFetchFn`                         | `(payloads: ItemPayload[], signal: AbortSignal, batchKey: string) => Promise<Map<ItemPayload, ItemState \| Error>>` | No       | See [Batch Fetching](./batch-fetching.md)                         |
+| `getItemsBatchKey`                     | `(payload: ItemPayload) => string \| false`                                                                         | No       | Groups batch fetches by key. `false` falls back to per-item fetch |
+| `maxBatchSize`                         | `number`                                                                                                            | No       | Triggers immediate fetch when batch reaches this size             |
+| `getCollectionItemKey`                 | `(params: ItemPayload) => ValidPayload \| unknown[]`                                                                | No       | Custom key derivation from payload                                |
+| `errorNormalizer`                      | `(exception: Error) => StoreError`                                                                                  | Yes      | Normalizes errors                                                 |
+| `lowPriorityThrottleMs`                | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
+| `baseCoalescingWindowMs`               | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                                                   | Yes      | See [Mutations](./mutations.md)                                   |
+| `mediumPriorityDelayMs`                | `number`                                                                                                            | No       | Delay for medium-priority fetches                                 |
+| `dynamicRealtimeThrottleMs`            | `(params) => number`                                                                                                | No       | See [Real-Time Updates](./real-time-updates.md)                   |
+| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                                                        | No       | Refetch on window focus                                           |
+| `usesRealTimeUpdates`                  | `boolean`                                                                                                           | No       | See [Real-Time Updates](./real-time-updates.md)                   |
+| `onInvalidate`                         | `(props: { itemState, payload, priority }) => void`                                                                 | No       | Called when an item is invalidated                                |
+| `onMutationError`                      | `(error, options: { silentErrors? }) => void`                                                                       | No       | Global mutation error handler                                     |
 
 ## Item State Shape
 
@@ -64,30 +64,30 @@ The overall store state is `Record<string, TSFDCollectionItem | null>` where key
 
 ### Hooks
 
-| Hook | Description | Details |
-|------|-------------|---------|
-| `useItem(payload, options?)` | Fetch and subscribe to a single item | See [Hooks - useItem](./hooks.md#useitem) |
-| `useMultipleItems(items, options?)` | Fetch and subscribe to multiple items | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems) |
-| `useListItemIsLoading(payload, options)` | Detect if a sub-item is loading | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
-| `useListItemIsDeleted(payload, options)` | Detect if a sub-item was deleted | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
-| `useListItem(payload, options)` | Combined loading + deletion detection | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
+| Hook                                     | Description                           | Details                                                       |
+| ---------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| `useItem(payload, options?)`             | Fetch and subscribe to a single item  | See [Hooks - useItem](./hooks.md#useitem)                     |
+| `useMultipleItems(items, options?)`      | Fetch and subscribe to multiple items | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems)   |
+| `useListItemIsLoading(payload, options)` | Detect if a sub-item is loading       | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
+| `useListItemIsDeleted(payload, options)` | Detect if a sub-item was deleted      | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
+| `useListItem(payload, options)`          | Combined loading + deletion detection | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
 
 ### Methods
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `scheduleFetch` | `(fetchType, payload(s), options?) => ScheduleFetchResults` | Schedule fetch for one or more items |
-| `awaitFetch` | `(params, options?) => Promise<{ data, error }>` | Await fetch with optional `timeoutMs` |
-| `getItemKey` | `(params) => string` | Get the composite key for a payload |
-| `getItemState` | `(params) => CollectionItem` | Get item state (single, array, or filter function) |
-| `invalidateItem` | `(payload(s), priority?) => void` | See [Invalidation](./invalidation.md) |
-| `updateItemState` | `(params, produceFn, options?) => boolean` | Immer-based state update |
-| `addItemToState` | `(payload, data) => void` | Add a new item to the store |
-| `deleteItemState` | `(params) => void` | Delete item(s) and cleanup scheduler resources |
-| `startMutation` | `(params) => () => void` | Start mutation lock. See [Mutations](./mutations.md) |
-| `performMutation` | `(payload, options) => Promise<Result<T>>` | Full mutation lifecycle. See [Mutations](./mutations.md) |
-| `reset` | `() => void` | Reset store and all schedulers |
-| `onTransportReconnect` | `() => void` | See [Real-Time Updates](./real-time-updates.md) |
+| Method                 | Signature                                                   | Description                                              |
+| ---------------------- | ----------------------------------------------------------- | -------------------------------------------------------- |
+| `scheduleFetch`        | `(fetchType, payload(s), options?) => ScheduleFetchResults` | Schedule fetch for one or more items                     |
+| `awaitFetch`           | `(params, options?) => Promise<{ data, error }>`            | Await fetch with optional `timeoutMs`                    |
+| `getItemKey`           | `(params) => string`                                        | Get the composite key for a payload                      |
+| `getItemState`         | `(params) => CollectionItem`                                | Get item state (single, array, or filter function)       |
+| `invalidateItem`       | `(payload(s), priority?) => void`                           | See [Invalidation](./invalidation.md)                    |
+| `updateItemState`      | `(params, produceFn, options?) => boolean`                  | Immer-based state update                                 |
+| `addItemToState`       | `(payload, data) => void`                                   | Add a new item to the store                              |
+| `deleteItemState`      | `(params) => void`                                          | Delete item(s) and cleanup scheduler resources           |
+| `startMutation`        | `(params) => () => void`                                    | Start mutation lock. See [Mutations](./mutations.md)     |
+| `performMutation`      | `(payload, options) => Promise<Result<T>>`                  | Full mutation lifecycle. See [Mutations](./mutations.md) |
+| `reset`                | `() => void`                                                | Reset store and all schedulers                           |
+| `onTransportReconnect` | `() => void`                                                | See [Real-Time Updates](./real-time-updates.md)          |
 
 ### Payload Overloads
 
@@ -115,7 +115,11 @@ function ProductCard({ productId }: { productId: string }) {
   if (isLoading) return <Skeleton />;
   if (error) return <Error error={error} />;
 
-  return <div>{data?.name} - ${data?.price}</div>;
+  return (
+    <div>
+      {data?.name} - ${data?.price}
+    </div>
+  );
 }
 
 // Disable fetching with falsy payload
@@ -130,7 +134,11 @@ productStore.updateItemState('product-1', (draft) => {
 });
 
 // Add a new item
-productStore.addItemToState('product-new', { id: 'product-new', name: 'New', price: 0 });
+productStore.addItemToState('product-new', {
+  id: 'product-new',
+  name: 'New',
+  price: 0,
+});
 
 // Delete an item
 productStore.deleteItemState('product-old');

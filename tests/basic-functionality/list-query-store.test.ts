@@ -4,10 +4,12 @@ import {
   type ListQueryParams,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, range } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {

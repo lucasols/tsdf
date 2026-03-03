@@ -54,13 +54,15 @@ Specifies which queries this rule applies to:
 
 ```ts
 // Single query
-queries: { projectId: 'proj-1' }
+queries: {
+  projectId: 'proj-1';
+}
 
 // Multiple queries
-queries: [{ projectId: 'proj-1' }, { projectId: 'proj-2' }]
+queries: [{ projectId: 'proj-1' }, { projectId: 'proj-2' }];
 
 // Filter function
-queries: (queryPayload) => queryPayload.status === 'active'
+queries: (queryPayload) => queryPayload.status === 'active';
 ```
 
 ### filterItem
@@ -73,7 +75,7 @@ filterItem: (item) => {
   // false → item should NOT be in the query (remove if present)
   // null  → skip this rule for this item (no change)
   return item.status === 'active';
-}
+};
 ```
 
 - When `filterItem` returns `true` and the item is not in the query, it's added at the position specified by `appendNewTo`
@@ -85,8 +87,8 @@ filterItem: (item) => {
 Where to insert items when `filterItem` adds them to a query:
 
 ```ts
-appendNewTo: 'start' // prepend to the beginning
-appendNewTo: 'end'   // append to the end (default)
+appendNewTo: 'start'; // prepend to the beginning
+appendNewTo: 'end'; // append to the end (default)
 ```
 
 ### sort
@@ -116,7 +118,7 @@ Sorting is applied only to queries that contain the updated item.
 When `true`, queries affected by the optimistic update are invalidated in the background. This ensures the server's actual ordering/filtering is fetched eventually.
 
 ```ts
-invalidateQueries: true
+invalidateQueries: true;
 ```
 
 ## When Rules Are Applied
@@ -127,6 +129,7 @@ Optimistic list updates are triggered by:
 2. **`addItemToState`** — After adding a new item, rules determine which queries should include it
 
 They are **not** triggered by:
+
 - `deleteItemState` (items are simply removed from all queries)
 - Direct store mutations
 - Fetch completions

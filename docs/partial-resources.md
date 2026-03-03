@@ -9,7 +9,13 @@ Partial resources allow you to fetch only specific fields of an item, reducing p
 Enable by setting the `TPartialResources` type parameter to `true` and providing a `partialResources` config:
 
 ```ts
-type User = { id: string; name: string; email: string; avatar: string; bio: string };
+type User = {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  bio: string;
+};
 
 const userStore = createListQueryStore<User, UserFilter, string, true>({
   //                                                              ^^^^ enables partial resources
@@ -64,13 +70,17 @@ function UserCard({ userId }: { userId: string }) {
     fields: ['name', 'email'],
   });
 
-  return <div>{data?.name} ({data?.email})</div>;
+  return (
+    <div>
+      {data?.name} ({data?.email})
+    </div>
+  );
 }
 
 // Fetch all fields
 function UserProfile({ userId }: { userId: string }) {
   const { data } = userStore.useItem(userId, {
-    fields: '*',  // '*' means all fields
+    fields: '*', // '*' means all fields
   });
 
   return <div>{data?.bio}</div>;
@@ -87,7 +97,11 @@ function UserList() {
   );
 
   return items.map((user) => (
-    <UserRow key={user.id} name={user.name} avatar={user.avatar} />
+    <UserRow
+      key={user.id}
+      name={user.name}
+      avatar={user.avatar}
+    />
   ));
 }
 ```
@@ -100,7 +114,7 @@ You can invalidate specific fields without refetching everything:
 userStore.invalidateQueryAndItems({
   queryPayload: false,
   itemPayload: 'user-1',
-  fields: ['name', 'email'],  // only these fields are refetched
+  fields: ['name', 'email'], // only these fields are refetched
 });
 ```
 
@@ -139,7 +153,7 @@ store.scheduleListQueryFetch('highPriority', filter, undefined, {
 ### mergeItems
 
 ```ts
-mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState
+mergeItems: (prev: ItemState | undefined, fetched: ItemState) => ItemState;
 ```
 
 Called when new fields arrive. `prev` is `undefined` if the item has never been fetched before. Should return the merged item with all known fields.
@@ -147,7 +161,7 @@ Called when new fields arrive. `prev` is `undefined` if the item has never been 
 ### selectFields
 
 ```ts
-selectFields: (fields: string[], item: ItemState) => ItemState
+selectFields: (fields: string[], item: ItemState) => ItemState;
 ```
 
 Called when a hook requests specific fields. Should return an item containing only the requested fields.

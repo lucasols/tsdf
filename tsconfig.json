@@ -1,7 +1,7 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
-    "target": "ESNext",
+    "target": "es2024",
     "moduleResolution": "bundler",
     "module": "ESNext",
     "jsx": "preserve",

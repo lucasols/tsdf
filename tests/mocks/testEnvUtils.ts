@@ -3,6 +3,18 @@ import type { StoreError } from '../../src/utils/storeShared';
 
 export const TEST_INITIAL_TIME = new Date('2025-01-01').getTime();
 
+let defaultLowPriorityThrottleMs = 200;
+
+/** Sets the global default `lowPriorityThrottleMs` used by all test env creators. */
+export function setDefaultLowPriorityThrottleMs(ms: number) {
+  defaultLowPriorityThrottleMs = ms;
+}
+
+/** Returns the current global default `lowPriorityThrottleMs`. */
+export function getDefaultLowPriorityThrottleMs() {
+  return defaultLowPriorityThrottleMs;
+}
+
 /**
  * Custom error class that carries path and method information for testing
  */
@@ -300,6 +312,52 @@ export function createUITracker<T>(
   return {
     uiChanges,
     trackUIChanges,
+  };
+}
+
+export function createPerItemUITracker(
+  addAction: (
+    action: string,
+    options?: { uiValue?: unknown; time?: number; itemId?: string },
+  ) => void,
+  getRelativeTime: () => number,
+  actionsHistory: Action[],
+) {
+  const itemUIValues: Record<string, unknown> = {};
+  const uiChanges: Array<Record<string, unknown>> = [];
+  let uiInitialized = false;
+
+  function trackItemUI(itemId: string, value: unknown) {
+    const valueToUse = value ?? '⋯';
+    if (itemUIValues[itemId] === valueToUse) return;
+
+    itemUIValues[itemId] = valueToUse;
+    uiChanges.push({ ...itemUIValues });
+
+    const time = getRelativeTime();
+
+    if (
+      actionsHistory.some(
+        (action) =>
+          action.action === 'optimistic-ui-commit' &&
+          action.time === time &&
+          action.uiValue === valueToUse &&
+          action.itemId === itemId,
+      )
+    ) {
+      return;
+    }
+
+    addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
+      uiValue: valueToUse,
+      itemId,
+    });
+    uiInitialized = true;
+  }
+
+  return {
+    uiChanges,
+    trackItemUI,
   };
 }
 

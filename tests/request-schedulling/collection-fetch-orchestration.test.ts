@@ -1,14 +1,17 @@
 import { renderHook } from '@testing-library/react';
-import { afterEach, beforeAll, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
 
-beforeAll(() => {
+beforeEach(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
+  vi.useRealTimers();
 });
 
 test('simple mutation with revalidation and optimistic update', async () => {
@@ -151,19 +154,24 @@ test('fetching one item does not interfere with another item', async () => {
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
+  // When starting from idle, UI starts as unknown ("⋯") until the first response resolves.
   expect(env.uiChanges).toEqual([
-    { item1: { v: 1 } },
+    { item1: '⋯' },
+    { item1: '⋯', item2: '⋯' },
+    { item1: { v: 1 }, item2: '⋯' },
     { item1: { v: 1 }, item2: { v: 2 } },
   ]);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2   |
-    10ms  | -       | -       | 🔴 [item1] >fetch-started
-    .     | -       | -       | 🟠 [item2] >fetch-started
-    810ms | -       | -       | 🔴 [item1] <fetch-finished (value: {"v":1})
-    .     | {"v":1} | -       | [item1] ui-initialized
-    .     | {"v":1} | -       | 🟠 [item2] <fetch-finished (value: {"v":2})
+    0     | ⋯       | -       | [item1] ui-initialized
+    .     | ⋯       | ⋯       | [item2] ui-changed
+    10ms  | ⋯       | ⋯       | 🔴 [item1] >fetch-started
+    .     | ⋯       | ⋯       | 🟠 [item2] >fetch-started
+    810ms | ⋯       | ⋯       | 🔴 [item1] <fetch-finished (value: {"v":1})
+    .     | {"v":1} | ⋯       | [item1] ui-changed
+    .     | {"v":1} | ⋯       | 🟠 [item2] <fetch-finished (value: {"v":2})
     .     | {"v":1} | {"v":2} | [item2] ui-changed
     "
   `);

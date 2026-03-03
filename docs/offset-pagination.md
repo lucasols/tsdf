@@ -84,7 +84,12 @@ function TaskList() {
 
   return (
     <div>
-      {items.map((task) => <TaskRow key={task.id} task={task} />)}
+      {items.map((task) => (
+        <TaskRow
+          key={task.id}
+          task={task}
+        />
+      ))}
 
       {hasMore && (
         <button

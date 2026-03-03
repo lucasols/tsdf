@@ -9,14 +9,17 @@ See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./i
 ```ts
 import { createListQueryStore } from 'tsdf';
 
-type Task = { id: string; title: string; status: 'todo' | 'done'; priority: number };
+type Task = {
+  id: string;
+  title: string;
+  status: 'todo' | 'done';
+  priority: number;
+};
 type TaskFilter = { status?: 'todo' | 'done'; projectId: string };
 
 const taskStore = createListQueryStore<Task, TaskFilter, string>({
-  fetchListFn: (filter, size, { signal }) =>
-    api.getTasks(filter, size, signal),
-  fetchItemFn: (taskId, { signal }) =>
-    api.getTask(taskId, signal),
+  fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
+  fetchItemFn: (taskId, { signal }) => api.getTask(taskId, signal),
   errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
   baseCoalescingWindowMs: 100,
@@ -26,6 +29,7 @@ const taskStore = createListQueryStore<Task, TaskFilter, string>({
 ```
 
 The type parameters are:
+
 - `ItemState` - The shape of each item
 - `QueryPayload` - The payload that identifies a query (e.g., filter params)
 - `ItemPayload` - The payload that identifies an individual item (e.g., item ID)
@@ -36,34 +40,34 @@ The type parameters are:
 
 ### Required Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `fetchListFn` | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes) |
-| `errorNormalizer` | `(exception: Error) => StoreError` | Normalizes errors |
-| `lowPriorityThrottleMs` | `number` | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `baseCoalescingWindowMs` | `number` | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `backgroundCoalescingWindowMultiplier` | `number` | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `blockWindowClose` | `BlockWindowCloseHandler \| null` | See [Mutations](./mutations.md) |
+| Option                                 | Type                                                                | Description                                                         |
+| -------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `fetchListFn`                          | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes) |
+| `errorNormalizer`                      | `(exception: Error) => StoreError`                                  | Normalizes errors                                                   |
+| `lowPriorityThrottleMs`                | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                       |
+| `baseCoalescingWindowMs`               | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                       |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                       |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                     |
 
 ### Optional Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `fetchItemFn` | `(payload, options: { signal, fields? }) => Promise<ItemState>` | Fetches a single item. Required for `useItem`, `invalidateItem`, `scheduleItemFetch` |
-| `batchFetchItemFn` | `(requests, options) => Promise<Map<ItemPayload, ItemState \| Error>>` | See [Batch Fetching](./batch-fetching.md) |
-| `getItemsBatchKey` | `(payload: ItemPayload) => string \| false` | See [Batch Fetching](./batch-fetching.md) |
-| `defaultQuerySize` | `number` | Default page size (default: `50`) |
-| `maxItemBatchSize` | `number` | Max items per batch fetch |
-| `optimisticListUpdates` | `OptimisticListUpdate[]` | See [Optimistic List Updates](./optimistic-list-updates.md) |
-| `partialResources` | `PartialResourcesConfig` | See [Partial Resources](./partial-resources.md) |
-| `offsetPagination` | `OffsetPaginationConfig` | See [Offset Pagination](./offset-pagination.md) |
-| `getQueryKey` | `(params) => ValidPayload \| unknown[]` | Custom query key derivation |
-| `getItemKey` | `(params) => ValidPayload \| unknown[]` | Custom item key derivation |
-| `revalidateOnWindowFocus` | `boolean \| (() => boolean)` | Refetch on window focus |
-| `usesRealTimeUpdates` | `boolean` | See [Real-Time Updates](./real-time-updates.md) |
-| `onInvalidateQuery` | `(query, priority) => void` | Called when a query is invalidated |
-| `onInvalidateItem` | `(props: { itemState, payload, priority }) => void` | Called when an item is invalidated |
-| `onMutationError` | `(error, options) => void` | Global mutation error handler |
+| Option                    | Type                                                                   | Description                                                                          |
+| ------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `fetchItemFn`             | `(payload, options: { signal, fields? }) => Promise<ItemState>`        | Fetches a single item. Required for `useItem`, `invalidateItem`, `scheduleItemFetch` |
+| `batchFetchItemFn`        | `(requests, options) => Promise<Map<ItemPayload, ItemState \| Error>>` | See [Batch Fetching](./batch-fetching.md)                                            |
+| `getItemsBatchKey`        | `(payload: ItemPayload) => string \| false`                            | See [Batch Fetching](./batch-fetching.md)                                            |
+| `defaultQuerySize`        | `number`                                                               | Default page size (default: `50`)                                                    |
+| `maxItemBatchSize`        | `number`                                                               | Max items per batch fetch                                                            |
+| `optimisticListUpdates`   | `OptimisticListUpdate[]`                                               | See [Optimistic List Updates](./optimistic-list-updates.md)                          |
+| `partialResources`        | `PartialResourcesConfig`                                               | See [Partial Resources](./partial-resources.md)                                      |
+| `offsetPagination`        | `OffsetPaginationConfig`                                               | See [Offset Pagination](./offset-pagination.md)                                      |
+| `getQueryKey`             | `(params) => ValidPayload \| unknown[]`                                | Custom query key derivation                                                          |
+| `getItemKey`              | `(params) => ValidPayload \| unknown[]`                                | Custom item key derivation                                                           |
+| `revalidateOnWindowFocus` | `boolean \| (() => boolean)`                                           | Refetch on window focus                                                              |
+| `usesRealTimeUpdates`     | `boolean`                                                              | See [Real-Time Updates](./real-time-updates.md)                                      |
+| `onInvalidateQuery`       | `(query, priority) => void`                                            | Called when a query is invalidated                                                   |
+| `onInvalidateItem`        | `(props: { itemState, payload, priority }) => void`                    | Called when an item is invalidated                                                   |
+| `onMutationError`         | `(error, options) => void`                                             | Global mutation error handler                                                        |
 
 ### FetchListFnReturn
 
@@ -79,11 +83,13 @@ type FetchListFnReturn<ItemState, ItemPayload> = {
 ### Pagination Modes
 
 **Size mode (default):**
+
 ```ts
 fetchListFn: (payload, size, { signal, fields? }) => Promise<FetchListFnReturn>
 ```
 
 **Offset mode** (when `offsetPagination` is set):
+
 ```ts
 fetchListFn: (payload, { offset, limit }, { signal, fields? }) => Promise<FetchListFnReturn>
 ```
@@ -112,7 +118,7 @@ type TSFDListQuery<QueryPayload> = {
   hasMore: boolean;
   wasLoaded: boolean;
   refetchOnMount: false | FetchType;
-  items: string[];  // Array of item keys
+  items: string[]; // Array of item keys
 };
 ```
 
@@ -129,6 +135,7 @@ type TSDFItemQuery<ItemPayload> = {
 ```
 
 Key points:
+
 - `items` stores the actual data, shared across queries
 - `queries` stores query metadata and an ordered list of item keys
 - `itemQueries` stores per-item fetch metadata (for `fetchItemFn`)
@@ -138,61 +145,61 @@ Key points:
 
 ### Hooks
 
-| Hook | Description | Details |
-|------|-------------|---------|
-| `useListQuery(payload, options?)` | Fetch and subscribe to a list query | See [Hooks - useListQuery](./hooks.md#uselistquery) |
-| `useMultipleListQueries(queries, options?)` | Fetch multiple list queries | See [Hooks - useMultipleListQueries](./hooks.md#usemultiplelistqueries) |
-| `useItem(payload, options?)` | Fetch and subscribe to a single item | See [Hooks - useItem](./hooks.md#useitem) |
-| `useMultipleItems(items, options?)` | Fetch multiple individual items | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems) |
-| `useFindItem(findFn, options?)` | Find an item by predicate across all items | See [Hooks - useFindItem](./hooks.md#usefinditem) |
+| Hook                                        | Description                                | Details                                                                 |
+| ------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
+| `useListQuery(payload, options?)`           | Fetch and subscribe to a list query        | See [Hooks - useListQuery](./hooks.md#uselistquery)                     |
+| `useMultipleListQueries(queries, options?)` | Fetch multiple list queries                | See [Hooks - useMultipleListQueries](./hooks.md#usemultiplelistqueries) |
+| `useItem(payload, options?)`                | Fetch and subscribe to a single item       | See [Hooks - useItem](./hooks.md#useitem)                               |
+| `useMultipleItems(items, options?)`         | Fetch multiple individual items            | See [Hooks - useMultipleItems](./hooks.md#usemultipleitems)             |
+| `useFindItem(findFn, options?)`             | Find an item by predicate across all items | See [Hooks - useFindItem](./hooks.md#usefinditem)                       |
 
 ### Query Methods
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `scheduleListQueryFetch` | `(fetchType, payload(s), size?, options?) => ScheduleFetchResults` | Schedule a list fetch |
-| `awaitListQueryFetch` | `(params, options?) => Promise<{ items, error, hasMore }>` | Await a list fetch |
-| `loadMore` | `(params, size?, options?) => ScheduleFetchResults` | Load more items (pagination) |
-| `getQueryState` | `(params) => TSFDListQuery` | Get query state |
-| `getQueryKey` | `(params) => string` | Get composite key for a query payload |
-| `getQueriesState` | `(params) => TSFDListQuery[]` | Get multiple query states |
-| `getQueriesRelatedToItem` | `(itemPayload) => TSFDListQuery[]` | Find queries containing an item |
+| Method                    | Signature                                                          | Description                           |
+| ------------------------- | ------------------------------------------------------------------ | ------------------------------------- |
+| `scheduleListQueryFetch`  | `(fetchType, payload(s), size?, options?) => ScheduleFetchResults` | Schedule a list fetch                 |
+| `awaitListQueryFetch`     | `(params, options?) => Promise<{ items, error, hasMore }>`         | Await a list fetch                    |
+| `loadMore`                | `(params, size?, options?) => ScheduleFetchResults`                | Load more items (pagination)          |
+| `getQueryState`           | `(params) => TSFDListQuery`                                        | Get query state                       |
+| `getQueryKey`             | `(params) => string`                                               | Get composite key for a query payload |
+| `getQueriesState`         | `(params) => TSFDListQuery[]`                                      | Get multiple query states             |
+| `getQueriesRelatedToItem` | `(itemPayload) => TSFDListQuery[]`                                 | Find queries containing an item       |
 
 ### Item Methods
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `scheduleItemFetch` | `(fetchType, payload(s), options?) => ScheduleFetchResults` | Schedule an item fetch |
-| `awaitItemFetch` | `(itemPayload, options?) => Promise<{ data, error }>` | Await an item fetch |
-| `getItemKey` | `(params) => string` | Get composite key for an item payload |
-| `getItemState` | `(payload) => ItemState \| null` | Get item data |
+| Method              | Signature                                                   | Description                           |
+| ------------------- | ----------------------------------------------------------- | ------------------------------------- |
+| `scheduleItemFetch` | `(fetchType, payload(s), options?) => ScheduleFetchResults` | Schedule an item fetch                |
+| `awaitItemFetch`    | `(itemPayload, options?) => Promise<{ data, error }>`       | Await an item fetch                   |
+| `getItemKey`        | `(params) => string`                                        | Get composite key for an item payload |
+| `getItemState`      | `(payload) => ItemState \| null`                            | Get item data                         |
 
 ### Mutation Methods
 
-| Method | Description | Details |
-|--------|-------------|---------|
-| `invalidateQueryAndItems(options)` | Invalidate queries and/or items | See [Invalidation](./invalidation.md) |
-| `invalidateItem(payload(s), priority?)` | Invalidate item(s) only | See [Invalidation](./invalidation.md) |
+| Method                                          | Description                                                                               | Details                               |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------- |
+| `invalidateQueryAndItems(options)`              | Invalidate queries and/or items                                                           | See [Invalidation](./invalidation.md) |
+| `invalidateItem(payload(s), priority?)`         | Invalidate item(s) only                                                                   | See [Invalidation](./invalidation.md) |
 | `updateItemState(itemIds, produceFn, options?)` | Immer-based item update + applies [Optimistic List Updates](./optimistic-list-updates.md) |
-| `addItemToState(itemPayload, data, options?)` | Add an item with optional query placement |
-| `deleteItemState(itemId)` | Delete item from all queries |
-| `startItemMutation(itemId)` | Start mutation lock on item + related queries |
-| `performMutation(payload, options)` | Full mutation lifecycle. See [Mutations](./mutations.md) |
+| `addItemToState(itemPayload, data, options?)`   | Add an item with optional query placement                                                 |
+| `deleteItemState(itemId)`                       | Delete item from all queries                                                              |
+| `startItemMutation(itemId)`                     | Start mutation lock on item + related queries                                             |
+| `performMutation(payload, options)`             | Full mutation lifecycle. See [Mutations](./mutations.md)                                  |
 
 ### Other
 
-| Method | Description |
-|--------|-------------|
-| `reset()` | Full reset of all state and schedulers |
+| Method                   | Description                                     |
+| ------------------------ | ----------------------------------------------- |
+| `reset()`                | Full reset of all state and schedulers          |
 | `onTransportReconnect()` | See [Real-Time Updates](./real-time-updates.md) |
 
 ### Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `store` | `Store<TSFDListQueryState>` | Underlying t-state store |
-| `events` | `Emitter<ListQueryStoreEvents>` | Invalidation events (`invalidateQuery`, `invalidateItem`) |
-| `storeEvents` | `Emitter<ListQueryStoreStoreEvents>` | Mutation lifecycle events |
+| Property      | Type                                 | Description                                               |
+| ------------- | ------------------------------------ | --------------------------------------------------------- |
+| `store`       | `Store<TSFDListQueryState>`          | Underlying t-state store                                  |
+| `events`      | `Emitter<ListQueryStoreEvents>`      | Invalidation events (`invalidateQuery`, `invalidateItem`) |
+| `storeEvents` | `Emitter<ListQueryStoreStoreEvents>` | Mutation lifecycle events                                 |
 
 ## Usage Example
 
@@ -209,10 +216,15 @@ function TaskList({ projectId }: { projectId: string }) {
   return (
     <div>
       {items.map((task) => (
-        <TaskRow key={task.id} task={task} />
+        <TaskRow
+          key={task.id}
+          task={task}
+        />
       ))}
       {hasMore && (
-        <button onClick={() => taskStore.loadMore({ projectId, status: 'todo' })}>
+        <button
+          onClick={() => taskStore.loadMore({ projectId, status: 'todo' })}
+        >
           Load More
         </button>
       )}

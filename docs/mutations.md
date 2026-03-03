@@ -33,6 +33,7 @@ if (result.ok) {
 ```
 
 The `mutation` callback receives:
+
 - `updateState` - An immer-based function to update state during the mutation
 - `currentState` - The current data at the time the mutation executes
 
@@ -65,6 +66,7 @@ const result = await store.performMutation('item-id', {
 ```
 
 The payload can be:
+
 - A single item payload
 - An array of item payloads
 - A filter function `(payload, data) => boolean`
@@ -120,7 +122,7 @@ Return `false` from `optimisticUpdate` to cancel the mutation entirely:
 optimisticUpdate: (currentState) => {
   if (currentState?.locked) return false; // cancel mutation
   currentState.name = 'Updated';
-}
+};
 ```
 
 ## Debouncing
@@ -130,9 +132,9 @@ For frequent mutations (e.g., typing), use debounce to batch them:
 ```ts
 await store.performMutation({
   debounce: {
-    context: 'update-name',  // debounce key
-    payload: newName,         // only the latest payload is used
-    ms: 500,                  // wait 500ms of inactivity
+    context: 'update-name', // debounce key
+    payload: newName, // only the latest payload is used
+    ms: 500, // wait 500ms of inactivity
   },
   mutation: () => api.updateName(newName),
 });
@@ -142,11 +144,11 @@ During the debounce period, the window close is blocked to prevent data loss.
 
 ## Revalidation on Success
 
-| Option | Behavior |
-|--------|----------|
-| `revalidateOnSuccess: true` | Invalidates all affected items and queries |
-| `revalidateOnSuccess: 'queries'` | (List Query only) Invalidates only queries, not individual items |
-| `revalidateOnSuccess: false` (default) | No automatic revalidation |
+| Option                                 | Behavior                                                         |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| `revalidateOnSuccess: true`            | Invalidates all affected items and queries                       |
+| `revalidateOnSuccess: 'queries'`       | (List Query only) Invalidates only queries, not individual items |
+| `revalidateOnSuccess: false` (default) | No automatic revalidation                                        |
 
 ### Error Revalidation
 
@@ -160,7 +162,8 @@ await store.performMutation(payload, {
   getRelatedQueries: (queryPayload) => queryPayload.projectId === 'proj-1',
 
   // Control which queries are revalidated on success (defaults to getRelatedQueries)
-  getRevalidateOnSuccessQueries: (queryPayload) => queryPayload.status === 'active',
+  getRevalidateOnSuccessQueries: (queryPayload) =>
+    queryPayload.status === 'active',
 
   // Don't revalidate data on error (keeps optimistic state)
   dontRevalidateOnError: true,
@@ -169,8 +172,12 @@ await store.performMutation(payload, {
   silentErrors: true,
 
   // Callbacks
-  onSuccess: (response, payload) => { /* ... */ },
-  onError: (error) => { /* ... */ },
+  onSuccess: (response, payload) => {
+    /* ... */
+  },
+  onError: (error) => {
+    /* ... */
+  },
 });
 ```
 
@@ -208,7 +215,9 @@ const store = createDocumentStore({
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', handler);
-    return { unblock: () => window.removeEventListener('beforeunload', handler) };
+    return {
+      unblock: () => window.removeEventListener('beforeunload', handler),
+    };
   },
   // ...
 });

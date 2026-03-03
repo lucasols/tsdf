@@ -23,21 +23,21 @@ const userStore = createDocumentStore<User>({
 
 ## Options
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `fetchFn` | `(signal: AbortSignal) => Promise<State>` | Yes | Fetches the document data |
-| `errorNormalizer` | `(exception: Error) => StoreError` | Yes | Normalizes errors into [StoreError](./shared-types.md#storeerror) |
-| `lowPriorityThrottleMs` | `number` | Yes | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `baseCoalescingWindowMs` | `number` | Yes | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `backgroundCoalescingWindowMultiplier` | `number` | Yes | See [Fetch Scheduling](./fetch-scheduling.md) |
-| `blockWindowClose` | `BlockWindowCloseHandler \| null` | Yes | See [Mutations](./mutations.md) |
-| `debugName` | `string` | No | Debug name for logging |
-| `dynamicRealtimeThrottleMs` | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No | See [Real-Time Updates](./real-time-updates.md) |
-| `revalidateOnWindowFocus` | `boolean \| (() => boolean)` | No | Refetch on window focus |
-| `mediumPriorityDelayMs` | `number` | No | Delay for medium-priority fetches |
-| `usesRealTimeUpdates` | `boolean` | No | Enables [Real-Time Updates](./real-time-updates.md) mode |
-| `onSchedulerEvent` | `(event) => void` | No | Scheduler event listener |
-| `onMutationError` | `(error, options: { dontShowToast?: boolean }) => void` | No | Global mutation error handler |
+| Option                                 | Type                                                                             | Required | Description                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| `fetchFn`                              | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                         |
+| `errorNormalizer`                      | `(exception: Error) => StoreError`                                               | Yes      | Normalizes errors into [StoreError](./shared-types.md#storeerror) |
+| `lowPriorityThrottleMs`                | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
+| `baseCoalescingWindowMs`               | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                | Yes      | See [Mutations](./mutations.md)                                   |
+| `debugName`                            | `string`                                                                         | No       | Debug name for logging                                            |
+| `dynamicRealtimeThrottleMs`            | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                   |
+| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                           |
+| `mediumPriorityDelayMs`                | `number`                                                                         | No       | Delay for medium-priority fetches                                 |
+| `usesRealTimeUpdates`                  | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode          |
+| `onSchedulerEvent`                     | `(event) => void`                                                                | No       | Scheduler event listener                                          |
+| `onMutationError`                      | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                     |
 
 ## State Shape
 
@@ -58,33 +58,33 @@ type DocumentStoreState<State> = {
 
 ### Hooks
 
-| Hook | Description | Details |
-|------|-------------|---------|
-| `useDocument(options?)` | Primary data hook | See [Hooks - useDocument](./hooks.md#usedocument) |
-| `useListItemIsLoading(options)` | Detect if a sub-item is loading | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
-| `useListItemIsDeleted(options)` | Detect if a sub-item was deleted | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
-| `useListItem(options)` | Combined loading + deletion detection | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
+| Hook                            | Description                           | Details                                                       |
+| ------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| `useDocument(options?)`         | Primary data hook                     | See [Hooks - useDocument](./hooks.md#usedocument)             |
+| `useListItemIsLoading(options)` | Detect if a sub-item is loading       | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
+| `useListItemIsDeleted(options)` | Detect if a sub-item was deleted      | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
+| `useListItem(options)`          | Combined loading + deletion detection | See [Hooks - useListItem Hooks](./hooks.md#uselistitem-hooks) |
 
 ### Methods
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `scheduleFetch` | `(fetchType, options?) => ScheduleFetchResults` | Schedule a fetch. See [Fetch Scheduling](./fetch-scheduling.md) |
-| `awaitFetch` | `(options?) => Promise<{ data, error }>` | Await a fetch with optional `timeoutMs` |
-| `invalidateData` | `(priority?) => void` | Invalidate data. See [Invalidation](./invalidation.md) |
-| `updateState` | `(produceFn) => boolean` | Immer-based state update. Returns `false` if no data exists |
-| `reset` | `() => void` | Reset store to idle state |
-| `startMutation` | `() => () => boolean` | Manually start a mutation lock. See [Mutations](./mutations.md) |
-| `performMutation` | `(options) => Promise<Result<T>>` | Full mutation lifecycle. See [Mutations](./mutations.md) |
-| `onTransportReconnect` | `() => void` | See [Real-Time Updates](./real-time-updates.md) |
+| Method                 | Signature                                       | Description                                                     |
+| ---------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| `scheduleFetch`        | `(fetchType, options?) => ScheduleFetchResults` | Schedule a fetch. See [Fetch Scheduling](./fetch-scheduling.md) |
+| `awaitFetch`           | `(options?) => Promise<{ data, error }>`        | Await a fetch with optional `timeoutMs`                         |
+| `invalidateData`       | `(priority?) => void`                           | Invalidate data. See [Invalidation](./invalidation.md)          |
+| `updateState`          | `(produceFn) => boolean`                        | Immer-based state update. Returns `false` if no data exists     |
+| `reset`                | `() => void`                                    | Reset store to idle state                                       |
+| `startMutation`        | `() => () => boolean`                           | Manually start a mutation lock. See [Mutations](./mutations.md) |
+| `performMutation`      | `(options) => Promise<Result<T>>`               | Full mutation lifecycle. See [Mutations](./mutations.md)        |
+| `onTransportReconnect` | `() => void`                                    | See [Real-Time Updates](./real-time-updates.md)                 |
 
 ### Properties
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `store` | `Store<DocumentStoreState<State>>` | Underlying t-state store |
-| `events` | `Emitter<{ invalidateData: FetchType }>` | Invalidation events |
-| `storeEvents` | `Emitter<DocumentStoreStoreEvents>` | Mutation lifecycle events (`mutationStart`, `mutationEnd`) |
+| Property      | Type                                     | Description                                                |
+| ------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| `store`       | `Store<DocumentStoreState<State>>`       | Underlying t-state store                                   |
+| `events`      | `Emitter<{ invalidateData: FetchType }>` | Invalidation events                                        |
+| `storeEvents` | `Emitter<DocumentStoreStoreEvents>`      | Mutation lifecycle events (`mutationStart`, `mutationEnd`) |
 
 ## Usage Example
 

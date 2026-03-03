@@ -6,12 +6,12 @@ TSDF uses a `RequestScheduler` to intelligently manage when and how fetches are 
 
 Every fetch request has a priority that determines its behavior:
 
-| Priority | When used | Behavior |
-|----------|-----------|----------|
-| `lowPriority` | Hook mount (default), window focus revalidation | Throttled — skipped if a fetch happened recently (within `lowPriorityThrottleMs`) |
-| `mediumPriority` | Background refetches | Delayed by `mediumPriorityDelayMs`, then executed. Cancelled if another fetch starts. If the store has never been fetched, automatically promotes to `highPriority` |
-| `realtimeUpdate` | Real-time data pushes | Uses `dynamicRealtimeThrottleMs` for adaptive throttling based on last fetch duration |
-| `highPriority` | Explicit invalidation, `ensureIsLoaded` | Executes immediately (after coalescing window). Never throttled |
+| Priority         | When used                                       | Behavior                                                                                                                                                            |
+| ---------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lowPriority`    | Hook mount (default), window focus revalidation | Throttled — skipped if a fetch happened recently (within `lowPriorityThrottleMs`)                                                                                   |
+| `mediumPriority` | Background refetches                            | Delayed by `mediumPriorityDelayMs`, then executed. Cancelled if another fetch starts. If the store has never been fetched, automatically promotes to `highPriority` |
+| `realtimeUpdate` | Real-time data pushes                           | Uses `dynamicRealtimeThrottleMs` for adaptive throttling based on last fetch duration                                                                               |
+| `highPriority`   | Explicit invalidation, `ensureIsLoaded`         | Executes immediately (after coalescing window). Never throttled                                                                                                     |
 
 ## Throttling
 
@@ -74,14 +74,14 @@ This is useful for background refetches that should yield to user-initiated acti
 
 ## Configuration Reference
 
-| Option | Required | Description |
-|--------|----------|-------------|
-| `lowPriorityThrottleMs` | Yes | Minimum interval between low-priority fetches for the same item |
-| `baseCoalescingWindowMs` | Yes | Time window to group multiple requests into a single batch |
-| `backgroundCoalescingWindowMultiplier` | Yes | Multiplier for coalescing window when the tab is in background |
-| `mediumPriorityDelayMs` | No | Delay before medium-priority fetches execute |
-| `dynamicRealtimeThrottleMs` | No | Function returning throttle duration for real-time updates. See [Real-Time Updates](./real-time-updates.md) |
-| `maxBatchSize` | No | (Collection/ListQuery) Triggers immediate fetch when batch size is reached, skipping the coalescing window |
+| Option                                 | Required | Description                                                                                                 |
+| -------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `lowPriorityThrottleMs`                | Yes      | Minimum interval between low-priority fetches for the same item                                             |
+| `baseCoalescingWindowMs`               | Yes      | Time window to group multiple requests into a single batch                                                  |
+| `backgroundCoalescingWindowMultiplier` | Yes      | Multiplier for coalescing window when the tab is in background                                              |
+| `mediumPriorityDelayMs`                | No       | Delay before medium-priority fetches execute                                                                |
+| `dynamicRealtimeThrottleMs`            | No       | Function returning throttle duration for real-time updates. See [Real-Time Updates](./real-time-updates.md) |
+| `maxBatchSize`                         | No       | (Collection/ListQuery) Triggers immediate fetch when batch size is reached, skipping the coalescing window  |
 
 ## Typical Configuration
 

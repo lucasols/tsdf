@@ -80,10 +80,9 @@ export type CreateFetchApiOptions<
   errorNormalizer: (exception: Error) => StoreError;
   partialResources?: PartialResourcesConfig<ItemState>;
   lowPriorityThrottleMs: number;
-  baseCoalescingWindowMs: number;
+  getCoalescingWindowMs: () => number;
   mediumPriorityDelayMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-  getCoalescingWindowMultiplier?: () => number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   usesRealTimeUpdates: boolean;
   defaultQuerySize: number;
@@ -95,6 +94,26 @@ export type CreateFetchApiOptions<
   ) => string[] | undefined;
   testInitialLastFetchStartTime?: number;
   noFetchItemFnError: string;
+  onQueryFetchStart?: (
+    requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
+    startedAt: number,
+  ) => void;
+  onQueryFetchSettled?: (params: {
+    requests: BatchRequest<QueryFetchPayload<QueryPayload>>[];
+    results: Map<string, boolean>;
+    startedAt: number;
+    duration: number;
+  }) => void;
+  onItemFetchStart?: (
+    requests: BatchRequest<ItemFetchData<ItemPayload>>[],
+    startedAt: number,
+  ) => void;
+  onItemFetchSettled?: (params: {
+    requests: BatchRequest<ItemFetchData<ItemPayload>>[];
+    results: Map<string, boolean>;
+    startedAt: number;
+    duration: number;
+  }) => void;
 };
 
 export function createFetchApi<
@@ -111,10 +130,9 @@ export function createFetchApi<
   errorNormalizer,
   partialResources,
   lowPriorityThrottleMs,
-  baseCoalescingWindowMs,
+  getCoalescingWindowMs,
   mediumPriorityDelayMs,
   dynamicRealtimeThrottleMs,
-  getCoalescingWindowMultiplier,
   onSchedulerEvent,
   usesRealTimeUpdates,
   defaultQuerySize,
@@ -124,6 +142,10 @@ export function createFetchApi<
   normalizeFieldsOption,
   testInitialLastFetchStartTime,
   noFetchItemFnError,
+  onQueryFetchStart,
+  onQueryFetchSettled,
+  onItemFetchStart,
+  onItemFetchSettled,
 }: CreateFetchApiOptions<ItemState, QueryPayload, ItemPayload>) {
   type Query = TSFDListQuery<QueryPayload>;
 
@@ -132,6 +154,7 @@ export function createFetchApi<
     RequestScheduler<QueryFetchPayload<QueryPayload>>
   >();
   const queryInitialFetchStartTime = new Map<string, number>();
+  const itemInitialFetchStartTime = new Map<string, number>();
 
   if (import.meta.env.TEST && testInitialLastFetchStartTime !== undefined) {
     for (const queryKey of Object.keys(store.state.queries)) {
@@ -140,6 +163,57 @@ export function createFetchApi<
   }
 
   const itemKeyToPayload = new Map<string, ItemPayload>();
+
+  function seedQuerySchedulerKnownRequest(
+    scheduler: RequestScheduler<QueryFetchPayload<QueryPayload>>,
+    queryKey: string,
+    initialStartTime: number | undefined,
+  ): void {
+    if (
+      initialStartTime === undefined &&
+      store.state.queries[queryKey] === undefined
+    ) {
+      return;
+    }
+
+    scheduler.setLastFetchStartTimeForRequest(queryKey, initialStartTime ?? 0);
+  }
+
+  function seedItemSchedulerKnownRequest(
+    scheduler: RequestScheduler<ItemFetchData<ItemPayload>>,
+    itemKey: string,
+    initialStartTime = itemInitialFetchStartTime.get(itemKey),
+  ): void {
+    if (initialStartTime !== undefined) {
+      itemInitialFetchStartTime.delete(itemKey);
+    }
+
+    if (
+      initialStartTime === undefined &&
+      store.state.itemQueries[itemKey] === undefined
+    ) {
+      return;
+    }
+
+    scheduler.setLastFetchStartTimeForRequest(itemKey, initialStartTime ?? 0);
+  }
+
+  function seedBatchSchedulerKnownRequests(
+    scheduler: RequestScheduler<ItemFetchData<ItemPayload>>,
+    batchKey: string,
+  ): void {
+    for (const [itemKey, itemQuery] of Object.entries(
+      store.state.itemQueries,
+    )) {
+      const payload = itemQuery?.payload;
+      const currentBatchKey =
+        payload && getItemsBatchKey ? getItemsBatchKey(payload) : '__default__';
+
+      if (currentBatchKey !== batchKey) continue;
+
+      seedItemSchedulerKnownRequest(scheduler, itemKey);
+    }
+  }
 
   function updateItemSchedulerTiming(itemKey: string, startTime: number) {
     if (!fetchItemFn) return;
@@ -154,11 +228,11 @@ export function createFetchApi<
       if (batchKey !== false) {
         const scheduler = batchKeySchedulers.get(batchKey);
         if (scheduler) {
-          scheduler.setLastFetchStartTime(startTime);
+          scheduler.setLastFetchStartTimeForRequest(itemKey, startTime);
         } else {
-          const existingStartTime = batchInitialFetchStartTime.get(batchKey);
-          batchInitialFetchStartTime.set(
-            batchKey,
+          const existingStartTime = itemInitialFetchStartTime.get(itemKey);
+          itemInitialFetchStartTime.set(
+            itemKey,
             existingStartTime === undefined
               ? startTime
               : Math.max(existingStartTime, startTime),
@@ -170,9 +244,15 @@ export function createFetchApi<
 
     const existingScheduler = perItemSchedulers.get(itemKey);
     if (existingScheduler) {
-      existingScheduler.setLastFetchStartTime(startTime);
+      existingScheduler.setLastFetchStartTimeForRequest(itemKey, startTime);
     } else {
-      itemInitialFetchStartTime.set(itemKey, startTime);
+      const existingStartTime = itemInitialFetchStartTime.get(itemKey);
+      itemInitialFetchStartTime.set(
+        itemKey,
+        existingStartTime === undefined
+          ? startTime
+          : Math.max(existingStartTime, startTime),
+      );
     }
   }
 
@@ -192,7 +272,8 @@ export function createFetchApi<
           requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
-          return executeQueryFetch(
+          onQueryFetchStart?.(requests, fetchCtx.getStartTime());
+          const results = await executeQueryFetch(
             requests,
             fetchCtx,
             store,
@@ -203,9 +284,16 @@ export function createFetchApi<
             partialResources,
             offsetPagination,
           );
+          onQueryFetchSettled?.({
+            requests,
+            results,
+            startedAt: fetchCtx.getStartTime(),
+            duration: Date.now() - fetchCtx.getStartTime(),
+          });
+          return results;
         },
         lowPriorityThrottleMs,
-        baseCoalescingWindowMs,
+        getCoalescingWindowMs,
         dynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
@@ -239,8 +327,12 @@ export function createFetchApi<
           };
         },
         usesRealTimeUpdates,
-        getCoalescingWindowMultiplier,
       });
+      seedQuerySchedulerKnownRequest(
+        scheduler,
+        queryKey,
+        initialLastFetchStartTime,
+      );
       querySchedulers.set(queryKey, scheduler);
     }
     return scheduler;
@@ -269,7 +361,6 @@ export function createFetchApi<
     string,
     RequestScheduler<ItemFetchData<ItemPayload>>
   >();
-  const batchInitialFetchStartTime = new Map<string, number>();
 
   function getOrCreateBatchKeyScheduler(
     batchKey: string,
@@ -280,18 +371,13 @@ export function createFetchApi<
         throw new Error(noFetchItemFnError);
       }
 
-      const initialLastFetchStartTime =
-        batchInitialFetchStartTime.get(batchKey);
-      if (initialLastFetchStartTime !== undefined) {
-        batchInitialFetchStartTime.delete(batchKey);
-      }
-
       scheduler = new RequestScheduler<ItemFetchData<ItemPayload>>({
         fetchFn: async (
           requests: BatchRequest<ItemFetchData<ItemPayload>>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
-          return executeItemBatchFetch(
+          onItemFetchStart?.(requests, fetchCtx.getStartTime());
+          const results = await executeItemBatchFetch(
             requests,
             fetchCtx,
             store,
@@ -302,18 +388,24 @@ export function createFetchApi<
             partialResources,
             batchKey,
           );
+          onItemFetchSettled?.({
+            requests,
+            results,
+            startedAt: fetchCtx.getStartTime(),
+            duration: Date.now() - fetchCtx.getStartTime(),
+          });
+          return results;
         },
         lowPriorityThrottleMs,
-        baseCoalescingWindowMs,
+        getCoalescingWindowMs,
         dynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         maxBatchSize: maxItemBatchSize,
         on: onSchedulerEvent,
-        initialLastFetchStartTime,
         coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
-        getCoalescingWindowMultiplier,
       });
+      seedBatchSchedulerKnownRequests(scheduler, batchKey);
       batchKeySchedulers.set(batchKey, scheduler);
     }
     return scheduler;
@@ -323,34 +415,13 @@ export function createFetchApi<
     string,
     RequestScheduler<ItemFetchData<ItemPayload>>
   >();
-  const itemInitialFetchStartTime = new Map<string, number>();
 
   if (import.meta.env.TEST && testInitialLastFetchStartTime !== undefined) {
     for (const [itemKey, itemQuery] of Object.entries(
       store.state.itemQueries,
     )) {
-      const initialLastFetchStartTime = testInitialLastFetchStartTime;
-
-      if (useBatchSchedulers) {
-        const payload = itemQuery?.payload;
-        const batchKey =
-          payload && getItemsBatchKey
-            ? getItemsBatchKey(payload)
-            : '__default__';
-
-        if (batchKey !== false) {
-          const existingStartTime = batchInitialFetchStartTime.get(batchKey);
-          batchInitialFetchStartTime.set(
-            batchKey,
-            existingStartTime === undefined
-              ? initialLastFetchStartTime
-              : Math.max(existingStartTime, initialLastFetchStartTime),
-          );
-          continue;
-        }
-      }
-
-      itemInitialFetchStartTime.set(itemKey, initialLastFetchStartTime);
+      if (!itemQuery) continue;
+      itemInitialFetchStartTime.set(itemKey, testInitialLastFetchStartTime);
     }
   }
 
@@ -386,7 +457,8 @@ export function createFetchApi<
           requests: BatchRequest<ItemFetchData<ItemPayload>>[],
           fetchCtx: FetchContext,
         ): Promise<Map<string, boolean>> => {
-          return executeItemBatchFetch(
+          onItemFetchStart?.(requests, fetchCtx.getStartTime());
+          const results = await executeItemBatchFetch(
             requests,
             fetchCtx,
             store,
@@ -396,17 +468,28 @@ export function createFetchApi<
             errorNormalizer,
             partialResources,
           );
+          onItemFetchSettled?.({
+            requests,
+            results,
+            startedAt: fetchCtx.getStartTime(),
+            duration: Date.now() - fetchCtx.getStartTime(),
+          });
+          return results;
         },
         lowPriorityThrottleMs,
-        baseCoalescingWindowMs,
+        getCoalescingWindowMs,
         dynamicRealtimeThrottleMs,
         mediumPriorityDelayMs,
         on: onSchedulerEvent,
         initialLastFetchStartTime,
         coalescePayload: coalesceItemFetchPayload,
         usesRealTimeUpdates,
-        getCoalescingWindowMultiplier,
       });
+      seedItemSchedulerKnownRequest(
+        scheduler,
+        itemKey,
+        initialLastFetchStartTime,
+      );
       perItemSchedulers.set(itemKey, scheduler);
     }
     return scheduler;
@@ -416,6 +499,51 @@ export function createFetchApi<
     if (!useBatchSchedulers) return false;
     if (!getItemsBatchKey) return '__default__';
     return getItemsBatchKey(payload);
+  }
+
+  function getKnownQueryScheduler(
+    queryKey: string,
+  ): RequestScheduler<QueryFetchPayload<QueryPayload>> | null {
+    const existingScheduler = querySchedulers.get(queryKey);
+    if (existingScheduler) return existingScheduler;
+    if (store.state.queries[queryKey] === undefined) return null;
+
+    return getOrCreateQueryScheduler(queryKey);
+  }
+
+  function getKnownBatchKeyScheduler(
+    batchKey: string,
+  ): RequestScheduler<ItemFetchData<ItemPayload>> | null {
+    const existingScheduler = batchKeySchedulers.get(batchKey);
+    if (existingScheduler) return existingScheduler;
+
+    const hasKnownItems = Object.values(store.state.itemQueries).some(
+      (itemQuery) => {
+        if (!itemQuery) return false;
+        return getBatchKeyForPayload(itemQuery.payload) === batchKey;
+      },
+    );
+    if (!hasKnownItems) return null;
+
+    return getOrCreateBatchKeyScheduler(batchKey);
+  }
+
+  function getKnownItemRequestIds(requestIds: string[]): string[] {
+    return requestIds.filter((requestId) => {
+      return store.state.itemQueries[requestId] !== undefined;
+    });
+  }
+
+  function getKnownItemScheduler(
+    itemKey: string,
+  ): RequestScheduler<ItemFetchData<ItemPayload>> | null {
+    const existingScheduler = perItemSchedulers.get(itemKey);
+    if (existingScheduler) return existingScheduler;
+
+    const itemQuery = store.state.itemQueries[itemKey];
+    if (!itemQuery) return null;
+
+    return getOrCreateItemScheduler(itemKey, itemQuery.payload);
   }
 
   function maybeDisposeBatchScheduler(payload: ItemPayload): void {
@@ -435,7 +563,6 @@ export function createFetchApi<
     if (!hasRelatedItems) {
       scheduler.reset();
       batchKeySchedulers.delete(batchKey);
-      batchInitialFetchStartTime.delete(batchKey);
     }
   }
 
@@ -874,7 +1001,6 @@ export function createFetchApi<
       scheduler.reset();
     }
     batchKeySchedulers.clear();
-    batchInitialFetchStartTime.clear();
 
     for (const scheduler of perItemSchedulers.values()) {
       scheduler.reset();
@@ -882,6 +1008,73 @@ export function createFetchApi<
     perItemSchedulers.clear();
     itemInitialFetchStartTime.clear();
     itemKeyToPayload.clear();
+  }
+
+  function syncRemoteFetchStart(
+    targetKey: string,
+    requestIds: string[],
+    startedAt: number,
+  ): void {
+    if (targetKey.startsWith('query:')) {
+      const queryKey = targetKey.slice('query:'.length);
+      const scheduler = getKnownQueryScheduler(queryKey);
+      if (!scheduler) return;
+      scheduler.syncExternalFetchStart(requestIds, startedAt);
+      scheduler.cancelCoalescingRequests(requestIds);
+      return;
+    }
+
+    if (targetKey.startsWith('item-batch:')) {
+      const batchKey = targetKey.slice('item-batch:'.length);
+      const scheduler = getKnownBatchKeyScheduler(batchKey);
+      if (!scheduler) return;
+      const knownRequestIds = getKnownItemRequestIds(requestIds);
+      if (knownRequestIds.length === 0) return;
+
+      scheduler.syncExternalFetchStart(knownRequestIds, startedAt);
+      scheduler.cancelCoalescingRequests(knownRequestIds);
+      return;
+    }
+
+    const itemKey = targetKey.slice('item:'.length);
+    const scheduler = getKnownItemScheduler(itemKey);
+    if (!scheduler) return;
+
+    scheduler.syncExternalFetchStart(requestIds, startedAt);
+    scheduler.cancelCoalescingRequests(requestIds);
+  }
+
+  function syncRemoteFetchSuccess(
+    targetKey: string,
+    requestIds: string[],
+    startedAt: number,
+    duration: number,
+  ): void {
+    if (targetKey.startsWith('query:')) {
+      const queryKey = targetKey.slice('query:'.length);
+      const scheduler = getKnownQueryScheduler(queryKey);
+      if (!scheduler) return;
+
+      scheduler.syncExternalFetchSuccess(requestIds, startedAt, duration);
+      return;
+    }
+
+    if (targetKey.startsWith('item-batch:')) {
+      const batchKey = targetKey.slice('item-batch:'.length);
+      const scheduler = getKnownBatchKeyScheduler(batchKey);
+      if (!scheduler) return;
+      const knownRequestIds = getKnownItemRequestIds(requestIds);
+      if (knownRequestIds.length === 0) return;
+
+      scheduler.syncExternalFetchSuccess(knownRequestIds, startedAt, duration);
+      return;
+    }
+
+    const itemKey = targetKey.slice('item:'.length);
+    const scheduler = getKnownItemScheduler(itemKey);
+    if (!scheduler) return;
+
+    scheduler.syncExternalFetchSuccess(requestIds, startedAt, duration);
   }
 
   return {
@@ -898,6 +1091,8 @@ export function createFetchApi<
     awaitItemFetch,
     getOrCreateQueryScheduler,
     getOrCreateItemScheduler,
+    syncRemoteFetchStart,
+    syncRemoteFetchSuccess,
     deleteItemFetchResources,
     resetSchedulers,
   };

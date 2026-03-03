@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { createCollectionStore } from '../../src/collectionStore/collectionStore';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
-import { normalizeError } from '../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
 
 type TodoItem = { title: string; completed: boolean };
@@ -11,6 +11,7 @@ const defaultTodo: TodoItem = { title: 'todo', completed: false };
 
 beforeAll(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -50,7 +51,10 @@ describe('test helpers', () => {
 });
 
 describe('fetch lifecycle', () => {
-  const env = createCollectionStoreTestEnv({});
+  const env = createCollectionStoreTestEnv(
+    {},
+    { ignoreInitialTimeCheck: true },
+  );
 
   test('fetch resource', async () => {
     env.serverTable.setItem('1', defaultTodo);
@@ -531,6 +535,8 @@ test('mutating a obj passed as payload does not break the store', async () => {
     { value: TodoItem },
     { id: { id: string } }
   >({
+    id: 'test-payload-mutation',
+    getSessionKey: () => 'test-session',
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs: 10,

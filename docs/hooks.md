@@ -15,14 +15,14 @@ All hooks share these behaviors:
 
 These options are available across all data hooks:
 
-| Option | Default | Behavior |
-|--------|---------|----------|
-| `disabled` / `isOffScreen` | `false` | When `true`, the hook does not trigger any fetches or respond to invalidation. Also respects the [IsOffScreenContext](./shared-types.md#isoffscreencontext) |
-| `disableRefetches` | `false` | Only fetches data if it has never been loaded (status is `idle` or `error`). Skips all refetches, even from invalidation |
-| `disableRefetchOnMount` | `false` (or `true` when `usesRealTimeUpdates` is enabled) | Only fetches if data was explicitly invalidated or has never been loaded. Skips the low-priority refetch that normally happens on mount |
-| `returnIdleStatus` | `true` when disabled, `false` otherwise | When `false`, maps `idle` status to `loading` so the UI shows a loading state immediately |
-| `returnRefetchingStatus` | `false` | When `false`, maps `refetching` status to `success` so the UI doesn't flicker during background refetches |
-| `ensureIsLoaded` | `false` | Forces a high-priority fetch on mount and overrides status to `loading` until data is loaded. Useful for components that must show fresh data |
+| Option                     | Default                                                   | Behavior                                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled` / `isOffScreen` | `false`                                                   | When `true`, the hook does not trigger any fetches or respond to invalidation. Also respects the [IsOffScreenContext](./shared-types.md#isoffscreencontext) |
+| `disableRefetches`         | `false`                                                   | Only fetches data if it has never been loaded (status is `idle` or `error`). Skips all refetches, even from invalidation                                    |
+| `disableRefetchOnMount`    | `false` (or `true` when `usesRealTimeUpdates` is enabled) | Only fetches if data was explicitly invalidated or has never been loaded. Skips the low-priority refetch that normally happens on mount                     |
+| `returnIdleStatus`         | `true` when disabled, `false` otherwise                   | When `false`, maps `idle` status to `loading` so the UI shows a loading state immediately                                                                   |
+| `returnRefetchingStatus`   | `false`                                                   | When `false`, maps `refetching` status to `success` so the UI doesn't flicker during background refetches                                                   |
+| `ensureIsLoaded`           | `false`                                                   | Forces a high-priority fetch on mount and overrides status to `loading` until data is loaded. Useful for components that must show fresh data               |
 
 ## useDocument
 
@@ -116,10 +116,12 @@ The `'deleted'` status is returned when the item's state is explicitly set to `n
 Fetches and subscribes to a paginated list query.
 
 ```tsx
-const { items, status, hasMore, isLoading, isLoadingMore } = store.useListQuery({
-  projectId: 'proj-1',
-  status: 'active',
-});
+const { items, status, hasMore, isLoading, isLoadingMore } = store.useListQuery(
+  {
+    projectId: 'proj-1',
+    status: 'active',
+  },
+);
 ```
 
 ### Disabling with falsy payload
@@ -195,10 +197,9 @@ const queries = store.useMultipleListQueries([
 Finds a single item across all items in the store by a predicate. Does not trigger any fetch — only searches the existing state.
 
 ```tsx
-const activeTask = store.useFindItem(
-  (item) => item.isActive,
-  { selector: (item) => item.title },
-);
+const activeTask = store.useFindItem((item) => item.isActive, {
+  selector: (item) => item.title,
+});
 // activeTask is string | null
 ```
 
@@ -220,6 +221,7 @@ const isLoading = store.useListItemIsLoading({
 ```
 
 Behavior:
+
 1. If the sub-item exists in the data, returns `false`
 2. If the sub-item is missing and the parent data is still loading, returns `true`
 3. After 100ms timeout, if the sub-item is still missing and no refetch is in progress, calls `loadItemFallback` (defaults to `invalidateData()` / `invalidateItem()`)
@@ -252,8 +254,11 @@ const { isLoading, isDeleted, data } = store.useListItem({
 For Collection Store, these hooks take the item payload as the first argument:
 
 ```tsx
-const { isLoading, isDeleted, data } = collectionStore.useListItem('item-payload', {
-  itemId: 'sub-item-1',
-  selector: (data) => data?.nested?.find((i) => i.id === 'sub-item-1'),
-});
+const { isLoading, isDeleted, data } = collectionStore.useListItem(
+  'item-payload',
+  {
+    itemId: 'sub-item-1',
+    selector: (data) => data?.nested?.find((i) => i.id === 'sub-item-1'),
+  },
+);
 ```

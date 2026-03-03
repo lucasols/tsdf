@@ -19,11 +19,11 @@ const store = createDocumentStore<Data>({
 
 When `usesRealTimeUpdates: true`:
 
-| Behavior | Change |
-|----------|--------|
-| `disableRefetchOnMount` | Defaults to `true` globally (data comes via push, not polling) |
-| `revalidateOnWindowFocus` | Disabled (real-time transport handles freshness) |
-| `realtimeUpdate` fetch type | Enabled for use with the scheduler |
+| Behavior                    | Change                                                         |
+| --------------------------- | -------------------------------------------------------------- |
+| `disableRefetchOnMount`     | Defaults to `true` globally (data comes via push, not polling) |
+| `revalidateOnWindowFocus`   | Disabled (real-time transport handles freshness)               |
+| `realtimeUpdate` fetch type | Enabled for use with the scheduler                             |
 
 ## Pushing Updates
 
@@ -78,7 +78,7 @@ dynamicRealtimeThrottleMs: ({ lastFetchDuration, windowIsNotFocused }) => {
   // If window is not focused, wait 10x longer
   if (windowIsNotFocused) return lastFetchDuration * 10;
   return lastFetchDuration * 2;
-}
+};
 ```
 
 This prevents the UI from being overwhelmed by rapid updates while keeping data fresh.
@@ -94,6 +94,7 @@ websocket.on('reconnect', () => {
 ```
 
 Behavior:
+
 - If the window is **focused**: all data is invalidated immediately with `realtimeUpdate` priority
 - If the window is **not focused**: invalidation is deferred until the window regains focus
 - Multiple reconnect calls while unfocused are coalesced (only one invalidation fires on focus)
