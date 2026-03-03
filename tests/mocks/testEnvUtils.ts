@@ -3,6 +3,18 @@ import type { StoreError } from '../../src/utils/storeShared';
 
 export const TEST_INITIAL_TIME = new Date('2025-01-01').getTime();
 
+let defaultLowPriorityThrottleMs = 200;
+
+/** Sets the global default `lowPriorityThrottleMs` used by all test env creators. */
+export function setDefaultLowPriorityThrottleMs(ms: number) {
+  defaultLowPriorityThrottleMs = ms;
+}
+
+/** Returns the current global default `lowPriorityThrottleMs`. */
+export function getDefaultLowPriorityThrottleMs() {
+  return defaultLowPriorityThrottleMs;
+}
+
 /**
  * Custom error class that carries path and method information for testing
  */
