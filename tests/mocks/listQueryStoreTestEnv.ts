@@ -285,7 +285,7 @@ export function createListQueryStoreTestEnv<
         if (message.kind === 'list-item-snapshot') {
           addAction(`<${message.consistency}-item-snapshot-received`, {
             actionValue: message.item,
-            itemId: message.itemKey,
+            itemId: message.itemQuery?.payload,
           });
         }
 

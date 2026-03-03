@@ -945,3 +945,89 @@ test('list query background RTU invalidations dedupe to one query fetch when all
     "
   `);
 });
+
+test('list query RTU fetch in the active tab updates the background tab that uses different query filters', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-rtu-filters');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedUsersTableState();
+
+  const filters = [{ op: 'eq' as const, field: 'id', value: 1 }];
+
+  const envA = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: { loaded: { tables: ['users'] } },
+    usesRealTimeUpdates: true,
+  });
+  const envB = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    testScenario: {
+      loaded: { queries: [{ tableId: 'users', filters }] },
+    },
+    usesRealTimeUpdates: true,
+  });
+
+  renderHook(() => {
+    const query = envA.apiStore.useListQuery({ tableId: 'users' });
+    for (const item of query.items) {
+      envA.trackItemUI(`users||${item.id}`, item.name);
+    }
+  });
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({
+      tableId: 'users',
+      filters,
+    });
+    for (const item of query.items) {
+      envB.trackItemUI(`users||${item.id}`, item.name);
+    }
+  });
+
+  envA.serverTable.setItem(
+    'users||1',
+    { id: 1, name: 'Zoe' },
+    { triggerRTUEvent: true },
+  );
+  await flushAllTimers();
+
+  expect(
+    envA.serverTable.fetchHistory.filter((entry) => entry.type === 'list'),
+  ).toHaveLength(1);
+  expect(
+    envB.serverTable.fetchHistory.filter((entry) => entry.type === 'list'),
+  ).toHaveLength(1);
+  expect(
+    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
+  ).toEqual({
+    id: 1,
+    name: 'Zoe',
+  });
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 | users||2 |
+    0     | Alice    | -        | [users||1] ui-initialized
+    .     | Alice    | Bob      | [users||2] ui-changed
+    .     | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
+    .     | Alice    | Bob      | [users||1] received-ws-data-change-event
+    10ms  | Alice    | Bob      | 🔴 >list-fetch-started
+    810ms | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Zoe      | Bob      | [users||1] ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | Alice    | ui-initialized
+    .     | Alice    | received-ws-data-change-event
+    1.01s | Alice    | 🔴 >list-fetch-started
+    1.81s | Alice    | 🔴 <list-fetch-finished (value: {"count":1})
+    .     | Zoe      | ui-changed
+    "
+  `);
+});
