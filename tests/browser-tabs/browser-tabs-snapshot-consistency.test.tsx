@@ -1,55 +1,58 @@
 import { renderHook } from '@testing-library/react';
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
+import {
+  createInMemoryBrowserTabsTransportFactory,
+  createInspectableInMemoryBrowserTabsTransportFactory,
+  getNextStoreId,
+} from '../mocks/browserTabsTestUtils';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
-  createInspectableInMemoryBrowserTabsTransportFactory,
-  createInMemoryBrowserTabsTransportFactory,
-  getNextStoreId,
-} from '../mocks/browserTabsTestUtils';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+  createListQueryStoreTestEnv,
+  createSharedListQueryServerTableState,
+  type Row,
+} from '../mocks/listQueryStoreTestEnv';
+import { createSharedServerMockState } from '../mocks/serverMock';
+import { createSharedServerTableState } from '../mocks/serverTableMock';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   countFetchHistoryEntries,
   createCollectionItems,
-  createFocusFlag,
+  createFocusChangeCoordinator,
   createOptimisticSortConfig,
   createThreeUsersTable,
   createUsersTable,
   getMessageKinds,
   getNonStatusMessages,
   getPublisherTabIds,
-  markLastActiveTab,
   partialResourcesConfig,
   setupBrowserTabsTestLifecycle,
 } from './browser-tabs-test-helpers';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-
-vi.mock('@ls-stack/browser-utils/window', () => ({
-  onWindowFocus: (handler: () => void) => {
-    window.addEventListener('focus', handler);
-    return () => window.removeEventListener('focus', handler);
-  },
-  isWindowFocused: () => !document.hidden,
-}));
 
 setupBrowserTabsTestLifecycle();
 
 test('collection snapshots do not re-broadcast after remote application', async () => {
   const transport = createInspectableInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-audit');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transport.transportFactory,
     testScenario: 'loaded',
   });
   createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transport.transportFactory,
     testScenario: 'loaded',
   });
   createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transport.transportFactory,
     testScenario: 'loaded',
   });
@@ -74,14 +77,19 @@ test('collection snapshots do not re-broadcast after remote application', async 
 test('collection resets stay local to the tab that triggered them', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-reset');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });

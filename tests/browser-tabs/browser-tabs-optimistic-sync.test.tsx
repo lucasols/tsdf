@@ -12,6 +12,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { createSharedServerMockState } from '../mocks/serverMock';
 import { createSharedServerTableState } from '../mocks/serverTableMock';
+import { setDefaultLowPriorityThrottleMs } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   createCollectionItems,
@@ -20,6 +21,8 @@ import {
   createUsersTable,
   setupBrowserTabsTestLifecycle,
 } from './browser-tabs-test-helpers';
+
+setDefaultLowPriorityThrottleMs(60_000); // Set a high default throttle to avoid unintended refetch on mounts
 
 setupBrowserTabsTestLifecycle();
 
@@ -317,22 +320,34 @@ test('collection failed optimistic mutations revert the synced background state'
 test('list query optimistic sorting propagates to other tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-sort');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { loaded: { tables: ['users'] } },
     optimisticListUpdates: createOptimisticSortConfig(),
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { loaded: { tables: ['users'] } },
     optimisticListUpdates: createOptimisticSortConfig(),
+  });
+
+  renderHook(() => {
+    const query = envA.apiStore.useListQuery({ tableId: 'users' });
+    envA.trackItemUI('users||1', query.items[0]?.name);
+  });
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({ tableId: 'users' });
+    envB.trackItemUI('users||1', query.items[0]?.name);
   });
 
   void envA.performClientItemUpdateAction(
@@ -351,46 +366,74 @@ test('list query optimistic sorting propagates to other tabs', async () => {
     envB.getStoreItemKeyFromRaw('users||2'),
     envB.getStoreItemKeyFromRaw('users||1'),
   ]);
+
+  await flushAllTimers();
+
+  expect(envB.serverTable.fetchHistory).toHaveLength(0);
+
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1              |
+    0     | Alice                 | ui-initialized
+    .     | {"id":1,"name":"Zoe"} | ⬜ optimistic-ui-commit
+    .     | {"id":1,"name":"Zoe"} | ⬜ >mutation-started (value: {"id":1,"name":"Zoe"})
+    .     | Bob                   | ui-changed
+    700ms | Bob                   | ⬜ <mutation-data-persisted (value: {"id":1,"name":"Zoe"})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time | users||1 |
+    0    | Alice    | ui-initialized
+    .    | Alice    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .    | Bob      | ui-changed
+    .    | Bob      | <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
+    .    | Bob      | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    "
+  `);
 });
 
 test('list query failed optimistic mutations revert the synced background state', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-optimistic-error');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { loaded: { tables: ['users'] } },
     optimisticListUpdates: createOptimisticSortConfig(),
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { loaded: { tables: ['users'] } },
     optimisticListUpdates: createOptimisticSortConfig(),
   });
 
-  renderHook(() => envA.apiStore.useListQuery({ tableId: 'users' }));
-
-  let mutationPromise!: ReturnType<typeof envA.apiStore.performMutation>;
-  act(() => {
-    mutationPromise = envA.apiStore.performMutation('users||1', {
-      optimisticUpdate: (itemPayload) => {
-        envA.apiStore.updateItemState(itemPayload, (draft) => {
-          draft.name = 'Zoe';
-        });
-      },
-      mutation: async () => {
-        await wait(100);
-        throw new Error('Mutation failed');
-      },
-      getRelatedQueries: (query) => query.tableId === 'users',
-    });
+  renderHook(() => {
+    const query = envA.apiStore.useListQuery({ tableId: 'users' });
+    envA.trackItemUI('users||1', query.items[0]?.name);
   });
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({ tableId: 'users' });
+    envB.trackItemUI('users||1', query.items[0]?.name);
+  });
+
+  const mutationPromise = envA.performClientItemUpdateAction(
+    'users||1',
+    { name: 'Zoe' },
+    {
+      withOptimisticUpdate: true,
+      error: 'Mutation failed',
+    },
+  );
 
   await advanceTime(0);
 
@@ -414,4 +457,28 @@ test('list query failed optimistic mutations revert the synced background state'
     secondItemKey,
   ]);
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1              |
+    0     | Alice                 | ui-initialized
+    .     | {"id":1,"name":"Zoe"} | ⬜ optimistic-ui-commit
+    .     | {"id":1,"name":"Zoe"} | ⬜ <mutation-error (value: "Mutation failed")
+    .     | Bob                   | ui-changed
+    10ms  | Bob                   | 🔴 >list-fetch-started
+    810ms | Bob                   | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Alice                 | ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | Alice    | ui-initialized
+    .     | Alice    | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Bob      | ui-changed
+    .     | Bob      | <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
+    .     | Bob      | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    810ms | Bob      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Alice    | ui-changed
+    "
+  `);
 });
