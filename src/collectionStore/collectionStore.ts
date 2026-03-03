@@ -205,7 +205,8 @@ export type CollectionStoreOptions<
   blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
-   * from storage on initialization and saved back on successful fetches. */
+   * from storage on initialization and saved back on successful fetches.
+   * Session scoping always reuses this store's `getSessionKey`. */
   persistentStorage?: CollectionPersistentStorageConfig<ItemState>;
   /** @internal */
   '~test'?: {
@@ -296,9 +297,10 @@ export function createCollectionStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupCollectionPersistence<ItemState, ItemPayload>(
-        persistentStorageConfig,
-      )
+    ? setupCollectionPersistence<ItemState, ItemPayload>({
+        ...persistentStorageConfig,
+        getSessionKey,
+      })
     : null;
 
   const store = new Store<CollectionState>({

@@ -81,7 +81,9 @@ export type DocumentPersistenceSetup<State extends ValidStoreState> = {
  * For OPFS backend, performs async hydration after store creation.
  */
 export function setupDocumentPersistence<State extends ValidStoreState>(
-  config: DocumentPersistentStorageConfig<State>,
+  config: DocumentPersistentStorageConfig<State> & {
+    getSessionKey: () => string | false;
+  },
   options: {
     adapter?: StorageAdapter;
   } = {},

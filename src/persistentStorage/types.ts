@@ -62,14 +62,20 @@ export type PersistentStorageBaseConfig<T> = {
   getSessionKey: () => string | false;
 };
 
+/** Store-level persistent storage config. Session scoping comes from the parent store. */
+type StorePersistentStorageBaseConfig<T> = Omit<
+  PersistentStorageBaseConfig<T>,
+  'getSessionKey'
+>;
+
 /** Persistent storage config for DocumentStore. */
 export type DocumentPersistentStorageConfig<State extends ValidStoreState> =
-  PersistentStorageBaseConfig<State>;
+  StorePersistentStorageBaseConfig<State>;
 
 /** Persistent storage config for CollectionStore. */
 export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
-> = PersistentStorageBaseConfig<ItemState> & {
+> = StorePersistentStorageBaseConfig<ItemState> & {
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
   maxItems?: number;
   /** Item keys that should never be evicted from storage. */
@@ -79,7 +85,7 @@ export type CollectionPersistentStorageConfig<
 /** Persistent storage config for ListQueryStore. */
 export type ListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
-> = PersistentStorageBaseConfig<ItemState> & {
+> = StorePersistentStorageBaseConfig<ItemState> & {
   /** Maximum number of items to persist. Defaults to 100. */
   maxItems?: number;
   /** Maximum number of queries to persist. Defaults to 20. */

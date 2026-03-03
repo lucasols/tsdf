@@ -43,15 +43,17 @@ function createDocPersistenceEnv(options: {
   getSessionKey?: () => string | false;
   serverData?: TestData;
 }) {
+  const getSessionKey =
+    options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
+
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
     ignoreInitialTimeCheck: true,
+    getSessionKey,
     persistentStorage: {
       storeName: options.storeName,
       backend: 'localStorage',
       schema: wrappedSchema,
       version: options.version,
-      getSessionKey:
-        options.getSessionKey ?? (() => options.sessionKey ?? 'session1'),
     },
   });
 }
@@ -429,7 +431,6 @@ describe('localStorage: document store persistence', () => {
         storeName,
         backend: 'localStorage',
         schema: wrappedSchema,
-        getSessionKey: () => sessionKey,
       },
     });
 
@@ -505,7 +506,6 @@ describe('standard schema support', () => {
         storeName: 'std-doc',
         backend: 'localStorage',
         schema: standardSchema,
-        getSessionKey: () => 'sess-std',
       },
     });
 

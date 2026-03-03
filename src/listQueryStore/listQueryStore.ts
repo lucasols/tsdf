@@ -239,7 +239,8 @@ type ListQueryStoreOptionsBase<
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   /** Opt-in persistent storage configuration. When provided, cached items and queries
-   * are loaded from storage on initialization and saved back on successful fetches. */
+   * are loaded from storage on initialization and saved back on successful fetches.
+   * Session scoping always reuses this store's `getSessionKey`. */
   persistentStorage?: ListQueryPersistentStorageConfig<ItemState>;
 } & ([TPartialResources] extends [true]
   ? { partialResources: PartialResourcesConfig<ItemState> }
@@ -476,9 +477,10 @@ export function createListQueryStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
-        persistentStorageConfig,
-      )
+    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>({
+        ...persistentStorageConfig,
+        getSessionKey,
+      })
     : null;
 
   const store = new Store<State>({

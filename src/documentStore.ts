@@ -140,7 +140,8 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
-   * from storage on initialization and saved back on successful fetches. */
+   * from storage on initialization and saved back on successful fetches.
+   * Session scoping always reuses this store's `getSessionKey`. */
   persistentStorage?: DocumentPersistentStorageConfig<State>;
   /** @internal */
   '~test'?: {
@@ -216,7 +217,10 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupDocumentPersistence(persistentStorageConfig)
+    ? setupDocumentPersistence({
+        ...persistentStorageConfig,
+        getSessionKey,
+      })
     : null;
 
   if (persistence?.initialState) {

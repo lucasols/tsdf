@@ -259,7 +259,9 @@ export function setupListQueryPersistence<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 >(
-  config: ListQueryPersistentStorageConfig<ItemState>,
+  config: ListQueryPersistentStorageConfig<ItemState> & {
+    getSessionKey: () => string | false;
+  },
   options: {
     adapter?: StorageAdapter;
   } = {},

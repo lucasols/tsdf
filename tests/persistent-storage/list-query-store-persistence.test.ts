@@ -68,7 +68,6 @@ function createTestListQueryStore(options: {
       backend: 'localStorage',
       schema: itemSchema,
       version: options.version,
-      getSessionKey,
       maxItems: options.maxItems,
       maxQueries: options.maxQueries,
       pinnedItems: options.pinnedItems,

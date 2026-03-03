@@ -47,10 +47,13 @@ function createColPersistenceEnv(options: {
   maxItems?: number;
   pinnedItems?: string[];
 }) {
+  const getSessionKey = () => options.sessionKey ?? 'session1';
+
   return createCollectionStoreTestEnv(
     {},
     {
       ignoreInitialTimeCheck: true,
+      getSessionKey,
       persistentStorage: {
         storeName: options.storeName,
         backend: 'localStorage',
@@ -58,7 +61,6 @@ function createColPersistenceEnv(options: {
         version: options.version,
         maxItems: options.maxItems,
         pinnedItems: options.pinnedItems,
-        getSessionKey: () => options.sessionKey ?? 'session1',
       },
     },
   );

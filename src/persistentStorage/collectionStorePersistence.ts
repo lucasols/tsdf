@@ -150,7 +150,9 @@ export function setupCollectionPersistence<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 >(
-  config: CollectionPersistentStorageConfig<ItemState>,
+  config: CollectionPersistentStorageConfig<ItemState> & {
+    getSessionKey: () => string | false;
+  },
   options: {
     adapter?: StorageAdapter;
   } = {},
