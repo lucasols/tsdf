@@ -26,7 +26,7 @@ export function wait(ms: number): Promise<void> {
   });
 }
 
-export function createFocusFlag(initialValue: boolean) {
+function createFocusFlag(initialValue: boolean) {
   let current = initialValue;
   return {
     get: () => current,
