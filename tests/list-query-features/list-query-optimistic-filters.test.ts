@@ -62,6 +62,7 @@ function getQueryItems(
 
 test.concurrent('filter items optimistically to queries', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    ignoreInitialTimeCheck: true,
     testScenario: {
       loaded: {
         queries: [
@@ -137,6 +138,7 @@ test.concurrent('filter items optimistically to queries', () => {
 
 test.concurrent('optimistically create a query if it does not exist', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    ignoreInitialTimeCheck: true,
     testScenario: {
       loaded: {
         queries: [{ tableId: 'users', filters: byTypeFilter('user') }],
@@ -179,6 +181,7 @@ test.concurrent('optimistically create a query if it does not exist', () => {
 
 test.concurrent('optimistically sort items', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
+    ignoreInitialTimeCheck: true,
     testScenario: {
       loaded: {
         queries: [{ tableId: 'users', filters: byTypeFilter('user') }],
