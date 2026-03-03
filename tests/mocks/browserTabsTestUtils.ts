@@ -39,6 +39,9 @@ function createInMemoryBrowserTabsTransportFactoryBase() {
         if (!listenersForChannel) return;
 
         for (const listener of listenersForChannel) {
+          // Real BroadcastChannel does not deliver messages to the sender
+          if (listener === onMessage) continue;
+
           setTimeout(() => {
             listener(klona(message));
           }, 0);

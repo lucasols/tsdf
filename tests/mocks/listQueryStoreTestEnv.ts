@@ -500,12 +500,14 @@ export function createListQueryStoreTestEnv<
         duration,
         triggerRTU,
         addServerDataChangeAction,
+        error,
       }: {
         withRevalidation?: boolean;
         withOptimisticUpdate?: boolean;
         duration?: number;
         triggerRTU?: boolean;
         addServerDataChangeAction?: boolean;
+        error?: string;
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
@@ -539,6 +541,14 @@ export function createListQueryStoreTestEnv<
               }
             : undefined,
           mutation: async () => {
+            if (error) {
+              addAction('<mutation-error', {
+                actionValue: error,
+                id: mutationId,
+              });
+              throw new Error(error);
+            }
+
             return serverTable.emulateClientMutation(itemId, mergedValue, {
               duration,
               triggerRTUEvent: triggerRTU,

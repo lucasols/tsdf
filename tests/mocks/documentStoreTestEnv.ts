@@ -212,6 +212,10 @@ export function createDocumentStoreTestEnv<D>(
             : undefined,
           mutation: async ({ updateState }) => {
             if (error) {
+              addAction('<mutation-error', {
+                actionValue: error,
+                id: mutationId,
+              });
               throw new Error(error);
             }
 

@@ -315,13 +315,11 @@ export function createPerItemUITracker(
   const uiChanges: Array<Record<string, unknown>> = [];
   let uiInitialized = false;
 
-  function trackItemUI(
-    itemId: string,
-    value: string | number | boolean | null | undefined,
-  ) {
-    if (itemUIValues[itemId] === value) return;
+  function trackItemUI(itemId: string, value: unknown) {
+    const valueToUse = value ?? '⋯';
+    if (itemUIValues[itemId] === valueToUse) return;
 
-    itemUIValues[itemId] = value;
+    itemUIValues[itemId] = valueToUse;
     uiChanges.push({ ...itemUIValues });
 
     const time = getRelativeTime();
@@ -331,7 +329,7 @@ export function createPerItemUITracker(
         (action) =>
           action.action === 'optimistic-ui-commit' &&
           action.time === time &&
-          action.uiValue === value &&
+          action.uiValue === valueToUse &&
           action.itemId === itemId,
       )
     ) {
@@ -339,7 +337,7 @@ export function createPerItemUITracker(
     }
 
     addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
-      uiValue: value,
+      uiValue: valueToUse,
       itemId,
     });
     uiInitialized = true;

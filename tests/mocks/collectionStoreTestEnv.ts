@@ -248,12 +248,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
         duration,
         triggerRTU,
         addServerDataChangeAction,
+        error,
       }: {
         withRevalidation?: boolean;
         withOptimisticUpdate?: boolean;
         duration?: number;
         triggerRTU?: boolean;
         addServerDataChangeAction?: boolean;
+        error?: string;
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
@@ -274,6 +276,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
               }
             : undefined,
           mutation: async () => {
+            if (error) {
+              addAction('<mutation-error', {
+                actionValue: error,
+                id: mutationId,
+              });
+              throw new Error(error);
+            }
+
             const result = await serverTable.emulateClientMutation(
               itemId,
               newValue,
