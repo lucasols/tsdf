@@ -164,20 +164,35 @@ test('document failed optimistic mutations revert the synced background state', 
 test('collection optimistic updates propagate across tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-shared');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
+    lowPriorityThrottleMs: 60_000,
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
+    lowPriorityThrottleMs: 60_000,
+  });
+
+  renderHook(() => {
+    const item = envA.apiStore.useItem('item1');
+    envA.trackItemUI('item1', item.data?.value.name);
+  });
+  renderHook(() => {
+    const item = envB.apiStore.useItem('item1');
+    envB.trackItemUI('item1', item.data?.value.name);
   });
 
   void envA.performClientUpdateAction(
@@ -194,7 +209,29 @@ test('collection optimistic updates propagate across tabs', async () => {
   expect(envB.apiStore.getItemState('item1')?.data).toEqual({
     value: { name: 'Updated' },
   });
-  expect(envB.serverTable.fetchHistory).toHaveLength(0);
+
+  await flushAllTimers();
+
+  expect(envB.serverTable.numOfFinishedFetches).toBe(0);
+
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1              |
+    0     | Item 1             | ui-initialized
+    .     | {"name":"Updated"} | ⬜ optimistic-ui-commit
+    .     | {"name":"Updated"} | ⬜ >mutation-started (value: {"name":"Updated"})
+    .     | Updated            | ui-changed
+    700ms | Updated            | ⬜ <mutation-data-persisted (value: {"name":"Updated"})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time | item1   |
+    0    | Item 1  | ui-initialized
+    .    | Item 1  | <optimistic-snapshot-received (value: {"name":"Updated"})
+    .    | Updated | ui-changed
+    "
+  `);
 });
 
 test('collection failed optimistic mutations revert the synced background state', async () => {
