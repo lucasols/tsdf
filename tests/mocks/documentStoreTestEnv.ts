@@ -1,26 +1,37 @@
 import { act } from 'react';
-import { createDocumentStore } from '../../src/documentStore';
-import type { FetchType } from '../../src/requestScheduler';
-import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import type { DocumentPersistentStorageConfig } from '../../src/persistentStorage/types';
-import { createServerMock, type FetchErrorConfig } from './serverMock';
 import {
-  simulateWindowBlur,
-  simulateWindowFocus,
-} from '../utils/genericTestUtils';
+  createDocumentStore,
+  type DocumentBrowserTabsMessage,
+} from '../../src/documentStore';
+import type { FetchType } from '../../src/requestScheduler';
+import type { DocumentPersistentStorageConfig } from '../../src/persistentStorage/types';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
+import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  createServerMock,
+  type FetchErrorConfig,
+  type SharedServerMockState,
+} from './serverMock';
 import {
   createActionTracker,
   createEmojiCyclers,
   createUITracker,
+  getDefaultLowPriorityThrottleMs,
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
+  TEST_INITIAL_TIME,
 } from './testEnvUtils';
 
 export type DocumentStoreTestScenario<D> =
   /** App just opened, no data fetched yet. */
   | 'idle'
-  /** App already opened before and data was fetched successfully. */
+  /**
+   * App already opened before and data was fetched successfully.
+   * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
+   */
   | 'loaded'
   /** App started with data restored from local cache, pending server revalidation. */
   | { idleWithLocalCache: 'sameAsServer' | D }
@@ -28,12 +39,22 @@ export type DocumentStoreTestScenario<D> =
   | { loadedWithStaleData: D };
 
 export type DocumentStoreTestEnvOptions<D> = {
+  id?: string;
+  getSessionKey?: () => string | false;
+  sharedServerState?: SharedServerMockState<D>;
+  browserTabsTransportFactory?: BrowserTabsTransportFactory;
+  browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+  /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
+  bindFocusController?: {
+    getWindowIsFocused: () => boolean;
+    onWindowFocus: (handler: () => void) => () => void;
+    onWindowBlur: (handler: () => void) => () => void;
+  };
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  backgroundCoalescingWindowMultiplier?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
@@ -41,23 +62,38 @@ export type DocumentStoreTestEnvOptions<D> = {
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: DocumentPersistentStorageConfig<{ value: D }>;
+  ignoreInitialTimeCheck?: boolean;
 };
 
 export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
+    id = getNextStoreId('document'),
+    getSessionKey = () => 'test-session',
+    sharedServerState,
+    browserTabsTransportFactory,
+    browserTabsLeadershipTimings,
+    bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier = 1,
     baseCoalescingWindowMs = 10,
-    lowPriorityThrottleMs = 200,
+    lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
     persistentStorage,
+    ignoreInitialTimeCheck,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
+  if (!ignoreInitialTimeCheck) {
+    if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
+      throw new Error(
+        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+      );
+    }
+  }
+
   const {
     actionsHistory,
     addAction,
@@ -72,11 +108,17 @@ export function createDocumentStoreTestEnv<D>(
     number | string | undefined
   >(addAction, getRelativeTime, actionsHistory);
 
-  const serverMock = createServerMock<D>(serverInitialData, addAction);
+  const serverMock = createServerMock<D>(
+    serverInitialData,
+    addAction,
+    sharedServerState,
+  );
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
   const documentStore = createDocumentStore<{ value: D }>({
+    id,
+    getSessionKey,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
@@ -87,11 +129,39 @@ export function createDocumentStoreTestEnv<D>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     persistentStorage,
-    '~test': testOptions,
+    '~test': {
+      ...testOptions,
+      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+      onWindowFocus: bindFocusController
+        ? (handler: () => void) => {
+            return bindFocusController.onWindowFocus(handler);
+          }
+        : undefined,
+      onWindowFocusChange: bindFocusController
+        ? (handler: () => void) => {
+            const cleanupFocus = bindFocusController.onWindowFocus(handler);
+            const cleanupBlur = bindFocusController.onWindowBlur(handler);
+            return () => {
+              cleanupFocus();
+              cleanupBlur();
+            };
+          }
+        : undefined,
+      browserTabsTransportFactory,
+      browserTabsLeadershipTimings,
+      onReceiveRemoteMsg: (
+        message: DocumentBrowserTabsMessage<{ value: D }>,
+      ) => {
+        if (message.kind === 'document-snapshot') {
+          addAction(`<${message.consistency}-snapshot-received`, {
+            actionValue: message.data?.value,
+          });
+        }
+      },
+    },
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
@@ -104,7 +174,7 @@ export function createDocumentStoreTestEnv<D>(
     });
   }
 
-  return {
+  const env = {
     apiStore: documentStore,
     store: documentStore.store,
     get uiChanges() {
@@ -164,6 +234,10 @@ export function createDocumentStoreTestEnv<D>(
             : undefined,
           mutation: async ({ updateState }) => {
             if (error) {
+              addAction('<mutation-error', {
+                actionValue: error,
+                id: mutationId,
+              });
               throw new Error(error);
             }
 
@@ -200,27 +274,25 @@ export function createDocumentStoreTestEnv<D>(
     setNextFetchDurations(...durations: number[]) {
       serverMock.setFetchDurations(...durations);
     },
-    emulateExternalRTU(value: D, fetchDuration?: number) {
+    emulateExternalRTU(value: D) {
       serverMock.setData(value);
-
-      if (fetchDuration !== undefined) {
-        serverMock.setFetchDurations(fetchDuration);
-      }
 
       serverMock.wsEvents.emit('data_changed', undefined);
     },
     setServerData(value: D) {
       serverMock.setData(value);
     },
-    simulateWindowFocus() {
-      addAction('window-focused');
-      simulateWindowFocus();
-    },
-    simulateWindowBlur() {
-      addAction('window-blurred');
-      simulateWindowBlur();
-    },
   };
+
+  bindFocusController?.onWindowFocus(() => {
+    addAction('👁 window-focused');
+  });
+
+  bindFocusController?.onWindowBlur(() => {
+    addAction('🔕 window-blurred');
+  });
+
+  return env;
 }
 
 function resolveTestOptions<D>(

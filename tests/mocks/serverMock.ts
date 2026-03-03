@@ -32,12 +32,32 @@ export type AddActionFn = (
   options?: { id?: string | number; actionValue?: unknown },
 ) => void;
 
+type ServerMockEvents = {
+  data_changed: undefined;
+};
+
+export type SharedServerMockState<Data> = {
+  serverDataHistory: Data[];
+  wsEvents: ReturnType<typeof evtmitter<ServerMockEvents>>;
+};
+
+export function createSharedServerMockState<Data>(
+  initialData: Data,
+): SharedServerMockState<Data> {
+  return {
+    serverDataHistory: [initialData],
+    wsEvents: evtmitter<ServerMockEvents>(),
+  };
+}
+
 export function createServerMock<Data>(
   initialData: Data,
   addAction?: AddActionFn,
+  sharedState: SharedServerMockState<Data> = createSharedServerMockState(
+    initialData,
+  ),
 ) {
-  const serverDataHistory: Data[] = [initialData];
-  const wsEvents = evtmitter<{ data_changed: undefined }>();
+  const { serverDataHistory, wsEvents } = sharedState;
   const customFetchDurations: number[] = [];
   let nextFetchError: FetchErrorConfig | null = null;
 

@@ -3,6 +3,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 import {
   createListQueryStore,
+  type ListQueryBrowserTabsMessage,
   type ListQueryStoreOptions,
 } from '../../src/listQueryStore/listQueryStore';
 import type {
@@ -10,28 +11,26 @@ import type {
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+import { getNextStoreId } from './browserTabsTestUtils';
 import {
-  simulateWindowBlur,
-  simulateWindowFocus,
-} from '../utils/genericTestUtils';
-import { createServerTableMock, type FilterOperator } from './serverTableMock';
+  createServerTableMock,
+  createSharedServerTableState,
+  type FilterOperator,
+  type ServerTableSharedState,
+} from './serverTableMock';
 import {
   createActionTracker,
   createEmojiCyclers,
-  createUITracker,
+  createPerItemUITracker,
+  getDefaultLowPriorityThrottleMs,
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
+  TEST_INITIAL_TIME,
 } from './testEnvUtils';
-
-export type Row = {
-  id: number;
-  name: string;
-  [key: string]: unknown;
-};
-
-export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
 
 type ListQueryItemPayload = string;
 
@@ -49,7 +48,10 @@ type ListQuerySnapshotConfig = {
 export type ListQueryStoreTestScenario =
   /** App just opened, no data fetched yet. */
   | 'idle'
-  /** User already have the app loaded and data was fetched successfully. */
+  /**
+   * App already opened before and data was fetched successfully.
+   * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
+   */
   | { loaded: ListQuerySnapshotConfig }
   /** App started with data restored from local cache, pending server revalidation. */
   | { idleWithLocalCache: ListQuerySnapshotConfig };
@@ -64,6 +66,32 @@ function getStoreItemKey(tableId: string, id: number): string {
   return getCompositeKey(getRawItemKey(tableId, id));
 }
 
+export type Row = {
+  id: number;
+  name: string;
+  [key: string]: unknown;
+};
+
+export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
+
+function flattenTables<TRow extends Row>(
+  tables: Tables<TRow>,
+): Record<string, TRow> {
+  const flatItems: Record<string, TRow> = {};
+  for (const [tableId, rows] of Object.entries(tables)) {
+    for (const row of rows) {
+      flatItems[getRawItemKey(tableId, row.id)] = row;
+    }
+  }
+  return flatItems;
+}
+
+export function createSharedListQueryServerTableState<TRow extends Row>(
+  tables: Tables<TRow>,
+): ServerTableSharedState<TRow> {
+  return createSharedServerTableState(flattenTables(tables));
+}
+
 export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends boolean = false,
@@ -71,13 +99,18 @@ export function createListQueryStoreTestEnv<
 >(
   serverInitialData: Tables<TRow>,
   {
+    id = getNextStoreId('list-query'),
+    getSessionKey = () => 'test-session',
+    sharedServerTableState,
+    browserTabsTransportFactory,
+    browserTabsLeadershipTimings,
+    bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
-    lowPriorityThrottleMs = 200,
+    lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     testScenario,
     usesRealTimeUpdates,
     useBatchFetch,
@@ -88,13 +121,24 @@ export function createListQueryStoreTestEnv<
     partialResources,
     offsetPagination,
     blockWindowClose,
+    ignoreInitialTimeCheck,
   }: {
+    id?: string;
+    getSessionKey?: () => string | false;
+    sharedServerTableState?: ServerTableSharedState<TRow>;
+    browserTabsTransportFactory?: BrowserTabsTransportFactory;
+    browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+    /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
+    bindFocusController?: {
+      getWindowIsFocused: () => boolean;
+      onWindowFocus: (handler: () => void) => () => void;
+      onWindowBlur: (handler: () => void) => () => void;
+    };
     dynamicRealtimeThrottleMs?: (params: {
       lastFetchDuration: number;
       windowIsNotFocused: boolean;
     }) => number;
     revalidateOnWindowFocus?: boolean | (() => boolean);
-    backgroundCoalescingWindowMultiplier?: number;
     baseCoalescingWindowMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
@@ -114,8 +158,17 @@ export function createListQueryStoreTestEnv<
     partialResources?: PartialResourcesConfig<TRow>;
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
+    ignoreInitialTimeCheck?: boolean;
   } = {},
 ) {
+  if (!ignoreInitialTimeCheck) {
+    if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
+      throw new Error(
+        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+      );
+    }
+  }
+
   const {
     actionsHistory,
     addAction,
@@ -125,54 +178,17 @@ export function createListQueryStoreTestEnv<
   } = createActionTracker();
   const { getMutationEmoji } = createEmojiCyclers();
 
-  // Convert Tables to Record<string, TRow> for serverTableMock
-  const flatItems: Record<string, TRow> = {};
-  for (const [tableId, rows] of Object.entries(serverInitialData)) {
-    for (const row of rows) {
-      flatItems[getRawItemKey(tableId, row.id)] = row;
-    }
-  }
+  const serverTable = createServerTableMock<TRow>(
+    flattenTables(serverInitialData),
+    addAction,
+    sharedServerTableState,
+  );
 
-  const serverTable = createServerTableMock<TRow>(flatItems, addAction);
-
-  const { trackUIChanges } = createUITracker<unknown>(
+  const { uiChanges, trackItemUI } = createPerItemUITracker(
     addAction,
     getRelativeTime,
     actionsHistory,
   );
-
-  // Per-item UI tracking (same pattern as collection store)
-  const itemUIValues: Record<string, unknown> = {};
-  const uiChanges: Array<Record<string, unknown>> = [];
-  let uiInitialized = false;
-
-  function trackItemUI(itemId: string, value: unknown) {
-    if (itemUIValues[itemId] === value) return;
-
-    itemUIValues[itemId] = value;
-    uiChanges.push({ ...itemUIValues });
-
-    const time = getRelativeTime();
-
-    // Skip if this was already recorded by optimistic-ui-commit
-    if (
-      actionsHistory.some(
-        (a) =>
-          a.action === 'optimistic-ui-commit' &&
-          a.time === time &&
-          a.uiValue === value &&
-          a.itemId === itemId,
-      )
-    ) {
-      return;
-    }
-
-    addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
-      uiValue: value,
-      itemId,
-    });
-    uiInitialized = true;
-  }
 
   // Batch fetch function - delegates to serverTable.list with itemIds
   const batchFetchItemFn = async (
@@ -245,12 +261,13 @@ export function createListQueryStoreTestEnv<
   }
 
   const baseOptions = {
+    id,
+    getSessionKey,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     defaultQuerySize,
     usesRealTimeUpdates,
@@ -260,7 +277,46 @@ export function createListQueryStoreTestEnv<
     blockWindowClose: blockWindowClose ?? null,
     optimisticListUpdates,
     partialResources,
-    '~test': testOptions,
+    '~test': {
+      ...testOptions,
+      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+      onWindowFocus: bindFocusController
+        ? (handler: () => void) => {
+            return bindFocusController.onWindowFocus(handler);
+          }
+        : undefined,
+      onWindowFocusChange: bindFocusController
+        ? (handler: () => void) => {
+            const cleanupFocus = bindFocusController.onWindowFocus(handler);
+            const cleanupBlur = bindFocusController.onWindowBlur(handler);
+            return () => {
+              cleanupFocus();
+              cleanupBlur();
+            };
+          }
+        : undefined,
+      browserTabsTransportFactory,
+      browserTabsLeadershipTimings,
+      onReceiveRemoteMsg: (
+        message: ListQueryBrowserTabsMessage<TRow, ListQueryParams, string>,
+      ) => {
+        if (message.kind === 'list-item-snapshot') {
+          addAction(`<${message.consistency}-item-snapshot-received`, {
+            actionValue: message.item,
+            itemId: message.itemQuery?.payload,
+          });
+        }
+
+        if (message.kind === 'list-query-snapshot') {
+          addAction(`<${message.consistency}-query-snapshot-received`, {
+            actionValue: {
+              queryKey: message.queryKey,
+              itemCount: message.items.length,
+            },
+          });
+        }
+      },
+    },
     onSchedulerEvent: (
       event: import('../../src/requestScheduler').RequestSchedulerEvents,
     ) => {
@@ -387,22 +443,29 @@ export function createListQueryStoreTestEnv<
     });
   }
 
-  return {
+  // Hide wsEvents from the public type to prevent direct usage in tests,
+  // while keeping the runtime object intact (preserves getters).
+  const typedServerTable: Omit<
+    ReturnType<typeof createServerTableMock<TRow>>,
+    'wsEvents'
+  > = serverTable;
+
+  const env = {
     apiStore: listQueryStore,
     store: listQueryStore.store,
-    serverTable,
+    serverTable: typedServerTable,
     get uiChanges() {
       return uiChanges;
     },
     get actions() {
       return actionsHistory;
     },
-    trackUIChanges,
     trackItemUI,
     addTimelineComments,
-    getItemKey: (tableId: string, id: number) => getRawItemKey(tableId, id),
-    getStoreItemKey: (tableId: string, id: number) =>
-      getStoreItemKey(tableId, id),
+    getItemKey: (tableId: string, rowId: number) =>
+      getRawItemKey(tableId, rowId),
+    getStoreItemKey: (tableId: string, rowId: number) =>
+      getStoreItemKey(tableId, rowId),
     getStoreItemKeyFromRaw: (rawKey: string) => getCompositeKey(rawKey),
     getQueryKey: (params: ListQueryParams) => getCompositeKey(params),
     getItemQueryState: (rawItemKey: string) =>
@@ -455,12 +518,14 @@ export function createListQueryStoreTestEnv<
         duration,
         triggerRTU,
         addServerDataChangeAction,
+        error,
       }: {
         withRevalidation?: boolean;
         withOptimisticUpdate?: boolean;
         duration?: number;
         triggerRTU?: boolean;
         addServerDataChangeAction?: boolean;
+        error?: string;
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
@@ -494,6 +559,14 @@ export function createListQueryStoreTestEnv<
               }
             : undefined,
           mutation: async () => {
+            if (error) {
+              addAction('<mutation-error', {
+                actionValue: error,
+                id: mutationId,
+              });
+              throw new Error(error);
+            }
+
             return serverTable.emulateClientMutation(itemId, mergedValue, {
               duration,
               triggerRTUEvent: triggerRTU,
@@ -511,15 +584,17 @@ export function createListQueryStoreTestEnv<
     get timelineString() {
       return getTimelineString();
     },
-    simulateWindowFocus() {
-      addAction('window-focused');
-      simulateWindowFocus();
-    },
-    simulateWindowBlur() {
-      addAction('window-blurred');
-      simulateWindowBlur();
-    },
   };
+
+  bindFocusController?.onWindowFocus(() => {
+    addAction('👁 window-focused');
+  });
+
+  bindFocusController?.onWindowBlur(() => {
+    addAction('🔕 window-blurred');
+  });
+
+  return env;
 }
 
 type InitialData<TRow extends Row = Row> = {

@@ -5,6 +5,7 @@ export { createDocumentStore } from './documentStore';
 export { createListQueryStore } from './listQueryStore/listQueryStore';
 
 export { fetchTypePriority, StoreFetchError } from './utils/storeShared';
+export { IsOffScreenContext } from './isOffScreenContext';
 
 // Document Store types
 export * from './documentStore';

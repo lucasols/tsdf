@@ -35,8 +35,12 @@ function createTestListQueryStore(options: {
   fetchDuration?: number;
 }) {
   const fetchDuration = options.fetchDuration ?? 800;
+  const storeName = options.storeName ?? 'test-lq';
+  const getSessionKey = () => options.sessionKey ?? 'session1';
 
   const store = createListQueryStore<ItemState, QueryPayload, ItemPayload>({
+    id: storeName,
+    getSessionKey,
     fetchListFn: async (payload, size, { signal }) => {
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(resolve, fetchDuration);
@@ -58,14 +62,13 @@ function createTestListQueryStore(options: {
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs: 10,
-    backgroundCoalescingWindowMultiplier: 1,
     blockWindowClose: null,
     persistentStorage: {
-      storeName: options.storeName ?? 'test-lq',
+      storeName,
       backend: 'localStorage',
       schema: itemSchema,
       version: options.version,
-      getSessionKey: () => options.sessionKey ?? 'session1',
+      getSessionKey,
       maxItems: options.maxItems,
       maxQueries: options.maxQueries,
       pinnedItems: options.pinnedItems,

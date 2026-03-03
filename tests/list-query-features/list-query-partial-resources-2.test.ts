@@ -385,12 +385,9 @@ describe('load more with partial resources', () => {
     renders.addMark('Load more');
 
     act(() => {
-      env.apiStore.loadMore(
-        { tableId: 'users' },
-        {
-          fields: result.current,
-        },
-      );
+      const fields = result.current;
+      if (!fields) throw new Error('Expected fields to be defined');
+      env.apiStore.loadMore({ tableId: 'users' }, { fields });
     });
 
     await flushAllTimers();

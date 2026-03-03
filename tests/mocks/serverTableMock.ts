@@ -85,13 +85,6 @@ export type ListQueryResult<ItemData> = {
   hasMore: boolean;
 };
 
-export type ServerTableEvents<ItemData> = {
-  data_changed: { itemId: string; data: ItemData };
-  item_deleted: { itemId: string };
-  item_added: { itemId: string; data: ItemData };
-  list_changed: undefined;
-};
-
 export type MutationOptions = {
   duration?: number;
   setDataAt?: number;
@@ -114,13 +107,60 @@ export type AddActionFn = (
   options?: { id?: string | number; actionValue?: unknown; itemId?: string },
 ) => void;
 
-export function createServerTableMock<ItemData extends Record<string, unknown>>(
-  initialItems: Record<string, ItemData>,
-  addAction?: AddActionFn,
-) {
+function getTableId(itemId: string): string | null {
+  const [tableId, rowId] = itemId.split('||');
+  if (!tableId || !rowId) {
+    return null;
+  }
+  return tableId;
+}
+
+export type ServerTableEvents<ItemData> = {
+  data_changed: { itemId: string; data: ItemData };
+  item_deleted: { itemId: string };
+  item_added: { itemId: string; data: ItemData };
+  list_changed: undefined;
+};
+
+export type ServerTableSharedState<ItemData extends Record<string, unknown>> = {
+  items: Map<string, ItemData>;
+  knownTableIds: Set<string>;
+  itemHistory: Map<string, ItemData[]>;
+  wsEvents: ReturnType<typeof evtmitter<ServerTableEvents<ItemData>>>;
+};
+
+export function createSharedServerTableState<
+  ItemData extends Record<string, unknown>,
+>(initialItems: Record<string, ItemData>): ServerTableSharedState<ItemData> {
   const items = new Map<string, ItemData>(Object.entries(initialItems));
   const knownTableIds = new Set<string>();
   const itemHistory = new Map<string, ItemData[]>();
+
+  for (const [itemId, data] of items) {
+    itemHistory.set(itemId, [data]);
+
+    const tableId = getTableId(itemId);
+    if (tableId) {
+      knownTableIds.add(tableId);
+    }
+  }
+
+  return {
+    items,
+    knownTableIds,
+    itemHistory,
+    wsEvents: evtmitter<ServerTableEvents<ItemData>>(),
+  };
+}
+
+export function createServerTableMock<ItemData extends Record<string, unknown>>(
+  initialItems: Record<string, ItemData>,
+  addAction?: AddActionFn,
+  sharedState: ServerTableSharedState<ItemData> = createSharedServerTableState(
+    initialItems,
+  ),
+) {
+  const { items, knownTableIds, itemHistory, wsEvents } = sharedState;
   const customFetchDurations = new Map<string, number[]>();
   const defaultFetchDuration = DEFAULT_FETCH_DURATION_MS;
   const nextFetchErrors = new Map<string, FetchErrorConfig>();
@@ -169,25 +209,6 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     }
     return defaultFetchDuration;
   }
-
-  function getTableId(itemId: string): string | null {
-    const [tableId, rowId] = itemId.split('||');
-    if (!tableId || !rowId) {
-      return null;
-    }
-    return tableId;
-  }
-
-  for (const [itemId, data] of items) {
-    itemHistory.set(itemId, [data]);
-
-    const tableId = getTableId(itemId);
-    if (tableId) {
-      knownTableIds.add(tableId);
-    }
-  }
-
-  const wsEvents = evtmitter<ServerTableEvents<ItemData>>();
 
   async function fetch(
     itemId: string,
@@ -508,7 +529,10 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
   function setItem(
     itemId: string,
     data: ItemData,
-    options?: { triggerRTUEvent?: boolean; prepend?: boolean },
+    options?: {
+      triggerRTUEvent?: boolean | 'for_all_items';
+      prepend?: boolean;
+    },
   ): void {
     const tableId = getTableId(itemId);
     if (tableId) {
@@ -537,7 +561,11 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     addAction?.('server-data-changed', { actionValue: data, itemId });
 
     if (options?.triggerRTUEvent) {
-      wsEvents.emit('data_changed', { itemId, data });
+      if (options.triggerRTUEvent === 'for_all_items') {
+        wsEvents.emit('list_changed', undefined);
+      } else {
+        wsEvents.emit('data_changed', { itemId, data });
+      }
     }
   }
 

@@ -50,6 +50,7 @@ function createColPersistenceEnv(options: {
   return createCollectionStoreTestEnv(
     {},
     {
+      ignoreInitialTimeCheck: true,
       persistentStorage: {
         storeName: options.storeName,
         backend: 'localStorage',

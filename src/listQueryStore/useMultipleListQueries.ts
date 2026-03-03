@@ -4,9 +4,11 @@ import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
+import { IsOffScreenContext } from '../isOffScreenContext';
+import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
@@ -62,7 +64,7 @@ export function useMultipleListQueries<
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
-  scheduleListQueryFetch: (
+  scheduleAutomaticListQueryFetch: (
     fetchType: FetchType,
     payload: QueryPayload,
     size?: number,
@@ -76,6 +78,8 @@ export function useMultipleListQueries<
   QueryPayload,
   QueryMetadata
 >[] {
+  const isOffScreenFromContext = useContext(IsOffScreenContext);
+
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
 
   type QueryWithId = {
@@ -111,7 +115,8 @@ export function useMultipleListQueries<
         allItemsReturnRefetchingStatus ??
         false,
       omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
-      isOffScreen: queryProps.isOffScreen ?? allItemsIsOffScreen ?? false,
+      isOffScreen:
+        queryProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
       loadSize: queryProps.loadSize ?? allItemsLoadSize,
       queryMetadata: queryProps.queryMetadata,
     }));
@@ -126,6 +131,7 @@ export function useMultipleListQueries<
     allItemsReturnIdleStatus,
     allItemsReturnRefetchingStatus,
     globalDisableRefetchOnMount,
+    isOffScreenFromContext,
   ]);
 
   const getQueryItems = useCallback(
@@ -218,6 +224,24 @@ export function useMultipleListQueries<
             } else if (someItemMissingFields) {
               status = 'loading';
             }
+          } else if (
+            partialResources &&
+            fields === '*' &&
+            (status === 'success' || status === 'refetching')
+          ) {
+            const hasAnyFieldInvalidation = query.items.some((itemKey) => {
+              const itemFieldInvalidationFields =
+                state.itemFieldInvalidationFields[itemKey];
+
+              return (
+                !!itemFieldInvalidationFields &&
+                itemFieldInvalidationFields.length > 0
+              );
+            });
+
+            if (hasAnyFieldInvalidation) {
+              status = 'refetching';
+            }
           }
 
           if (!returnRefetchingStatus && status === 'refetching') {
@@ -274,7 +298,9 @@ export function useMultipleListQueries<
           query.refetchOnMount = false;
         });
 
-        scheduleListQueryFetch(event.priority, payload, undefined, { fields });
+        scheduleAutomaticListQueryFetch(event.priority, payload, undefined, {
+          fields,
+        });
         queryInvalidationWasTriggered.add(key);
       }
     }
@@ -363,16 +389,18 @@ export function useMultipleListQueries<
 
       ignoreQueriesInRefetchOnMount.add(queryId);
 
-      if (disableRefetches) {
-        if (!queryState?.wasLoaded) {
-          scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
-        }
-      } else if (disableRefetchOnMount) {
-        if (shouldFetch) {
-          scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
-        }
-      } else if (!partialResources || shouldFetch) {
-        scheduleListQueryFetch(fetchType, payload, loadSize, { fields });
+      if (
+        shouldScheduleAutomaticFetch({
+          wasLoaded: queryState?.wasLoaded,
+          shouldFetch: !!shouldFetch,
+          disableRefetches,
+          disableRefetchOnMount,
+          skipFreshFetch: !!partialResources,
+        })
+      ) {
+        scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
+          fields,
+        });
       }
     }
 
@@ -383,7 +411,7 @@ export function useMultipleListQueries<
     getQueryState,
     ignoreQueriesInRefetchOnMount,
     queriesWithId,
-    scheduleListQueryFetch,
+    scheduleAutomaticListQueryFetch,
     partialResources,
     store.state.itemLoadedFields,
     store.state.itemFieldInvalidationFields,

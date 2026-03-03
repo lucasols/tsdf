@@ -1,27 +1,15 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
-vi.mock('@ls-stack/browser-utils/window', () => ({
-  onWindowFocus: (handler: () => void) => {
-    window.addEventListener('focus', handler);
-    return () => window.removeEventListener('focus', handler);
-  },
-  isWindowFocused: () => !document.hidden,
-}));
-
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
-  Object.defineProperty(document, 'hidden', {
-    value: false,
-    writable: true,
-    configurable: true,
-  });
 });
 
 afterEach(() => {
@@ -32,9 +20,12 @@ afterEach(() => {
 // -- DocumentStore: revalidateOnWindowFocus ------------------------------------
 
 test('document store: focus triggers lowPriority invalidation for non-realtime store', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     revalidateOnWindowFocus: true,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => {
@@ -43,27 +34,32 @@ test('document store: focus triggers lowPriority invalidation for non-realtime s
 
   await flushAllTimers();
 
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(2);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |
-    0     | 0  | ui-initialized
-    10ms  | 0  | 🔴 >fetch-started
-    810ms | 0  | 🔴 <fetch-finished (value: 0)
-    .     | 0  | window-focused
-    820ms | 0  | 🟠 >fetch-started
-    1.62s | 0  | 🟠 <fetch-finished (value: 0)
+    time   | ui |
+    0      | 0  | ui-initialized
+    10ms   | 0  | 🔴 >fetch-started
+    810ms  | 0  | 🔴 <fetch-finished (value: 0)
+    .      | 0  | 🔕 window-blurred
+    815ms  | 0  | 👁 window-focused
+    825ms  | 0  | 🟠 >fetch-started
+    1.625s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });
 
 test('document store: focus does nothing when revalidateOnWindowFocus is not set', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], null);
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useDocument().data?.value);
@@ -72,7 +68,7 @@ test('document store: focus does nothing when revalidateOnWindowFocus is not set
 
   const fetchesBefore = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
@@ -80,10 +76,12 @@ test('document store: focus does nothing when revalidateOnWindowFocus is not set
 
 test('document store: focus with dynamic disable function', async () => {
   let enabled = true;
+  const tabs = createFocusChangeCoordinator(['a'], null);
 
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     revalidateOnWindowFocus: () => enabled,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useDocument().data?.value);
@@ -95,14 +93,15 @@ test('document store: focus with dynamic disable function', async () => {
 
   const fetchesBeforeDisabled = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBeforeDisabled);
 
   // Re-enable and focus — should trigger fetch
   enabled = true;
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBeGreaterThan(
@@ -111,11 +110,14 @@ test('document store: focus with dynamic disable function', async () => {
 });
 
 test('document store: realtime store does NOT trigger on focus even when option is set', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], null);
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
     revalidateOnWindowFocus: true,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useDocument().data?.value);
@@ -124,16 +126,19 @@ test('document store: realtime store does NOT trigger on focus even when option 
 
   const fetchesBefore = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
 });
 
 test('document store: reset() cleans up and re-registers focus listener', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], null);
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     revalidateOnWindowFocus: true,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useDocument().data?.value);
@@ -150,19 +155,21 @@ test('document store: reset() cleans up and re-registers focus listener', async 
 
   const fetchesBefore = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBeGreaterThan(fetchesBefore);
 });
 
-// -- DocumentStore: backgroundCoalescingWindowMultiplier -----------------------
+// -- DocumentStore: background coalescing window -------------------------------
 
-test('document store: coalescing window is multiplied when window is not focused', async () => {
+test('document store: a single background tab increases the coalescing window by 1 second', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     baseCoalescingWindowMs: 20,
-    backgroundCoalescingWindowMultiplier: 5,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => {
@@ -173,34 +180,35 @@ test('document store: coalescing window is multiplied when window is not focused
 
   const initialFetches = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowBlur();
+  await tabs.blur();
 
-  // Coalescing window should be 20 * 5 = 100ms
   env.apiStore.invalidateData('highPriority');
 
-  // At 50ms, still within the multiplied coalescing window
-  await advanceTime(50);
+  await advanceTime(10);
   expect(env.serverMock.numOfStartedFetches).toBe(initialFetches);
 
-  await advanceTime(20);
-  // trigger coalesced fetch
   env.apiStore.invalidateData('highPriority');
 
-  // At 110ms, past the multiplied coalescing window
-  await advanceTime(60);
+  await advanceTime(9);
+  expect(env.serverMock.numOfStartedFetches).toBe(initialFetches);
+
+  await advanceTime(1_000);
+  expect(env.serverMock.numOfStartedFetches).toBe(initialFetches);
+
+  await advanceTime(2);
   await flushAllTimers();
 
   expect(env.serverMock.numOfStartedFetches).toBe(initialFetches + 1);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  | ui |
-    0     | 0  | ui-initialized
-    20ms  | 0  | 🔴 >fetch-started
-    820ms | 0  | 🔴 <fetch-finished (value: 0)
-    .     | 0  | window-blurred
-    920ms | 0  | 🟠 >fetch-started
-    1.72s | 0  | 🟠 <fetch-finished (value: 0)
+    time   | ui |
+    0      | 0  | ui-initialized
+    20ms   | 0  | 🔴 >fetch-started
+    820ms  | 0  | 🔴 <fetch-finished (value: 0)
+    .      | 0  | 🔕 window-blurred
+    1.845s | 0  | 🟠 >fetch-started
+    2.645s | 0  | 🟠 <fetch-finished (value: 0)
     "
   `);
 });
@@ -213,6 +221,8 @@ test('document store: dynamicRealtimeThrottleMs receives correct windowIsNotFocu
     windowIsNotFocused: boolean;
   }> = [];
 
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
@@ -220,6 +230,7 @@ test('document store: dynamicRealtimeThrottleMs receives correct windowIsNotFocu
       receivedParams.push({ ...params });
       return 300;
     },
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useDocument().data?.value);
@@ -235,7 +246,7 @@ test('document store: dynamicRealtimeThrottleMs receives correct windowIsNotFocu
   expect(receivedParams.some((p) => p.windowIsNotFocused === false)).toBe(true);
 
   // Go to background and trigger RTU
-  env.simulateWindowBlur();
+  await tabs.blur();
   env.emulateExternalRTU(3);
   await flushAllTimers();
 
@@ -245,11 +256,14 @@ test('document store: dynamicRealtimeThrottleMs receives correct windowIsNotFocu
 // -- CollectionStore: revalidateOnWindowFocus ----------------------------------
 
 test('collection store: focus triggers lowPriority invalidation for all items', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createCollectionStoreTestEnv(
     { '1': { name: 'Alice' }, '2': { name: 'Bob' } },
     {
       testScenario: 'loaded',
       revalidateOnWindowFocus: true,
+      bindFocusController: tabs.bind('a'),
     },
   );
 
@@ -260,31 +274,34 @@ test('collection store: focus triggers lowPriority invalidation for all items', 
 
   env.serverTable.fetchHistory.length = 0;
 
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
     - duration: 800
       itemId: '1'
       result: { name: 'Alice' }
-      startedAt: 820
+      startedAt: 825
       type: 'fetch'
     - duration: 800
       itemId: '2'
       result: { name: 'Bob' }
-      startedAt: 820
+      startedAt: 825
       type: 'fetch'
   `);
 });
 
 test('collection store: focus with dynamic disable function', async () => {
   let enabled = true;
+  const tabs = createFocusChangeCoordinator(['a'], null);
 
   const env = createCollectionStoreTestEnv(
     { '1': { name: 'Alice' }, '2': { name: 'Bob' } },
     {
       testScenario: 'loaded',
       revalidateOnWindowFocus: () => enabled,
+      bindFocusController: tabs.bind('a'),
     },
   );
 
@@ -296,13 +313,14 @@ test('collection store: focus with dynamic disable function', async () => {
   env.serverTable.fetchHistory.length = 0;
 
   enabled = false;
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverTable.fetchHistory).toHaveLength(0);
 
   enabled = true;
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   const fetchedItemIds: string[] = [];
@@ -320,6 +338,8 @@ test('collection store: focus with dynamic disable function', async () => {
 // -- ListQueryStore: revalidateOnWindowFocus -----------------------------------
 
 test('list query store: focus triggers lowPriority invalidation for queries and items', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const initialData = {
     users: [
       { id: 1, name: 'Alice' },
@@ -330,6 +350,7 @@ test('list query store: focus triggers lowPriority invalidation for queries and 
   const env = createListQueryStoreTestEnv(initialData, {
     testScenario: { loaded: { tables: ['users'] } },
     revalidateOnWindowFocus: true,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useListQuery({ tableId: 'users' }));
@@ -341,7 +362,8 @@ test('list query store: focus triggers lowPriority invalidation for queries and 
 
   env.serverTable.fetchHistory.length = 0;
 
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   const listFetch = env.serverTable.fetchHistory.find(
@@ -357,7 +379,7 @@ test('list query store: focus triggers lowPriority invalidation for queries and 
         itemId: 'users||1'
       - data: { id: 2, name: 'Bob' }
         itemId: 'users||2'
-    startedAt: 820
+    startedAt: 825
     type: 'list'
   `);
 
@@ -376,10 +398,13 @@ test('list query store: focus triggers lowPriority invalidation for queries and 
 // -- DocumentStore: onTransportReconnect ----------------------------------------
 
 test('document store: onTransportReconnect while focused triggers immediate realtimeUpdate invalidation', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => {
@@ -400,10 +425,13 @@ test('document store: onTransportReconnect while focused triggers immediate real
 });
 
 test('document store: onTransportReconnect while unfocused defers invalidation to next focus', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => {
@@ -414,7 +442,7 @@ test('document store: onTransportReconnect while unfocused defers invalidation t
 
   const fetchesBefore = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowBlur();
+  await tabs.blur();
 
   act(() => {
     env.apiStore.onTransportReconnect();
@@ -425,15 +453,15 @@ test('document store: onTransportReconnect while unfocused defers invalidation t
   // No fetch while unfocused
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   // Fetch triggered on focus
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 
   await advanceTime(1_200);
-  env.simulateWindowBlur();
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   // No extra fetch on later focus events
@@ -441,10 +469,13 @@ test('document store: onTransportReconnect while unfocused defers invalidation t
 });
 
 test('document store: multiple onTransportReconnect calls while unfocused are coalesced', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => {
@@ -455,7 +486,7 @@ test('document store: multiple onTransportReconnect calls while unfocused are co
 
   const fetchesBefore = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowBlur();
+  await tabs.blur();
 
   act(() => {
     env.apiStore.onTransportReconnect();
@@ -470,7 +501,7 @@ test('document store: multiple onTransportReconnect calls while unfocused are co
 
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   // Only one invalidation despite 3 calls
@@ -478,8 +509,11 @@ test('document store: multiple onTransportReconnect calls while unfocused are co
 });
 
 test('document store: onTransportReconnect is no-op when usesRealTimeUpdates is false', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => {
@@ -500,10 +534,13 @@ test('document store: onTransportReconnect is no-op when usesRealTimeUpdates is 
 });
 
 test('document store: reset() cleans up pending onTransportReconnect listener', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => {
@@ -514,7 +551,7 @@ test('document store: reset() cleans up pending onTransportReconnect listener', 
 
   const fetchesBefore = env.serverMock.numOfStartedFetches;
 
-  env.simulateWindowBlur();
+  await tabs.blur();
 
   act(() => {
     env.apiStore.onTransportReconnect();
@@ -524,7 +561,7 @@ test('document store: reset() cleans up pending onTransportReconnect listener', 
     env.apiStore.reset();
   });
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   // No stale fetch after reset
@@ -534,12 +571,15 @@ test('document store: reset() cleans up pending onTransportReconnect listener', 
 // -- CollectionStore: onTransportReconnect ------------------------------------
 
 test('collection store: onTransportReconnect while focused invalidates all items', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createCollectionStoreTestEnv(
     { '1': { name: 'Alice' }, '2': { name: 'Bob' } },
     {
       testScenario: 'loaded',
       usesRealTimeUpdates: true,
       dynamicRealtimeThrottleMs: () => 300,
+      bindFocusController: tabs.bind('a'),
     },
   );
 
@@ -566,12 +606,15 @@ test('collection store: onTransportReconnect while focused invalidates all items
 });
 
 test('collection store: onTransportReconnect while unfocused defers and coalesces', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const env = createCollectionStoreTestEnv(
     { '1': { name: 'Alice' }, '2': { name: 'Bob' } },
     {
       testScenario: 'loaded',
       usesRealTimeUpdates: true,
       dynamicRealtimeThrottleMs: () => 300,
+      bindFocusController: tabs.bind('a'),
     },
   );
 
@@ -582,7 +625,7 @@ test('collection store: onTransportReconnect while unfocused defers and coalesce
 
   env.serverTable.fetchHistory.length = 0;
 
-  env.simulateWindowBlur();
+  await tabs.blur();
 
   act(() => {
     env.apiStore.onTransportReconnect();
@@ -596,7 +639,7 @@ test('collection store: onTransportReconnect while unfocused defers and coalesce
     env.serverTable.fetchHistory.filter((e) => e.type === 'fetch'),
   ).toHaveLength(0);
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   const fetchedItemIds = env.serverTable.fetchHistory
@@ -608,8 +651,8 @@ test('collection store: onTransportReconnect while unfocused defers and coalesce
   `);
 
   await advanceTime(1_200);
-  env.simulateWindowBlur();
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   const fetchedItemIdsAfterSecondFocus = env.serverTable.fetchHistory
@@ -624,6 +667,8 @@ test('collection store: onTransportReconnect while unfocused defers and coalesce
 // -- ListQueryStore: onTransportReconnect -------------------------------------
 
 test('list query store: onTransportReconnect while focused invalidates queries and items', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const initialData = {
     users: [
       { id: 1, name: 'Alice' },
@@ -635,6 +680,7 @@ test('list query store: onTransportReconnect while focused invalidates queries a
     testScenario: { loaded: { tables: ['users'] } },
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useListQuery({ tableId: 'users' }));
@@ -666,6 +712,8 @@ test('list query store: onTransportReconnect while focused invalidates queries a
 });
 
 test('list query store: onTransportReconnect while unfocused defers and coalesces', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
   const initialData = {
     users: [
       { id: 1, name: 'Alice' },
@@ -677,6 +725,7 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
     testScenario: { loaded: { tables: ['users'] } },
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useListQuery({ tableId: 'users' }));
@@ -687,7 +736,7 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
 
   env.serverTable.fetchHistory.length = 0;
 
-  env.simulateWindowBlur();
+  await tabs.blur();
 
   act(() => {
     env.apiStore.onTransportReconnect();
@@ -699,7 +748,7 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
   // No fetches while unfocused
   expect(env.serverTable.fetchHistory).toHaveLength(0);
 
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   const hasListFetch = env.serverTable.fetchHistory.some(
@@ -716,8 +765,8 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
   `);
 
   await advanceTime(1_200);
-  env.simulateWindowBlur();
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   const fetchedItemIdsAfterSecondFocus = env.serverTable.fetchHistory
@@ -731,6 +780,7 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
 
 test('list query store: focus with dynamic disable function', async () => {
   let enabled = true;
+  const tabs = createFocusChangeCoordinator(['a'], null);
 
   const initialData = {
     users: [
@@ -742,6 +792,7 @@ test('list query store: focus with dynamic disable function', async () => {
   const env = createListQueryStoreTestEnv(initialData, {
     testScenario: { loaded: { tables: ['users'] } },
     revalidateOnWindowFocus: () => enabled,
+    bindFocusController: tabs.bind('a'),
   });
 
   renderHook(() => env.apiStore.useListQuery({ tableId: 'users' }));
@@ -754,13 +805,14 @@ test('list query store: focus with dynamic disable function', async () => {
   env.serverTable.fetchHistory.length = 0;
 
   enabled = false;
-  env.simulateWindowFocus();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   expect(env.serverTable.fetchHistory).toHaveLength(0);
 
   enabled = true;
-  env.simulateWindowFocus();
+  await tabs.blur();
+  await tabs.focusTab('a');
   await flushAllTimers();
 
   const hasListFetch = env.serverTable.fetchHistory.some(

@@ -3,9 +3,11 @@ import { useConst } from '@ls-stack/react-utils/useConst';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
+import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
+import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
@@ -56,7 +58,7 @@ export function useMultipleItems<
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   events: Emitter<ListQueryStoreEvents>,
   getItemKey: (params: ItemPayload) => string,
-  scheduleItemFetch: (
+  scheduleAutomaticItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
     options?: { fields?: FieldsInput },
@@ -66,6 +68,8 @@ export function useMultipleItems<
   fetchItemFn: unknown,
   partialResources?: PartialResourcesConfig<ItemState>,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
+  const isOffScreenFromContext = useContext(IsOffScreenContext);
+
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
 
   type QueryWithId = {
@@ -98,7 +102,8 @@ export function useMultipleItems<
         itemProps.returnRefetchingStatus ??
         allItemsReturnRefetchingStatus ??
         false,
-      isOffScreen: itemProps.isOffScreen ?? allItemsIsOffScreen ?? false,
+      isOffScreen:
+        itemProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
       queryMetadata: itemProps.queryMetadata,
     }));
   }, [
@@ -110,6 +115,7 @@ export function useMultipleItems<
     allItemsReturnIdleStatus,
     allItemsReturnRefetchingStatus,
     globalDisableRefetchOnMount,
+    isOffScreenFromContext,
   ]);
 
   const resultSelector = useCallback(
@@ -310,7 +316,7 @@ export function useMultipleItems<
       query.refetchOnMount = false;
     });
 
-    scheduleItemFetch(event.priority, firstQuery.payload, {
+    scheduleAutomaticItemFetch(event.priority, firstQuery.payload, {
       fields: fieldsToFetch ?? firstQuery.fields,
     });
     itemInvalidationWasTriggered.add(event.itemKey);
@@ -369,16 +375,16 @@ export function useMultipleItems<
 
       ignoreItemsInRefetchOnMount.add(itemKey);
 
-      if (disableRefetches) {
-        if (!itemState?.wasLoaded) {
-          scheduleItemFetch(fetchType, payload, { fields });
-        }
-      } else if (disableRefetchOnMount) {
-        if (shouldFetch) {
-          scheduleItemFetch(fetchType, payload, { fields });
-        }
-      } else if (!partialResources || shouldFetch) {
-        scheduleItemFetch(fetchType, payload, { fields });
+      if (
+        shouldScheduleAutomaticFetch({
+          wasLoaded: itemState?.wasLoaded,
+          shouldFetch: !!shouldFetch,
+          disableRefetches,
+          disableRefetchOnMount,
+          skipFreshFetch: !!partialResources,
+        })
+      ) {
+        scheduleAutomaticItemFetch(fetchType, payload, { fields });
       }
     }
 
@@ -389,7 +395,7 @@ export function useMultipleItems<
     ignoreItemsInRefetchOnMount,
     loadFromStateOnly,
     queriesWithId,
-    scheduleItemFetch,
+    scheduleAutomaticItemFetch,
     store.state.itemQueries,
     store.state.itemLoadedFields,
     fetchItemFn,

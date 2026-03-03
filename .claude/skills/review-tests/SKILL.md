@@ -1,6 +1,6 @@
 ---
 name: review-tests
-description: Review automated tests for correctness, reliability, maintainability, and coverage gaps. Use when asked to review tests in a PR, audit flaky tests, evaluate whether tests are meaningful, or identify missing scenarios in Vitest/TypeScript test suites.
+description: Review automated tests for correctness, reliability, maintainability, and coverage gaps. Use when asked to review tests, audit flaky tests, evaluate whether tests are meaningful, or identify missing scenarios in Vitest/TypeScript test suites.
 ---
 
 # Review Tests
@@ -45,6 +45,9 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, fla
 - Flag weak assertions (for example, only checking call count without verifying effect).
 - Check negative assertions and error assertions for precision.
 - Ensure snapshots are readable and scoped to meaningful behavior.
+- When sequencing, throttling, coalescing, focus changes, websocket delivery, or other time-ordered behavior is central to the test, prefer timeline snapshots over scattered point assertions when the test env exposes `timelineString`.
+- Prefer using the existing tracking helpers (`trackUIChanges`, `trackItemUI`, logger/test env helpers) so timeline snapshots show the state transitions a reader actually cares about.
+- Flag tests that use dense object assertions or raw fetch-history assertions where a focused `timelineString` snapshot would communicate the behavior more clearly.
 - Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.
 
 ## 5) Check Determinism And Flakiness
@@ -59,6 +62,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, fla
 - Flag test names that are wrong, vague, or misleading relative to the actual assertions.
 - Flag brittle fixtures, duplicated setup, and opaque data builders.
 - Prefer human-readable snapshots over dense object comparisons.
+- When a timeline snapshot can express the behavior clearly, prefer it as the primary readable artifact and keep additional assertions limited to key invariants or end-state checks.
 - Flag redundant tests — tests that assert the same behavior already covered by another test without adding meaningful coverage. Multiple tests should exist only when they exercise genuinely different paths, states, or edge cases. Copy-pasted tests with trivial variations, or tests that are strict subsets of a more comprehensive test, add maintenance cost without catching additional regressions.
 
 ## 7) Report Findings

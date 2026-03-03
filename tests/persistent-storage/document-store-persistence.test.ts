@@ -43,19 +43,17 @@ function createDocPersistenceEnv(options: {
   getSessionKey?: () => string | false;
   serverData?: TestData;
 }) {
-  return createDocumentStoreTestEnv(
-    options.serverData ?? defaultServerData,
-    {
-      persistentStorage: {
-        storeName: options.storeName,
-        backend: 'localStorage',
-        schema: wrappedSchema,
-        version: options.version,
-        getSessionKey:
-          options.getSessionKey ?? (() => options.sessionKey ?? 'session1'),
-      },
+  return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
+    ignoreInitialTimeCheck: true,
+    persistentStorage: {
+      storeName: options.storeName,
+      backend: 'localStorage',
+      schema: wrappedSchema,
+      version: options.version,
+      getSessionKey:
+        options.getSessionKey ?? (() => options.sessionKey ?? 'session1'),
     },
-  );
+  });
 }
 
 beforeAll(() => {
@@ -170,7 +168,9 @@ describe('localStorage: document store persistence', () => {
       StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
       unknown
     >(JSON.parse(cached ?? ''));
-    expect(parsed.data.data).toMatchInlineSnapshot(`value: { name: 'test', value: 42 }`);
+    expect(parsed.data.data).toMatchInlineSnapshot(
+      `value: { name: 'test', value: 42 }`,
+    );
   });
 
   test('save is debounced - only final state is saved', async () => {
@@ -409,6 +409,8 @@ describe('localStorage: document store persistence', () => {
     });
 
     const store = createDocumentStore<{ value: TestData }>({
+      id: storeName,
+      getSessionKey: () => sessionKey,
       fetchFn: async (signal) => {
         await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(resolve, 800);
@@ -422,7 +424,6 @@ describe('localStorage: document store persistence', () => {
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 200,
       baseCoalescingWindowMs: 10,
-      backgroundCoalescingWindowMultiplier: 1,
       blockWindowClose: null,
       persistentStorage: {
         storeName,
@@ -493,11 +494,12 @@ describe('standard schema support', () => {
     localStorage.setItem(key, JSON.stringify(entry));
 
     const store = createDocumentStore<TestData>({
+      id: 'std-doc',
+      getSessionKey: () => 'sess-std',
       fetchFn: () => Promise.resolve({ name: 'fresh', value: 1 }),
       errorNormalizer: normalizeError,
       lowPriorityThrottleMs: 200,
       baseCoalescingWindowMs: 10,
-      backgroundCoalescingWindowMultiplier: 1,
       blockWindowClose: null,
       persistentStorage: {
         storeName: 'std-doc',

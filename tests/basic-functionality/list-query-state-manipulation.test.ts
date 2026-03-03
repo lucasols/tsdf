@@ -3,9 +3,11 @@ import {
   createListQueryStoreTestEnv,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {

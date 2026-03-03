@@ -1,23 +1,29 @@
 import { act } from 'react';
 import {
   createCollectionStore,
+  type CollectionBrowserTabsMessage,
   type CollectionInitialStateItem,
 } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
+import { getNextStoreId } from './browserTabsTestUtils';
 import {
-  simulateWindowBlur,
-  simulateWindowFocus,
-} from '../utils/genericTestUtils';
-import { createServerTableMock } from './serverTableMock';
+  createServerTableMock,
+  type ServerTableSharedState,
+} from './serverTableMock';
 import {
   createActionTracker,
   createEmojiCyclers,
+  createPerItemUITracker,
   createUITracker,
+  getDefaultLowPriorityThrottleMs,
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
+  TEST_INITIAL_TIME,
 } from './testEnvUtils';
 
 export type CollectionTestItem<D> = { value: D };
@@ -25,7 +31,10 @@ export type CollectionTestItem<D> = { value: D };
 export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** App just opened, no data fetched yet. */
   | 'idle'
-  /** App already opened before and data was fetched successfully. */
+  /**
+   * App already opened before and data was fetched successfully.
+   * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
+   */
   | 'loaded'
   /** App started with data restored from local cache, pending server revalidation. */
   | { idleWithLocalCache: 'sameAsServer' | Record<string, D> }
@@ -33,13 +42,24 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   | { loadedWithStaleData: Record<string, D> };
 
 export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
+  id?: string;
+  getSessionKey?: () => string | false;
+  sharedServerTableState?: ServerTableSharedState<D>;
+  browserTabsTransportFactory?: BrowserTabsTransportFactory;
+  browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+  /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
+  bindFocusController?: {
+    getWindowIsFocused: () => boolean;
+    onWindowFocus: (handler: () => void) => () => void;
+    onWindowBlur: (handler: () => void) => () => void;
+  };
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
-  backgroundCoalescingWindowMultiplier?: number;
   baseCoalescingWindowMs?: number;
+  lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
   /** Enable batch fetch mode - uses batchFetchFn instead of per-item fetchFn */
   useBatchFetch?: boolean;
@@ -51,15 +71,22 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: CollectionPersistentStorageConfig<CollectionTestItem<D>>;
+  ignoreInitialTimeCheck?: boolean;
 };
 
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
+    id = getNextStoreId('collection'),
+    getSessionKey = () => 'test-session',
+    sharedServerTableState,
+    browserTabsTransportFactory,
+    browserTabsLeadershipTimings,
+    bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier = 1,
     baseCoalescingWindowMs = 10,
+    lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
@@ -68,8 +95,17 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     usesRealTimeUpdates,
     blockWindowClose,
     persistentStorage,
+    ignoreInitialTimeCheck,
   }: CollectionStoreTestEnvOptions<D> = {},
 ) {
+  if (!ignoreInitialTimeCheck) {
+    if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
+      throw new Error(
+        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+      );
+    }
+  }
+
   const {
     actionsHistory,
     addAction,
@@ -80,40 +116,17 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const { getMutationEmoji } = createEmojiCyclers();
 
-  const serverTable = createServerTableMock<D>(serverInitialData, addAction);
+  const serverTable = createServerTableMock<D>(
+    serverInitialData,
+    addAction,
+    sharedServerTableState,
+  );
 
-  // Per-item UI tracking
-  const itemUIValues: Record<string, unknown> = {};
-  const uiChanges: Array<Record<string, unknown>> = [];
-  let uiInitialized = false;
-
-  function trackItemUI(itemId: string, value: unknown) {
-    if (itemUIValues[itemId] === value) return;
-
-    itemUIValues[itemId] = value;
-    uiChanges.push({ ...itemUIValues });
-
-    const time = getRelativeTime();
-
-    // Skip if this was already recorded by optimistic-ui-commit
-    if (
-      actionsHistory.some(
-        (a) =>
-          a.action === 'optimistic-ui-commit' &&
-          a.time === time &&
-          a.uiValue === value &&
-          a.itemId === itemId,
-      )
-    ) {
-      return;
-    }
-
-    addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
-      uiValue: value,
-      itemId,
-    });
-    uiInitialized = true;
-  }
+  const { uiChanges, trackItemUI } = createPerItemUITracker(
+    addAction,
+    getRelativeTime,
+    actionsHistory,
+  );
 
   const { trackUIChanges } = createUITracker<
     Record<string, number | 'error' | undefined>
@@ -156,8 +169,10 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
   const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
+    id,
+    getSessionKey,
     errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 200,
+    lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
@@ -169,11 +184,40 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
-    backgroundCoalescingWindowMultiplier,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     persistentStorage,
-    '~test': testOptions,
+    '~test': {
+      ...testOptions,
+      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+      onWindowFocus: bindFocusController
+        ? (handler: () => void) => {
+            return bindFocusController.onWindowFocus(handler);
+          }
+        : undefined,
+      onWindowFocusChange: bindFocusController
+        ? (handler: () => void) => {
+            const cleanupFocus = bindFocusController.onWindowFocus(handler);
+            const cleanupBlur = bindFocusController.onWindowBlur(handler);
+            return () => {
+              cleanupFocus();
+              cleanupBlur();
+            };
+          }
+        : undefined,
+      browserTabsTransportFactory,
+      browserTabsLeadershipTimings,
+      onReceiveRemoteMsg: (
+        message: CollectionBrowserTabsMessage<CollectionTestItem<D>, string>,
+      ) => {
+        if (message.kind === 'collection-item-snapshot') {
+          addAction(`<${message.consistency}-snapshot-received`, {
+            actionValue: message.item?.data?.value,
+            itemId: message.item?.payload,
+          });
+        }
+      },
+    },
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
     },
@@ -186,9 +230,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       });
       collectionStore.invalidateItem(event.payload.itemId, 'realtimeUpdate');
     });
+
+    serverTable.wsEvents.on('list_changed', () => {
+      addAction('received-ws-data-change-event');
+      collectionStore.invalidateItem(() => true, 'realtimeUpdate');
+    });
   }
 
-  return {
+  const env = {
     apiStore: collectionStore,
     store: collectionStore.store,
     serverTable,
@@ -221,12 +270,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
         duration,
         triggerRTU,
         addServerDataChangeAction,
+        error,
       }: {
         withRevalidation?: boolean;
         withOptimisticUpdate?: boolean;
         duration?: number;
         triggerRTU?: boolean;
         addServerDataChangeAction?: boolean;
+        error?: string;
       } = {},
     ) => {
       const mutationId = getMutationEmoji();
@@ -247,6 +298,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
               }
             : undefined,
           mutation: async () => {
+            if (error) {
+              addAction('<mutation-error', {
+                actionValue: error,
+                id: mutationId,
+              });
+              throw new Error(error);
+            }
+
             const result = await serverTable.emulateClientMutation(
               itemId,
               newValue,
@@ -268,15 +327,17 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     get timelineString() {
       return getTimelineString();
     },
-    simulateWindowFocus() {
-      addAction('window-focused');
-      simulateWindowFocus();
-    },
-    simulateWindowBlur() {
-      addAction('window-blurred');
-      simulateWindowBlur();
-    },
   };
+
+  bindFocusController?.onWindowFocus(() => {
+    addAction('👁 window-focused');
+  });
+
+  bindFocusController?.onWindowBlur(() => {
+    addAction('🔕 window-blurred');
+  });
+
+  return env;
 }
 
 function mapInitialData<D extends Record<string, unknown>>(

@@ -114,9 +114,7 @@ describe('opfs adapter', () => {
     const mockCacheDir = {
       getFileHandle(name: string, options?: { create?: boolean }) {
         if (!files.has(name) && !options?.create) {
-          return Promise.reject(
-            new DOMException('Not found', 'NotFoundError'),
-          );
+          return Promise.reject(new DOMException('Not found', 'NotFoundError'));
         }
         if (!files.has(name)) {
           files.set(name, '');
@@ -148,6 +146,7 @@ describe('opfs adapter', () => {
       entries() {
         const snapshot = [...files.keys()];
         return (async function* (): AsyncGenerator<[string, unknown]> {
+          await Promise.resolve();
           for (const name of snapshot) {
             yield [name, {}];
           }

@@ -10,10 +10,12 @@ import {
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {

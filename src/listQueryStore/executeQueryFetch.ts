@@ -64,6 +64,23 @@ function applyFetchedItems<
       } else {
         draft.itemLoadedFields[itemKey] = Object.keys(merged).sort();
       }
+
+      const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
+      if (invalidationFields) {
+        if (!fields || fields.length === 0) {
+          delete draft.itemFieldInvalidationFields[itemKey];
+        } else {
+          const remainingFields = invalidationFields.filter(
+            (field) => !fields.includes(field),
+          );
+
+          if (remainingFields.length > 0) {
+            draft.itemFieldInvalidationFields[itemKey] = remainingFields;
+          } else {
+            delete draft.itemFieldInvalidationFields[itemKey];
+          }
+        }
+      }
     } else {
       draft.items[itemKey] = reusePrevIfEqual({
         current: data,
