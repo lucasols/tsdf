@@ -237,38 +237,43 @@ test('collection optimistic updates propagate across tabs', async () => {
 test('collection failed optimistic mutations revert the synced background state', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-optimistic-error');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
   });
 
-  renderHook(() => envA.apiStore.useItem('item1'));
-
-  let mutationPromise!: ReturnType<typeof envA.apiStore.performMutation>;
-  act(() => {
-    mutationPromise = envA.apiStore.performMutation('item1', {
-      optimisticUpdate: () => {
-        envA.apiStore.updateItemState('item1', (draft) => {
-          draft.value = { name: 'Updated' };
-        });
-      },
-      mutation: async () => {
-        await wait(100);
-        throw new Error('Mutation failed');
-      },
-    });
+  renderHook(() => {
+    const item = envA.apiStore.useItem('item1');
+    envA.trackItemUI('item1', item.data?.value.name);
   });
+  renderHook(() => {
+    const item = envB.apiStore.useItem('item1');
+    envB.trackItemUI('item1', item.data?.value.name);
+  });
+
+  const mutationPromise = envA.performClientUpdateAction(
+    'item1',
+    { name: 'Updated' },
+    {
+      withOptimisticUpdate: true,
+      error: 'Mutation failed',
+    },
+  );
 
   await advanceTime(0);
 
@@ -285,6 +290,28 @@ test('collection failed optimistic mutations revert the synced background state'
   expect(envB.apiStore.getItemState('item1')?.data).toEqual({
     value: { name: 'Item 1' },
   });
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1              |
+    0     | Item 1             | ui-initialized
+    .     | {"name":"Updated"} | ⬜ optimistic-ui-commit
+    .     | {"name":"Updated"} | ⬜ <mutation-error (value: "Mutation failed")
+    .     | Updated            | ui-changed
+    10ms  | Updated            | 🔴 >fetch-started
+    810ms | Updated            | 🔴 <fetch-finished (value: {"name":"Item 1"})
+    .     | Item 1             | ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1   |
+    0     | Item 1  | ui-initialized
+    .     | Item 1  | <optimistic-snapshot-received (value: {"name":"Updated"})
+    .     | Updated | ui-changed
+    810ms | Updated | <confirmed-snapshot-received (value: {"name":"Item 1"})
+    .     | Item 1  | ui-changed
+    "
+  `);
 });
 
 test('list query optimistic sorting propagates to other tabs', async () => {
