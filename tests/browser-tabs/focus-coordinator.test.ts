@@ -7,7 +7,7 @@ import {
 setupBrowserTabsTestLifecycle();
 
 test('focusTab with no previous tab sets flag to true', async () => {
-  const tabs = createFocusChangeCoordinator(['a', 'b']);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
 
   await tabs.focusTab('a');
 
@@ -16,7 +16,7 @@ test('focusTab with no previous tab sets flag to true', async () => {
 });
 
 test('focusTab switching tabs blurs old flag and focuses new flag, others unchanged', async () => {
-  const tabs = createFocusChangeCoordinator(['a', 'b', 'c']);
+  const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
 
   await tabs.focusTab('a');
   await tabs.focusTab('b');
@@ -27,7 +27,7 @@ test('focusTab switching tabs blurs old flag and focuses new flag, others unchan
 });
 
 test('focusTab on already-focused tab is a no-op', async () => {
-  const tabs = createFocusChangeCoordinator(['a']);
+  const tabs = createFocusChangeCoordinator(['a'], null);
   const events: string[] = [];
   const binding = tabs.bind('a');
   binding.onWindowFocus(() => {
@@ -47,7 +47,7 @@ test('focusTab on already-focused tab is a no-op', async () => {
 });
 
 test('blur after focus sets flag to false', async () => {
-  const tabs = createFocusChangeCoordinator(['a']);
+  const tabs = createFocusChangeCoordinator(['a'], null);
 
   await tabs.focusTab('a');
   await tabs.blur();
@@ -56,7 +56,7 @@ test('blur after focus sets flag to false', async () => {
 });
 
 test('blur when nothing focused is a no-op', async () => {
-  const tabs = createFocusChangeCoordinator(['a']);
+  const tabs = createFocusChangeCoordinator(['a'], null);
   const events: string[] = [];
   const binding = tabs.bind('a');
   binding.onWindowFocus(() => {
@@ -73,7 +73,7 @@ test('blur when nothing focused is a no-op', async () => {
 });
 
 test('focusTab after blur does not blur before focusing (no previous tab to blur)', async () => {
-  const tabs = createFocusChangeCoordinator(['a', 'b']);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
 
   await tabs.focusTab('a');
   await tabs.blur();
@@ -87,7 +87,7 @@ test('focusTab after blur does not blur before focusing (no previous tab to blur
 });
 
 test('full 3-tab ranking sequence produces correct flag states at each step', async () => {
-  const tabs = createFocusChangeCoordinator(['a', 'b', 'c']);
+  const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
 
   await tabs.focusTab('c');
   expect(tabs.getWindowIsFocused('a')()).toBe(false);
@@ -118,7 +118,7 @@ test('initialFocused sets the initial flag state', () => {
 });
 
 test('per-tab listeners fire only for the correct tab', async () => {
-  const tabs = createFocusChangeCoordinator(['a', 'b']);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
   const events: string[] = [];
 
   const bindingA = tabs.bind('a');
@@ -150,7 +150,7 @@ test('per-tab listeners fire only for the correct tab', async () => {
 });
 
 test('cleanup function removes the listener', async () => {
-  const tabs = createFocusChangeCoordinator(['a']);
+  const tabs = createFocusChangeCoordinator(['a'], null);
   const events: string[] = [];
 
   const binding = tabs.bind('a');

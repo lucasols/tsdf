@@ -535,6 +535,7 @@ test('mutating a obj passed as payload does not break the store', async () => {
     { value: TodoItem },
     { id: { id: string } }
   >({
+    id: 'test-payload-mutation',
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs: 10,
