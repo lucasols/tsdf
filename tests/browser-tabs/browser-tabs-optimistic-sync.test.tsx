@@ -93,37 +93,38 @@ test('document optimistic updates propagate to another tab without a remote refe
 test('document failed optimistic mutations revert the synced background state', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-optimistic-error');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
+    lowPriorityThrottleMs: 60_000,
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
+    lowPriorityThrottleMs: 60_000,
   });
 
-  renderHook(() => envA.apiStore.useDocument());
+  renderHook(() => {
+    const doc = envA.apiStore.useDocument();
+    envA.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
 
-  let mutationPromise!: ReturnType<typeof envA.apiStore.performMutation>;
-  act(() => {
-    mutationPromise = envA.apiStore.performMutation({
-      optimisticUpdate: () => {
-        envA.apiStore.updateState((draft) => {
-          draft.value = 1;
-        });
-      },
-      mutation: async () => {
-        await wait(100);
-        throw new Error('Mutation failed');
-      },
-    });
+  const mutationPromise = envA.performClientUpdateAction(1, {
+    withOptimisticUpdate: true,
+    error: 'Mutation failed',
   });
 
   await advanceTime(0);
@@ -137,6 +138,27 @@ test('document failed optimistic mutations revert the synced background state', 
   expect(envA.serverMock.numOfStartedFetches).toBe(1);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
   expect(envB.store.state.data?.value).toBe(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 1  | ⬜ optimistic-ui-commit
+    .     | 1  | ⬜ <mutation-error (value: "Mutation failed")
+    10ms  | 1  | 🔴 >fetch-started
+    810ms | 1  | 🔴 <fetch-finished (value: 0)
+    .     | 0  | ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | <optimistic-snapshot-received (value: 1)
+    .     | 1  | ui-changed
+    810ms | 1  | <confirmed-snapshot-received (value: 0)
+    .     | 0  | ui-changed
+    "
+  `);
 });
 
 test('collection optimistic updates propagate across tabs', async () => {
