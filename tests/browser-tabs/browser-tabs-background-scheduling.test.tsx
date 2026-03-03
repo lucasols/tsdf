@@ -228,32 +228,60 @@ test('document background scheduling does not retry on sibling tabs after a remo
 test('document low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-all-background-refetch');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { idleWithLocalCache: 'sameAsServer' },
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { idleWithLocalCache: 'sameAsServer' },
   });
 
-  await markLastActiveTab(envA, [focusA, focusB], 1);
-  await markLastActiveTab(envA, [focusA, focusB], 0);
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
 
-  renderHook(() => envA.apiStore.useDocument());
-  renderHook(() => envB.apiStore.useDocument());
+  renderHook(() => {
+    const doc = envA.apiStore.useDocument();
+    envA.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
 
   await flushAllTimers();
 
   expect(envA.serverMock.numOfStartedFetches).toBe(1);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    10ms  | -  | 👁 window-focused
+    15ms  | -  | 🔕 window-blurred
+    20ms  | 0  | ui-initialized
+    1.03s | 0  | 🔴 >fetch-started
+    1.83s | 0  | 🔴 <fetch-finished (value: 0)
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | -  | 👁 window-focused
+    5ms   | -  | 🔕 window-blurred
+    20ms  | 0  | ui-initialized
+    1.83s | 0  | <confirmed-snapshot-received (value: 0)
+    "
+  `);
 });
 
 test('document fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
