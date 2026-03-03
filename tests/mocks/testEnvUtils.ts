@@ -315,7 +315,10 @@ export function createPerItemUITracker(
   const uiChanges: Array<Record<string, unknown>> = [];
   let uiInitialized = false;
 
-  function trackItemUI(itemId: string, value: unknown) {
+  function trackItemUI(
+    itemId: string,
+    value: string | number | boolean | null | undefined,
+  ) {
     if (itemUIValues[itemId] === value) return;
 
     itemUIValues[itemId] = value;
