@@ -113,6 +113,12 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   debugName?: string;
   /** Stable id shared by the same logical document store across browser tabs. */
   id: string;
+  /**
+   * Returns the current authenticated session / tenant key used to scope
+   * browser-tabs sync. Return `false` to disable browser-tabs sync when no
+   * account is loaded.
+   */
+  getSessionKey: () => string | false;
   fetchFn: (signal: AbortSignal) => Promise<State>;
   errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
@@ -158,6 +164,7 @@ const DOC_TARGET_KEY = 'document' as const;
 export function createDocumentStore<State extends ValidStoreState>({
   debugName,
   id,
+  getSessionKey,
   fetchFn,
   errorNormalizer,
   lowPriorityThrottleMs,
@@ -357,7 +364,11 @@ export function createDocumentStore<State extends ValidStoreState>({
       {
         storeType: 'document',
         storeKey: id,
+        getSessionKey,
         onMessage: handleRemoteMessage,
+        onSessionChange() {
+          lastDocumentSyncVersion = undefined;
+        },
         transportFactory: testOptions?.browserTabsTransportFactory,
         getWindowIsFocused,
         onWindowFocusChange: testOptions?.onWindowFocusChange,

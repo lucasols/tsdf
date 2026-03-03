@@ -29,6 +29,25 @@ afterEach(() => {
   setDefaultLowPriorityThrottleMs(200);
 });
 
+function getTrackedAge(value: unknown): string {
+  return typeof value === 'number' ? String(value) : '-';
+}
+
+function getTrackedUserSummary(value: unknown): string {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'name' in value &&
+    'age' in value &&
+    typeof value.name === 'string' &&
+    typeof value.age === 'number'
+  ) {
+    return `${value.name}:${String(value.age)}`;
+  }
+
+  return '-';
+}
+
 test('list query partial-resource snapshots do not seed an untouched sibling item tab', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-partial-background-item');
@@ -79,6 +98,87 @@ test('list query partial-resource snapshots do not seed an untouched sibling ite
   expect(
     envB.store.state.itemQueries[envB.getStoreItemKeyFromRaw('users||1')],
   ).toBeUndefined();
+});
+
+test('a fresh partial-resource list-query tab still performs its first fetch after a sibling tab fetched earlier', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-partial-first-fetch-after-sibling');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
+
+  const envA = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    testScenario: { loaded: { tables: ['users'] } },
+    lowPriorityThrottleMs: 10_000,
+    partialResources: partialResourcesConfig,
+  });
+  const envB = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transportFactory,
+    testScenario: 'idle',
+    lowPriorityThrottleMs: 10_000,
+    partialResources: partialResourcesConfig,
+  });
+
+  void envA.apiStore.scheduleListQueryFetch(
+    'highPriority',
+    { tableId: 'users' },
+    undefined,
+    {
+      fields: ['name'],
+    },
+  );
+  await flushAllTimers();
+
+  const envBQuery = renderHook(() => {
+    const query = envB.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        fields: ['name'],
+      },
+    );
+
+    envB.trackItemUI('users||1', query.items[0]?.name);
+    return query;
+  });
+  await flushAllTimers();
+
+  const queryKey = envB.getQueryKey({ tableId: 'users' });
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
+    1,
+  );
+  expect(envBQuery.result.current).toMatchObject({
+    status: 'success',
+    items: [{ name: 'Alice' }, { name: 'Bob' }],
+  });
+  expect(envB.store.state.queries[queryKey]?.items).toEqual([
+    envB.getStoreItemKeyFromRaw('users||1'),
+    envB.getStoreItemKeyFromRaw('users||2'),
+  ]);
+  expect(envB.store.state.itemLoadedFields[itemKey]).toEqual(['name']);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    10ms  | 🔴 >list-fetch-started
+    810ms | 🔴 <list-fetch-finished (value: {"count":2})
+    1.62s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    810ms | ⋯        | ui-initialized
+    820ms | ⋯        | 🔴 >list-fetch-started
+    1.62s | ⋯        | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Alice    | ui-changed
+    "
+  `);
 });
 
 test('list query partial-resources field metadata updates an already-loaded sibling tab', async () => {
@@ -189,6 +289,155 @@ test('list query partial-resources field metadata updates an already-loaded sibl
   `);
 });
 
+test('list query partial-resources remote query snapshots satisfy affected field-subset hooks without refetching unaffected sibling hooks', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-field-subset-invalidation');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
+    users: [{ id: 1, name: 'Alice', age: 30 }],
+  });
+
+  const envA = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('a'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+  const envB = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('b'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+
+  void envB.apiStore.scheduleListQueryFetch(
+    'highPriority',
+    { tableId: 'users' },
+    1,
+    {
+      fields: ['name', 'age'],
+    },
+  );
+  await flushAllTimers();
+
+  const envBListFetchCountBeforeInvalidation = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'list',
+  );
+  const envBQueries = renderHook(() => {
+    const name = envB.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetches: true,
+        fields: ['name'],
+        loadSize: 1,
+      },
+    );
+    const age = envB.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetches: true,
+        fields: ['age'],
+        loadSize: 1,
+      },
+    );
+
+    envB.trackItemUI('name-query', name.items[0]?.name);
+    envB.trackItemUI('age-query', getTrackedAge(age.items[0]?.age));
+
+    return { name, age };
+  });
+  await advanceTime(0);
+
+  expect(envBQueries.result.current.name).toMatchObject({
+    status: 'success',
+    items: [{ name: 'Alice' }],
+  });
+  expect(envBQueries.result.current.age).toMatchObject({
+    status: 'success',
+    items: [{ age: 30 }],
+  });
+
+  act(() => {
+    envB.apiStore.invalidateQueryAndItems({
+      queryPayload: false,
+      itemPayload: 'users||1',
+      type: 'highPriority',
+      fields: ['age'],
+    });
+  });
+  await advanceTime(0);
+
+  expect(envBQueries.result.current.name).toMatchObject({
+    status: 'success',
+    items: [{ name: 'Alice' }],
+  });
+  expect(envBQueries.result.current.age).toMatchObject({
+    status: 'refetching',
+    items: [{ age: 30 }],
+  });
+
+  envA.serverTable.setItem('users||1', {
+    id: 1,
+    name: 'Alice',
+    age: 31,
+  });
+  void envA.apiStore.scheduleListQueryFetch(
+    'highPriority',
+    { tableId: 'users' },
+    1,
+    {
+      fields: ['age'],
+    },
+  );
+  await flushAllTimers();
+
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
+    envBListFetchCountBeforeInvalidation,
+  );
+  expect(envBQueries.result.current.name).toMatchObject({
+    status: 'success',
+    items: [{ name: 'Alice' }],
+  });
+  expect(envBQueries.result.current.age).toMatchObject({
+    status: 'success',
+    items: [{ age: 31 }],
+  });
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    1.81s | -        | server-data-changed (value: {"id":1,"name":"Alice","age":31})
+    1.82s | -        | 🔴 >list-fetch-started
+    2.62s | -        | 🔴 <list-fetch-finished (value: {"count":1})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | age-query | name-query |
+    1.01s | -         | -          | 🔴 >list-fetch-started
+    1.81s | -         | -          | 🔴 <list-fetch-finished (value: {"count":1})
+    .     | -         | Alice      | [name-query] ui-initialized
+    .     | 30        | Alice      | [age-query] ui-changed
+    2.62s | 30        | Alice      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+    .     | 31        | Alice      | [age-query] ui-changed
+    "
+  `);
+});
+
 test('list query partial-resources full-resource list hooks refetch in one tab and update a sibling tab via query snapshots', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-full-resource-fields-star');
@@ -264,10 +513,7 @@ test('list query partial-resources full-resource list hooks refetch in one tab a
       },
     );
 
-    envA.trackItemUI(
-      'users||1',
-      query.items[0] ? `${query.items[0].name}:${query.items[0].age}` : '-',
-    );
+    envA.trackItemUI('users||1', getTrackedUserSummary(query.items[0]));
     return query;
   });
   const envBQuery = renderHook(() => {
@@ -280,10 +526,7 @@ test('list query partial-resources full-resource list hooks refetch in one tab a
       },
     );
 
-    envB.trackItemUI(
-      'users||1',
-      query.items[0] ? `${query.items[0].name}:${query.items[0].age}` : '-',
-    );
+    envB.trackItemUI('users||1', getTrackedUserSummary(query.items[0]));
     return query;
   });
   await advanceTime(0);
@@ -429,11 +672,8 @@ test('list query partial-resources remote snapshots clear satisfied local invali
     });
 
     envB.trackItemUI('name-hook', name.data?.name ?? '-');
-    envB.trackItemUI('age-hook', String(age.data?.age ?? '-'));
-    envB.trackItemUI(
-      'full-hook',
-      full.data ? `${full.data.name}:${full.data.age}` : '-',
-    );
+    envB.trackItemUI('age-hook', getTrackedAge(age.data?.age));
+    envB.trackItemUI('full-hook', getTrackedUserSummary(full.data));
 
     return { name, age, full };
   });
