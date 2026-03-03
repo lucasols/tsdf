@@ -3,8 +3,9 @@ import { useConst } from '@ls-stack/react-utils/useConst';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
+import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
@@ -63,6 +64,8 @@ export function useMultipleItems<
   ItemPayload,
   QueryMetadata
 >[] {
+  const isOffScreenFromContext = useContext(IsOffScreenContext);
+
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
 
   type QueryWithId = {
@@ -95,7 +98,8 @@ export function useMultipleItems<
         allItemsReturnRefetchingStatus ??
         false,
       omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
-      isOffScreen: queryProps.isOffScreen ?? allItemsIsOffScreen ?? false,
+      isOffScreen:
+        queryProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
       queryMetadata: queryProps.queryMetadata,
     }));
 
@@ -110,6 +114,7 @@ export function useMultipleItems<
     allItemsReturnRefetchingStatus,
     getItemKey,
     globalDisableRefetchOnMount,
+    isOffScreenFromContext,
   ]);
 
   const resultSelector = useCallback(

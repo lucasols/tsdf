@@ -4,9 +4,10 @@ import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
+import { IsOffScreenContext } from '../isOffScreenContext';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
@@ -77,6 +78,8 @@ export function useMultipleListQueries<
   QueryPayload,
   QueryMetadata
 >[] {
+  const isOffScreenFromContext = useContext(IsOffScreenContext);
+
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
 
   type QueryWithId = {
@@ -112,7 +115,8 @@ export function useMultipleListQueries<
         allItemsReturnRefetchingStatus ??
         false,
       omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
-      isOffScreen: queryProps.isOffScreen ?? allItemsIsOffScreen ?? false,
+      isOffScreen:
+        queryProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
       loadSize: queryProps.loadSize ?? allItemsLoadSize,
       queryMetadata: queryProps.queryMetadata,
     }));
@@ -127,6 +131,7 @@ export function useMultipleListQueries<
     allItemsReturnIdleStatus,
     allItemsReturnRefetchingStatus,
     globalDisableRefetchOnMount,
+    isOffScreenFromContext,
   ]);
 
   const getQueryItems = useCallback(

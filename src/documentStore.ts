@@ -10,7 +10,8 @@ import {
 } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useContext, useEffect } from 'react';
+import { IsOffScreenContext } from './isOffScreenContext';
 import { unknownToError, type Result } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import { useListItem as useListItemBase } from './hooks/useListItem';
@@ -685,11 +686,11 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   function useDocument<Selected = State | null>({
     selector,
-    isOffScreen,
-    disabled = isOffScreen,
+    isOffScreen: isOffScreenProp,
+    disabled: disabledProp,
     returnRefetchingStatus,
     disableRefetchOnMount = globalDisableRefetchOnMount,
-    returnIdleStatus = !!disabled,
+    returnIdleStatus: returnIdleStatusProp,
     ensureIsLoaded,
     disableRefetches,
   }: {
@@ -703,6 +704,9 @@ export function createDocumentStore<State extends ValidStoreState>({
     ensureIsLoaded?: boolean;
     returnRefetchingStatus?: boolean;
   } = {}) {
+    const isOffScreenFromContext = useContext(IsOffScreenContext);
+    const disabled = disabledProp ?? isOffScreenProp ?? isOffScreenFromContext;
+    const returnIdleStatus = returnIdleStatusProp ?? !!disabled;
     const storeStateSelector = useCallback(
       (state: DocumentStoreState<State>): TSDFUseDocumentReturn<Selected> => {
         const { error } = state;
