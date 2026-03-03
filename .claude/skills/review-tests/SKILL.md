@@ -1,6 +1,6 @@
 ---
 name: review-tests
-description: Review automated tests for correctness, reliability, maintainability, and coverage gaps. Use when asked to review tests in a PR, audit flaky tests, evaluate whether tests are meaningful, or identify missing scenarios in Vitest/TypeScript test suites.
+description: Review automated tests for correctness, reliability, maintainability, and coverage gaps. Use when asked to review tests, audit flaky tests, evaluate whether tests are meaningful, or identify missing scenarios in Vitest/TypeScript test suites.
 ---
 
 # Review Tests
