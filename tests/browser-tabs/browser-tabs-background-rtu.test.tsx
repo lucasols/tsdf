@@ -198,6 +198,45 @@ test('document RTU does not sync across tabs using different store ids', async (
   `);
 });
 
+test('document RTU does not sync across tabs using different session keys', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('document-rtu-shared-store');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+
+  const envA = createDocumentStoreTestEnv(0, {
+    id,
+    getSessionKey: () => 'account-a',
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('a'),
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+  });
+  const envB = createDocumentStoreTestEnv(100, {
+    id,
+    getSessionKey: () => 'account-b',
+    browserTabsTransportFactory: transportFactory,
+    bindFocusController: tabs.bind('b'),
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+  });
+
+  renderHook(() =>
+    envA.trackUIChanges(envA.apiStore.useDocument().data?.value),
+  );
+  renderHook(() =>
+    envB.trackUIChanges(envB.apiStore.useDocument().data?.value),
+  );
+
+  envA.emulateExternalRTU(2);
+  await flushAllTimers();
+
+  expect(envA.store.state.data?.value).toBe(2);
+  expect(envB.store.state.data?.value).toBe(100);
+  expect(envB.serverMock.numOfStartedFetches).toBe(0);
+});
+
 test('document RTU invalidations are deduplicated when all tabs are backgrounded and the last active tab leads', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-all-background');
