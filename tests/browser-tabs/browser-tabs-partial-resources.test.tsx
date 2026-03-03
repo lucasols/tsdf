@@ -88,10 +88,15 @@ test('list query partial-resource snapshots do not seed an untouched sibling ite
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     0,
   );
-  expect(envA.serverTable.fetchHistory[0]).toMatchObject({
-    type: 'fetch',
+  const envAFetchEntries = envA.serverTable.fetchHistory.filter(
+    (e) => e.type === 'fetch',
+  );
+  expect(envAFetchEntries[0]).toMatchObject({
     fields: ['name'],
   });
+  expect(
+    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
+  ).toBeUndefined();
   expect(
     envB.store.state.itemLoadedFields[envB.getStoreItemKeyFromRaw('users||1')],
   ).toBeUndefined();
@@ -381,8 +386,10 @@ test('focused partial-resource item refetch updates the matching background hook
     'fetch',
   );
   expect(envBFetchCountBeforeFocusedRefetch).toBe(1);
-  expect(envB.serverTable.fetchHistory[0]).toMatchObject({
-    type: 'fetch',
+  const envBFetchEntries = envB.serverTable.fetchHistory.filter(
+    (e) => e.type === 'fetch',
+  );
+  expect(envBFetchEntries[0]).toMatchObject({
     fields: ['age', 'name'],
   });
 
@@ -901,4 +908,276 @@ test('list query partial-resources remote snapshots clear satisfied local invali
     .     | 31       | Alice:31  | Alice     | -        | [full-hook] ui-changed
     "
   `);
+});
+
+test('a sibling partial snapshot for one field does not clear a local invalidation for a different field', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-partial-cross-field-invalidation');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
+    users: [{ id: 1, name: 'Alice', age: 30 }],
+  });
+
+  const envA = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('a'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+  const envB = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('b'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+
+  // Both tabs load name+age.
+  void envB.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: ['name', 'age'],
+  });
+  await flushAllTimers();
+
+  const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+
+  // Tab B invalidates both fields.
+  envB.apiStore.invalidateQueryAndItems({
+    queryPayload: false,
+    itemPayload: 'users||1',
+    type: 'highPriority',
+    fields: ['name', 'age'],
+  });
+  await advanceTime(0);
+
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toEqual([]);
+  expect(
+    [...(envB.store.state.itemFieldInvalidationFields[itemKeyB] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+
+  // Tab A refetches only 'name'. The incoming snapshot should clear the name
+  // invalidation on tab B, but leave the age invalidation in place.
+  envA.serverTable.setItem('users||1', {
+    id: 1,
+    name: 'Alicia',
+    age: 31,
+  });
+  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: ['name'],
+  });
+  await flushAllTimers();
+
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toEqual(['name']);
+  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
+    'age',
+  ]);
+
+  // A second fetch from tab A for 'age' clears the remaining invalidation.
+  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: ['age'],
+  });
+  await flushAllTimers();
+
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKeyB],
+  ).toBeUndefined();
+  expect(envB.store.state.items[itemKeyB]).toEqual({
+    age: 31,
+    name: 'Alicia',
+  });
+});
+
+test('failed partial-resource item fetch does not broadcast stale metadata to sibling tab', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-partial-fetch-error');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
+    users: [{ id: 1, name: 'Alice', age: 30 }],
+  });
+
+  const envA = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('a'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+  const envB = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('b'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+
+  // Both tabs load all fields initially.
+  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: ['name', 'age'],
+  });
+  await flushAllTimers();
+  void envB.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: ['name', 'age'],
+  });
+  await flushAllTimers();
+
+  const itemKeyA = envA.getStoreItemKeyFromRaw('users||1');
+  const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
+
+  // Tab A invalidates 'age' and the subsequent refetch fails.
+  envA.apiStore.invalidateQueryAndItems({
+    queryPayload: false,
+    itemPayload: 'users||1',
+    type: 'highPriority',
+    fields: ['age'],
+  });
+  await advanceTime(0);
+
+  expect(envA.store.state.itemLoadedFields[itemKeyA]).toEqual(['name']);
+  expect(envA.store.state.itemFieldInvalidationFields[itemKeyA]).toEqual([
+    'age',
+  ]);
+
+  envA.serverTable.setNextFetchError('users||1', 'Network error');
+  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: ['age'],
+  });
+  await flushAllTimers();
+
+  // After the error, tab A clears the invalidation marker but age remains
+  // missing from loaded fields.
+  expect(envA.store.state.itemLoadedFields[itemKeyA]).toEqual(['name']);
+  expect(
+    envA.store.state.itemFieldInvalidationFields[itemKeyA],
+  ).toBeUndefined();
+
+  // Tab B must be completely unaffected — no error snapshot is broadcast, and
+  // the sibling's field metadata stays intact.
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKeyB],
+  ).toBeUndefined();
+  expect(envB.store.state.items[itemKeyB]).toEqual({
+    age: 30,
+    name: 'Alice',
+  });
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    1,
+  );
+});
+
+test('item deletion on one tab cleans up partial-resource field metadata on sibling tab', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-partial-deletion-cleanup');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
+    users: [{ id: 1, name: 'Alice', age: 30 }],
+  });
+
+  const envA = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('a'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+  const envB = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('b'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+
+  // Load fields on both tabs and populate a query so we can verify removal.
+  void envA.apiStore.scheduleListQueryFetch(
+    'highPriority',
+    { tableId: 'users' },
+    1,
+    { fields: ['name', 'age'] },
+  );
+  await flushAllTimers();
+  void envB.apiStore.scheduleListQueryFetch(
+    'highPriority',
+    { tableId: 'users' },
+    1,
+    { fields: ['name', 'age'] },
+  );
+  await flushAllTimers();
+
+  const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
+  const queryKeyB = envB.getQueryKey({ tableId: 'users' });
+
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+  expect(envB.store.state.queries[queryKeyB]?.items).toContain(itemKeyB);
+
+  // Invalidate age on tab B so we can verify the invalidation metadata is also
+  // cleaned up when the deletion snapshot arrives.
+  envB.apiStore.invalidateQueryAndItems({
+    queryPayload: false,
+    itemPayload: 'users||1',
+    type: 'highPriority',
+    fields: ['age'],
+  });
+  await advanceTime(0);
+
+  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
+    'age',
+  ]);
+
+  // Advance time so the deletion snapshot has a strictly newer sentAt than any
+  // previously recorded sync version on tab B.
+  await advanceTime(1);
+
+  // Tab A deletes the item — tab B should receive the deletion snapshot and
+  // clean up all field metadata.
+  envA.apiStore.deleteItemState('users||1');
+  await flushAllTimers();
+
+  expect(envB.store.state.items[itemKeyB]).toBe(null);
+  expect(envB.store.state.itemQueries[itemKeyB]).toBe(null);
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toBeUndefined();
+  expect(
+    envB.store.state.itemFieldInvalidationFields[itemKeyB],
+  ).toBeUndefined();
+  expect(envB.store.state.queries[queryKeyB]?.items).not.toContain(itemKeyB);
 });

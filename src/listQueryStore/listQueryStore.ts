@@ -906,6 +906,8 @@ export function createListQueryStore<
           );
 
           if (!message.itemQuery && message.item === null) {
+            delete draft.itemFieldInvalidationFields[message.itemKey];
+
             for (const query of Object.values(draft.queries)) {
               query.items = query.items.filter(
                 (itemId) => itemId !== message.itemKey,
