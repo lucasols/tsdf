@@ -1,4 +1,7 @@
-import { isWindowFocused } from '@ls-stack/browser-utils/window';
+import {
+  isWindowFocused,
+  onWindowFocus as onWindowFocusDefault,
+} from '@ls-stack/browser-utils/window';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
@@ -101,7 +104,7 @@ type ListQuerySnapshotItemEntry<
   loadedFields: string[];
 };
 
-type ListQueryBrowserTabsMessage<
+export type ListQueryBrowserTabsMessage<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
@@ -191,9 +194,18 @@ type ListQueryStoreOptionsBase<
     initialRefetchOnMount?: FetchType | false;
     initialLastFetchStartTime?: number;
     getWindowIsFocused?: () => boolean;
+    onWindowFocus?: (handler: () => void) => () => void;
+    onWindowFocusChange?: (handler: () => void) => () => void;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
+    onReceiveRemoteMsg?: (
+      message: ListQueryBrowserTabsMessage<
+        ItemState,
+        QueryPayload,
+        ItemPayload
+      >,
+    ) => void;
   };
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
@@ -1042,6 +1054,10 @@ export function createListQueryStore<
         return;
       }
 
+      if (import.meta.env.TEST) {
+        testOptions?.onReceiveRemoteMsg?.(message);
+      }
+
       applyRemoteItemSnapshot(message);
       lastItemSyncVersions.set(message.itemKey, candidateVersion);
       return;
@@ -1076,6 +1092,10 @@ export function createListQueryStore<
       return;
     }
 
+    if (import.meta.env.TEST) {
+      testOptions?.onReceiveRemoteMsg?.(message);
+    }
+
     applyRemoteQuerySnapshot(message);
   }
 
@@ -1088,6 +1108,7 @@ export function createListQueryStore<
       onMessage: handleRemoteBrowserTabsMessage,
       transportFactory: testOptions?.browserTabsTransportFactory,
       getWindowIsFocused,
+      onWindowFocusChange: testOptions?.onWindowFocusChange,
       priorityTimings:
         testOptions?.browserTabsPriorityTimings ??
         testOptions?.browserTabsLeadershipTimings,
@@ -1229,6 +1250,7 @@ export function createListQueryStore<
     revalidateOnWindowFocus,
     usesRealTimeUpdates,
     getWindowIsFocused,
+    onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
     onWindowFocusRevalidate: () => {
       invalidateQueryAndItems({
         queryPayload: () => true,

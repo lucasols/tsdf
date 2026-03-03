@@ -1,10 +1,10 @@
 import { expect, test } from 'vitest';
+import type { BrowserTabsTabStatusMessage } from '../../src/utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinator,
   type BrowserTabsMessageMeta,
   type BrowserTabsTransportFactory,
 } from '../../src/utils/browserTabsSync';
-import type { BrowserTabsTabStatusMessage } from '../../src/utils/browserTabsPriority';
 
 function createControlledTransportFactory() {
   let onMessage: ((message: unknown) => void) | null = null;

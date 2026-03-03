@@ -1,18 +1,18 @@
 import { act } from 'react';
 import {
   createCollectionStore,
+  type CollectionBrowserTabsMessage,
   type CollectionInitialStateItem,
 } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
-import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import {
-  simulateWindowBlur,
-  simulateWindowFocus,
-} from '../utils/genericTestUtils';
 import { getNextStoreId } from './browserTabsTestUtils';
-import { createServerTableMock } from './serverTableMock';
+import {
+  createServerTableMock,
+  type ServerTableSharedState,
+} from './serverTableMock';
 import {
   createActionTracker,
   createEmojiCyclers,
@@ -37,9 +37,15 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
 
 export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   id?: string;
+  sharedServerTableState?: ServerTableSharedState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
   browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
-  getWindowIsFocused?: () => boolean;
+  /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
+  bindFocusController?: {
+    getWindowIsFocused: () => boolean;
+    onWindowFocus: (handler: () => void) => () => void;
+    onWindowBlur: (handler: () => void) => () => void;
+  };
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
@@ -63,9 +69,10 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
     id = getNextStoreId('collection'),
+    sharedServerTableState,
     browserTabsTransportFactory,
     browserTabsLeadershipTimings,
-    getWindowIsFocused,
+    bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
     baseCoalescingWindowMs = 10,
@@ -89,7 +96,11 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const { getMutationEmoji } = createEmojiCyclers();
 
-  const serverTable = createServerTableMock<D>(serverInitialData, addAction);
+  const serverTable = createServerTableMock<D>(
+    serverInitialData,
+    addAction,
+    sharedServerTableState,
+  );
 
   const { uiChanges, trackItemUI } = createPerItemUITracker(
     addAction,
@@ -156,9 +167,34 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     blockWindowClose: blockWindowClose ?? null,
     '~test': {
       ...testOptions,
-      getWindowIsFocused,
+      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+      onWindowFocus: bindFocusController
+        ? (handler: () => void) => {
+            return bindFocusController.onWindowFocus(handler);
+          }
+        : undefined,
+      onWindowFocusChange: bindFocusController
+        ? (handler: () => void) => {
+            const cleanupFocus = bindFocusController.onWindowFocus(handler);
+            const cleanupBlur = bindFocusController.onWindowBlur(handler);
+            return () => {
+              cleanupFocus();
+              cleanupBlur();
+            };
+          }
+        : undefined,
       browserTabsTransportFactory,
       browserTabsLeadershipTimings,
+      onReceiveRemoteMsg: (
+        message: CollectionBrowserTabsMessage<CollectionTestItem<D>, string>,
+      ) => {
+        if (message.kind === 'collection-item-snapshot') {
+          addAction(`<${message.consistency}-snapshot-received`, {
+            actionValue: message.item?.data?.value,
+            itemId: message.item?.payload,
+          });
+        }
+      },
     },
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
@@ -172,9 +208,14 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
       });
       collectionStore.invalidateItem(event.payload.itemId, 'realtimeUpdate');
     });
+
+    serverTable.wsEvents.on('list_changed', () => {
+      addAction('received-ws-data-change-event');
+      collectionStore.invalidateItem(() => true, 'realtimeUpdate');
+    });
   }
 
-  return {
+  const env = {
     apiStore: collectionStore,
     store: collectionStore.store,
     serverTable,
@@ -254,15 +295,17 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     get timelineString() {
       return getTimelineString();
     },
-    simulateWindowFocus() {
-      addAction('window-focused');
-      simulateWindowFocus();
-    },
-    simulateWindowBlur() {
-      addAction('window-blurred');
-      simulateWindowBlur();
-    },
   };
+
+  bindFocusController?.onWindowFocus(() => {
+    addAction('👁 window-focused');
+  });
+
+  bindFocusController?.onWindowBlur(() => {
+    addAction('🔕 window-blurred');
+  });
+
+  return env;
 }
 
 function mapInitialData<D extends Record<string, unknown>>(

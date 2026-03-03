@@ -1,4 +1,7 @@
-import { isWindowFocused } from '@ls-stack/browser-utils/window';
+import {
+  isWindowFocused,
+  onWindowFocus as onWindowFocusDefault,
+} from '@ls-stack/browser-utils/window';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
@@ -124,7 +127,7 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   mutationEnd: { mutationId: number; payload: ItemPayload; success: boolean };
 };
 
-type CollectionBrowserTabsMessage<
+export type CollectionBrowserTabsMessage<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > =
@@ -201,9 +204,14 @@ export type CollectionStoreOptions<
     initialError?: StoreError;
     initialLastFetchStartTime?: number;
     getWindowIsFocused?: () => boolean;
+    onWindowFocus?: (handler: () => void) => () => void;
+    onWindowFocusChange?: (handler: () => void) => () => void;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
+    onReceiveRemoteMsg?: (
+      message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
+    ) => void;
   };
 };
 
@@ -696,6 +704,10 @@ export function createCollectionStore<
       return;
     }
 
+    if (import.meta.env.TEST) {
+      testOptions?.onReceiveRemoteMsg?.(message);
+    }
+
     applyRemoteItemSnapshot(message, candidateVersion);
   }
 
@@ -708,6 +720,7 @@ export function createCollectionStore<
       onMessage: handleRemoteMessage,
       transportFactory: testOptions?.browserTabsTransportFactory,
       getWindowIsFocused,
+      onWindowFocusChange: testOptions?.onWindowFocusChange,
       priorityTimings:
         testOptions?.browserTabsPriorityTimings ??
         testOptions?.browserTabsLeadershipTimings,
@@ -1182,6 +1195,7 @@ export function createCollectionStore<
     revalidateOnWindowFocus,
     usesRealTimeUpdates,
     getWindowIsFocused,
+    onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
     onWindowFocusRevalidate: () => {
       invalidateItem(() => true, 'lowPriority');
     },

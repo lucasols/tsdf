@@ -1,15 +1,18 @@
 import { act } from 'react';
-import { createDocumentStore } from '../../src/documentStore';
+import {
+  createDocumentStore,
+  type DocumentBrowserTabsMessage,
+} from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
-import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import { createServerMock, type FetchErrorConfig } from './serverMock';
 import { getNextStoreId } from './browserTabsTestUtils';
 import {
-  simulateWindowBlur,
-  simulateWindowFocus,
-} from '../utils/genericTestUtils';
+  createServerMock,
+  type FetchErrorConfig,
+  type SharedServerMockState,
+} from './serverMock';
 import {
   createActionTracker,
   createEmojiCyclers,
@@ -31,9 +34,15 @@ export type DocumentStoreTestScenario<D> =
 
 export type DocumentStoreTestEnvOptions<D> = {
   id?: string;
+  sharedServerState?: SharedServerMockState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
   browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
-  getWindowIsFocused?: () => boolean;
+  /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
+  bindFocusController?: {
+    getWindowIsFocused: () => boolean;
+    onWindowFocus: (handler: () => void) => () => void;
+    onWindowBlur: (handler: () => void) => () => void;
+  };
   dynamicRealtimeThrottleMs?: (params: {
     lastFetchDuration: number;
     windowIsNotFocused: boolean;
@@ -51,9 +60,10 @@ export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
     id = getNextStoreId('document'),
+    sharedServerState,
     browserTabsTransportFactory,
     browserTabsLeadershipTimings,
-    getWindowIsFocused,
+    bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
     baseCoalescingWindowMs = 10,
@@ -78,7 +88,11 @@ export function createDocumentStoreTestEnv<D>(
     number | string | undefined
   >(addAction, getRelativeTime, actionsHistory);
 
-  const serverMock = createServerMock<D>(serverInitialData, addAction);
+  const serverMock = createServerMock<D>(
+    serverInitialData,
+    addAction,
+    sharedServerState,
+  );
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
@@ -98,9 +112,33 @@ export function createDocumentStoreTestEnv<D>(
     blockWindowClose: blockWindowClose ?? null,
     '~test': {
       ...testOptions,
-      getWindowIsFocused,
+      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+      onWindowFocus: bindFocusController
+        ? (handler: () => void) => {
+            return bindFocusController.onWindowFocus(handler);
+          }
+        : undefined,
+      onWindowFocusChange: bindFocusController
+        ? (handler: () => void) => {
+            const cleanupFocus = bindFocusController.onWindowFocus(handler);
+            const cleanupBlur = bindFocusController.onWindowBlur(handler);
+            return () => {
+              cleanupFocus();
+              cleanupBlur();
+            };
+          }
+        : undefined,
       browserTabsTransportFactory,
       browserTabsLeadershipTimings,
+      onReceiveRemoteMsg: (
+        message: DocumentBrowserTabsMessage<{ value: D }>,
+      ) => {
+        if (message.kind === 'document-snapshot') {
+          addAction(`<${message.consistency}-snapshot-received`, {
+            actionValue: message.data?.value,
+          });
+        }
+      },
     },
     onSchedulerEvent: (event) => {
       logSchedulerEvent(event, addAction);
@@ -114,7 +152,7 @@ export function createDocumentStoreTestEnv<D>(
     });
   }
 
-  return {
+  const env = {
     apiStore: documentStore,
     store: documentStore.store,
     get uiChanges() {
@@ -210,27 +248,25 @@ export function createDocumentStoreTestEnv<D>(
     setNextFetchDurations(...durations: number[]) {
       serverMock.setFetchDurations(...durations);
     },
-    emulateExternalRTU(value: D, fetchDuration?: number) {
+    emulateExternalRTU(value: D) {
       serverMock.setData(value);
-
-      if (fetchDuration !== undefined) {
-        serverMock.setFetchDurations(fetchDuration);
-      }
 
       serverMock.wsEvents.emit('data_changed', undefined);
     },
     setServerData(value: D) {
       serverMock.setData(value);
     },
-    simulateWindowFocus() {
-      addAction('window-focused');
-      simulateWindowFocus();
-    },
-    simulateWindowBlur() {
-      addAction('window-blurred');
-      simulateWindowBlur();
-    },
   };
+
+  bindFocusController?.onWindowFocus(() => {
+    addAction('👁 window-focused');
+  });
+
+  bindFocusController?.onWindowBlur(() => {
+    addAction('🔕 window-blurred');
+  });
+
+  return env;
 }
 
 function resolveTestOptions<D>(

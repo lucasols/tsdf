@@ -1,5 +1,8 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
-import { isWindowFocused } from '@ls-stack/browser-utils/window';
+import {
+  isWindowFocused,
+  onWindowFocus as onWindowFocusDefault,
+} from '@ls-stack/browser-utils/window';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import {
   __LEGIT_CAST__,
@@ -29,18 +32,19 @@ import {
 } from './utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinatorWithPriority,
+  isBrowserTabsSyncVersionNewer,
   SnapshotConsistency,
+  toBrowserTabsSyncVersion,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
-  isBrowserTabsSyncVersionNewer,
-  toBrowserTabsSyncVersion,
 } from './utils/browserTabsSync';
 import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from './utils/performMutation';
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
+import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
   fetchTypePriority,
   StoreFetchError,
@@ -48,7 +52,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
-import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -80,7 +83,7 @@ export type DocumentStoreStoreEvents = {
   mutationEnd: { mutationId: number; success: boolean };
 };
 
-type DocumentBrowserTabsMessage<State extends ValidStoreState> =
+export type DocumentBrowserTabsMessage<State extends ValidStoreState> =
   | (BrowserTabsMessageMeta & BrowserTabsTabStatusMessage)
   | (BrowserTabsMessageMeta & {
       kind: 'document-snapshot';
@@ -135,9 +138,12 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     initialError?: StoreError;
     initialLastFetchStartTime?: number;
     getWindowIsFocused?: () => boolean;
+    onWindowFocus?: (handler: () => void) => () => void;
+    onWindowFocusChange?: (handler: () => void) => () => void;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
+    onReceiveRemoteMsg?: (message: DocumentBrowserTabsMessage<State>) => void;
   };
 };
 
@@ -339,6 +345,10 @@ export function createDocumentStore<State extends ValidStoreState>({
       return;
     }
 
+    if (import.meta.env.TEST) {
+      testOptions?.onReceiveRemoteMsg?.(message);
+    }
+
     applyRemoteDocumentSnapshot(message, candidateVersion);
   }
 
@@ -350,6 +360,7 @@ export function createDocumentStore<State extends ValidStoreState>({
         onMessage: handleRemoteMessage,
         transportFactory: testOptions?.browserTabsTransportFactory,
         getWindowIsFocused,
+        onWindowFocusChange: testOptions?.onWindowFocusChange,
         priorityTimings:
           testOptions?.browserTabsPriorityTimings ??
           testOptions?.browserTabsLeadershipTimings,
@@ -473,6 +484,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     revalidateOnWindowFocus,
     usesRealTimeUpdates,
     getWindowIsFocused,
+    onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
     onWindowFocusRevalidate: () => {
       invalidateData('lowPriority');
     },

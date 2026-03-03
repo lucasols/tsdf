@@ -1,15 +1,15 @@
-import { onWindowFocus } from '@ls-stack/browser-utils/window';
-
 export function createStoreFocusLifecycle({
   revalidateOnWindowFocus,
   usesRealTimeUpdates,
   getWindowIsFocused,
+  onWindowFocus,
   onWindowFocusRevalidate,
   onTransportReconnectRevalidate,
 }: {
   revalidateOnWindowFocus: boolean | (() => boolean) | undefined;
   usesRealTimeUpdates: boolean | undefined;
   getWindowIsFocused: () => boolean;
+  onWindowFocus: (handler: () => void) => () => void;
   onWindowFocusRevalidate: () => void;
   onTransportReconnectRevalidate: () => void;
 }) {

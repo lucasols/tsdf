@@ -37,36 +37,126 @@ export function createFocusFlag(initialValue: boolean) {
 }
 
 export type FocusFlag = ReturnType<typeof createFocusFlag>;
-export type FocusEventEnv = {
-  simulateWindowFocus(): void;
-  simulateWindowBlur(): void;
+
+export type FocusControllerBinding = {
+  getWindowIsFocused: () => boolean;
+  /** Per-tab focus subscription. Calls the handler when this tab receives focus. */
+  onWindowFocus: (handler: () => void) => () => void;
+  /** Per-tab blur subscription. Calls the handler when this tab loses focus. */
+  onWindowBlur: (handler: () => void) => () => void;
 };
 
-export async function setFocusedTab(
-  env: FocusEventEnv,
-  focusFlags: FocusFlag[],
-  focusedTabIndex: number | null,
-): Promise<void> {
-  for (const [index, focusFlag] of focusFlags.entries()) {
-    focusFlag.set(index === focusedTabIndex);
-  }
-
-  if (focusedTabIndex === null) {
-    env.simulateWindowBlur();
-  } else {
-    env.simulateWindowFocus();
-  }
-
-  await advanceTime(5);
+export interface FocusChangeCoordinator<T extends string> {
+  /** Returns a `getWindowIsFocused` getter for the given tab, for use in store env creation. */
+  getWindowIsFocused(tab: T): () => boolean;
+  /** Returns a binding for use as `bindFocusController` in test env options. Provides per-tab `getWindowIsFocused`, `onWindowFocus`, and `onWindowBlur`. */
+  bind(tab: T): FocusControllerBinding;
+  /** Focus a tab. If another tab was focused, it gets blurred first (like a real browser tab switch). */
+  focusTab(tab: T): Promise<void>;
+  /** Blur all tabs (simulates window going to background). No-op if nothing is focused. */
+  blur(): Promise<void>;
 }
 
-export async function markLastActiveTab(
-  env: FocusEventEnv,
-  focusFlags: FocusFlag[],
-  activeTabIndex: number,
-): Promise<void> {
-  await setFocusedTab(env, focusFlags, activeTabIndex);
-  await setFocusedTab(env, focusFlags, null);
+export function createFocusChangeCoordinator<T extends string>(
+  tabs: readonly T[],
+  initialFocused: T | null,
+): FocusChangeCoordinator<T> {
+  const flags = new Map<
+    string,
+    { get: () => boolean; set: (v: boolean) => void }
+  >();
+  const focusListeners = new Map<string, Set<() => void>>();
+  const blurListeners = new Map<string, Set<() => void>>();
+  let currentFocused: string | null = initialFocused ?? null;
+
+  for (const tab of tabs) {
+    const flag = createFocusFlag(tab === currentFocused);
+    flags.set(tab, flag);
+    focusListeners.set(tab, new Set());
+    blurListeners.set(tab, new Set());
+  }
+
+  function getFlag(tab: string) {
+    const flag = flags.get(tab);
+    if (!flag) {
+      throw new Error(`Unknown tab "${tab}"`);
+    }
+    return flag;
+  }
+
+  function notifyFocus(tab: string) {
+    const listeners = focusListeners.get(tab);
+    if (listeners) {
+      for (const listener of listeners) {
+        listener();
+      }
+    }
+  }
+
+  function notifyBlur(tab: string) {
+    const listeners = blurListeners.get(tab);
+    if (listeners) {
+      for (const listener of listeners) {
+        listener();
+      }
+    }
+  }
+
+  return {
+    getWindowIsFocused(tab) {
+      return getFlag(tab).get;
+    },
+
+    bind(tab) {
+      return {
+        getWindowIsFocused: getFlag(tab).get,
+        onWindowFocus(handler) {
+          const listeners = focusListeners.get(tab);
+          if (!listeners) {
+            throw new Error(`Unknown tab "${tab}"`);
+          }
+          listeners.add(handler);
+          return () => {
+            listeners.delete(handler);
+          };
+        },
+        onWindowBlur(handler) {
+          const listeners = blurListeners.get(tab);
+          if (!listeners) {
+            throw new Error(`Unknown tab "${tab}"`);
+          }
+          listeners.add(handler);
+          return () => {
+            listeners.delete(handler);
+          };
+        },
+      };
+    },
+
+    async focusTab(tab) {
+      if (currentFocused === tab) return;
+
+      if (currentFocused !== null) {
+        getFlag(currentFocused).set(false);
+        notifyBlur(currentFocused);
+        await advanceTime(5);
+      }
+
+      getFlag(tab).set(true);
+      notifyFocus(tab);
+      await advanceTime(5);
+      currentFocused = tab;
+    },
+
+    async blur() {
+      if (currentFocused === null) return;
+
+      getFlag(currentFocused).set(false);
+      notifyBlur(currentFocused);
+      await advanceTime(5);
+      currentFocused = null;
+    },
+  };
 }
 
 export function countFetchHistoryEntries<

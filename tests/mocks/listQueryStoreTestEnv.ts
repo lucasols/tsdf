@@ -3,6 +3,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 import {
   createListQueryStore,
+  type ListQueryBrowserTabsMessage,
   type ListQueryStoreOptions,
 } from '../../src/listQueryStore/listQueryStore';
 import type {
@@ -10,32 +11,24 @@ import type {
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
 import type { FetchType } from '../../src/requestScheduler';
-import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import {
-  simulateWindowBlur,
-  simulateWindowFocus,
-} from '../utils/genericTestUtils';
 import { getNextStoreId } from './browserTabsTestUtils';
-import { createServerTableMock, type FilterOperator } from './serverTableMock';
+import {
+  createServerTableMock,
+  createSharedServerTableState,
+  type FilterOperator,
+  type ServerTableSharedState,
+} from './serverTableMock';
 import {
   createActionTracker,
   createEmojiCyclers,
   createPerItemUITracker,
-  createUITracker,
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
 } from './testEnvUtils';
-
-export type Row = {
-  id: number;
-  name: string;
-  [key: string]: unknown;
-};
-
-export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
 
 type ListQueryItemPayload = string;
 
@@ -68,6 +61,32 @@ function getStoreItemKey(tableId: string, id: number): string {
   return getCompositeKey(getRawItemKey(tableId, id));
 }
 
+export type Row = {
+  id: number;
+  name: string;
+  [key: string]: unknown;
+};
+
+export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
+
+function flattenTables<TRow extends Row>(
+  tables: Tables<TRow>,
+): Record<string, TRow> {
+  const flatItems: Record<string, TRow> = {};
+  for (const [tableId, rows] of Object.entries(tables)) {
+    for (const row of rows) {
+      flatItems[getRawItemKey(tableId, row.id)] = row;
+    }
+  }
+  return flatItems;
+}
+
+export function createSharedListQueryServerTableState<TRow extends Row>(
+  tables: Tables<TRow>,
+): ServerTableSharedState<TRow> {
+  return createSharedServerTableState(flattenTables(tables));
+}
+
 export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends boolean = false,
@@ -76,9 +95,10 @@ export function createListQueryStoreTestEnv<
   serverInitialData: Tables<TRow>,
   {
     id = getNextStoreId('list-query'),
+    sharedServerTableState,
     browserTabsTransportFactory,
     browserTabsLeadershipTimings,
-    getWindowIsFocused,
+    bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
     baseCoalescingWindowMs = 10,
@@ -97,9 +117,15 @@ export function createListQueryStoreTestEnv<
     blockWindowClose,
   }: {
     id?: string;
+    sharedServerTableState?: ServerTableSharedState<TRow>;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
-    getWindowIsFocused?: () => boolean;
+    /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
+    bindFocusController?: {
+      getWindowIsFocused: () => boolean;
+      onWindowFocus: (handler: () => void) => () => void;
+      onWindowBlur: (handler: () => void) => () => void;
+    };
     dynamicRealtimeThrottleMs?: (params: {
       lastFetchDuration: number;
       windowIsNotFocused: boolean;
@@ -135,20 +161,10 @@ export function createListQueryStoreTestEnv<
   } = createActionTracker();
   const { getMutationEmoji } = createEmojiCyclers();
 
-  // Convert Tables to Record<string, TRow> for serverTableMock
-  const flatItems: Record<string, TRow> = {};
-  for (const [tableId, rows] of Object.entries(serverInitialData)) {
-    for (const row of rows) {
-      flatItems[getRawItemKey(tableId, row.id)] = row;
-    }
-  }
-
-  const serverTable = createServerTableMock<TRow>(flatItems, addAction);
-
-  const { trackUIChanges } = createUITracker<unknown>(
+  const serverTable = createServerTableMock<TRow>(
+    flattenTables(serverInitialData),
     addAction,
-    getRelativeTime,
-    actionsHistory,
+    sharedServerTableState,
   );
 
   const { uiChanges, trackItemUI } = createPerItemUITracker(
@@ -245,9 +261,43 @@ export function createListQueryStoreTestEnv<
     partialResources,
     '~test': {
       ...testOptions,
-      getWindowIsFocused,
+      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+      onWindowFocus: bindFocusController
+        ? (handler: () => void) => {
+            return bindFocusController.onWindowFocus(handler);
+          }
+        : undefined,
+      onWindowFocusChange: bindFocusController
+        ? (handler: () => void) => {
+            const cleanupFocus = bindFocusController.onWindowFocus(handler);
+            const cleanupBlur = bindFocusController.onWindowBlur(handler);
+            return () => {
+              cleanupFocus();
+              cleanupBlur();
+            };
+          }
+        : undefined,
       browserTabsTransportFactory,
       browserTabsLeadershipTimings,
+      onReceiveRemoteMsg: (
+        message: ListQueryBrowserTabsMessage<TRow, ListQueryParams, string>,
+      ) => {
+        if (message.kind === 'list-item-snapshot') {
+          addAction(`<${message.consistency}-item-snapshot-received`, {
+            actionValue: message.item,
+            itemId: message.itemKey,
+          });
+        }
+
+        if (message.kind === 'list-query-snapshot') {
+          addAction(`<${message.consistency}-query-snapshot-received`, {
+            actionValue: {
+              queryKey: message.queryKey,
+              itemCount: message.items.length,
+            },
+          });
+        }
+      },
     },
     onSchedulerEvent: (
       event: import('../../src/requestScheduler').RequestSchedulerEvents,
@@ -375,17 +425,23 @@ export function createListQueryStoreTestEnv<
     });
   }
 
-  return {
+  // Hide wsEvents from the public type to prevent direct usage in tests,
+  // while keeping the runtime object intact (preserves getters).
+  const typedServerTable: Omit<
+    ReturnType<typeof createServerTableMock<TRow>>,
+    'wsEvents'
+  > = serverTable;
+
+  const env = {
     apiStore: listQueryStore,
     store: listQueryStore.store,
-    serverTable,
+    serverTable: typedServerTable,
     get uiChanges() {
       return uiChanges;
     },
     get actions() {
       return actionsHistory;
     },
-    trackUIChanges,
     trackItemUI,
     addTimelineComments,
     getItemKey: (tableId: string, rowId: number) =>
@@ -500,15 +556,17 @@ export function createListQueryStoreTestEnv<
     get timelineString() {
       return getTimelineString();
     },
-    simulateWindowFocus() {
-      addAction('window-focused');
-      simulateWindowFocus();
-    },
-    simulateWindowBlur() {
-      addAction('window-blurred');
-      simulateWindowBlur();
-    },
   };
+
+  bindFocusController?.onWindowFocus(() => {
+    addAction('👁 window-focused');
+  });
+
+  bindFocusController?.onWindowBlur(() => {
+    addAction('🔕 window-blurred');
+  });
+
+  return env;
 }
 
 type InitialData<TRow extends Row = Row> = {

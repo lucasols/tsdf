@@ -141,6 +141,7 @@ export type BrowserTabsCoordinatorWithPriorityOptions<
   Message extends { kind: string },
 > = BrowserTabsCoordinatorOptions<Message> & {
   getWindowIsFocused: () => boolean;
+  onWindowFocusChange?: (handler: () => void) => () => void;
   priorityTimings?: BrowserTabsPriorityTimings;
 };
 
@@ -152,6 +153,7 @@ export function createBrowserTabsCoordinatorWithPriority<
   onMessage,
   transportFactory,
   getWindowIsFocused,
+  onWindowFocusChange,
   priorityTimings,
 }: BrowserTabsCoordinatorWithPriorityOptions<Message>) {
   const coordinator = createBrowserTabsCoordinator({
@@ -165,6 +167,7 @@ export function createBrowserTabsCoordinatorWithPriority<
     enabled: coordinator.enabled,
     tabId: coordinator.tabId,
     getWindowIsFocused,
+    onWindowFocusChange,
     publishStatus: (status) => {
       coordinator.publish(
         __LEGIT_CAST__<

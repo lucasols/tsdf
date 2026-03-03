@@ -28,6 +28,8 @@ export type BrowserTabsPriorityOptions = {
   enabled: boolean;
   tabId: string;
   getWindowIsFocused: () => boolean;
+  /** Subscribes to window focus/blur state changes. Defaults to listening on window focus/blur events. */
+  onWindowFocusChange?: (handler: () => void) => () => void;
   publishStatus: (status: BrowserTabsTabStatusMessage) => void;
   timings?: BrowserTabsPriorityTimings;
 };
@@ -41,6 +43,7 @@ export function createBrowserTabsPriority({
   enabled,
   tabId,
   getWindowIsFocused,
+  onWindowFocusChange,
   publishStatus,
   timings,
 }: BrowserTabsPriorityOptions) {
@@ -268,7 +271,11 @@ export function createBrowserTabsPriority({
       }, heartbeatMs);
     }
 
-    if (typeof window !== 'undefined') {
+    if (onWindowFocusChange) {
+      cleanupFocusListeners = onWindowFocusChange(() => {
+        noteLocalFocusState();
+      });
+    } else if (typeof window !== 'undefined') {
       function onFocusOrBlur() {
         noteLocalFocusState();
       }
