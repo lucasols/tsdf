@@ -998,13 +998,15 @@ test('list query fetch timing sync suppresses redundant low-priority work after 
 test('list query first item fetch stays local after a sibling batch item fetch for the same batch', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-item-batch-first-fetch');
-  const focusA = createFocusFlag(true);
-  const focusB = createFocusFlag(true);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     useBatchFetch: true,
     getItemsBatchKey: () => 'shared',
     lowPriorityThrottleMs: 10_000,
@@ -1012,8 +1014,9 @@ test('list query first item fetch stays local after a sibling batch item fetch f
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { loaded: { items: ['users||1'] } },
     useBatchFetch: true,
     getItemsBatchKey: () => 'shared',
@@ -1029,7 +1032,10 @@ test('list query first item fetch stays local after a sibling batch item fetch f
   expect(envB.store.state.items[untouchedItemKey]).toBeUndefined();
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
 
-  renderHook(() => envB.apiStore.useItem('users||2'));
+  renderHook(() => {
+    const item = envB.apiStore.useItem('users||2');
+    envB.trackItemUI('users||2', item.data?.name);
+  });
   await flushAllTimers();
 
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
@@ -1043,4 +1049,22 @@ test('list query first item fetch stays local after a sibling batch item fetch f
     id: 2,
     name: 'Bob',
   });
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||2 |
+    1.01s | -        | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
+    1.81s | -        | 🔴 <list-fetch-finished (value: {"count":2})
+    3.62s | -        | <confirmed-item-snapshot-received (value: {"id":2,"name":"Bob"})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 | users||2 |
+    1.81s | -        | -        | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
+    .     | -        | ⋯        | [users||2] ui-initialized
+    2.82s | -        | ⋯        | 🔴 [users||2] >fetch-started
+    3.62s | -        | ⋯        | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Bob"})
+    .     | -        | Bob      | [users||2] ui-changed
+    "
+  `);
 });
