@@ -538,27 +538,38 @@ test('collection background scheduling does not retry on sibling tabs after a re
 test('collection low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-refetch-on-mount');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { idleWithLocalCache: 'sameAsServer' },
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { idleWithLocalCache: 'sameAsServer' },
   });
 
-  await markLastActiveTab(envA, [focusA, focusB], 1);
-  await markLastActiveTab(envA, [focusA, focusB], 0);
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
 
-  renderHook(() => envA.apiStore.useItem('item1'));
-  renderHook(() => envB.apiStore.useItem('item1'));
+  renderHook(() => {
+    const item = envA.apiStore.useItem('item1');
+    envA.trackItemUI('item1', item.data?.value.name);
+  });
+  renderHook(() => {
+    const item = envB.apiStore.useItem('item1');
+    envB.trackItemUI('item1', item.data?.value.name);
+  });
 
   await flushAllTimers();
 
@@ -566,6 +577,25 @@ test('collection low-priority refetch-on-mount work is deduplicated when all tab
     countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch') +
     countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch');
   expect(totalFetches).toBe(1);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1  |
+    10ms  | -      | 👁 window-focused
+    15ms  | -      | 🔕 window-blurred
+    20ms  | Item 1 | ui-initialized
+    1.03s | Item 1 | 🔴 >fetch-started
+    1.83s | Item 1 | 🔴 <fetch-finished (value: {"name":"Item 1"})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1  |
+    0     | -      | 👁 window-focused
+    5ms   | -      | 🔕 window-blurred
+    20ms  | Item 1 | ui-initialized
+    1.83s | Item 1 | <confirmed-snapshot-received (value: {"name":"Item 1"})
+    "
+  `);
 });
 
 test('collection fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
