@@ -875,27 +875,37 @@ test('list query background scheduling does not retry on sibling tabs after a re
 test('list query low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-refetch-on-mount');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: { idleWithLocalCache: { tables: ['users'] } },
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: { idleWithLocalCache: { tables: ['users'] } },
   });
 
-  await markLastActiveTab(envA, [focusA, focusB], 1);
-  await markLastActiveTab(envA, [focusA, focusB], 0);
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
 
-  renderHook(() => envA.apiStore.useListQuery({ tableId: 'users' }));
-  renderHook(() => envB.apiStore.useListQuery({ tableId: 'users' }));
+  renderHook(() => {
+    const query = envA.apiStore.useListQuery({ tableId: 'users' });
+    envA.trackItemUI('users||1', query.items[0]?.name);
+  });
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({ tableId: 'users' });
+    envB.trackItemUI('users||1', query.items[0]?.name);
+  });
 
   await flushAllTimers();
 
@@ -903,6 +913,25 @@ test('list query low-priority refetch-on-mount work is deduplicated when all tab
     countFetchHistoryEntries(envA.serverTable.fetchHistory, 'list') +
     countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list');
   expect(totalFetches).toBe(1);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    10ms  | -        | 👁 window-focused
+    15ms  | -        | 🔕 window-blurred
+    20ms  | Alice    | ui-initialized
+    1.03s | Alice    | 🔴 >list-fetch-started
+    1.83s | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | -        | 👁 window-focused
+    5ms   | -        | 🔕 window-blurred
+    20ms  | Alice    | ui-initialized
+    1.83s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    "
+  `);
 });
 
 test('list query fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
