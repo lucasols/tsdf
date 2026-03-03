@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { createFocusChangeCoordinator } from '../browser-tabs/browser-tabs-test-helpers';
 import { createInspectableInMemoryBrowserTabsTransportFactory } from '../mocks/browserTabsTestUtils';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -17,13 +18,7 @@ test('scheduled known requests are dropped after a sibling fetch starts later', 
   const sharedTransports =
     createInspectableInMemoryBrowserTabsTransportFactory();
 
-  function createStaticFocusController(isFocused: boolean) {
-    return {
-      getWindowIsFocused: () => isFocused,
-      onWindowFocus: (handler_: () => void) => () => {},
-      onWindowBlur: (handler_: () => void) => () => {},
-    };
-  }
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
 
   // Both envs use the same store id so they share the same browser tabs channel.
   const sharedStoreId = 'request-scheduler-cross-tab-sync';
@@ -32,7 +27,7 @@ test('scheduled known requests are dropped after a sibling fetch starts later', 
     id: sharedStoreId,
     testScenario: 'loaded',
     browserTabsTransportFactory: sharedTransports.transportFactory,
-    bindFocusController: createStaticFocusController(true),
+    bindFocusController: tabs.bind('a'),
     // Matches production: base window is non-zero.
     baseCoalescingWindowMs: 10,
     usesRealTimeUpdates: false,
@@ -42,7 +37,7 @@ test('scheduled known requests are dropped after a sibling fetch starts later', 
     id: sharedStoreId,
     testScenario: 'loaded',
     browserTabsTransportFactory: sharedTransports.transportFactory,
-    bindFocusController: createStaticFocusController(false),
+    bindFocusController: tabs.bind('b'),
     // Matches production: base window is non-zero.
     baseCoalescingWindowMs: 10,
     usesRealTimeUpdates: false,
@@ -69,9 +64,32 @@ test('scheduled known requests are dropped after a sibling fetch starts later', 
   // Focused tab coalesces on the base window.
   await vi.advanceTimersByTimeAsync(11);
 
+  // Deliver cross-tab transport messages (scheduled with setTimeout(0)).
+  await vi.advanceTimersByTimeAsync(0);
+
   await vi.runAllTimersAsync();
 
   // Tab B performed only the initial fetch; the scheduled one was dropped.
   expect(tabB.serverMock.numOfStartedFetches).toBe(1);
   expect(tabA.serverMock.numOfStartedFetches).toBe(1);
+
+  expect(tabA.timelineString).toMatchInlineSnapshot(`
+    "
+    time   |
+    1.013s | scheduled-fetch-triggered
+    1.023s | 🔴 >fetch-started
+    1.81s  | <confirmed-snapshot-received (value: 0)
+    1.823s | 🔴 <fetch-finished (value: 0)
+    "
+  `);
+  expect(tabB.timelineString).toMatchInlineSnapshot(`
+    "
+    time   |
+    0      | scheduled-fetch-triggered
+    1.01s  | 🔴 >fetch-started
+    1.012s | scheduled-fetch-scheduled
+    1.81s  | 🔴 <fetch-finished (value: 0)
+    1.823s | <confirmed-snapshot-received (value: 0)
+    "
+  `);
 });
