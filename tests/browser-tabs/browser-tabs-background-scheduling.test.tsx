@@ -348,42 +348,49 @@ test('document fetch timing sync suppresses redundant low-priority work after a 
 test('collection background scheduling falls back to the next-ranked tab when the primary tab never starts', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-background-fallback-item');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
-  const focusC = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
-  const createEnv = (
-    getWindowIsFocused: () => boolean,
-    baseCoalescingWindowMs: number,
-  ) =>
+  const createEnv = (tab: 'a' | 'b' | 'c', baseCoalescingWindowMs: number) =>
     createCollectionStoreTestEnv(createCollectionItems(), {
       id,
+      sharedServerTableState,
       browserTabsTransportFactory: transportFactory,
-      getWindowIsFocused,
+      bindFocusController: tabs.bind(tab),
       testScenario: 'loaded',
       usesRealTimeUpdates: true,
       baseCoalescingWindowMs,
     });
 
-  const envA = createEnv(focusA.get, 1_500);
-  const envB = createEnv(focusB.get, 10);
-  const envC = createEnv(focusC.get, 10);
+  const envA = createEnv('a', 1_500);
+  const envB = createEnv('b', 10);
+  const envC = createEnv('c', 10);
 
-  renderHook(() => envA.apiStore.useItem('item1'));
-  renderHook(() => envB.apiStore.useItem('item1'));
-  renderHook(() => envC.apiStore.useItem('item1'));
+  renderHook(() => {
+    const item = envA.apiStore.useItem('item1');
+    envA.trackItemUI('item1', item.data?.value.name);
+  });
+  renderHook(() => {
+    const item = envB.apiStore.useItem('item1');
+    envB.trackItemUI('item1', item.data?.value.name);
+  });
+  renderHook(() => {
+    const item = envC.apiStore.useItem('item1');
+    envC.trackItemUI('item1', item.data?.value.name);
+  });
 
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 2);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 1);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 0);
+  await tabs.focusTab('c');
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
 
-  envA.serverTable.setItem('item1', { name: 'Updated' });
-  envB.serverTable.setItem('item1', { name: 'Updated' });
-  envC.serverTable.setItem('item1', { name: 'Updated' });
-
-  envA.apiStore.invalidateItem('item1', 'realtimeUpdate');
-  envB.apiStore.invalidateItem('item1', 'realtimeUpdate');
-  envC.apiStore.invalidateItem('item1', 'realtimeUpdate');
+  envA.serverTable.setItem(
+    'item1',
+    { name: 'Updated' },
+    { triggerRTUEvent: true },
+  );
 
   await flushAllTimers();
 
@@ -396,6 +403,41 @@ test('collection background scheduling falls back to the next-ranked tab when th
   expect(countFetchHistoryEntries(envC.serverTable.fetchHistory, 'fetch')).toBe(
     0,
   );
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1   |
+    0     | Item 1  | ui-initialized
+    20ms  | Item 1  | 👁 window-focused
+    25ms  | Item 1  | 🔕 window-blurred
+    30ms  | Item 1  | server-data-changed (value: {"name":"Updated"})
+    .     | Item 1  | received-ws-data-change-event
+    2.84s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
+    .     | Updated | ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1   |
+    0     | Item 1  | ui-initialized
+    10ms  | Item 1  | 👁 window-focused
+    15ms  | Item 1  | 🔕 window-blurred
+    30ms  | Item 1  | received-ws-data-change-event
+    2.04s | Item 1  | 🔴 >fetch-started
+    2.84s | Item 1  | 🔴 <fetch-finished (value: {"name":"Updated"})
+    .     | Updated | ui-changed
+    "
+  `);
+  expect(envC.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item1   |
+    0     | Item 1  | ui-initialized
+    .     | Item 1  | 👁 window-focused
+    5ms   | Item 1  | 🔕 window-blurred
+    30ms  | Item 1  | received-ws-data-change-event
+    2.84s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
+    .     | Updated | ui-changed
+    "
+  `);
 });
 
 test('collection background scheduling does not retry on sibling tabs after a remote fetch has started', async () => {
