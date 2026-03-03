@@ -219,6 +219,24 @@ export function useMultipleListQueries<
             } else if (someItemMissingFields) {
               status = 'loading';
             }
+          } else if (
+            partialResources &&
+            fields === '*' &&
+            (status === 'success' || status === 'refetching')
+          ) {
+            const hasAnyFieldInvalidation = query.items.some((itemKey) => {
+              const itemFieldInvalidationFields =
+                state.itemFieldInvalidationFields[itemKey];
+
+              return (
+                !!itemFieldInvalidationFields &&
+                itemFieldInvalidationFields.length > 0
+              );
+            });
+
+            if (hasAnyFieldInvalidation) {
+              status = 'refetching';
+            }
           }
 
           if (!returnRefetchingStatus && status === 'refetching') {

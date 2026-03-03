@@ -53,7 +53,7 @@ async function openScenario(
   context: BrowserContext,
   scenario: 'document' | 'collection' | 'list',
   pageId: string,
-  options?: { storeId?: string },
+  options?: { storeId?: string; sessionKey?: string },
 ) {
   const page = await context.newPage();
   const searchParams = new URLSearchParams({
@@ -63,6 +63,10 @@ async function openScenario(
 
   if (options?.storeId) {
     searchParams.set('storeId', options.storeId);
+  }
+
+  if (options?.sessionKey) {
+    searchParams.set('sessionKey', options.sessionKey);
   }
 
   await page.goto(`/?${searchParams.toString()}`);
@@ -200,6 +204,47 @@ test('document realtime updates do not sync across different store ids', async (
       pageId: 'page-a',
       path: '/api/document',
       method: 'GET',
+    }),
+  ).toBe(1);
+  expect(
+    countRequests(history, {
+      pageId: 'page-b',
+      path: '/api/document',
+      method: 'GET',
+    }),
+  ).toBe(0);
+
+  await context.close();
+});
+
+test('document browser-tabs sync stays isolated across different session keys', async ({
+  browser,
+  request,
+}) => {
+  const context = await browser.newContext();
+  const pageA = await openScenario(context, 'document', 'page-a', {
+    storeId: 'document-store-shared',
+    sessionKey: 'account-a',
+  });
+  const pageB = await openScenario(context, 'document', 'page-b', {
+    storeId: 'document-store-shared',
+    sessionKey: 'account-b',
+  });
+
+  await expect(pageA.getByTestId('document-value')).toHaveText('0');
+  await expect(pageB.getByTestId('document-value')).toHaveText('0');
+
+  await resetHistory(request);
+  await pageA.getByTestId('document-mutate-optimistic').click();
+
+  await expect(pageA.getByTestId('document-value')).toHaveText('1');
+  await expect(pageB.getByTestId('document-value')).toHaveText('0');
+
+  const history = await getHistory(request);
+  expect(
+    countRequests(history, {
+      pageId: 'page-a',
+      path: '/api/document/mutate',
     }),
   ).toBe(1);
   expect(

@@ -100,6 +100,7 @@ export function createListQueryStoreTestEnv<
   serverInitialData: Tables<TRow>,
   {
     id = getNextStoreId('list-query'),
+    getSessionKey = () => 'test-session',
     sharedServerTableState,
     browserTabsTransportFactory,
     browserTabsLeadershipTimings,
@@ -123,6 +124,7 @@ export function createListQueryStoreTestEnv<
     ignoreInitialTimeCheck,
   }: {
     id?: string;
+    getSessionKey?: () => string | false;
     sharedServerTableState?: ServerTableSharedState<TRow>;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
@@ -260,6 +262,7 @@ export function createListQueryStoreTestEnv<
 
   const baseOptions = {
     id,
+    getSessionKey,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,

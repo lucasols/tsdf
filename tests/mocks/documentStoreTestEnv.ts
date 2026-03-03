@@ -39,6 +39,7 @@ export type DocumentStoreTestScenario<D> =
 
 export type DocumentStoreTestEnvOptions<D> = {
   id?: string;
+  getSessionKey?: () => string | false;
   sharedServerState?: SharedServerMockState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
   browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
@@ -66,6 +67,7 @@ export function createDocumentStoreTestEnv<D>(
   serverInitialData: D,
   {
     id = getNextStoreId('document'),
+    getSessionKey = () => 'test-session',
     sharedServerState,
     browserTabsTransportFactory,
     browserTabsLeadershipTimings,
@@ -113,6 +115,7 @@ export function createDocumentStoreTestEnv<D>(
 
   const documentStore = createDocumentStore<{ value: D }>({
     id,
+    getSessionKey,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,

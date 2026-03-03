@@ -94,6 +94,30 @@ export type ListQueryStore<
   >
 >;
 
+const noFetchItemFnError = 'No fetchItemFn was provided';
+const noPartialResourcesFieldsOptionError =
+  'fields option is required when partialResources is enabled';
+
+type FetchListFnSizeMode<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = (
+  payload: QueryPayload,
+  size: number,
+  options: { signal: AbortSignal; fields?: string[] },
+) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
+
+type FetchListFnOffsetMode<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = (
+  payload: QueryPayload,
+  pagination: { offset: number; limit: number },
+  options: { signal: AbortSignal; fields?: string[] },
+) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
+
 type ListQuerySnapshotItemEntry<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -139,30 +163,6 @@ export type ListQueryBrowserTabsMessage<
       duration: number;
     });
 
-const noFetchItemFnError = 'No fetchItemFn was provided';
-const noPartialResourcesFieldsOptionError =
-  'fields option is required when partialResources is enabled';
-
-type FetchListFnSizeMode<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = (
-  payload: QueryPayload,
-  size: number,
-  options: { signal: AbortSignal; fields?: string[] },
-) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
-
-type FetchListFnOffsetMode<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = (
-  payload: QueryPayload,
-  pagination: { offset: number; limit: number },
-  options: { signal: AbortSignal; fields?: string[] },
-) => Promise<FetchListFnReturn<ItemState, ItemPayload>>;
-
 type ListQueryStoreOptionsBase<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -172,6 +172,12 @@ type ListQueryStoreOptionsBase<
   debugName?: string;
   /** Stable id shared by the same logical list-query store across browser tabs. */
   id: string;
+  /**
+   * Returns the current authenticated session / tenant key used to scope
+   * browser-tabs sync. Return `false` to disable browser-tabs sync when no
+   * account is loaded.
+   */
+  getSessionKey: () => string | false;
   fetchItemFn?: (
     payload: ItemPayload,
     options: { signal: AbortSignal; fields?: string[] },
@@ -278,6 +284,7 @@ export function createListQueryStore<
   const {
     debugName,
     id,
+    getSessionKey,
     fetchItemFn,
     batchFetchItemFn,
     getItemsBatchKey,
@@ -1105,7 +1112,12 @@ export function createListQueryStore<
     >({
       storeType: 'listQuery',
       storeKey: id,
+      getSessionKey,
       onMessage: handleRemoteBrowserTabsMessage,
+      onSessionChange() {
+        lastQuerySyncVersions.clear();
+        lastItemSyncVersions.clear();
+      },
       transportFactory: testOptions?.browserTabsTransportFactory,
       getWindowIsFocused,
       onWindowFocusChange: testOptions?.onWindowFocusChange,

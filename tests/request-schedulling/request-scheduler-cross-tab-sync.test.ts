@@ -93,3 +93,50 @@ test('scheduled known requests are dropped after a sibling fetch starts later', 
     "
   `);
 });
+
+test('scheduled requests are not dropped when sibling tabs use different session keys', async () => {
+  const sharedTransports =
+    createInspectableInMemoryBrowserTabsTransportFactory();
+
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedStoreId = 'request-scheduler-cross-tab-sync-different-sessions';
+
+  const tabA = createDocumentStoreTestEnv(0, {
+    id: sharedStoreId,
+    getSessionKey: () => 'account-a',
+    testScenario: 'loaded',
+    browserTabsTransportFactory: sharedTransports.transportFactory,
+    bindFocusController: tabs.bind('a'),
+    baseCoalescingWindowMs: 10,
+    usesRealTimeUpdates: false,
+  });
+
+  const tabB = createDocumentStoreTestEnv(0, {
+    id: sharedStoreId,
+    getSessionKey: () => 'account-b',
+    testScenario: 'loaded',
+    browserTabsTransportFactory: sharedTransports.transportFactory,
+    bindFocusController: tabs.bind('b'),
+    baseCoalescingWindowMs: 10,
+    usesRealTimeUpdates: false,
+  });
+
+  await vi.advanceTimersByTimeAsync(0);
+
+  expect(tabB.scheduleFetch('highPriority')).toBe('triggered');
+  await vi.advanceTimersByTimeAsync(1_011);
+  expect(tabB.serverMock.numOfStartedFetches).toBe(1);
+
+  await vi.advanceTimersByTimeAsync(1);
+  expect(tabB.scheduleFetch('highPriority')).toBe('scheduled');
+
+  await vi.advanceTimersByTimeAsync(1);
+  expect(tabA.scheduleFetch('highPriority')).toBe('triggered');
+  await vi.advanceTimersByTimeAsync(11);
+
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.runAllTimersAsync();
+
+  expect(tabB.serverMock.numOfStartedFetches).toBe(2);
+  expect(tabA.serverMock.numOfStartedFetches).toBe(1);
+});

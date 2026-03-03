@@ -167,6 +167,12 @@ export type CollectionStoreOptions<
   debugName?: string;
   /** Stable id shared by the same logical collection store across browser tabs. */
   id: string;
+  /**
+   * Returns the current authenticated session / tenant key used to scope
+   * browser-tabs sync. Return `false` to disable browser-tabs sync when no
+   * account is loaded.
+   */
+  getSessionKey: () => string | false;
   fetchFn: (params: ItemPayload, signal: AbortSignal) => Promise<ItemState>;
   /** Optional batch fetch function for fetching multiple items at once */
   batchFetchFn?: (
@@ -230,6 +236,7 @@ export function createCollectionStore<
 >({
   debugName,
   id,
+  getSessionKey,
   fetchFn,
   batchFetchFn,
   getItemsBatchKey,
@@ -717,7 +724,11 @@ export function createCollectionStore<
     >({
       storeType: 'collection',
       storeKey: id,
+      getSessionKey,
       onMessage: handleRemoteMessage,
+      onSessionChange() {
+        lastCollectionSyncVersions.clear();
+      },
       transportFactory: testOptions?.browserTabsTransportFactory,
       getWindowIsFocused,
       onWindowFocusChange: testOptions?.onWindowFocusChange,

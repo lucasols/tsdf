@@ -289,6 +289,155 @@ test('list query partial-resources field metadata updates an already-loaded sibl
   `);
 });
 
+test('focused partial-resource item refetch updates the matching background hook without refetching a sibling field hook', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-query-focused-item-refetch-name');
+  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
+  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
+    users: [{ id: 1, name: 'Alice', age: 30 }],
+  });
+
+  const envA = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('a'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+  const envB = createListQueryStoreTestEnv(
+    {
+      users: [{ id: 1, name: 'Alice', age: 30 }],
+    },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      bindFocusController: tabs.bind('b'),
+      partialResources: partialResourcesConfig,
+    },
+  );
+
+  const envANameHook = renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name'],
+    });
+
+    envA.trackItemUI('name-hook', item.data?.name ?? '-');
+    return item;
+  });
+  await flushAllTimers();
+
+  const envBHooks = renderHook(() => {
+    const name = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name'],
+    });
+    const age = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['age'],
+    });
+
+    envB.trackItemUI('name-hook', name.data?.name ?? '-');
+    envB.trackItemUI('age-hook', getTrackedAge(age.data?.age));
+
+    return { name, age };
+  });
+  await flushAllTimers();
+
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+
+  // The focused tab seeds the name field first; the background tab then mounts
+  // both hooks and only performs the extra fetch needed to satisfy age.
+  expect(envANameHook.result.current).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alice',
+    },
+  });
+  expect(envBHooks.result.current.name).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alice',
+    },
+  });
+  expect(envBHooks.result.current.age).toMatchObject({
+    status: 'success',
+    data: {
+      age: 30,
+    },
+  });
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+
+  const envBFetchCountBeforeFocusedRefetch = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'fetch',
+  );
+  expect(envBFetchCountBeforeFocusedRefetch).toBe(1);
+  expect(envB.serverTable.fetchHistory[0]).toMatchObject({
+    type: 'fetch',
+    fields: ['age', 'name'],
+  });
+
+  // A focused-tab name-only refetch should update the matching background hook
+  // from the incoming item snapshot without making the background tab refetch.
+  envA.serverTable.setItem('users||1', {
+    id: 1,
+    name: 'Alicia',
+    age: 30,
+  });
+  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+    fields: ['name'],
+  });
+  await flushAllTimers();
+
+  expect(countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch')).toBe(
+    2,
+  );
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    envBFetchCountBeforeFocusedRefetch,
+  );
+  expect(envBHooks.result.current.name).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alicia',
+    },
+  });
+  expect(envBHooks.result.current.age).toMatchObject({
+    status: 'success',
+    data: {
+      age: 30,
+    },
+  });
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+  expect(envB.store.state.items[itemKey]).toEqual({
+    age: 30,
+    name: 'Alicia',
+  });
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | age-hook | name-hook | users||1 |
+    810ms | -        | -         | -        | [name-hook] ui-initialized
+    .     | -        | -         | -        | [age-hook] ui-changed
+    1.82s | -        | -         | -        | 🔴 [users||1] >fetch-started
+    2.62s | -        | -         | -        | 🔴 [users||1] <fetch-finished (value: {"age":30,"name":"Alice"})
+    .     | -        | Alice     | -        | [name-hook] ui-changed
+    .     | 30       | Alice     | -        | [age-hook] ui-changed
+    3.43s | 30       | Alice     | -        | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":30})
+    .     | 30       | Alicia    | -        | [name-hook] ui-changed
+    "
+  `);
+});
+
 test('list query partial-resources remote query snapshots satisfy affected field-subset hooks without refetching unaffected sibling hooks', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-field-subset-invalidation');

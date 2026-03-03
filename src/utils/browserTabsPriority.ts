@@ -25,7 +25,8 @@ export type BrowserTabsRemoteLeaseState = {
 };
 
 export type BrowserTabsPriorityOptions = {
-  enabled: boolean;
+  transportEnabled: boolean;
+  getIsEnabled: () => boolean;
   tabId: string;
   getWindowIsFocused: () => boolean;
   /** Subscribes to window focus/blur state changes. Defaults to listening on window focus/blur events. */
@@ -40,7 +41,8 @@ const DEFAULT_FETCH_LEASE_MS = 10_000;
 const COALESCING_WINDOW_STEP_MS = 1_000;
 
 export function createBrowserTabsPriority({
-  enabled,
+  transportEnabled,
+  getIsEnabled,
   tabId,
   getWindowIsFocused,
   onWindowFocusChange,
@@ -95,6 +97,10 @@ export function createBrowserTabsPriority({
   }
 
   function getRankedLiveTabs(): PresenceState[] {
+    if (!getIsEnabled()) {
+      return [localPresence];
+    }
+
     pruneStaleTabs();
 
     return [localPresence, ...knownTabs.values()].sort((a, b) => {
@@ -116,7 +122,7 @@ export function createBrowserTabsPriority({
   }
 
   function publishLocalStatus(): void {
-    if (!enabled) return;
+    if (!getIsEnabled()) return;
 
     noteLocalFocusState();
     localPresence.lastPresenceAt = Date.now();
@@ -140,7 +146,7 @@ export function createBrowserTabsPriority({
       localPresence.lastFocusedAt = localPresence.lastPresenceAt;
     }
 
-    if (!enabled) return;
+    if (!getIsEnabled()) return;
 
     publishStatus({
       kind: 'tab-status',
@@ -151,6 +157,8 @@ export function createBrowserTabsPriority({
   }
 
   function getPriorityRank(): number {
+    if (!getIsEnabled()) return 1;
+
     const localTabIndex = getLocalTabIndex();
     return localTabIndex >= 0 ? localTabIndex + 1 : 1;
   }
@@ -186,7 +194,7 @@ export function createBrowserTabsPriority({
     remoteTabId: string,
     message: BrowserTabsTabStatusMessage,
   ): void {
-    if (!enabled) return;
+    if (!getIsEnabled()) return;
 
     const previousPresence = knownTabs.get(remoteTabId);
     if (
@@ -210,13 +218,14 @@ export function createBrowserTabsPriority({
     startedAt: number,
     lastFetchDuration: number,
   ): BrowserTabsRemoteLeaseState {
-    pruneExpiredRemoteLeases();
-
     const lease = {
       ownerTabId: remoteTabId,
       startedAt,
       expiresAt: startedAt + resolveFetchLeaseMs(lastFetchDuration),
     };
+    if (!getIsEnabled()) return lease;
+
+    pruneExpiredRemoteLeases();
 
     remoteFetchLeases.set(targetKey, lease);
     return lease;
@@ -228,6 +237,8 @@ export function createBrowserTabsPriority({
     startedAt: number,
     duration_: number,
   ): void {
+    if (!getIsEnabled()) return;
+
     void remoteTabId_;
     void duration_;
     pruneExpiredRemoteLeases();
@@ -242,6 +253,8 @@ export function createBrowserTabsPriority({
   function getRemoteLeaseState(
     targetKey: string,
   ): BrowserTabsRemoteLeaseState | null {
+    if (!getIsEnabled()) return null;
+
     pruneExpiredRemoteLeases();
     return remoteFetchLeases.get(targetKey) ?? null;
   }
@@ -258,11 +271,11 @@ export function createBrowserTabsPriority({
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
 
   const shouldRunHeartbeat =
-    enabled &&
+    transportEnabled &&
     heartbeatMs > 0 &&
     (!import.meta.env.TEST || timings?.heartbeatMs !== undefined);
 
-  if (enabled) {
+  if (transportEnabled) {
     publishLocalStatus();
 
     if (shouldRunHeartbeat) {

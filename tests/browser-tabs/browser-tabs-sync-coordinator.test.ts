@@ -8,6 +8,7 @@ import {
 
 function createControlledTransportFactory() {
   let onMessage: ((message: unknown) => void) | null = null;
+  const postedMessages: unknown[] = [];
 
   const transportFactory: BrowserTabsTransportFactory = ({
     onMessage: next,
@@ -15,7 +16,9 @@ function createControlledTransportFactory() {
     onMessage = next;
 
     return {
-      postMessage() {},
+      postMessage(message) {
+        postedMessages.push(message);
+      },
       close() {},
     };
   };
@@ -25,16 +28,23 @@ function createControlledTransportFactory() {
     deliver(message: unknown) {
       onMessage?.(message);
     },
+    getPostedMessages() {
+      return [...postedMessages];
+    },
   };
 }
 
 type SyncTestMessage = BrowserTabsMessageMeta & BrowserTabsTabStatusMessage;
 
-function createRemoteStatusMessage(seq: number): SyncTestMessage {
+function createRemoteStatusMessage(
+  seq: number,
+  sessionKey = 'test-session',
+): SyncTestMessage {
   return {
     kind: 'tab-status',
     protocolVersion: 1,
     storeType: 'document',
+    sessionKey,
     tabId: 'remote-tab',
     seq,
     sentAt: seq,
@@ -44,6 +54,75 @@ function createRemoteStatusMessage(seq: number): SyncTestMessage {
     lastPresenceAt: seq,
   };
 }
+
+test('browser tabs coordinator ignores messages from a different session key', () => {
+  const transport = createControlledTransportFactory();
+  const receivedMessageIds: string[] = [];
+
+  createBrowserTabsCoordinator<SyncTestMessage>({
+    storeType: 'document',
+    storeKey: 'coordinator-session-mismatch',
+    getSessionKey: () => 'account-a',
+    transportFactory: transport.transportFactory,
+    onMessage(message) {
+      receivedMessageIds.push(message.messageId);
+    },
+  });
+
+  transport.deliver(createRemoteStatusMessage(1, 'account-b'));
+
+  expect(receivedMessageIds).toEqual([]);
+});
+
+test('browser tabs coordinator disables publish and receive when session key is false', () => {
+  const transport = createControlledTransportFactory();
+  const receivedMessageIds: string[] = [];
+
+  const coordinator = createBrowserTabsCoordinator<SyncTestMessage>({
+    storeType: 'document',
+    storeKey: 'coordinator-no-session',
+    getSessionKey: () => false,
+    transportFactory: transport.transportFactory,
+    onMessage(message) {
+      receivedMessageIds.push(message.messageId);
+    },
+  });
+
+  const published = coordinator.publish({
+    kind: 'tab-status',
+    isFocused: false,
+    lastFocusedAt: 0,
+    lastPresenceAt: 0,
+  });
+
+  transport.deliver(createRemoteStatusMessage(1));
+
+  expect(published).toBeNull();
+  expect(receivedMessageIds).toEqual([]);
+  expect(transport.getPostedMessages()).toEqual([]);
+});
+
+test('browser tabs coordinator clears duplicate suppression when the session key changes', () => {
+  const transport = createControlledTransportFactory();
+  const receivedMessageIds: string[] = [];
+  let sessionKey: string | false = 'account-a';
+
+  createBrowserTabsCoordinator<SyncTestMessage>({
+    storeType: 'document',
+    storeKey: 'coordinator-session-switch',
+    getSessionKey: () => sessionKey,
+    transportFactory: transport.transportFactory,
+    onMessage(message) {
+      receivedMessageIds.push(message.messageId);
+    },
+  });
+
+  transport.deliver(createRemoteStatusMessage(1, 'account-a'));
+  sessionKey = 'account-b';
+  transport.deliver(createRemoteStatusMessage(1, 'account-b'));
+
+  expect(receivedMessageIds).toEqual(['remote-tab:1', 'remote-tab:1']);
+});
 
 test('browser tabs coordinator keeps duplicate suppression bounded during long-lived status traffic', () => {
   const OriginalSet = globalThis.Set;
@@ -97,6 +176,7 @@ test('browser tabs coordinator keeps duplicate suppression bounded during long-l
     const coordinator = createBrowserTabsCoordinator<SyncTestMessage>({
       storeType: 'document',
       storeKey: 'coordinator-dedupe',
+      getSessionKey: () => 'test-session',
       transportFactory: transport.transportFactory,
       onMessage(message) {
         receivedMessageIds.push(message.messageId);

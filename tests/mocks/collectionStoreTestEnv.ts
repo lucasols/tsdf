@@ -42,6 +42,7 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
 
 export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   id?: string;
+  getSessionKey?: () => string | false;
   sharedServerTableState?: ServerTableSharedState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
   browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
@@ -75,6 +76,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
   serverInitialData: Record<string, D>,
   {
     id = getNextStoreId('collection'),
+    getSessionKey = () => 'test-session',
     sharedServerTableState,
     browserTabsTransportFactory,
     browserTabsLeadershipTimings,
@@ -165,6 +167,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
     id,
+    getSessionKey,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,

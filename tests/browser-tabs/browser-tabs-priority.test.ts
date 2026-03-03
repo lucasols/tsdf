@@ -13,7 +13,8 @@ afterEach(() => {
 
 function createPriority(getWindowIsFocused: () => boolean) {
   return createBrowserTabsPriority({
-    enabled: true,
+    transportEnabled: true,
+    getIsEnabled: () => true,
     tabId: 'local-tab',
     getWindowIsFocused,
     publishStatus() {},
@@ -22,6 +23,28 @@ function createPriority(getWindowIsFocused: () => boolean) {
 
 test('browser tabs priority assigns the first delayed coalescing slot to a single background tab', () => {
   const priority = createPriority(() => false);
+
+  expect(priority.getPriorityRank()).toBe(1);
+  expect(priority.getCoalescingWindowMs(20)).toBe(1_020);
+
+  priority.close();
+});
+
+test('browser tabs priority falls back to standalone ranking when sync is disabled', () => {
+  const priority = createBrowserTabsPriority({
+    transportEnabled: true,
+    getIsEnabled: () => false,
+    tabId: 'local-tab',
+    getWindowIsFocused: () => false,
+    publishStatus() {},
+  });
+
+  priority.onTabStatusMessage('remote-tab', {
+    kind: 'tab-status',
+    isFocused: true,
+    lastFocusedAt: 1_000,
+    lastPresenceAt: 1_000,
+  });
 
   expect(priority.getPriorityRank()).toBe(1);
   expect(priority.getCoalescingWindowMs(20)).toBe(1_020);

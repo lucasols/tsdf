@@ -536,6 +536,7 @@ test('mutating a obj passed as payload does not break the store', async () => {
     { id: { id: string } }
   >({
     id: 'test-payload-mutation',
+    getSessionKey: () => 'test-session',
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 200,
     baseCoalescingWindowMs: 10,
