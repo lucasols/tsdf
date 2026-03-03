@@ -109,9 +109,13 @@ test('collection resets stay local to the tab that triggered them', async () => 
 test('a fresh collection tab reuses the sibling snapshot without a first local fetch', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-snapshot-before-first-subscribe');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
     lowPriorityThrottleMs: 10_000,
@@ -119,6 +123,7 @@ test('a fresh collection tab reuses the sibling snapshot without a first local f
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'idle',
     lowPriorityThrottleMs: 10_000,
@@ -126,7 +131,6 @@ test('a fresh collection tab reuses the sibling snapshot without a first local f
   });
 
   envA.serverTable.setItem('item1', { name: 'Updated' });
-  envB.serverTable.setItem('item1', { name: 'Updated' });
 
   envA.scheduleFetch('highPriority', 'item1');
   await flushAllTimers();
