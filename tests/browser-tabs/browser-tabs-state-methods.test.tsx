@@ -1,41 +1,41 @@
 import { act } from 'react';
-import { expect, test, vi } from 'vitest';
-import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { expect, test } from 'vitest';
 import {
   createInMemoryBrowserTabsTransportFactory,
   getNextStoreId,
 } from '../mocks/browserTabsTestUtils';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  createSharedListQueryServerTableState,
+} from '../mocks/listQueryStoreTestEnv';
+import { createSharedServerMockState } from '../mocks/serverMock';
+import { createSharedServerTableState } from '../mocks/serverTableMock';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   createCollectionItems,
   createUsersTable,
   setupBrowserTabsTestLifecycle,
   wait,
 } from './browser-tabs-test-helpers';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-
-vi.mock('@ls-stack/browser-utils/window', () => ({
-  onWindowFocus: (handler: () => void) => {
-    window.addEventListener('focus', handler);
-    return () => window.removeEventListener('focus', handler);
-  },
-  isWindowFocused: () => !document.hidden,
-}));
 
 setupBrowserTabsTestLifecycle();
 
 test('document updateState changes are applied to background tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-update-state');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
@@ -51,14 +51,17 @@ test('document updateState changes are applied to background tabs', async () => 
 test('document state changes emitted during an in-flight mutation sync immediately to background tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-update-state-in-mutation');
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
@@ -88,14 +91,19 @@ test('document state changes emitted during an in-flight mutation sync immediate
 test('collection state methods are applied to background tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-state-methods');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
@@ -121,14 +129,19 @@ test('collection state methods are applied to background tabs', async () => {
 test('collection state changes emitted during an in-flight mutation sync immediately to background tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('collection-state-methods-in-mutation');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
 
   const envA = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
   const envB = createCollectionStoreTestEnv(createCollectionItems(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: 'loaded',
   });
@@ -160,14 +173,18 @@ test('collection state changes emitted during an in-flight mutation sync immedia
 test('list query state methods are applied to background tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-state-methods');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: { loaded: { tables: ['users'] } },
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: { loaded: { tables: ['users'] } },
   });
@@ -216,14 +233,18 @@ test('list query state methods are applied to background tabs', async () => {
 test('list query state changes emitted during an in-flight mutation sync immediately to background tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-state-methods-in-mutation');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
   const envA = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: { loaded: { tables: ['users'] } },
   });
   const envB = createListQueryStoreTestEnv(createUsersTable(), {
     id,
+    sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     testScenario: { loaded: { tables: ['users'] } },
   });
