@@ -1,43 +1,39 @@
 import { renderHook } from '@testing-library/react';
-import { expect, test, vi } from 'vitest';
-import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { expect, test } from 'vitest';
 import {
   createInMemoryBrowserTabsTransportFactory,
   getNextStoreId,
 } from '../mocks/browserTabsTestUtils';
-import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  createSharedListQueryServerTableState,
+} from '../mocks/listQueryStoreTestEnv';
+import { createSharedServerMockState } from '../mocks/serverMock';
+import { createSharedServerTableState } from '../mocks/serverTableMock';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   countFetchHistoryEntries,
   createCollectionItems,
-  createFocusFlag,
+  createFocusChangeCoordinator,
   createUsersTable,
-  markLastActiveTab,
   setupBrowserTabsTestLifecycle,
 } from './browser-tabs-test-helpers';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-
-vi.mock('@ls-stack/browser-utils/window', () => ({
-  onWindowFocus: (handler: () => void) => {
-    window.addEventListener('focus', handler);
-    return () => window.removeEventListener('focus', handler);
-  },
-  isWindowFocused: () => !document.hidden,
-}));
 
 setupBrowserTabsTestLifecycle();
 
-test('document background scheduling falls back to the next-ranked tab when the primary tab never starts', async () => {
+test('document background scheduling: next-ranked tab preempts the primary tab when it has a shorter coalescing window', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-background-fallback');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
-  const focusC = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
@@ -45,8 +41,9 @@ test('document background scheduling falls back to the next-ranked tab when the 
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
@@ -54,38 +51,75 @@ test('document background scheduling falls back to the next-ranked tab when the 
   });
   const envC = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusC.get,
+    bindFocusController: tabs.bind('c'),
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
     baseCoalescingWindowMs: 10,
   });
 
-  renderHook(() => envA.apiStore.useDocument());
-  renderHook(() => envB.apiStore.useDocument());
-  renderHook(() => envC.apiStore.useDocument());
+  renderHook(() => {
+    const doc = envA.apiStore.useDocument();
+    envA.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envC.apiStore.useDocument();
+    envC.trackUIChanges(doc.data?.value);
+  });
 
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 2);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 1);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 0);
+  await tabs.focusTab('c');
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
 
-  envA.setServerData(9);
-  envB.setServerData(9);
-  envC.setServerData(9);
-
-  envA.apiStore.invalidateData('realtimeUpdate');
-  envB.apiStore.invalidateData('realtimeUpdate');
-  envC.apiStore.invalidateData('realtimeUpdate');
+  envA.emulateExternalRTU(9);
 
   await flushAllTimers();
 
   expect(envA.serverMock.numOfStartedFetches).toBe(0);
   expect(envB.serverMock.numOfStartedFetches).toBe(1);
   expect(envC.serverMock.numOfStartedFetches).toBe(0);
-  expect(envA.store.state.data?.value).toBe(9);
-  expect(envB.store.state.data?.value).toBe(9);
-  expect(envC.store.state.data?.value).toBe(9);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    20ms  | 0  | 👁 window-focused
+    25ms  | 0  | 🔕 window-blurred
+    30ms  | 0  | server-data-changed (value: 9)
+    .     | 0  | received-ws-data-change-event
+    2.84s | 0  | <confirmed-snapshot-received (value: 9)
+    .     | 9  | ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    10ms  | 0  | 👁 window-focused
+    15ms  | 0  | 🔕 window-blurred
+    30ms  | 0  | received-ws-data-change-event
+    2.04s | 0  | 🔴 >fetch-started
+    2.84s | 0  | 🔴 <fetch-finished (value: 9)
+    .     | 9  | ui-changed
+    "
+  `);
+  expect(envC.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | 👁 window-focused
+    5ms   | 0  | 🔕 window-blurred
+    30ms  | 0  | received-ws-data-change-event
+    2.84s | 0  | <confirmed-snapshot-received (value: 9)
+    .     | 9  | ui-changed
+    "
+  `);
 });
 
 test('document background scheduling does not retry on sibling tabs after a remote fetch has started', async () => {
