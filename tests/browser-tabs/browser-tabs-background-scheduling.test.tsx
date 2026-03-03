@@ -125,52 +125,58 @@ test('document background scheduling: next-ranked tab preempts the primary tab w
 test('document background scheduling does not retry on sibling tabs after a remote fetch has started', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-background-no-retry');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
-  const focusC = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
+  const sharedServerState = createSharedServerMockState(0);
 
   const envA = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusA.get,
+    bindFocusController: tabs.bind('a'),
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
   });
   const envB = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusB.get,
+    bindFocusController: tabs.bind('b'),
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
   });
   const envC = createDocumentStoreTestEnv(0, {
     id,
+    sharedServerState,
     browserTabsTransportFactory: transportFactory,
-    getWindowIsFocused: focusC.get,
+    bindFocusController: tabs.bind('c'),
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
   });
 
-  renderHook(() => envA.apiStore.useDocument());
-  renderHook(() => envB.apiStore.useDocument());
-  renderHook(() => envC.apiStore.useDocument());
+  renderHook(() => {
+    const doc = envA.apiStore.useDocument();
+    envA.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envB.apiStore.useDocument();
+    envB.trackUIChanges(doc.data?.value);
+  });
+  renderHook(() => {
+    const doc = envC.apiStore.useDocument();
+    envC.trackUIChanges(doc.data?.value);
+  });
 
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 2);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 1);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 0);
+  await tabs.focusTab('c');
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
 
   envA.setNextFetchDurations(2_500);
-  envB.setNextFetchDurations(25);
-  envA.setServerData(12);
-  envB.setServerData(12);
-  envC.setServerData(12);
 
-  envA.apiStore.invalidateData('realtimeUpdate');
-  envB.apiStore.invalidateData('realtimeUpdate');
-  envC.apiStore.invalidateData('realtimeUpdate');
+  envA.emulateExternalRTU(12);
 
   await advanceTime(1_200);
 
@@ -180,10 +186,43 @@ test('document background scheduling does not retry on sibling tabs after a remo
 
   await flushAllTimers();
 
-  expect(envB.store.state.data?.value).toBe(12);
-  expect(envC.store.state.data?.value).toBe(12);
   expect(envB.serverMock.numOfStartedFetches).toBe(0);
   expect(envC.serverMock.numOfStartedFetches).toBe(0);
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    20ms  | 0  | 👁 window-focused
+    25ms  | 0  | 🔕 window-blurred
+    30ms  | 0  | server-data-changed (value: 12)
+    .     | 0  | received-ws-data-change-event
+    1.04s | 0  | 🔴 >fetch-started
+    3.54s | 0  | 🔴 <fetch-finished (value: 12)
+    .     | 12 | ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    10ms  | 0  | 👁 window-focused
+    15ms  | 0  | 🔕 window-blurred
+    30ms  | 0  | received-ws-data-change-event
+    3.54s | 0  | <confirmed-snapshot-received (value: 12)
+    .     | 12 | ui-changed
+    "
+  `);
+  expect(envC.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui |
+    0     | 0  | ui-initialized
+    .     | 0  | 👁 window-focused
+    5ms   | 0  | 🔕 window-blurred
+    30ms  | 0  | received-ws-data-change-event
+    3.54s | 0  | <confirmed-snapshot-received (value: 12)
+    .     | 12 | ui-changed
+    "
+  `);
 });
 
 test('document low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
