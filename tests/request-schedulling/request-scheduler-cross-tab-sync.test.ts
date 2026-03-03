@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { RequestScheduler } from '../../src/requestScheduler';
+import { createInspectableInMemoryBrowserTabsTransportFactory } from '../mocks/browserTabsTestUtils';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 beforeEach(() => {
@@ -13,50 +14,64 @@ afterEach(() => {
 });
 
 test('scheduled known requests are dropped after a sibling fetch starts later', async () => {
-  const startedBatches: string[][] = [];
+  const sharedTransports =
+    createInspectableInMemoryBrowserTabsTransportFactory();
 
-  const scheduler = new RequestScheduler<null>({
-    fetchFn: async (requests, { signal }) => {
-      startedBatches.push(requests.map(({ requestId }) => requestId));
+  function createStaticFocusController(isFocused: boolean) {
+    return {
+      getWindowIsFocused: () => isFocused,
+      onWindowFocus: (handler_: () => void) => () => {},
+      onWindowBlur: (handler_: () => void) => () => {},
+    };
+  }
 
-      await new Promise<void>((resolve) => {
-        const timeoutId = setTimeout(resolve, 100);
-        signal.addEventListener(
-          'abort',
-          () => {
-            clearTimeout(timeoutId);
-            resolve();
-          },
-          { once: true },
-        );
-      });
+  // Both envs use the same store id so they share the same browser tabs channel.
+  const sharedStoreId = 'request-scheduler-cross-tab-sync';
 
-      return new Map(
-        requests.map(({ requestId }) => [requestId, true] as const),
-      );
-    },
-    lowPriorityThrottleMs: 10_000,
-    getCoalescingWindowMs: () => 10,
+  const tabA = createDocumentStoreTestEnv(0, {
+    id: sharedStoreId,
+    testScenario: 'loaded',
+    browserTabsTransportFactory: sharedTransports.transportFactory,
+    bindFocusController: createStaticFocusController(true),
+    // Matches production: base window is non-zero.
+    baseCoalescingWindowMs: 10,
     usesRealTimeUpdates: false,
   });
 
-  expect(scheduler.scheduleFetch('doc', 'highPriority', null)).toBe(
-    'triggered',
-  );
+  const tabB = createDocumentStoreTestEnv(0, {
+    id: sharedStoreId,
+    testScenario: 'loaded',
+    browserTabsTransportFactory: sharedTransports.transportFactory,
+    bindFocusController: createStaticFocusController(false),
+    // Matches production: base window is non-zero.
+    baseCoalescingWindowMs: 10,
+    usesRealTimeUpdates: false,
+  });
 
-  await vi.advanceTimersByTimeAsync(15);
+  // Let both tabs exchange initial status messages so browser-tabs priority state is stable.
+  await vi.advanceTimersByTimeAsync(0);
 
-  expect(startedBatches).toEqual([['doc']]);
+  // Tab B starts a fetch.
+  expect(tabB.scheduleFetch('highPriority')).toBe('triggered');
+  // Background tabs get a delayed coalescing window (base + 1s).
+  // Only advance enough to start the fetch, not finish it.
+  await vi.advanceTimersByTimeAsync(1_011);
+  expect(tabB.serverMock.numOfStartedFetches).toBe(1);
 
-  expect(scheduler.scheduleFetch('doc', 'highPriority', null)).toBe(
-    'scheduled',
-  );
+  // While tab B is fetching, schedule another fetch (this becomes a scheduled request).
+  await vi.advanceTimersByTimeAsync(1);
+  expect(tabB.scheduleFetch('highPriority')).toBe('scheduled');
 
-  await vi.advanceTimersByTimeAsync(5);
-  scheduler.syncExternalFetchStart(['doc'], Date.now());
+  // Later, tab A starts a sibling fetch. This publishes a cross-tab "fetch-start" message
+  // that makes tab B drop its scheduled request as "superseded".
+  await vi.advanceTimersByTimeAsync(1);
+  expect(tabA.scheduleFetch('highPriority')).toBe('triggered');
+  // Focused tab coalesces on the base window.
+  await vi.advanceTimersByTimeAsync(11);
 
   await vi.runAllTimersAsync();
 
-  expect(startedBatches).toEqual([['doc']]);
-  expect(scheduler.hasPendingFetch).toBe(false);
+  // Tab B performed only the initial fetch; the scheduled one was dropped.
+  expect(tabB.serverMock.numOfStartedFetches).toBe(1);
+  expect(tabA.serverMock.numOfStartedFetches).toBe(1);
 });
