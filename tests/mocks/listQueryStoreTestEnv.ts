@@ -28,6 +28,7 @@ import {
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
+  TEST_INITIAL_TIME,
 } from './testEnvUtils';
 
 type ListQueryItemPayload = string;
@@ -115,6 +116,7 @@ export function createListQueryStoreTestEnv<
     partialResources,
     offsetPagination,
     blockWindowClose,
+    ignoreInitialTimeCheck,
   }: {
     id?: string;
     sharedServerTableState?: ServerTableSharedState<TRow>;
@@ -150,8 +152,17 @@ export function createListQueryStoreTestEnv<
     partialResources?: PartialResourcesConfig<TRow>;
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
+    ignoreInitialTimeCheck?: boolean;
   } = {},
 ) {
+  if (!ignoreInitialTimeCheck) {
+    if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
+      throw new Error(
+        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+      );
+    }
+  }
+
   const {
     actionsHistory,
     addAction,

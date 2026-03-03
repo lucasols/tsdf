@@ -21,6 +21,7 @@ import {
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
+  TEST_INITIAL_TIME,
 } from './testEnvUtils';
 
 export type CollectionTestItem<D> = { value: D };
@@ -63,6 +64,7 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
+  ignoreInitialTimeCheck?: boolean;
 };
 
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
@@ -84,8 +86,17 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
+    ignoreInitialTimeCheck,
   }: CollectionStoreTestEnvOptions<D> = {},
 ) {
+  if (!ignoreInitialTimeCheck) {
+    if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
+      throw new Error(
+        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+      );
+    }
+  }
+
   const {
     actionsHistory,
     addAction,

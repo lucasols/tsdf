@@ -20,6 +20,7 @@ import {
   logScheduleFetchResult,
   logSchedulerEvent,
   normalizeError,
+  TEST_INITIAL_TIME,
 } from './testEnvUtils';
 
 export type DocumentStoreTestScenario<D> =
@@ -54,6 +55,7 @@ export type DocumentStoreTestEnvOptions<D> = {
   testScenario?: DocumentStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
+  ignoreInitialTimeCheck?: boolean;
 };
 
 export function createDocumentStoreTestEnv<D>(
@@ -72,8 +74,17 @@ export function createDocumentStoreTestEnv<D>(
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
+    ignoreInitialTimeCheck,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
+  if (!ignoreInitialTimeCheck) {
+    if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
+      throw new Error(
+        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+      );
+    }
+  }
+
   const {
     actionsHistory,
     addAction,
