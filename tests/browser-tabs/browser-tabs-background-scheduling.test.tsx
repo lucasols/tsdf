@@ -768,51 +768,49 @@ test('list query background scheduling falls back to the next-ranked tab when th
 test('list query background scheduling does not retry on sibling tabs after a remote fetch has started', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('list-query-background-no-retry');
-  const focusA = createFocusFlag(false);
-  const focusB = createFocusFlag(false);
-  const focusC = createFocusFlag(false);
+  const tabs = createFocusChangeCoordinator(['a', 'b', 'c'], null);
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
 
-  const createEnv = (getWindowIsFocused: () => boolean) =>
+  const createEnv = (tab: 'a' | 'b' | 'c') =>
     createListQueryStoreTestEnv(createUsersTable(), {
       id,
+      sharedServerTableState,
       browserTabsTransportFactory: transportFactory,
-      getWindowIsFocused,
+      bindFocusController: tabs.bind(tab),
       testScenario: { loaded: { tables: ['users'] } },
       usesRealTimeUpdates: true,
     });
 
-  const envA = createEnv(focusA.get);
-  const envB = createEnv(focusB.get);
-  const envC = createEnv(focusC.get);
+  const envA = createEnv('a');
+  const envB = createEnv('b');
+  const envC = createEnv('c');
 
-  renderHook(() => envA.apiStore.useListQuery({ tableId: 'users' }));
-  renderHook(() => envB.apiStore.useListQuery({ tableId: 'users' }));
-  renderHook(() => envC.apiStore.useListQuery({ tableId: 'users' }));
+  renderHook(() => {
+    const query = envA.apiStore.useListQuery({ tableId: 'users' });
+    envA.trackItemUI('users||1', query.items[0]?.name);
+  });
+  renderHook(() => {
+    const query = envB.apiStore.useListQuery({ tableId: 'users' });
+    envB.trackItemUI('users||1', query.items[0]?.name);
+  });
+  renderHook(() => {
+    const query = envC.apiStore.useListQuery({ tableId: 'users' });
+    envC.trackItemUI('users||1', query.items[0]?.name);
+  });
 
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 2);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 1);
-  await markLastActiveTab(envA, [focusA, focusB, focusC], 0);
+  await tabs.focusTab('c');
+  await tabs.focusTab('b');
+  await tabs.focusTab('a');
+  await tabs.blur();
 
   envA.serverTable.addListFetchStartDelay(2_500);
-  envA.serverTable.setItem('users||1', { id: 1, name: 'Zoe' });
-  envB.serverTable.setItem('users||1', { id: 1, name: 'Zoe' });
-  envC.serverTable.setItem('users||1', { id: 1, name: 'Zoe' });
 
-  envA.apiStore.invalidateQueryAndItems({
-    queryPayload: { tableId: 'users' },
-    itemPayload: 'users||1',
-    type: 'realtimeUpdate',
-  });
-  envB.apiStore.invalidateQueryAndItems({
-    queryPayload: { tableId: 'users' },
-    itemPayload: 'users||1',
-    type: 'realtimeUpdate',
-  });
-  envC.apiStore.invalidateQueryAndItems({
-    queryPayload: { tableId: 'users' },
-    itemPayload: 'users||1',
-    type: 'realtimeUpdate',
-  });
+  envA.serverTable.setItem(
+    'users||1',
+    { id: 1, name: 'Zoe' },
+    { triggerRTUEvent: true },
+  );
 
   await advanceTime(1_200);
 
@@ -828,18 +826,6 @@ test('list query background scheduling does not retry on sibling tabs after a re
 
   await flushAllTimers();
 
-  expect(
-    envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Zoe',
-  });
-  expect(
-    envC.store.state.items[envC.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Zoe',
-  });
   expect(countFetchHistoryEntries(envA.serverTable.fetchHistory, 'list')).toBe(
     1,
   );
@@ -849,6 +835,41 @@ test('list query background scheduling does not retry on sibling tabs after a re
   expect(countFetchHistoryEntries(envC.serverTable.fetchHistory, 'list')).toBe(
     0,
   );
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | Alice    | ui-initialized
+    20ms  | Alice    | 👁 window-focused
+    25ms  | Alice    | 🔕 window-blurred
+    30ms  | Alice    | server-data-changed (value: {"id":1,"name":"Zoe"})
+    .     | Alice    | received-ws-data-change-event
+    1.04s | Alice    | 🔴 >list-fetch-started
+    4.34s | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Zoe      | ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | Alice    | ui-initialized
+    10ms  | Alice    | 👁 window-focused
+    15ms  | Alice    | 🔕 window-blurred
+    30ms  | Alice    | received-ws-data-change-event
+    4.34s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Zoe      | ui-changed
+    "
+  `);
+  expect(envC.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | users||1 |
+    0     | Alice    | ui-initialized
+    .     | Alice    | 👁 window-focused
+    5ms   | Alice    | 🔕 window-blurred
+    30ms  | Alice    | received-ws-data-change-event
+    4.34s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Zoe      | ui-changed
+    "
+  `);
 });
 
 test('list query low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
