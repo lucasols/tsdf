@@ -1,9 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
+  clearSessionStorage,
   createCollectionStore,
   createDocumentStore,
   createListQueryStore,
+  type StorageBackend,
   type StoreError,
 } from '@src/main';
 
@@ -48,13 +51,19 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
-type ScenarioName = 'document' | 'collection' | 'list';
+type ScenarioName =
+  | 'document'
+  | 'collection'
+  | 'list'
+  | 'persist-document'
+  | 'persist-collection';
 
 function getQueryParams(): {
   pageId: string;
   scenario: ScenarioName;
   storeId: string | null;
   sessionKey: string | null;
+  backend: StorageBackend;
 } {
   const searchParams = new URLSearchParams(window.location.search);
   const pageId =
@@ -63,12 +72,14 @@ function getQueryParams(): {
   const scenario = (searchParams.get('scenario') ?? 'document') as ScenarioName;
   const storeId = searchParams.get('storeId');
   const sessionKey = searchParams.get('sessionKey');
+  const backend = (searchParams.get('backend') ?? 'opfs') as StorageBackend;
 
   return {
     pageId,
     scenario,
     storeId,
     sessionKey,
+    backend,
   };
 }
 
@@ -478,8 +489,172 @@ function ListScenario({
   );
 }
 
+const documentSchema = rc_object({ value: rc_number });
+
+function PersistDocumentScenario({
+  pageId,
+  storeId,
+  sessionKey,
+  backend,
+}: {
+  pageId: string;
+  storeId: string;
+  sessionKey: string | false;
+  backend: StorageBackend;
+}) {
+  const [store] = useState(() =>
+    createDocumentStore<DocumentState>({
+      id: storeId,
+      getSessionKey: () => sessionKey,
+      fetchFn: (signal) =>
+        requestJson<DocumentState>(pageId, '/api/document', { signal }),
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs: 10_000,
+      persistentStorage: {
+        storeName: `persist-doc-${storeId}`,
+        backend,
+        schema: documentSchema,
+      },
+    }),
+  );
+
+  const document = store.useDocument({
+    returnRefetchingStatus: true,
+  });
+
+  return (
+    <section>
+      <h1>Persist Document</h1>
+      <div data-testid="persist-doc-value">
+        {document.data ? String(document.data.value) : 'null'}
+      </div>
+      <div data-testid="persist-doc-status">{document.status}</div>
+      <button
+        data-testid="persist-doc-mutate"
+        onClick={() => {
+          const nextValue = (document.data?.value ?? 0) + 1;
+
+          void store.performMutation({
+            optimisticUpdate: () => {
+              store.updateState((draft) => {
+                draft.value = nextValue;
+              });
+            },
+            mutation: async () => {
+              return requestJson<DocumentState>(
+                pageId,
+                '/api/document/mutate',
+                {
+                  method: 'POST',
+                  body: JSON.stringify({ value: nextValue }),
+                },
+              );
+            },
+          });
+        }}
+        type="button"
+      >
+        mutate
+      </button>
+      <button
+        data-testid="persist-doc-clear-storage"
+        onClick={() => {
+          if (sessionKey !== false) {
+            void clearSessionStorage(sessionKey, backend);
+          }
+        }}
+        type="button"
+      >
+        clear storage
+      </button>
+    </section>
+  );
+}
+
+const collectionItemSchema = rc_object({ name: rc_string });
+
+function PersistCollectionScenario({
+  pageId,
+  storeId,
+  sessionKey,
+  backend,
+}: {
+  pageId: string;
+  storeId: string;
+  sessionKey: string | false;
+  backend: StorageBackend;
+}) {
+  const [store] = useState(() =>
+    createCollectionStore<CollectionItem, string>({
+      id: storeId,
+      getSessionKey: () => sessionKey,
+      fetchFn: (payload, signal) =>
+        requestJson<CollectionItem>(pageId, `/api/collection/${payload}`, {
+          signal,
+        }),
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs: 10_000,
+      persistentStorage: {
+        storeName: `persist-col-${storeId}`,
+        backend,
+        schema: collectionItemSchema,
+      },
+    }),
+  );
+
+  const item1 = store.useItem('item1', {
+    returnRefetchingStatus: true,
+  });
+
+  return (
+    <section>
+      <h1>Persist Collection</h1>
+      <div data-testid="persist-col-item1-name">
+        {item1.data?.name ?? 'null'}
+      </div>
+      <div data-testid="persist-col-item1-status">{item1.status}</div>
+      <button
+        data-testid="persist-col-item1-mutate"
+        onClick={() => {
+          void store.performMutation('item1', {
+            optimisticUpdate: () => {
+              store.updateItemState('item1', (draft) => {
+                draft.name = 'Persisted';
+              });
+            },
+            mutation: async () => {
+              return requestJson<CollectionItem>(
+                pageId,
+                '/api/collection/item1/mutate',
+                {
+                  method: 'POST',
+                  body: JSON.stringify({ name: 'Persisted' }),
+                },
+              );
+            },
+          });
+        }}
+        type="button"
+      >
+        mutate item1
+      </button>
+      <button
+        data-testid="persist-col-clear-storage"
+        onClick={() => {
+          if (sessionKey !== false) {
+            void clearSessionStorage(sessionKey, backend);
+          }
+        }}
+        type="button"
+      >
+        clear storage
+      </button>
+    </section>
+  );
+}
+
 function App() {
-  const { pageId, scenario, storeId, sessionKey } = getQueryParams();
+  const { pageId, scenario, storeId, sessionKey, backend } = getQueryParams();
   const resolvedStoreId =
     storeId ?? `playwright-${scenario === 'list' ? 'list' : scenario}-sync`;
   const resolvedSessionKey =
@@ -512,6 +687,22 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
+        />
+      ) : null}
+      {scenario === 'persist-document' ? (
+        <PersistDocumentScenario
+          pageId={pageId}
+          storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
+          backend={backend}
+        />
+      ) : null}
+      {scenario === 'persist-collection' ? (
+        <PersistCollectionScenario
+          pageId={pageId}
+          storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
+          backend={backend}
         />
       ) : null}
     </main>
