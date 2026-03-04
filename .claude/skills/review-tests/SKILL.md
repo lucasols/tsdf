@@ -45,7 +45,8 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, fla
 - Flag weak assertions (for example, only checking call count without verifying effect).
 - Check negative assertions and error assertions for precision.
 - Ensure snapshots are readable and scoped to meaningful behavior.
-- When sequencing, throttling, coalescing, focus changes, websocket delivery, or other time-ordered behavior is central to the test, prefer timeline snapshots over scattered point assertions when the test env exposes `timelineString`.
+- **Flag tests with sequential actions over time that don't include `timelineString` snapshots.** Whenever a test performs a sequence of actions over time (fetches, refetches, invalidations, syncs), `timelineString` snapshots should be the primary assertion — they make the full sequence of events and their timing visible at a glance, replacing scattered point assertions.
+- When a test involves multiple environments/tabs/stores, **all** timelines must be included so the reader can compare them side by side and trace connected actions across environments.
 - Prefer using the existing tracking helpers (`trackUIChanges`, `trackItemUI`, logger/test env helpers) so timeline snapshots show the state transitions a reader actually cares about.
 - Flag tests that use dense object assertions or raw fetch-history assertions where a focused `timelineString` snapshot would communicate the behavior more clearly.
 - Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.
@@ -56,7 +57,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, fla
 - Ensure async behavior is awaited and timers are controlled.
 - Flag tests that depend on execution order or leaked state between tests.
 
-## 6) Evaluate Maintainability
+## 6) Evaluate Readability And Maintainability
 
 - Prefer focused tests with clear setup and intent.
 - Flag test names that are wrong, vague, or misleading relative to the actual assertions.
@@ -64,6 +65,11 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, fla
 - Prefer human-readable snapshots over dense object comparisons.
 - When a timeline snapshot can express the behavior clearly, prefer it as the primary readable artifact and keep additional assertions limited to key invariants or end-state checks.
 - Flag redundant tests — tests that assert the same behavior already covered by another test without adding meaningful coverage. Multiple tests should exist only when they exercise genuinely different paths, states, or edge cases. Copy-pasted tests with trivial variations, or tests that are strict subsets of a more comprehensive test, add maintenance cost without catching additional regressions.
+- **Flag complex tests that lack comments.** Tests with multiple actions, non-obvious timing, or interleaved assertions must have comments explaining the intent behind each step and the expected behavior. Without comments, a reader must reverse-engineer the scenario from raw code, which makes it hard to tell whether the test is correct or what regression it guards against. Comments should explain **why**, not just label **what** (e.g., `// refetch while previous request is still in-flight — should deduplicate` rather than `// refetch`).
+- Flag generic names for test scenarios, fixtures, and variables (`scenarioA`, `scenarioB`, `store1`, `store2`). Names should describe what makes each case distinct (e.g., `storeWithExpiredCache`, `fetchThatFailsOnce`) so a reader can understand the test without tracing through the setup.
+- Prefer inline snapshots for object/array assertions instead of chaining multiple `expect(obj.a.b).toBe(...)` calls — a single snapshot communicates the full expected shape at a glance.
+- Flag tests where related assertions are scattered across many individual `expect` calls when they could be grouped into one snapshot.
+- Flag redundant or noise assertions that don't add confidence — re-checking already-asserted state, asserting obvious intermediate values, or verifying test setup rather than behavior. Every assertion should justify its existence by catching a distinct regression.
 
 ## 7) Report Findings
 

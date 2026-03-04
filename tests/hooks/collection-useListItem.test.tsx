@@ -1,5 +1,5 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
-import { cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import {
   afterEach,
   beforeAll,
@@ -93,9 +93,11 @@ describe('collection store useListItemIsDeleted', () => {
     await flushAllTimers();
 
     // Remove item 'a' from the collection item's data
-    env.apiStore.updateItemState('1', (draft) => {
-      const { a: _, ...rest } = draft.value.items;
-      draft.value.items = rest;
+    act(() => {
+      env.apiStore.updateItemState('1', (draft) => {
+        const { a: _, ...rest } = draft.value.items;
+        draft.value.items = rest;
+      });
     });
 
     await flushAllTimers();
@@ -423,9 +425,11 @@ describe('collection store useListItem (combined)', () => {
     await flushAllTimers();
 
     // Remove item 'a'
-    env.apiStore.updateItemState('1', (draft) => {
-      const { a: _, ...rest } = draft.value.items;
-      draft.value.items = rest;
+    act(() => {
+      env.apiStore.updateItemState('1', (draft) => {
+        const { a: _, ...rest } = draft.value.items;
+        draft.value.items = rest;
+      });
     });
 
     await flushAllTimers();
