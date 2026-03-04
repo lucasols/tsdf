@@ -42,6 +42,7 @@ Use this checklist to evaluate test quality quickly and consistently.
 - Do complex tests (multiple actions/assertions or non-obvious logic) have comments explaining **why** each step matters? Without comments, readers must reverse-engineer intent from raw code. Good: `// refetch while previous request is still in-flight — should deduplicate`. Bad: no comment at all, or trivial labels like `// trigger refetch`.
 - Does each test read top-to-bottom as a clear scenario: arrange, act, assert?
 - Are test values realistic and meaningful (e.g., `'user-123'`, `'Product A'`) rather than generic (`'foo'`, `'bar'`, `'test1'`)?
+- Are test scenarios, fixtures, and variables named descriptively (e.g., `storeWithExpiredCache`, `fetchThatFailsOnce`) rather than opaque labels (`scenarioA`, `scenarioB`, `store1`, `store2`)?
 - Are helper functions and variables named to convey intent (e.g., `waitForRefetch()`) rather than mechanics (e.g., `doStuff()`)?
 - Is nesting (`describe` depth) kept shallow — ideally at most 2 levels — so tests are easy to scan?
 - Are related assertions grouped into a single snapshot rather than scattered across many individual `expect` calls?
