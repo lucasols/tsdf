@@ -45,7 +45,8 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, fla
 - Flag weak assertions (for example, only checking call count without verifying effect).
 - Check negative assertions and error assertions for precision.
 - Ensure snapshots are readable and scoped to meaningful behavior.
-- When sequencing, throttling, coalescing, focus changes, websocket delivery, or other time-ordered behavior is central to the test, prefer timeline snapshots over scattered point assertions when the test env exposes `timelineString`.
+- **Flag tests with sequential actions over time that don't include `timelineString` snapshots.** Whenever a test performs a sequence of actions over time (fetches, refetches, invalidations, syncs), `timelineString` snapshots should be the primary assertion — they make the full sequence of events and their timing visible at a glance, replacing scattered point assertions.
+- When a test involves multiple environments/tabs/stores, **all** timelines must be included so the reader can compare them side by side and trace connected actions across environments.
 - Prefer using the existing tracking helpers (`trackUIChanges`, `trackItemUI`, logger/test env helpers) so timeline snapshots show the state transitions a reader actually cares about.
 - Flag tests that use dense object assertions or raw fetch-history assertions where a focused `timelineString` snapshot would communicate the behavior more clearly.
 - Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.

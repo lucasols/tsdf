@@ -38,7 +38,8 @@ Use this checklist to evaluate test quality quickly and consistently.
 
 ## Readability
 
-- Do tests use inline snapshots for objects/arrays (with `timelineString` when appropriate) instead of chaining multiple `expect(obj.a.b).toBe(...)` assertions?
+- Do tests use inline snapshots for objects/arrays instead of chaining multiple `expect(obj.a.b).toBe(...)` assertions?
+- Do tests with sequential actions over time include `timelineString` snapshots? When multiple environments/tabs/stores are involved, are **all** timelines shown so the reader can compare and trace connected actions?
 - Do complex tests (multiple actions/assertions or non-obvious logic) have comments explaining **why** each step matters? Without comments, readers must reverse-engineer intent from raw code. Good: `// refetch while previous request is still in-flight — should deduplicate`. Bad: no comment at all, or trivial labels like `// trigger refetch`.
 - Does each test read top-to-bottom as a clear scenario: arrange, act, assert?
 - Are test values realistic and meaningful (e.g., `'user-123'`, `'Product A'`) rather than generic (`'foo'`, `'bar'`, `'test1'`)?
