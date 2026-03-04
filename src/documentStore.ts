@@ -11,12 +11,14 @@ import {
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useContext, useEffect } from 'react';
-import { IsOffScreenContext } from './isOffScreenContext';
 import { unknownToError, type Result } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
+import { IsOffScreenContext } from './isOffScreenContext';
+import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
+import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -53,8 +55,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
-import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
-import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -227,18 +227,6 @@ export function createDocumentStore<State extends ValidStoreState>({
     initialData = persistence.initialState.data;
     initialStatus = persistence.initialState.status;
     initialRefetchOnMount = persistence.initialState.refetchOnMount;
-  }
-
-  // Track whether store was hydrated from persistent storage for refetch optimization
-  let hydratedFromStorage =
-    persistence !== null && persistence.initialState !== null;
-  let hydratedRefetchDelayTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function clearHydratedRefetchTimer() {
-    if (hydratedRefetchDelayTimer !== null) {
-      clearTimeout(hydratedRefetchDelayTimer);
-      hydratedRefetchDelayTimer = null;
-    }
   }
 
   const store = new Store<DocumentStoreState<State>>({
@@ -414,53 +402,25 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   async function executeFetch(fetchCtx: FetchContext): Promise<boolean> {
     const currentStatus = store.state.status;
-    const isHydratedRefetch =
-      hydratedFromStorage && currentStatus === 'success';
 
-    if (isHydratedRefetch) {
-      // For the first fetch after hydration from persistent storage, delay showing
-      // 'refetching' status by 100ms. If the fetch completes within 100ms, the user
-      // never sees a loading indicator, providing a seamless experience.
-      hydratedFromStorage = false;
-      hydratedRefetchDelayTimer = setTimeout(() => {
-        hydratedRefetchDelayTimer = null;
-        if (store.state.status === 'success') {
-          store.setPartialState(
-            { status: 'refetching', error: null, refetchOnMount: false },
-            { action: 'fetch-start-refetching-delayed' },
-          );
-        }
-      }, 100);
-
-      store.setPartialState(
-        { error: null, refetchOnMount: false },
-        { action: 'fetch-start-hydrated-refetch' },
-      );
-    } else {
-      store.setPartialState(
-        {
-          status: currentStatus === 'success' ? 'refetching' : 'loading',
-          error: null,
-          refetchOnMount: false,
-        },
-        {
-          action:
-            currentStatus === 'success'
-              ? 'fetch-start-refetching'
-              : 'fetch-start-loading',
-        },
-      );
-    }
+    store.setPartialState(
+      {
+        status: currentStatus === 'success' ? 'refetching' : 'loading',
+        error: null,
+        refetchOnMount: false,
+      },
+      {
+        action:
+          currentStatus === 'success'
+            ? 'fetch-start-refetching'
+            : 'fetch-start-loading',
+      },
+    );
 
     try {
       const data = await fetchFn(fetchCtx.signal);
 
-      if (fetchCtx.shouldAbort()) {
-        clearHydratedRefetchTimer();
-        return false;
-      }
-
-      clearHydratedRefetchTimer();
+      if (fetchCtx.shouldAbort()) return false;
 
       store.setPartialState(
         {
@@ -475,12 +435,7 @@ export function createDocumentStore<State extends ValidStoreState>({
 
       return true;
     } catch (exception) {
-      if (fetchCtx.shouldAbort()) {
-        clearHydratedRefetchTimer();
-        return false;
-      }
-
-      clearHydratedRefetchTimer();
+      if (fetchCtx.shouldAbort()) return false;
 
       store.setPartialState(
         {
@@ -684,8 +639,6 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   function reset(): void {
     scheduler.reset();
-    clearHydratedRefetchTimer();
-    hydratedFromStorage = false;
     lastDocumentSyncVersion = undefined;
     browserTabsPriority.reset();
 
