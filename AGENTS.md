@@ -44,6 +44,35 @@ pnpm vitest run src/yourFile.test.ts
 
 Tests use Vitest with `happy-dom` environment. Test files follow the pattern `src/*.test.{ts,tsx}`.
 
+### Test Environments (required)
+
+Always use the pre-built test environments instead of manually creating stores with `createDocumentStore`, `createCollectionStore`, or `createListQueryStore`. The test envs provide a complete, realistic production-like scenario with server mocks, action tracking, timeline snapshots, and proper test wiring:
+
+- **`createDocumentStoreTestEnv`** (`tests/mocks/documentStoreTestEnv.ts`) — for DocumentStore tests
+- **`createCollectionStoreTestEnv`** (`tests/mocks/collectionStoreTestEnv.ts`) — for CollectionStore tests
+- **`createListQueryStoreTestEnv`** (`tests/mocks/listQueryStoreTestEnv.ts`) — for ListQueryStore tests
+
+Each test env returns an object with:
+- `apiStore` — the store instance
+- `store` — the underlying t-state store (for direct state access)
+- `serverMock` / `serverTable` — server mock for controlling responses, errors, and data
+- `scheduleFetch(fetchType, ...)` — schedule fetches with automatic action logging
+- `performClientUpdateAction(...)` / `performClientItemUpdateAction(...)` — perform mutations with built-in optimistic update and revalidation support
+- `trackUIChanges(selector)` / `trackItemUI(itemId, selector)` — track UI state changes for timeline snapshots
+- `timelineString` — human-readable timeline of all actions (fetches, mutations, UI changes, etc.)
+- `actions` — raw action history array
+- `addTimelineComments(...)` — annotate the timeline with custom comments
+
+Test scenarios can be configured via the `testScenario` option to start tests in different states:
+- `'idle'` — fresh app, no data (default)
+- `'loaded'` — data already fetched successfully
+- `{ idleWithLocalCache: ... }` — data restored from persistent storage, pending revalidation
+- `{ loadedWithStaleData: ... }` — loaded but server has newer data
+
+Do not manually wire up fetch functions, error normalizers, or event handlers — the test envs handle all of this. See existing tests in `tests/` for usage examples.
+
+### General testing guidelines
+
 - Prefer using toMatchInlineSnapshot instead of toBe or toEqual for object assertions
 - Tests use a YAML snapshot serializer instead of the default vitest snapshot serializer. Using `compactSnapshot` from `@ls-stack/utils/testUtils` to serialize the snapshot. Boolean values are serialized as `❌` or `✅` instead of `true` or `false`.
 - Tests should be optimized for human readability
