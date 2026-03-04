@@ -46,6 +46,7 @@ Use this checklist to evaluate test quality quickly and consistently.
 - Are helper functions and variables named to convey intent (e.g., `waitForRefetch()`) rather than mechanics (e.g., `doStuff()`)?
 - Is nesting (`describe` depth) kept shallow — ideally at most 2 levels — so tests are easy to scan?
 - Are related assertions grouped into a single snapshot rather than scattered across many individual `expect` calls?
+- Are there redundant or noise assertions that don't add confidence (e.g., re-checking state that was already asserted, asserting obvious intermediate states, or verifying setup rather than behavior)?
 
 ## Severity Guide
 

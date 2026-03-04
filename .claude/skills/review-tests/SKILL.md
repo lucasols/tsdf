@@ -68,6 +68,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, fla
 - Flag generic names for test scenarios, fixtures, and variables (`scenarioA`, `scenarioB`, `store1`, `store2`). Names should describe what makes each case distinct (e.g., `storeWithExpiredCache`, `fetchThatFailsOnce`) so a reader can understand the test without tracing through the setup.
 - Prefer inline snapshots for object/array assertions instead of chaining multiple `expect(obj.a.b).toBe(...)` calls — a single snapshot communicates the full expected shape at a glance.
 - Flag tests where related assertions are scattered across many individual `expect` calls when they could be grouped into one snapshot.
+- Flag redundant or noise assertions that don't add confidence — re-checking already-asserted state, asserting obvious intermediate values, or verifying test setup rather than behavior. Every assertion should justify its existence by catching a distinct regression.
 
 ## 7) Report Findings
 
