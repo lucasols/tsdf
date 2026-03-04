@@ -10,6 +10,7 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import type { ListQueryPersistentStorageConfig } from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
@@ -121,6 +122,7 @@ export function createListQueryStoreTestEnv<
     partialResources,
     offsetPagination,
     blockWindowClose,
+    persistentStorage,
     ignoreInitialTimeCheck,
   }: {
     id?: string;
@@ -158,6 +160,7 @@ export function createListQueryStoreTestEnv<
     partialResources?: PartialResourcesConfig<TRow>;
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
+    persistentStorage?: ListQueryPersistentStorageConfig<TRow>;
     ignoreInitialTimeCheck?: boolean;
   } = {},
 ) {
@@ -275,6 +278,7 @@ export function createListQueryStoreTestEnv<
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     blockWindowClose: blockWindowClose ?? null,
+    persistentStorage,
     optimisticListUpdates,
     partialResources,
     '~test': {

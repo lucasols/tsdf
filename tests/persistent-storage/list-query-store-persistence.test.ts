@@ -1,30 +1,53 @@
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-import { createListQueryStore } from '../../src/listQueryStore/listQueryStore';
 import type {
   PersistedListQueryData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { rc_object, rc_string } from 'runcheck';
-import type { StoreError } from '../../src/utils/storeShared';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+  type Row,
+  type Tables,
+} from '../mocks/listQueryStoreTestEnv';
 
-function normalizeError(exception: Error): StoreError {
-  return {
-    code: 500,
-    id: 'error',
-    message: exception.message,
-  };
+const rowSchema = rc_object({ id: rc_number, name: rc_string });
+
+// --- Key helpers matching the test env's internal format ---
+
+function rawItemKey(tableId: string, id: number): string {
+  return `${tableId}||${id}`;
 }
 
-type QueryPayload = { filter: string };
-type ItemPayload = string;
+function storeItemKey(tableId: string, id: number): string {
+  return getCompositeKey(rawItemKey(tableId, id));
+}
 
-type ItemState = { id: string; title: string };
+function queryKey(params: ListQueryParams): string {
+  return getCompositeKey(params);
+}
 
-const itemSchema = rc_object({ id: rc_string, title: rc_string });
+// --- localStorage helpers ---
 
-function createTestListQueryStore(options: {
+function setCachedData(
+  storeName: string,
+  sessionKey: string,
+  data: PersistedListQueryData<Row>,
+  version = 1,
+) {
+  const key = `tsdf.${sessionKey}.${storeName}`;
+  const entry: StorageCacheEntry<PersistedListQueryData<Row>> = {
+    data,
+    timestamp: Date.now(),
+    version,
+  };
+  localStorage.setItem(key, JSON.stringify(entry));
+}
+
+function createEnv(options: {
   storeName?: string;
   sessionKey?: string;
   version?: number;
@@ -32,65 +55,27 @@ function createTestListQueryStore(options: {
   maxQueries?: number;
   pinnedItems?: string[];
   pinnedQueries?: string[];
-  fetchDuration?: number;
+  serverData?: Tables<Row>;
 }) {
-  const fetchDuration = options.fetchDuration ?? 800;
   const storeName = options.storeName ?? 'test-lq';
-  const getSessionKey = () => options.sessionKey ?? 'session1';
-
-  const store = createListQueryStore<ItemState, QueryPayload, ItemPayload>({
-    id: storeName,
-    getSessionKey,
-    fetchListFn: async (payload, size, { signal }) => {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, fetchDuration);
-        signal.addEventListener('abort', () => {
-          clearTimeout(timer);
-          reject(new Error('Aborted'));
-        });
-      });
-      return {
-        items: [
-          {
-            itemPayload: '1',
-            data: { id: '1', title: `Result for ${payload.filter}` },
-          },
-        ],
-        hasMore: false,
-      };
+  return createListQueryStoreTestEnv(
+    options.serverData ?? {},
+    {
+      id: storeName,
+      getSessionKey: () => options.sessionKey ?? 'test-session',
+      ignoreInitialTimeCheck: true,
+      persistentStorage: {
+        storeName,
+        backend: 'localStorage',
+        schema: rowSchema,
+        version: options.version,
+        maxItems: options.maxItems,
+        maxQueries: options.maxQueries,
+        pinnedItems: options.pinnedItems,
+        pinnedQueries: options.pinnedQueries,
+      },
     },
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 200,
-    baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
-    persistentStorage: {
-      storeName,
-      backend: 'localStorage',
-      schema: itemSchema,
-      version: options.version,
-      maxItems: options.maxItems,
-      maxQueries: options.maxQueries,
-      pinnedItems: options.pinnedItems,
-      pinnedQueries: options.pinnedQueries,
-    },
-  });
-
-  return store;
-}
-
-function setCachedListQueryData(
-  storeName: string,
-  sessionKey: string,
-  data: PersistedListQueryData<ItemState>,
-  version = 1,
-) {
-  const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedListQueryData<ItemState>> = {
-    data,
-    timestamp: Date.now(),
-    version,
-  };
-  localStorage.setItem(key, JSON.stringify(entry));
+  );
 }
 
 beforeAll(() => {
@@ -104,122 +89,94 @@ afterEach(() => {
 
 describe('localStorage: list query store persistence', () => {
   test('items and queries loaded from cache', () => {
-    setCachedListQueryData('lq1', 'sess1', {
+    const ik1 = storeItemKey('t1', 1);
+    const ik2 = storeItemKey('t1', 2);
+    const qk = queryKey({ tableId: 't1' });
+
+    setCachedData('lq1', 'sess1', {
       items: {
-        '1': { id: '1', title: 'First' },
-        '2': { id: '2', title: 'Second' },
+        [ik1]: { id: 1, name: 'First' },
+        [ik2]: { id: 2, name: 'Second' },
       },
       queries: {
-        'query-key-1': {
-          payload: { filter: 'all' },
-          items: ['1', '2'],
+        [qk]: {
+          payload: { tableId: 't1' },
+          items: [ik1, ik2],
           hasMore: true,
         },
       },
       itemPayloads: {
-        '1': '1',
-        '2': '2',
+        [ik1]: rawItemKey('t1', 1),
+        [ik2]: rawItemKey('t1', 2),
       },
     });
 
-    const store = createTestListQueryStore({
-      storeName: 'lq1',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'lq1', sessionKey: 'sess1' });
 
     // Items should be loaded
-    expect(store.store.state.items['1']).toMatchInlineSnapshot(`
-      id: '1'
-      title: 'First'
+    expect(env.store.state.items[ik1]).toMatchInlineSnapshot(`
+      id: 1
+      name: 'First'
     `);
-    expect(store.store.state.items['2']).toMatchInlineSnapshot(`
-      id: '2'
-      title: 'Second'
+    expect(env.store.state.items[ik2]).toMatchInlineSnapshot(`
+      id: 2
+      name: 'Second'
     `);
 
     // Query should be loaded
-    const query = store.store.state.queries['query-key-1'];
+    const query = env.store.state.queries[qk];
     expect(query).toMatchInlineSnapshot(`
       error: null
       hasMore: '✅'
-      items: ['1', '2']
-      payload: { filter: 'all' }
+      items: ['"t1||1', '"t1||2']
+      payload: { tableId: 't1' }
       refetchOnMount: 'lowPriority'
       status: 'success'
       wasLoaded: '✅'
     `);
 
     // Item queries should be reconstructed
-    expect(store.store.state.itemQueries['1']).toMatchInlineSnapshot(`
+    expect(env.store.state.itemQueries[ik1]).toMatchInlineSnapshot(`
       error: null
-      payload: '1'
+      payload: 't1||1'
       refetchOnMount: 'lowPriority'
       status: 'success'
       wasLoaded: '✅'
     `);
 
     // Fields should start empty
-    expect(store.store.state.itemLoadedFields).toMatchInlineSnapshot(`{}`);
-    expect(store.store.state.itemFieldInvalidationFields).toMatchInlineSnapshot(
+    expect(env.store.state.itemLoadedFields).toMatchInlineSnapshot(`{}`);
+    expect(env.store.state.itemFieldInvalidationFields).toMatchInlineSnapshot(
       `{}`,
     );
   });
 
   test('query limit enforcement', async () => {
-    const store = createTestListQueryStore({
+    const env = createEnv({
       storeName: 'lq2',
       sessionKey: 'sess1',
       maxQueries: 2,
+      serverData: {
+        a: [{ id: 1, name: 'Item 1' }],
+        b: [{ id: 1, name: 'Item 2' }],
+        c: [{ id: 1, name: 'Item 3' }],
+      },
     });
 
-    // Manually populate the store with 3 queries
-    store.store.setPartialState(
-      {
-        items: {
-          '1': { id: '1', title: 'Item 1' },
-          '2': { id: '2', title: 'Item 2' },
-          '3': { id: '3', title: 'Item 3' },
-        },
-        queries: {
-          q1: {
-            payload: { filter: 'a' },
-            items: ['1'],
-            hasMore: false,
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-          q2: {
-            payload: { filter: 'b' },
-            items: ['2'],
-            hasMore: false,
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-          q3: {
-            payload: { filter: 'c' },
-            items: ['3'],
-            hasMore: false,
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-        },
-        itemQueries: {},
-      },
-      { action: 'test-setup' },
-    );
+    // Populate 3 queries via fetches
+    env.scheduleFetch('highPriority', { tableId: 'a' });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', { tableId: 'b' });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', { tableId: 'c' });
+    await flushAllTimers();
 
     // Wait for save debounce
     await advanceTime(1100);
 
     const cached = localStorage.getItem('tsdf.sess1.lq2');
     const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedListQueryData<ItemState>>,
+      StorageCacheEntry<PersistedListQueryData<Row>>,
       unknown
     >(JSON.parse(cached ?? ''));
     const savedQueryKeys = Object.keys(parsed.data.queries);
@@ -229,220 +186,176 @@ describe('localStorage: list query store persistence', () => {
   });
 
   test('item limit with query-reference prioritization', async () => {
-    const store = createTestListQueryStore({
+    const ik1 = storeItemKey('t1', 1);
+    const ik2 = storeItemKey('t1', 2);
+
+    const env = createEnv({
       storeName: 'lq3',
       sessionKey: 'sess1',
       maxItems: 2,
+      serverData: {
+        t1: [
+          { id: 1, name: 'Referenced 1' },
+          { id: 2, name: 'Referenced 2' },
+        ],
+      },
     });
 
-    // 3 items, only 2 referenced by query
-    store.store.setPartialState(
-      {
-        items: {
-          '1': { id: '1', title: 'Referenced 1' },
-          '2': { id: '2', title: 'Referenced 2' },
-          '3': { id: '3', title: 'Orphan' },
-        },
-        queries: {
-          q1: {
-            payload: { filter: 'x' },
-            items: ['1', '2'],
-            hasMore: false,
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-        },
-        itemQueries: {
-          '1': {
-            payload: '1',
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-          '2': {
-            payload: '2',
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-          '3': {
-            payload: '3',
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-        },
-      },
-      { action: 'test-setup' },
-    );
+    // Fetch query — items 1 and 2 become query-referenced
+    env.scheduleFetch('highPriority', { tableId: 't1' });
+    await flushAllTimers();
+
+    // Add orphan item directly (not part of any query)
+    env.apiStore.addItemToState(rawItemKey('t1', 3), { id: 3, name: 'Orphan' });
 
     // Wait for save debounce
     await advanceTime(1100);
 
     const cached = localStorage.getItem('tsdf.sess1.lq3');
     const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedListQueryData<ItemState>>,
+      StorageCacheEntry<PersistedListQueryData<Row>>,
       unknown
     >(JSON.parse(cached ?? ''));
     const savedItemKeys = Object.keys(parsed.data.items);
 
     // Only 2 items saved; query-referenced items prioritized
     expect(savedItemKeys.length).toBe(2);
-    expect(savedItemKeys).toContain('1');
-    expect(savedItemKeys).toContain('2');
+    expect(savedItemKeys).toContain(ik1);
+    expect(savedItemKeys).toContain(ik2);
   });
 
   test('pinned items and queries are preserved', async () => {
-    const store = createTestListQueryStore({
+    const pinnedIk = storeItemKey('pinned', 1);
+    const pinnedQk = queryKey({ tableId: 'pinned' });
+
+    const env = createEnv({
       storeName: 'lq4',
       sessionKey: 'sess1',
       maxQueries: 1,
       maxItems: 1,
-      pinnedItems: ['pinned-item'],
-      pinnedQueries: ['pinned-query'],
+      pinnedItems: [pinnedIk],
+      pinnedQueries: [pinnedQk],
+      serverData: {
+        pinned: [{ id: 1, name: 'Pinned' }],
+        other: [{ id: 1, name: 'Other' }],
+      },
     });
 
-    store.store.setPartialState(
-      {
-        items: {
-          'pinned-item': { id: 'p', title: 'Pinned' },
-          other: { id: 'o', title: 'Other' },
-        },
-        queries: {
-          'pinned-query': {
-            payload: { filter: 'pinned' },
-            items: ['pinned-item'],
-            hasMore: false,
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-          'other-query': {
-            payload: { filter: 'other' },
-            items: ['other'],
-            hasMore: false,
-            status: 'success',
-            error: null,
-            wasLoaded: true,
-            refetchOnMount: false,
-          },
-        },
-        itemQueries: {},
-      },
-      { action: 'test-setup' },
-    );
+    // Fetch both queries
+    env.scheduleFetch('highPriority', { tableId: 'pinned' });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', { tableId: 'other' });
+    await flushAllTimers();
 
     await advanceTime(1100);
 
     const cached = localStorage.getItem('tsdf.sess1.lq4');
     const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedListQueryData<ItemState>>,
+      StorageCacheEntry<PersistedListQueryData<Row>>,
       unknown
     >(JSON.parse(cached ?? ''));
 
-    expect(Object.keys(parsed.data.queries)).toContain('pinned-query');
-    expect(Object.keys(parsed.data.items)).toContain('pinned-item');
+    expect(Object.keys(parsed.data.queries)).toContain(pinnedQk);
+    expect(Object.keys(parsed.data.items)).toContain(pinnedIk);
   });
 
   test('version mismatch discards cached data', () => {
-    setCachedListQueryData(
+    const ik = storeItemKey('t1', 1);
+
+    setCachedData(
       'lq5',
       'sess1',
       {
-        items: { '1': { id: '1', title: 'Old' } },
+        items: { [ik]: { id: 1, name: 'Old' } },
         queries: {},
         itemPayloads: {},
       },
       1,
     );
 
-    const store = createTestListQueryStore({
+    const env = createEnv({
       storeName: 'lq5',
       sessionKey: 'sess1',
       version: 2,
     });
 
-    expect(Object.keys(store.store.state.items).length).toBe(0);
-    expect(Object.keys(store.store.state.queries).length).toBe(0);
+    expect(Object.keys(env.store.state.items).length).toBe(0);
+    expect(Object.keys(env.store.state.queries).length).toBe(0);
   });
 
   test('schema validation failure discards invalid items', () => {
+    const validIk = storeItemKey('t1', 1);
+    const invalidIk = storeItemKey('t1', 2);
+    const qk = queryKey({ tableId: 't1' });
+
     const key = 'tsdf.sess1.lq6';
     const entry: StorageCacheEntry<PersistedListQueryData<unknown>> = {
       data: {
         items: {
-          valid: { id: 'v', title: 'Valid' },
-          invalid: { badField: true },
+          [validIk]: { id: 1, name: 'Valid' },
+          [invalidIk]: { badField: true },
         },
         queries: {
-          q1: {
-            payload: { filter: 'test' },
-            items: ['valid', 'invalid'],
+          [qk]: {
+            payload: { tableId: 't1' },
+            items: [validIk, invalidIk],
             hasMore: false,
           },
         },
-        itemPayloads: { valid: 'v', invalid: 'bad' },
+        itemPayloads: {
+          [validIk]: rawItemKey('t1', 1),
+          [invalidIk]: rawItemKey('t1', 2),
+        },
       },
       timestamp: Date.now(),
       version: 1,
     };
     localStorage.setItem(key, JSON.stringify(entry));
 
-    const store = createTestListQueryStore({
-      storeName: 'lq6',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'lq6', sessionKey: 'sess1' });
 
     // Valid item loaded
-    expect(store.store.state.items['valid']).toMatchInlineSnapshot(`
-      id: 'v'
-      title: 'Valid'
+    expect(env.store.state.items[validIk]).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Valid'
     `);
 
     // Invalid item not loaded
-    expect(store.store.state.items['invalid']).toBeUndefined();
+    expect(env.store.state.items[invalidIk]).toBeUndefined();
 
     // Query should only reference valid item
-    const query = store.store.state.queries['q1'];
-    expect(query?.items).toMatchInlineSnapshot(`['valid']`);
+    const query = env.store.state.queries[qk];
+    expect(query?.items).toMatchInlineSnapshot(`['"t1||1']`);
   });
 
   test('session isolation', () => {
-    setCachedListQueryData('lq7', 'sess-a', {
-      items: { '1': { id: '1', title: 'A' } },
+    const ik = storeItemKey('t1', 1);
+
+    setCachedData('lq7', 'sess-a', {
+      items: { [ik]: { id: 1, name: 'A' } },
       queries: {},
       itemPayloads: {},
     });
 
-    const store = createTestListQueryStore({
-      storeName: 'lq7',
-      sessionKey: 'sess-b',
-    });
+    const env = createEnv({ storeName: 'lq7', sessionKey: 'sess-b' });
 
-    expect(Object.keys(store.store.state.items).length).toBe(0);
+    expect(Object.keys(env.store.state.items).length).toBe(0);
   });
 
   test('reset clears persisted storage', async () => {
-    setCachedListQueryData('lq8', 'sess1', {
-      items: { '1': { id: '1', title: 'X' } },
+    const ik = storeItemKey('t1', 1);
+
+    setCachedData('lq8', 'sess1', {
+      items: { [ik]: { id: 1, name: 'X' } },
       queries: {},
       itemPayloads: {},
     });
 
-    const store = createTestListQueryStore({
-      storeName: 'lq8',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'lq8', sessionKey: 'sess1' });
 
-    expect(Object.keys(store.store.state.items).length).toBe(1);
+    expect(Object.keys(env.store.state.items).length).toBe(1);
 
-    store.reset();
+    env.apiStore.reset();
     await flushAllTimers();
 
     const cached = localStorage.getItem('tsdf.sess1.lq8');
@@ -450,29 +363,29 @@ describe('localStorage: list query store persistence', () => {
   });
 
   test('itemLoadedFields starts empty after hydration', () => {
-    setCachedListQueryData('lq9', 'sess1', {
-      items: { '1': { id: '1', title: 'Item' } },
+    const ik = storeItemKey('t1', 1);
+    const qk = queryKey({ tableId: 't1' });
+
+    setCachedData('lq9', 'sess1', {
+      items: { [ik]: { id: 1, name: 'Item' } },
       queries: {
-        q1: {
-          payload: { filter: 'all' },
-          items: ['1'],
+        [qk]: {
+          payload: { tableId: 't1' },
+          items: [ik],
           hasMore: false,
         },
       },
-      itemPayloads: { '1': '1' },
+      itemPayloads: { [ik]: rawItemKey('t1', 1) },
     });
 
-    const store = createTestListQueryStore({
-      storeName: 'lq9',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'lq9', sessionKey: 'sess1' });
 
     // Items should be loaded
-    expect(store.store.state.items['1']).not.toBeNull();
+    expect(env.store.state.items[ik]).not.toBeNull();
 
     // But fields should be empty (repopulated on refetch)
-    expect(store.store.state.itemLoadedFields).toMatchInlineSnapshot(`{}`);
-    expect(store.store.state.itemFieldInvalidationFields).toMatchInlineSnapshot(
+    expect(env.store.state.itemLoadedFields).toMatchInlineSnapshot(`{}`);
+    expect(env.store.state.itemFieldInvalidationFields).toMatchInlineSnapshot(
       `{}`,
     );
   });
