@@ -36,6 +36,16 @@ Use this checklist to evaluate test quality quickly and consistently.
 - Are snapshots small, intentional, and understandable?
 - Does each test cover a genuinely distinct behavior, or is it redundant with another test?
 
+## Readability
+
+- Do tests use inline snapshots for objects/arrays (with `timelineString` when appropriate) instead of chaining multiple `expect(obj.a.b).toBe(...)` assertions?
+- Do complex tests (multiple actions/assertions or non-obvious logic) have comments explaining **why** each step matters? Without comments, readers must reverse-engineer intent from raw code. Good: `// refetch while previous request is still in-flight — should deduplicate`. Bad: no comment at all, or trivial labels like `// trigger refetch`.
+- Does each test read top-to-bottom as a clear scenario: arrange, act, assert?
+- Are test values realistic and meaningful (e.g., `'user-123'`, `'Product A'`) rather than generic (`'foo'`, `'bar'`, `'test1'`)?
+- Are helper functions and variables named to convey intent (e.g., `waitForRefetch()`) rather than mechanics (e.g., `doStuff()`)?
+- Is nesting (`describe` depth) kept shallow — ideally at most 2 levels — so tests are easy to scan?
+- Are related assertions grouped into a single snapshot rather than scattered across many individual `expect` calls?
+
 ## Severity Guide
 
 - P0: Tests give false confidence on critical behavior or mask production bugs.
