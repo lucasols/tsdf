@@ -4,7 +4,10 @@ import {
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
 import type { FetchType } from '../../src/requestScheduler';
-import type { DocumentPersistentStorageConfig } from '../../src/persistentStorage/types';
+import type {
+  DocumentPersistentStorageConfig,
+  StorageAdapter,
+} from '../../src/persistentStorage/types';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
@@ -62,6 +65,7 @@ export type DocumentStoreTestEnvOptions<D> = {
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: DocumentPersistentStorageConfig<{ value: D }>;
+  storageAdapter?: StorageAdapter;
   ignoreInitialTimeCheck?: boolean;
 };
 
@@ -83,6 +87,7 @@ export function createDocumentStoreTestEnv<D>(
     usesRealTimeUpdates,
     blockWindowClose,
     persistentStorage,
+    storageAdapter,
     ignoreInitialTimeCheck,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
@@ -134,6 +139,7 @@ export function createDocumentStoreTestEnv<D>(
     persistentStorage,
     '~test': {
       ...testOptions,
+      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {

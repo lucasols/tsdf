@@ -18,7 +18,10 @@ import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useLis
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
-import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
+import type {
+  DocumentPersistentStorageConfig,
+  StorageAdapter,
+} from './persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -157,6 +160,7 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
     onReceiveRemoteMsg?: (message: DocumentBrowserTabsMessage<State>) => void;
+    storageAdapter?: StorageAdapter;
   };
 };
 
@@ -217,10 +221,13 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupDocumentPersistence({
-        ...persistentStorageConfig,
-        getSessionKey,
-      })
+    ? setupDocumentPersistence(
+        {
+          ...persistentStorageConfig,
+          getSessionKey,
+        },
+        { adapter: testOptions?.storageAdapter },
+      )
     : null;
 
   if (persistence?.initialState) {
