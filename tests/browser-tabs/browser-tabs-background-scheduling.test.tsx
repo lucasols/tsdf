@@ -225,7 +225,6 @@ test('document background scheduling does not retry on sibling tabs after a remo
   `);
 });
 
-
 test('document fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-timing-sync');
@@ -476,7 +475,6 @@ test('collection background scheduling does not retry on sibling tabs after a re
     "
   `);
 });
-
 
 test('collection fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
@@ -749,7 +747,6 @@ test('list query background scheduling does not retry on sibling tabs after a re
     "
   `);
 });
-
 
 test('list query fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();

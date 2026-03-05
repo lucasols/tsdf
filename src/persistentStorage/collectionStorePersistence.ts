@@ -8,7 +8,9 @@ import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   createPersistentStorageHandle,
   getStorageKeyForStore,
+  refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
+import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   CollectionPersistentStorageConfig,
   PersistedCollectionData,
@@ -174,6 +176,7 @@ export function setupCollectionPersistence<
 
     if (sessionKey !== false) {
       const key = getStorageKeyForStore(sessionKey, config.storeName);
+      const hasEntry = localStorage.getItem(key) !== null;
       const persisted = readCollectionFromLocalStorageSync(key, version);
 
       if (persisted) {
@@ -181,6 +184,14 @@ export function setupCollectionPersistence<
           persisted,
           config,
         );
+
+        if (initialItems !== null) {
+          scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+        } else {
+          scheduleIdleCleanup(() => localStorage.removeItem(key));
+        }
+      } else if (hasEntry) {
+        scheduleIdleCleanup(() => localStorage.removeItem(key));
       }
     }
   }
@@ -205,7 +216,10 @@ export function setupCollectionPersistence<
           config,
         );
 
-        if (!validated) return;
+        if (!validated) {
+          scheduleIdleCleanup(() => void handle.clear());
+          return;
+        }
 
         store.setPartialState(validated, {
           action: 'persistent-storage-hydrate',

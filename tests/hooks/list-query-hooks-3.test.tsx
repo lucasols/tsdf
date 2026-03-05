@@ -347,7 +347,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
   `);
 });
 
-
 test('useItem: disable then enable isOffScreen', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     testScenario: { loaded: { tables: ['products', 'users'] } },
@@ -800,7 +799,6 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
     "
   `);
 });
-
 
 test('Selected value should update when external dep changes (default selectorUsesExternalDeps)', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {

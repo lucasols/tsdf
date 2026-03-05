@@ -644,4 +644,3 @@ test('RTU update works', async () => {
     secondFetch ? secondFetch.startTime - rtuTriggeredAt : 0,
   ).toBeGreaterThanOrEqual(300);
 });
-

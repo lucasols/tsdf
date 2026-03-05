@@ -185,7 +185,7 @@ function createOpfsAdapter(): StorageAdapter {
           try {
             const originalKey = decodeFileNameToKey(nameWithoutExt);
             if (originalKey.startsWith(prefix)) {
-              keys.push(name);
+              keys.push(originalKey);
             }
           } catch {
             // Ignore entries that can't be decoded

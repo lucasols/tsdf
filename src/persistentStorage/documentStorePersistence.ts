@@ -6,7 +6,9 @@ import type { ValidStoreState } from '../utils/storeShared';
 import {
   createPersistentStorageHandle,
   getStorageKeyForStore,
+  refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
+import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   DocumentPersistentStorageConfig,
   PersistedDocumentData,
@@ -104,6 +106,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
 
     if (sessionKey !== false) {
       const key = getStorageKeyForStore(sessionKey, config.storeName);
+      const hasEntry = localStorage.getItem(key) !== null;
       const persisted = readDocumentFromLocalStorageSync(key, version);
 
       if (persisted) {
@@ -115,7 +118,12 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
             status: 'success',
             refetchOnMount: 'lowPriority',
           };
+          scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+        } else {
+          scheduleIdleCleanup(() => localStorage.removeItem(key));
         }
+      } else if (hasEntry) {
+        scheduleIdleCleanup(() => localStorage.removeItem(key));
       }
     }
   }
@@ -133,7 +141,10 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
         if (!cached || disposed) return;
 
         const validated = validateWithSchema(config.schema, cached.data);
-        if (validated === null) return;
+        if (validated === null) {
+          scheduleIdleCleanup(() => void handle.clear());
+          return;
+        }
 
         // Only hydrate if store is still idle with no data
         const currentState = store.state;

@@ -1,4 +1,12 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  rc_number,
+  rc_object,
+  rc_parse,
+  rc_parse_json,
+  rc_unknown,
+} from 'runcheck';
+import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import { createStorageAdapter } from './storageAdapter';
 import type {
   PersistentStorageBaseConfig,
@@ -10,6 +18,25 @@ import type {
 import { validateWithSchema } from './validateWithSchema';
 
 const DEBOUNCE_MS = 1000;
+
+const LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+const OPFS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 2 weeks
+
+function getMaxAgeForBackend(backend: StorageBackend): number {
+  return backend === 'localStorage'
+    ? LOCAL_STORAGE_MAX_AGE_MS
+    : OPFS_MAX_AGE_MS;
+}
+
+const cacheEntrySchema = rc_object({
+  data: rc_unknown,
+  timestamp: rc_number,
+  version: rc_number,
+});
+
+const timestampSchema = rc_object({ timestamp: rc_number });
+
+const scannedBackends = new Set<StorageBackend>();
 
 function getStorageKey(sessionKey: string, storeName: string): string {
   return `tsdf.${sessionKey}.${storeName}`;
@@ -46,10 +73,18 @@ export function createPersistentStorageHandle<T>(
   } = {},
 ): PersistentStorageHandle<T> {
   const version = config.version ?? 1;
+  const backendKey: StorageBackend = config.backend ?? 'opfs';
   const { onPersistentStorageError } = config;
-  const adapter =
-    adapterOverride ?? createStorageAdapter(config.backend ?? 'opfs');
+  const adapter = adapterOverride ?? createStorageAdapter(backendKey);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Schedule expiration scan once per backend per session
+  if (!adapterOverride && !scannedBackends.has(backendKey)) {
+    scannedBackends.add(backendKey);
+    scheduleIdleCleanup(() => {
+      void runExpirationScan(adapter, getMaxAgeForBackend(backendKey));
+    });
+  }
 
   function getKey(): string | false {
     const sessionKey = config.getSessionKey();
@@ -71,7 +106,16 @@ export function createPersistentStorageHandle<T>(
     const entry = await adapter.read<StorageCacheEntry<T>>(key);
 
     if (!entry) return null;
-    if (entry.version !== version) return null;
+
+    if (entry.version !== version) {
+      scheduleIdleCleanup(() => void adapter.remove(key));
+      return null;
+    }
+
+    // Refresh timestamp to track last access time for expiration
+    scheduleIdleCleanup(() => {
+      void adapter.write(key, { ...entry, timestamp: Date.now() });
+    });
 
     return entry.data;
   }
@@ -140,12 +184,23 @@ export function readFromLocalStorageSync<T>(
       JSON.parse(raw),
     );
 
-    if (entry.version !== version) return null;
+    if (entry.version !== version) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return null;
+    }
 
     // Validate as a single item
     const validated = validateWithSchema(schema, entry.data);
+
+    if (validated !== null) {
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    } else {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+    }
+
     return validated;
   } catch {
+    scheduleIdleCleanup(() => localStorage.removeItem(key));
     return null;
   }
 }
@@ -178,4 +233,51 @@ export async function clearAllSessionStorage(
     clearSessionStorage(sessionKey, 'localStorage'),
     clearSessionStorage(sessionKey, 'opfs'),
   ]);
+}
+
+/**
+ * Refreshes the timestamp of a localStorage cache entry to track last access time.
+ * Used by store persistence setup functions after successful sync reads.
+ */
+export function refreshLocalStorageTimestamp(key: string): void {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return;
+
+  const result = rc_parse_json(raw, cacheEntrySchema);
+  if (!result.ok) return;
+
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      ...result.value,
+      timestamp: Date.now(),
+    }),
+  );
+}
+
+async function runExpirationScan(
+  adapter: StorageAdapter,
+  maxAgeMs: number,
+): Promise<void> {
+  const prefix = 'tsdf.';
+  const keys = await adapter.listKeys(prefix);
+  const now = Date.now();
+
+  for (const key of keys) {
+    const raw = await adapter.read<unknown>(key);
+    if (!raw) {
+      await adapter.remove(key);
+      continue;
+    }
+
+    const result = rc_parse(raw, timestampSchema);
+    if (!result.ok || now - result.value.timestamp > maxAgeMs) {
+      await adapter.remove(key);
+    }
+  }
+}
+
+/** Resets expiration scan tracking. Exported for test cleanup. */
+export function resetExpirationScanTracking(): void {
+  scannedBackends.clear();
 }

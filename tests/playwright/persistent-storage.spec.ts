@@ -1,11 +1,4 @@
-import {
-  expect,
-  test,
-  type BrowserContext,
-  type Page,
-} from '@playwright/test';
-
-
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 const SAVE_DEBOUNCE_MS = 1000;
 
@@ -137,15 +130,10 @@ for (const backend of ['localStorage', 'opfs'] as const) {
       browser,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(
-        context,
-        'persist-collection',
-        'page-a',
-        {
-          storeId: `col-${backend}-basic`,
-          backend,
-        },
-      );
+      const page = await openScenario(context, 'persist-collection', 'page-a', {
+        storeId: `col-${backend}-basic`,
+        backend,
+      });
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
         'success',
@@ -172,15 +160,10 @@ for (const backend of ['localStorage', 'opfs'] as const) {
       browser,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(
-        context,
-        'persist-collection',
-        'page-a',
-        {
-          storeId: `col-${backend}-mutate`,
-          backend,
-        },
-      );
+      const page = await openScenario(context, 'persist-collection', 'page-a', {
+        storeId: `col-${backend}-mutate`,
+        backend,
+      });
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
         'success',
@@ -209,15 +192,10 @@ for (const backend of ['localStorage', 'opfs'] as const) {
       browser,
     }) => {
       const context = await browser.newContext();
-      const page = await openScenario(
-        context,
-        'persist-collection',
-        'page-a',
-        {
-          storeId: `col-${backend}-clear`,
-          backend,
-        },
-      );
+      const page = await openScenario(context, 'persist-collection', 'page-a', {
+        storeId: `col-${backend}-clear`,
+        backend,
+      });
 
       await expect(page.getByTestId('persist-col-item1-status')).toHaveText(
         'success',

@@ -1,7 +1,14 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
-import { renderHook } from '@testing-library/react';
-import { rc_number, rc_object, rc_string, rc_to_standard } from 'runcheck';
+import { act, renderHook } from '@testing-library/react';
+import {
+  rc_number,
+  rc_object,
+  rc_parse_json,
+  rc_string,
+  rc_to_standard,
+  rc_unknown,
+} from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { createDocumentStore } from '../../src/documentStore';
 import type {
@@ -12,6 +19,12 @@ import type {
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+
+const cacheEntryTimestampSchema = rc_object({
+  data: rc_unknown,
+  timestamp: rc_number,
+  version: rc_number,
+});
 
 const testDataSchema = rc_object({ name: rc_string, value: rc_number });
 const wrappedSchema = rc_object({ value: testDataSchema });
@@ -87,175 +100,179 @@ describe('localStorage: document store persistence', () => {
     `);
   });
 
-//   test('refetch is triggered on mount after hydration', async () => {
-//     setCachedDocumentData('doc2', 'sess1', { name: 'stale', value: 0 });
+  test('refetch is triggered on mount after hydration', async () => {
+    setCachedDocumentData('doc2', 'sess1', { name: 'stale', value: 0 });
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc2',
-//       sessionKey: 'sess1',
-//     });
+    const env = createDocPersistenceEnv({
+      storeName: 'doc2',
+      sessionKey: 'sess1',
+    });
 
-//     // Initial state has data from cache with refetchOnMount
-//     expect(env.store.state.status).toBe('success');
-//     expect(env.store.state.refetchOnMount).toBe('lowPriority');
+    const renders = createLoggerStore();
 
-//     // Mount the hook to trigger refetch
-//     renderHook(() => env.apiStore.useDocument());
-//     await flushAllTimers();
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+      });
 
-//     // After refetch, data should be from server
-//     expect(env.store.state).toMatchInlineSnapshot(`
-//       data:
-//         value: { name: 'test', value: 42 }
+      renders.add({ status, data: data?.value ?? null });
+    });
 
-//       error: null
-//       refetchOnMount: '❌'
-//       status: 'success'
-//     `);
-//   });
+    await flushAllTimers();
 
-//   test('version mismatch causes cached data to be discarded', () => {
-//     setCachedDocumentData('doc3', 'sess1', { name: 'old', value: 99 }, 1);
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {name:stale, value:0}
+      -> status: refetching ⋅ data: {name:stale, value:0}
+      -> status: success ⋅ data: {name:test, value:42}
+      "
+    `);
+  });
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc3',
-//       sessionKey: 'sess1',
-//       version: 2, // Different version
-//     });
+  test('version mismatch causes cached data to be discarded', () => {
+    setCachedDocumentData('doc3', 'sess1', { name: 'old', value: 99 }, 1);
 
-//     // Should start idle since version doesn't match
-//     expect(env.store.state).toMatchInlineSnapshot(`
-//       data: null
-//       error: null
-//       refetchOnMount: '❌'
-//       status: 'idle'
-//     `);
-//   });
+    const env = createDocPersistenceEnv({
+      storeName: 'doc3',
+      sessionKey: 'sess1',
+      version: 2, // Different version
+    });
 
-//   test('schema validation failure causes cached data to be discarded', () => {
-//     // Store invalid data (doesn't match wrapped schema { value: { name, value } })
-//     const key = 'tsdf.sess1.doc4';
-//     const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
-//       data: { data: { invalid: true } },
-//       timestamp: Date.now(),
-//       version: 1,
-//     };
-//     localStorage.setItem(key, JSON.stringify(entry));
+    // Should start idle since version doesn't match
+    expect(env.store.state).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      refetchOnMount: '❌'
+      status: 'idle'
+    `);
+  });
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc4',
-//       sessionKey: 'sess1',
-//     });
+  test('schema validation failure causes cached data to be discarded', () => {
+    // Store invalid data (doesn't match wrapped schema { value: { name, value } })
+    const key = 'tsdf.sess1.doc4';
+    const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
+      data: { data: { invalid: true } },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    localStorage.setItem(key, JSON.stringify(entry));
 
-//     expect(env.store.state.data).toBeNull();
-//     expect(env.store.state.status).toBe('idle');
-//   });
+    const env = createDocPersistenceEnv({
+      storeName: 'doc4',
+      sessionKey: 'sess1',
+    });
 
-//   test('data is saved to localStorage after successful fetch', async () => {
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc5',
-//       sessionKey: 'sess1',
-//     });
+    expect(env.store.state.data).toBeNull();
+    expect(env.store.state.status).toBe('idle');
+  });
 
-//     // Mount and trigger fetch
-//     renderHook(() => env.apiStore.useDocument());
-//     await flushAllTimers();
+  test('data is saved to localStorage after successful fetch', async () => {
+    const env = createDocPersistenceEnv({
+      storeName: 'doc5',
+      sessionKey: 'sess1',
+    });
 
-//     // Wait for debounce to fire (1 second)
-//     await advanceTime(1100);
+    // Mount and trigger fetch
+    renderHook(() => env.apiStore.useDocument());
+    await flushAllTimers();
 
-//     const cached = localStorage.getItem('tsdf.sess1.doc5');
-//     expect(cached).not.toBeNull();
+    // Wait for debounce to fire (1 second)
+    await advanceTime(1100);
 
-//     const parsed = __LEGIT_CAST__<
-//       StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
-//       unknown
-//     >(JSON.parse(cached ?? ''));
-//     expect(parsed.data.data).toMatchInlineSnapshot(
-//       `value: { name: 'test', value: 42 }`,
-//     );
-//   });
+    const cached = localStorage.getItem('tsdf.sess1.doc5');
+    expect(cached).not.toBeNull();
 
-//   test('save is debounced - only final state is saved', async () => {
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc6',
-//       sessionKey: 'sess1',
-//     });
+    const parsed = __LEGIT_CAST__<
+      StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
+      unknown
+    >(JSON.parse(cached ?? ''));
+    expect(parsed.data.data).toMatchInlineSnapshot(
+      `value: { name: 'test', value: 42 }`,
+    );
+  });
 
-//     const setItemSpy = vi.spyOn(localStorage, 'setItem');
+  test('save is debounced - only final state is saved', async () => {
+    const env = createDocPersistenceEnv({
+      storeName: 'doc6',
+      sessionKey: 'sess1',
+    });
 
-//     // Fetch initial data
-//     renderHook(() => env.apiStore.useDocument());
-//     await flushAllTimers();
+    const setItemSpy = vi.spyOn(localStorage, 'setItem');
 
-//     // Reset spy after initial fetch+save cycle
-//     setItemSpy.mockClear();
+    // Fetch initial data
+    renderHook(() => env.apiStore.useDocument());
+    await flushAllTimers();
 
-//     // Rapidly update state multiple times (within the debounce window)
-//     env.apiStore.updateState((draft) => {
-//       draft.value = { name: 'intermediate', value: 1 };
-//     });
-//     env.apiStore.updateState((draft) => {
-//       draft.value = { name: 'final', value: 99 };
-//     });
+    // Reset spy after initial fetch+save cycle
+    setItemSpy.mockClear();
 
-//     // Wait for debounce
-//     await advanceTime(1100);
+    // Rapidly update state multiple times (within the debounce window)
+    act(() => {
+      env.apiStore.updateState((draft) => {
+        draft.value = { name: 'intermediate', value: 1 };
+      });
+      env.apiStore.updateState((draft) => {
+        draft.value = { name: 'final', value: 99 };
+      });
+    });
 
-//     // Should have only written once (debounced)
-//     const writeCount = setItemSpy.mock.calls.filter(
-//       ([key]) => key === 'tsdf.sess1.doc6',
-//     ).length;
-//     expect(writeCount).toBe(1);
+    // Wait for debounce
+    await advanceTime(1100);
 
-//     // Saved data should be the final state
-//     const cached = localStorage.getItem('tsdf.sess1.doc6');
-//     const parsed = __LEGIT_CAST__<
-//       StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
-//       unknown
-//     >(JSON.parse(cached ?? ''));
-//     expect(parsed.data.data.value).toMatchInlineSnapshot(`
-//       name: 'final'
-//       value: 99
-//     `);
+    // Should have only written once (debounced)
+    const writeCount = setItemSpy.mock.calls.filter(
+      ([key]) => key === 'tsdf.sess1.doc6',
+    ).length;
+    expect(writeCount).toBe(1);
 
-//     setItemSpy.mockRestore();
-//   });
+    // Saved data should be the final state
+    const cached = localStorage.getItem('tsdf.sess1.doc6');
+    const parsed = __LEGIT_CAST__<
+      StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
+      unknown
+    >(JSON.parse(cached ?? ''));
+    expect(parsed.data.data.value).toMatchInlineSnapshot(`
+      name: 'final'
+      value: 99
+    `);
 
-//   test('reset clears persisted storage', async () => {
-//     setCachedDocumentData('doc7', 'sess1', { name: 'to-clear', value: 7 });
+    setItemSpy.mockRestore();
+  });
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc7',
-//       sessionKey: 'sess1',
-//     });
+  test('reset clears persisted storage', async () => {
+    setCachedDocumentData('doc7', 'sess1', { name: 'to-clear', value: 7 });
 
-//     // Verify data was loaded
-//     expect(env.store.state.data).not.toBeNull();
+    const env = createDocPersistenceEnv({
+      storeName: 'doc7',
+      sessionKey: 'sess1',
+    });
 
-//     // Reset the store
-//     env.apiStore.reset();
+    // Verify data was loaded
+    expect(env.store.state.data).not.toBeNull();
 
-//     // Wait for async clear
-//     await flushAllTimers();
+    // Reset the store
+    env.apiStore.reset();
 
-//     // Storage should be cleared
-//     const cached = localStorage.getItem('tsdf.sess1.doc7');
-//     expect(cached).toBeNull();
-//   });
+    // Wait for async clear
+    await flushAllTimers();
 
-//   test('session key isolation - different sessions do not share data', () => {
-//     setCachedDocumentData('doc8', 'sess-a', { name: 'session-a', value: 1 });
+    // Storage should be cleared
+    const cached = localStorage.getItem('tsdf.sess1.doc7');
+    expect(cached).toBeNull();
+  });
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc8',
-//       sessionKey: 'sess-b', // Different session
-//     });
+  test('session key isolation - different sessions do not share data', () => {
+    setCachedDocumentData('doc8', 'sess-a', { name: 'session-a', value: 1 });
 
-//     // Should not load data from different session
-//     expect(env.store.state.data).toBeNull();
-//     expect(env.store.state.status).toBe('idle');
-//   });
+    const env = createDocPersistenceEnv({
+      storeName: 'doc8',
+      sessionKey: 'sess-b', // Different session
+    });
+
+    // Should not load data from different session
+    expect(env.store.state.data).toBeNull();
+    expect(env.store.state.status).toBe('idle');
+  });
 
 //   test('save uses current session key when getSessionKey changes', async () => {
 //     let currentSession = 'sess-old';

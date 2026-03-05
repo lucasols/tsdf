@@ -1039,7 +1039,6 @@ test('fetch error then mount component without error', async () => {
   `);
 });
 
-
 test('emulate load resource during its mutation', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },

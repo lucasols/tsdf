@@ -1,11 +1,25 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { rc_object, rc_string } from 'runcheck';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { renderHook } from '@testing-library/react';
+import {
+  rc_number,
+  rc_object,
+  rc_parse_json,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import type {
   PersistedCollectionData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+
+const cacheEntryTimestampSchema = rc_object({
+  data: rc_unknown,
+  timestamp: rc_number,
+  version: rc_number,
+});
 import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
