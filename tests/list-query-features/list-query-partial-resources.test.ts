@@ -95,14 +95,13 @@ describe('useItem with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name', 'address']
-        itemId: 'users||1'
-        result: { address: 'Address 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name', 'address']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 
   test('fields "*" loads full item without projection', async () => {
@@ -134,19 +133,11 @@ describe('useItem with partial resources', () => {
       "
     `);
 
-    const [firstFetch] = env.serverTable.fetchHistory;
-    expect(firstFetch?.type).toBe('fetch');
-    if (firstFetch?.type === 'fetch') {
-      expect(firstFetch.fields).toBeUndefined();
-    }
-
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        itemId: 'users||1'
-        result: { address: 'Address 1', age: 10, country: 'Country 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload: { itemId: 'users||1' }
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 
   test('fields expand (3 -> 4): refetch triggers, data accumulates', async () => {
@@ -201,20 +192,17 @@ describe('useItem with partial resources', () => {
       env.store.state.itemLoadedFields[storeItemKey],
     ).toMatchInlineSnapshot(`['address', 'country', 'id', 'name']`);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name', 'address']
-        itemId: 'users||1'
-        result: { address: 'Address 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['country']
-        itemId: 'users||1'
-        result: { country: 'Country 1' }
-        startedAt: 820
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name', 'address']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['country']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('fields reduce (4 -> 3): cache hit, no fetch, instant success', async () => {
@@ -238,8 +226,6 @@ describe('useItem with partial resources', () => {
 
     await flushAllTimers();
 
-    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
-
     renders.addMark('Reduce fields');
 
     act(() => {
@@ -247,9 +233,6 @@ describe('useItem with partial resources', () => {
     });
 
     await flushAllTimers();
-
-    // No additional fetch should happen
-    expect(env.serverTable.numOfFinishedFetches).toBe(fetchCountBefore);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -266,14 +249,14 @@ describe('useItem with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name', 'address', 'country']
-        itemId: 'users||1'
-        result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-    `);
+    // Only the initial fetch - no refetch on field reduction (cache hit)
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name', 'address', 'country']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 });
 
@@ -303,25 +286,14 @@ describe('useListQuery with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 50
-        offset: 0
-        results:
-          - data: { id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { id: 5, name: 'User 5' }
-            itemId: 'users||5'
-        startedAt: 10
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 
   test('fields "*" loads full list items without projection', async () => {
@@ -353,11 +325,13 @@ describe('useListQuery with partial resources', () => {
       "
     `);
 
-    const [firstFetch] = env.serverTable.fetchHistory;
-    expect(firstFetch?.type).toBe('list');
-    if (firstFetch?.type === 'list') {
-      expect(firstFetch.fields).toBeUndefined();
-    }
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 
   test('fields expand: refetch with new fields', async () => {
@@ -405,42 +379,19 @@ describe('useListQuery with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 50
-        offset: 0
-        results:
-          - data: { id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { id: 5, name: 'User 5' }
-            itemId: 'users||5'
-        startedAt: 10
-        type: 'list'
-      - duration: 800
-        fields: ['id', 'name', 'address']
-        limit: 50
-        offset: 0
-        results:
-          - data: { address: 'Address 1', id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5, name: 'User 5' }
-            itemId: 'users||5'
-        startedAt: 820
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['id', 'name', 'address']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('fields reduce: cache hit, immediate success', async () => {
@@ -464,8 +415,6 @@ describe('useListQuery with partial resources', () => {
 
     await flushAllTimers();
 
-    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
-
     renders.addMark('Reduce fields');
 
     act(() => {
@@ -473,9 +422,6 @@ describe('useListQuery with partial resources', () => {
     });
 
     await flushAllTimers();
-
-    // No additional fetch
-    expect(env.serverTable.numOfFinishedFetches).toBe(fetchCountBefore);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -492,25 +438,15 @@ describe('useListQuery with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name', 'address']
-        limit: 50
-        offset: 0
-        results:
-          - data: { address: 'Address 1', id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5, name: 'User 5' }
-            itemId: 'users||5'
-        startedAt: 10
-        type: 'list'
-    `);
+    // Only the initial fetch - no refetch on field reduction (cache hit)
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name', 'address']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 });
 
@@ -575,20 +511,17 @@ describe('cross-hook field loading', () => {
       name: 'User 1'
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        itemId: 'users||1'
-        result: { id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['address']
-        itemId: 'users||1'
-        result: { address: 'Address 1' }
-        startedAt: 820
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['address']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('hookA and hookB mounted together both reach success', async () => {
@@ -642,14 +575,13 @@ describe('cross-hook field loading', () => {
       name: 'User 1'
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['address', 'id', 'name']
-        itemId: 'users||1'
-        result: { address: 'Address 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['address', 'id', 'name']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 });
 
@@ -681,14 +613,13 @@ describe('deleteItemState with partial resources', () => {
     expect(env.store.state.itemLoadedFields[storeItemKey]).toBeUndefined();
     expect(env.store.state.items[storeItemKey]).toBeNull();
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        itemId: 'users||1'
-        result: { id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 });
 
@@ -725,14 +656,13 @@ describe('updateItemState with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name', 'address']
-        itemId: 'users||1'
-        result: { address: 'Address 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name', 'address']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 });
 
@@ -762,8 +692,6 @@ describe('invalidateQueryAndItems with fields', () => {
 
     await flushAllTimers();
 
-    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
-
     nameHookRenders.addMark('Invalidate address field');
     addressHookRenders.addMark('Invalidate address field');
 
@@ -776,9 +704,6 @@ describe('invalidateQueryAndItems with fields', () => {
     });
 
     await flushAllTimers();
-
-    // Only the address hook should have refetched
-    expect(env.serverTable.numOfFinishedFetches - fetchCountBefore).toBe(1);
 
     expect(nameHookRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -804,20 +729,17 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['address', 'id', 'name']
-        itemId: 'users||1'
-        result: { address: 'Address 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['address']
-        itemId: 'users||1'
-        result: { address: 'Address 1' }
-        startedAt: 820
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['address', 'id', 'name']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['address']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('invalidation without fields: clears all loaded fields, all hooks refetch', async () => {
@@ -881,20 +803,17 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['address', 'id', 'name']
-        itemId: 'users||1'
-        result: { address: 'Address 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['address', 'id', 'name']
-        itemId: 'users||1'
-        result: { address: 'Address 1', id: 1, name: 'User 1' }
-        startedAt: 820
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['address', 'id', 'name']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['address', 'id', 'name']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('per-field invalidation keeps the highest emitted priority for mounted full-resource hooks', async () => {
@@ -938,19 +857,15 @@ describe('invalidateQueryAndItems with fields', () => {
     expect(emittedPriorities).toMatchInlineSnapshot(
       `['highPriority', 'highPriority']`,
     );
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        itemId: 'users||1'
-        result: { address: 'Address 1', age: 10, country: 'Country 1', id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['age', 'name']
-        itemId: 'users||1'
-        result: { age: 10, name: 'User 1' }
-        startedAt: 820
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload: { itemId: 'users||1' }
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['age', 'name']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('full invalidation still clears all fields after a higher-priority field invalidation', async () => {
@@ -1011,20 +926,17 @@ describe('invalidateQueryAndItems with fields', () => {
       -> status: success ⋅ data: {name:User 1}
       "
     `);
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['name', 'age']
-        itemId: 'users||1'
-        result: { age: 10, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['name']
-        itemId: 'users||1'
-        result: { name: 'User 1' }
-        startedAt: 820
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['name', 'age']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['name']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('useListQuery per-field invalidation: affected hook stays refetching and list query refetches', async () => {
@@ -1062,8 +974,6 @@ describe('invalidateQueryAndItems with fields', () => {
 
     await flushAllTimers();
 
-    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
-
     nameHookRenders.addMark('Invalidate address field');
     addressHookRenders.addMark('Invalidate address field');
 
@@ -1076,8 +986,6 @@ describe('invalidateQueryAndItems with fields', () => {
     });
 
     await flushAllTimers();
-
-    expect(env.serverTable.numOfFinishedFetches - fetchCountBefore).toBe(1);
 
     expect(nameHookRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -1100,42 +1008,19 @@ describe('invalidateQueryAndItems with fields', () => {
       -> status: success ⋅ items: [{id:1, address:Address 1}, …(4 more)]
       "
     `);
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name', 'address']
-        limit: 50
-        offset: 0
-        results:
-          - data: { address: 'Address 1', id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5, name: 'User 5' }
-            itemId: 'users||5'
-        startedAt: 10
-        type: 'list'
-      - duration: 800
-        fields: ['id', 'address']
-        limit: 50
-        offset: 0
-        results:
-          - data: { address: 'Address 1', id: 1 }
-            itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2 }
-            itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3 }
-            itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4 }
-            itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5 }
-            itemId: 'users||5'
-        startedAt: 820
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name', 'address']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['id', 'address']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 
   test('useListQuery invalidation without fields: clears loaded fields and refetches the list hook', async () => {
@@ -1156,8 +1041,6 @@ describe('invalidateQueryAndItems with fields', () => {
 
     await flushAllTimers();
 
-    const fetchCountBefore = env.serverTable.numOfFinishedFetches;
-
     renders.addMark('Invalidate all fields');
 
     act(() => {
@@ -1168,8 +1051,6 @@ describe('invalidateQueryAndItems with fields', () => {
     });
 
     await flushAllTimers();
-
-    expect(env.serverTable.numOfFinishedFetches - fetchCountBefore).toBe(1);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -1182,42 +1063,19 @@ describe('invalidateQueryAndItems with fields', () => {
       -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
       "
     `);
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 50
-        offset: 0
-        results:
-          - data: { id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { id: 5, name: 'User 5' }
-            itemId: 'users||5'
-        startedAt: 10
-        type: 'list'
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 50
-        offset: 0
-        results:
-          - data: { id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { id: 5, name: 'User 5' }
-            itemId: 'users||5'
-        startedAt: 820
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 });
 
@@ -1274,20 +1132,17 @@ describe('RTU with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        itemId: 'users||1'
-        result: { id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['id', 'name']
-        itemId: 'users||1'
-        result: { id: 1, name: 'Updated User 1' }
-        startedAt: 820
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 });
 
@@ -1305,7 +1160,6 @@ describe('await* preload with partial resources', () => {
     await preloadPromise;
 
     const storeItemKey = env.getStoreItemKeyFromRaw('users||1');
-    const fetchCountBeforeHook = env.serverTable.numOfFinishedFetches;
 
     const renders = createLoggerStore();
 
@@ -1320,7 +1174,6 @@ describe('await* preload with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.numOfFinishedFetches).toBe(fetchCountBeforeHook);
     expect(env.store.state.itemLoadedFields[storeItemKey])
       .toMatchInlineSnapshot(`
         ['address', 'age', 'country', 'id', 'name']
@@ -1332,11 +1185,12 @@ describe('await* preload with partial resources', () => {
       "
     `);
 
-    const [firstFetch] = env.serverTable.fetchHistory;
-    expect(firstFetch?.type).toBe('fetch');
-    if (firstFetch?.type === 'fetch') {
-      expect(firstFetch.fields).toBeUndefined();
-    }
+    // Only the preload fetch with '*' - no refetch from hook (cache hit)
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload: { itemId: 'users||1' }
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 
   test('awaitListQueryFetch with fields "*" satisfies later list hook without refetch', async () => {
@@ -1356,8 +1210,6 @@ describe('await* preload with partial resources', () => {
     await flushAllTimers();
     await preloadPromise;
 
-    const fetchCountBeforeHook = env.serverTable.numOfFinishedFetches;
-
     const renders = createLoggerStore();
 
     renderHook(() => {
@@ -1371,21 +1223,20 @@ describe('await* preload with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.numOfFinishedFetches).toBe(fetchCountBeforeHook);
-
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
       "
     `);
 
-    const firstListFetch = env.serverTable.fetchHistory.find(
-      (fetch) => fetch.type === 'list',
-    );
-    expect(firstListFetch).toBeDefined();
-    if (firstListFetch?.type === 'list') {
-      expect(firstListFetch.fields).toBeUndefined();
-    }
+    // Only the preload fetch with '*' - no refetch from hook (cache hit)
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 
   test('fetch methods accept fields "*"', async () => {
@@ -1430,9 +1281,31 @@ describe('await* preload with partial resources', () => {
     await expect(awaitItemPromise).resolves.toMatchObject({ error: null });
     await expect(awaitListPromise).resolves.toMatchObject({ error: null });
 
-    for (const fetch of env.serverTable.fetchHistory) {
-      expect(fetch.fields).toBeUndefined();
-    }
+    // All fetches should have no fields (fields '*' = no projection)
+    expect(env.serverTable.getRequestMadeHistory('all'))
+      .toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
+          time: '10ms -> 810ms | duration: 800ms'
+        - _type: 'list'
+          payload:
+            pos: { limit: 2, offset: 0 }
+          returned_items: 2
+          time: '820ms -> 1.62s | duration: 800ms'
+        - _type: 'list'
+          payload:
+            pos: { limit: 4, offset: 0 }
+          returned_items: 4
+          time: '1.63s -> 2.43s | duration: 800ms'
+        - _type: 'item'
+          payload: { itemId: 'users||2' }
+          time: '2.44s -> 3.24s | duration: 800ms'
+        - _type: 'list'
+          payload:
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '2.44s -> 3.24s | duration: 800ms'
+      `);
   });
 
   test('fetch methods throw when fields is missing', async () => {
