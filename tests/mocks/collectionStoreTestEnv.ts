@@ -8,7 +8,10 @@ import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
+import type {
+  CollectionPersistentStorageConfig,
+  StorageAdapter,
+} from '../../src/persistentStorage/types';
 import { getNextStoreId } from './browserTabsTestUtils';
 import {
   createServerTableMock,
@@ -69,6 +72,7 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: CollectionPersistentStorageConfig<CollectionTestItem<D>>;
+  storageAdapter?: StorageAdapter;
   ignoreInitialTimeCheck?: boolean;
 };
 
@@ -93,6 +97,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     usesRealTimeUpdates,
     blockWindowClose,
     persistentStorage,
+    storageAdapter,
     ignoreInitialTimeCheck,
   }: CollectionStoreTestEnvOptions<D> = {},
 ) {
@@ -187,6 +192,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     persistentStorage,
     '~test': {
       ...testOptions,
+      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {

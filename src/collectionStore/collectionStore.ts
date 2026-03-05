@@ -48,7 +48,10 @@ import {
   type StoreError,
 } from '../utils/storeShared';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
-import type { CollectionPersistentStorageConfig } from '../persistentStorage/types';
+import type {
+  CollectionPersistentStorageConfig,
+  StorageAdapter,
+} from '../persistentStorage/types';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
@@ -224,6 +227,7 @@ export type CollectionStoreOptions<
     onReceiveRemoteMsg?: (
       message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
     ) => void;
+    storageAdapter?: StorageAdapter;
   };
 };
 
@@ -297,10 +301,13 @@ export function createCollectionStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupCollectionPersistence<ItemState, ItemPayload>({
-        ...persistentStorageConfig,
-        getSessionKey,
-      })
+    ? setupCollectionPersistence<ItemState, ItemPayload>(
+        {
+          ...persistentStorageConfig,
+          getSessionKey,
+        },
+        { adapter: testOptions?.storageAdapter },
+      )
     : null;
 
   const store = new Store<CollectionState>({

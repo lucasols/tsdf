@@ -10,7 +10,10 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
-import type { ListQueryPersistentStorageConfig } from '../../src/persistentStorage/types';
+import type {
+  ListQueryPersistentStorageConfig,
+  StorageAdapter,
+} from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
@@ -123,6 +126,7 @@ export function createListQueryStoreTestEnv<
     offsetPagination,
     blockWindowClose,
     persistentStorage,
+    storageAdapter,
     ignoreInitialTimeCheck,
   }: {
     id?: string;
@@ -161,6 +165,7 @@ export function createListQueryStoreTestEnv<
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
     persistentStorage?: ListQueryPersistentStorageConfig<TRow>;
+    storageAdapter?: StorageAdapter;
     ignoreInitialTimeCheck?: boolean;
   } = {},
 ) {
@@ -284,6 +289,7 @@ export function createListQueryStoreTestEnv<
     partialResources,
     '~test': {
       ...testOptions,
+      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {

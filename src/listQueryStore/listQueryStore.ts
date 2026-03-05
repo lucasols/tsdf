@@ -35,7 +35,10 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
-import type { ListQueryPersistentStorageConfig } from '../persistentStorage/types';
+import type {
+  ListQueryPersistentStorageConfig,
+  StorageAdapter,
+} from '../persistentStorage/types';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import {
@@ -214,6 +217,7 @@ type ListQueryStoreOptionsBase<
         ItemPayload
       >,
     ) => void;
+    storageAdapter?: StorageAdapter;
   };
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
@@ -477,10 +481,13 @@ export function createListQueryStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>({
-        ...persistentStorageConfig,
-        getSessionKey,
-      })
+    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
+        {
+          ...persistentStorageConfig,
+          getSessionKey,
+        },
+        { adapter: testOptions?.storageAdapter },
+      )
     : null;
 
   const store = new Store<State>({

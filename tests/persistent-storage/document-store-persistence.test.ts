@@ -13,7 +13,6 @@ import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { createDocumentStore } from '../../src/documentStore';
 import type {
   PersistedDocumentData,
-  StorageAdapter,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -53,8 +52,6 @@ function createDocPersistenceEnv(options: {
   version?: number;
   getSessionKey?: () => string | false;
   serverData?: TestData;
-  backend?: 'localStorage' | 'opfs';
-  storageAdapter?: StorageAdapter;
 }) {
   const getSessionKey =
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
@@ -62,10 +59,9 @@ function createDocPersistenceEnv(options: {
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
     ignoreInitialTimeCheck: true,
     getSessionKey,
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
-      backend: options.backend ?? 'localStorage',
+      backend: 'localStorage',
       schema: wrappedSchema,
       version: options.version,
     },
@@ -497,7 +493,7 @@ describe('localStorage: invalid data cleanup', () => {
       expect(parsed.value.timestamp).toBeGreaterThan(originalTimestamp);
     }
   });
-
+});
 
 describe('standard schema support', () => {
   test('works with Standard Schema v1 via rc_to_standard', () => {
@@ -532,74 +528,3 @@ describe('standard schema support', () => {
     `);
   });
 });
-
-//   test('OPFS hydration works when persistence is still attached', async () => {
-//     const { adapter, storage } = createMockAdapter(100);
-//     populateStorage(storage, 'opfs-doc', 'session1', {
-//       name: 'cached',
-//       value: 42,
-//     });
-
-//     const env = createDocPersistenceEnv({
-//       storeName: 'opfs-doc',
-//       backend: 'opfs',
-//       storageAdapter: adapter,
-//     });
-
-//     // Advance past the read delay so OPFS hydration completes (before mounting)
-//     await advanceTime(200);
-
-//     // Store should have been hydrated with cached data
-//     expect(env.store.state).toMatchInlineSnapshot(`
-//       data:
-//         value: { name: 'cached', value: 42 }
-
-//       error: null
-//       refetchOnMount: 'lowPriority'
-//       status: 'success'
-//     `);
-
-//     // Mount the hook — this triggers a refetch due to refetchOnMount: 'lowPriority'
-//     renderHook(() => env.apiStore.useDocument());
-//     await flushAllTimers();
-
-//     // After refetch, data should be from server
-//     expect(env.store.state).toMatchInlineSnapshot(`
-//       data:
-//         value: { name: 'test', value: 42 }
-
-//       error: null
-//       refetchOnMount: '❌'
-//       status: 'success'
-//     `);
-//   });
-
-//   test('reset prevents stale OPFS hydration from modifying store', async () => {
-//     const { adapter, storage } = createMockAdapter(100);
-//     populateStorage(storage, 'test-dispose', 'session1', {
-//       name: 'stale',
-//       value: 999,
-//     });
-
-//     const env = createDocPersistenceEnv({
-//       storeName: 'test-dispose',
-//       backend: 'opfs',
-//       storageAdapter: adapter,
-//     });
-
-//     // Reset immediately before OPFS read completes (disposes persistence)
-//     env.apiStore.reset();
-
-//     // Advance past the read delay so the load promise resolves
-//     await advanceTime(200);
-
-//     // Store should NOT have been modified by the stale hydration callback
-//     // (refetchOnMount is 'lowPriority' because reset() sets it for the next mount)
-//     expect(env.store.state).toMatchInlineSnapshot(`
-//       data: null
-//       error: null
-//       refetchOnMount: 'lowPriority'
-//       status: 'idle'
-//     `);
-//   });
-// });

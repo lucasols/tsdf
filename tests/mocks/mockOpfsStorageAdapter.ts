@@ -16,12 +16,16 @@ export function createMockOpfsStorageAdapter({
 
   const adapter: StorageAdapter = {
     async read<T>(key: string): Promise<T | null> {
-      await waitForReadDelay();
+      try {
+        await waitForReadDelay();
 
-      const raw = storage.get(key);
-      if (!raw) return null;
+        const raw = storage.get(key);
+        if (!raw) return null;
 
-      return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
+        return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
+      } catch {
+        return null;
+      }
     },
 
     write<T>(key: string, value: T): Promise<void> {
