@@ -123,34 +123,13 @@ describe('list then load item: cross-source field accumulation', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name', 'address']
-        limit: 50
-        offset: 0
-        results:
-          - data: { address: 'Address 1', id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5, name: 'User 5' }
-            itemId: 'users||5'
-          - data: { address: 'Address 6', id: 6, name: 'User 6' }
-            itemId: 'users||6'
-          - data: { address: 'Address 7', id: 7, name: 'User 7' }
-            itemId: 'users||7'
-          - data: { address: 'Address 8', id: 8, name: 'User 8' }
-            itemId: 'users||8'
-          - data: { address: 'Address 9', id: 9, name: 'User 9' }
-            itemId: 'users||9'
-          - data: { address: 'Address 10', id: 10, name: 'User 10' }
-            itemId: 'users||10'
-        startedAt: 10
-        type: 'list'
+    expect(env.serverTable.getRequestMadeHistory('all')).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '10ms -> 810ms | duration: 800ms'
     `);
   });
 
@@ -326,34 +305,13 @@ describe('list then load item: cross-source field accumulation', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 50
-        offset: 0
-        results:
-          - data: { id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { id: 5, name: 'User 5' }
-            itemId: 'users||5'
-          - data: { id: 6, name: 'User 6' }
-            itemId: 'users||6'
-          - data: { id: 7, name: 'User 7' }
-            itemId: 'users||7'
-          - data: { id: 8, name: 'User 8' }
-            itemId: 'users||8'
-          - data: { id: 9, name: 'User 9' }
-            itemId: 'users||9'
-          - data: { id: 10, name: 'User 10' }
-            itemId: 'users||10'
-        startedAt: 10
-        type: 'list'
+    expect(env.serverTable.getRequestMadeHistory('all')).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '10ms -> 810ms | duration: 800ms'
     `);
   });
 });
@@ -419,40 +377,19 @@ describe('load more with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 3
-        offset: 0
-        results:
-          - data: { id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { id: 3, name: 'User 3' }
-            itemId: 'users||3'
-        startedAt: 10
-        type: 'list'
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 6
-        offset: 0
-        results:
-          - data: { id: 1, name: 'User 1' }
-            itemId: 'users||1'
-          - data: { id: 2, name: 'User 2' }
-            itemId: 'users||2'
-          - data: { id: 3, name: 'User 3' }
-            itemId: 'users||3'
-          - data: { id: 4, name: 'User 4' }
-            itemId: 'users||4'
-          - data: { id: 5, name: 'User 5' }
-            itemId: 'users||5'
-          - data: { id: 6, name: 'User 6' }
-            itemId: 'users||6'
-        startedAt: 820
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 3, offset: 0 }
+          returned_items: 3
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 6, offset: 0 }
+          returned_items: 6
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
   });
 });
 
@@ -496,19 +433,16 @@ describe('concurrent fetches with different fields', () => {
       "
     `);
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        itemId: 'users||1'
-        result: { id: 1, name: 'User 1' }
-        startedAt: 10
-        type: 'fetch'
-      - duration: 800
-        fields: ['address', 'country', 'id']
-        itemId: 'users||2'
-        result: { address: 'Address 2', country: 'Country 2', id: 2 }
-        startedAt: 10
-        type: 'fetch'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['address', 'country', 'id']
+            itemId: 'users||2'
+          time: '10ms -> 810ms | duration: 800ms'
+      `);
   });
 });

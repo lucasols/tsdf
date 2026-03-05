@@ -302,9 +302,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     }
 
     const result =
-      options?.fields && options.fields.length > 0
-        ? selectFields(item, options.fields)
-        : item;
+      options?.fields && options.fields.length > 0 ?
+        selectFields(item, options.fields)
+      : item;
 
     fetchHistory.push({
       type: 'fetch',
@@ -886,18 +886,20 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       return numOfFinishedFetches;
     },
     fetchHistory,
-    getRequestMadeHistory(fetchType: 'fetch' | 'list' | 'all') {
+    getRequestMadeHistory(fetchType: 'item' | 'list' | 'all' = 'all') {
       const history: Array<{
-        type: 'list' | 'fetch' | undefined;
+        _type: 'list' | 'item' | undefined;
         payload: unknown;
         time: string;
+        returned_items?: number;
       }> = [];
       for (const entry of fetchHistory) {
-        if (fetchType === 'all' || fetchType === entry.type) {
+        const normalizedFetchType = entry.type === 'fetch' ? 'item' : 'list';
+        if (fetchType === 'all' || fetchType === normalizedFetchType) {
           if (entry.type === 'fetch') {
             history.push({
               time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
-              type: fetchType === 'all' ? 'fetch' : undefined,
+              _type: fetchType === 'all' ? 'item' : undefined,
               payload: {
                 itemId: entry.itemId,
                 fields: entry.fields,
@@ -906,13 +908,14 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
           } else {
             history.push({
               time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
-              type: fetchType === 'all' ? 'list' : undefined,
+              _type: fetchType === 'all' ? 'list' : undefined,
               payload: {
                 itemIds: entry.itemIds,
                 pos: { offset: entry.offset, limit: entry.limit },
                 filters: entry.filters,
                 fields: entry.fields,
               },
+              returned_items: entry.results.length,
             });
           }
         }

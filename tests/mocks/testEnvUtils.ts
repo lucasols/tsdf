@@ -328,9 +328,9 @@ export function createUITracker<T>(
         if (
           actionsHistory.some(
             (action) =>
-              action.action === 'optimistic-ui-commit' &&
-              action.time === time &&
-              action.uiValue === value,
+              action.action === 'optimistic-ui-commit'
+              && action.time === time
+              && action.uiValue === value,
           )
         ) {
           return;
@@ -362,10 +362,7 @@ export function createPerItemUITracker(
   const uiChanges: Array<Record<string, unknown>> = [];
   let uiInitialized = false;
 
-  function trackItemUI(
-    itemId: string,
-    value: string | number | undefined | null,
-  ): string | number {
+  function trackItemUI(itemId: string, value: unknown): unknown {
     const valueToUse = value ?? '···';
     if (itemUIValues[itemId] === valueToUse) return valueToUse;
 
@@ -377,10 +374,10 @@ export function createPerItemUITracker(
     if (
       actionsHistory.some(
         (action) =>
-          action.action === 'optimistic-ui-commit' &&
-          action.time === time &&
-          action.uiValue === valueToUse &&
-          action.itemId === itemId,
+          action.action === 'optimistic-ui-commit'
+          && action.time === time
+          && action.uiValue === valueToUse
+          && action.itemId === itemId,
       )
     ) {
       return valueToUse;
@@ -576,8 +573,8 @@ function formatMultiItemTimelineString(
   const itemIdsWithUI = itemIds.filter((id) =>
     sortedActions.some(
       (a) =>
-        (a.itemId === id && a.uiValue !== undefined) ||
-        (a.itemUiValues && id in a.itemUiValues),
+        (a.itemId === id && a.uiValue !== undefined)
+        || (a.itemUiValues && id in a.itemUiValues),
     ),
   );
 
@@ -606,15 +603,15 @@ function formatMultiItemTimelineString(
       prevEntry?.action === 'ui-initialized' ? 'ui-changed' : prevEntry?.action;
 
     if (
-      prevEntry &&
-      showItemIdInAction &&
-      entry.time === prevEntry.time &&
-      normalizeEntryAction === normalizePrevEntryAction &&
-      entry.itemId !== undefined &&
-      prevEntry.itemId !== undefined &&
-      entry.actionValue === undefined &&
-      prevEntry.actionValue === undefined &&
-      entry.id === prevEntry.id
+      prevEntry
+      && showItemIdInAction
+      && entry.time === prevEntry.time
+      && normalizeEntryAction === normalizePrevEntryAction
+      && entry.itemId !== undefined
+      && prevEntry.itemId !== undefined
+      && entry.actionValue === undefined
+      && prevEntry.actionValue === undefined
+      && entry.id === prevEntry.id
     ) {
       prev.push(entry);
     } else {
@@ -635,6 +632,7 @@ function formatMultiItemTimelineString(
     }
 
     const first = group[0];
+    if (!first) continue;
     const timeStr = formatTime(first.time, prevTime);
 
     // Create UI columns for each item with tracked values
