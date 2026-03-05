@@ -411,7 +411,9 @@ export function useMultipleItems<
         if (hasMissingFields && !itemFetchIsActive) {
           shouldFetch = true;
           fieldsToFetch = missingFields;
-          if (fetchTypePriority.highPriority > fetchTypePriority[fetchType]) {
+          // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+          // Keep stronger priorities intact; only lift low priority.
+          if (fetchType === 'lowPriority') {
             fetchType = 'highPriority';
           }
 
