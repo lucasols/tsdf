@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { expect, test } from 'vitest';
 import {
   createInMemoryBrowserTabsTransportFactory,
@@ -73,16 +73,18 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
   await tabs.focusTab('a');
   await tabs.blur();
 
-  envA.serverTable.setItem(
-    'item1',
-    { name: 'Updated' },
-    { triggerRTUEvent: true },
-  );
-  envA.serverTable.setItem(
-    'item2',
-    { name: 'Updated 2' },
-    { triggerRTUEvent: true },
-  );
+  act(() => {
+    envA.serverTable.setItem(
+      'item1',
+      { name: 'Updated' },
+      { triggerRTUEvent: true },
+    );
+    envA.serverTable.setItem(
+      'item2',
+      { name: 'Updated 2' },
+      { triggerRTUEvent: true },
+    );
+  });
 
   await flushAllTimers();
 
@@ -182,21 +184,23 @@ test('collection background RTU batch fetch includes the union of invalidated it
   await tabs.focusTab('a');
   await tabs.blur();
 
-  envA.serverTable.setItem(
-    'item1',
-    { name: 'Updated 1' },
-    { triggerRTUEvent: true },
-  );
-  envA.serverTable.setItem(
-    'item2',
-    { name: 'Updated 2' },
-    { triggerRTUEvent: true },
-  );
-  envA.serverTable.setItem(
-    'item3',
-    { name: 'Updated 3' },
-    { triggerRTUEvent: true },
-  );
+  act(() => {
+    envA.serverTable.setItem(
+      'item1',
+      { name: 'Updated 1' },
+      { triggerRTUEvent: true },
+    );
+    envA.serverTable.setItem(
+      'item2',
+      { name: 'Updated 2' },
+      { triggerRTUEvent: true },
+    );
+    envA.serverTable.setItem(
+      'item3',
+      { name: 'Updated 3' },
+      { triggerRTUEvent: true },
+    );
+  });
 
   await flushAllTimers();
 
@@ -296,11 +300,13 @@ test('collection background RTU invalidations dedupe to one per-item fetch when 
   await tabs.focusTab('a');
   await tabs.blur();
 
-  envA.serverTable.setItem(
-    'item1',
-    { name: 'Updated' },
-    { triggerRTUEvent: true },
-  );
+  act(() => {
+    envA.serverTable.setItem(
+      'item1',
+      { name: 'Updated' },
+      { triggerRTUEvent: true },
+    );
+  });
 
   await flushAllTimers();
 
@@ -390,16 +396,18 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
   await tabs.focusTab('a');
   await tabs.blur();
 
-  envA.serverTable.setItem(
-    'users||1',
-    { id: 1, name: 'Zoe' },
-    { triggerRTUEvent: true },
-  );
-  envA.serverTable.setItem(
-    'users||2',
-    { id: 2, name: 'Yara' },
-    { triggerRTUEvent: true },
-  );
+  act(() => {
+    envA.serverTable.setItem(
+      'users||1',
+      { id: 1, name: 'Zoe' },
+      { triggerRTUEvent: true },
+    );
+    envA.serverTable.setItem(
+      'users||2',
+      { id: 2, name: 'Yara' },
+      { triggerRTUEvent: true },
+    );
+  });
 
   await flushAllTimers();
 
