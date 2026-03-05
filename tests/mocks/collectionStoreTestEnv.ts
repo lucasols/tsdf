@@ -36,8 +36,6 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
    * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
    */
   | 'loaded'
-  /** App started with data restored from local cache, pending server revalidation. */
-  | { idleWithLocalCache: 'sameAsServer' | Record<string, D> }
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: Record<string, D> };
 
@@ -368,20 +366,6 @@ function resolveTestOptions<D extends Record<string, unknown>>(
     return {
       initialData: mapInitialData(serverInitialData),
       initialStatus: 'success',
-      initialLastFetchStartTime: Date.now() - 10_000,
-    };
-  }
-
-  if ('idleWithLocalCache' in scenario) {
-    const cacheData =
-      scenario.idleWithLocalCache === 'sameAsServer'
-        ? serverInitialData
-        : scenario.idleWithLocalCache;
-
-    return {
-      initialData: mapInitialData(cacheData),
-      initialStatus: 'success',
-      initialRefetchOnMount: 'lowPriority',
       initialLastFetchStartTime: Date.now() - 10_000,
     };
   }

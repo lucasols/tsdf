@@ -68,7 +68,6 @@ Test scenarios can be configured via the `testScenario` option to start tests in
 
 - `'idle'` — fresh app, no data (default)
 - `'loaded'` — data already fetched successfully
-- `{ idleWithLocalCache: ... }` — data restored from persistent storage, pending revalidation
 - `{ loadedWithStaleData: ... }` — loaded but server has newer data
 
 Do not manually wire up fetch functions, error normalizers, or event handlers — the test envs handle all of this. See existing tests in `tests/` for usage examples.

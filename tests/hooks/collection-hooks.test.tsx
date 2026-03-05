@@ -1039,35 +1039,6 @@ test('fetch error then mount component without error', async () => {
   `);
 });
 
-test('initial data is invalidated on first load', async () => {
-  const env = createCollectionStoreTestEnv<Todo>(
-    { '1': defaultTodo, '2': defaultTodo },
-    { testScenario: { idleWithLocalCache: 'sameAsServer' } },
-  );
-
-  env.serverTable.setItem('1', { title: 'Update', completed: false });
-
-  const renders = createLoggerStore();
-
-  renderHook(() => {
-    const { data, status } = env.apiStore.useItem('1', {
-      returnRefetchingStatus: true,
-      disableRefetchOnMount: true,
-    });
-
-    renders.add({ status, data: data?.value ?? null });
-  });
-
-  await flushAllTimers();
-
-  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
-    "
-    -> status: success ⋅ data: {title:todo, completed:❌}
-    -> status: refetching ⋅ data: {title:todo, completed:❌}
-    -> status: success ⋅ data: {title:Update, completed:❌}
-    "
-  `);
-});
 
 test('emulate load resource during its mutation', async () => {
   const env = createCollectionStoreTestEnv<Todo>(

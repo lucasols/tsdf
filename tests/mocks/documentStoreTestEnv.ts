@@ -36,8 +36,6 @@ export type DocumentStoreTestScenario<D> =
    * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
    */
   | 'loaded'
-  /** App started with data restored from local cache, pending server revalidation. */
-  | { idleWithLocalCache: 'sameAsServer' | D }
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: D };
 
@@ -320,20 +318,6 @@ function resolveTestOptions<D>(
     return {
       initialData: { value: serverInitialData },
       initialStatus: 'success',
-      initialLastFetchStartTime: Date.now() - 10_000,
-    };
-  }
-
-  if ('idleWithLocalCache' in scenario) {
-    const cacheData =
-      scenario.idleWithLocalCache === 'sameAsServer'
-        ? serverInitialData
-        : scenario.idleWithLocalCache;
-
-    return {
-      initialData: { value: cacheData },
-      initialStatus: 'success',
-      initialRefetchOnMount: 'lowPriority',
       initialLastFetchStartTime: Date.now() - 10_000,
     };
   }

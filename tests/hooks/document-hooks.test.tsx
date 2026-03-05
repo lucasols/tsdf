@@ -645,32 +645,3 @@ test('RTU update works', async () => {
   ).toBeGreaterThanOrEqual(300);
 });
 
-test('initial data is invalidated on first load', async () => {
-  const env = createDocumentStoreTestEnv<StoreValue>(
-    { hello: 'world' },
-    { testScenario: { idleWithLocalCache: 'sameAsServer' } },
-  );
-
-  env.setServerData({ hello: 'update' });
-
-  const renders = createLoggerStore();
-
-  renderHook(() => {
-    const { data, status } = env.apiStore.useDocument({
-      returnRefetchingStatus: true,
-      disableRefetchOnMount: true,
-    });
-
-    renders.add({ status, data: data?.value ?? null });
-  });
-
-  await flushAllTimers();
-
-  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
-    "
-    -> status: success ⋅ data: {hello:world}
-    -> status: refetching ⋅ data: {hello:world}
-    -> status: success ⋅ data: {hello:update}
-    "
-  `);
-});

@@ -53,9 +53,7 @@ export type ListQueryStoreTestScenario =
    * App already opened before and data was fetched successfully.
    * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
    */
-  | { loaded: ListQuerySnapshotConfig }
-  /** App started with data restored from local cache, pending server revalidation. */
-  | { idleWithLocalCache: ListQuerySnapshotConfig };
+  | { loaded: ListQuerySnapshotConfig };
 
 // Raw item key (used for serverTable and external references)
 function getRawItemKey(tableId: string, id: number): string {
@@ -701,17 +699,9 @@ function resolveTestOptions<TRow extends Row>(
     return undefined;
   }
 
-  if ('loaded' in scenario) {
-    return {
-      initialData: buildSnapshotData(scenario.loaded, serverTable),
-      initialRefetchOnMount: false,
-      initialLastFetchStartTime: Date.now() - 10_000,
-    };
-  }
-
   return {
-    initialData: buildSnapshotData(scenario.idleWithLocalCache, serverTable),
-    initialRefetchOnMount: 'lowPriority',
+    initialData: buildSnapshotData(scenario.loaded, serverTable),
+    initialRefetchOnMount: false,
     initialLastFetchStartTime: Date.now() - 10_000,
   };
 }
