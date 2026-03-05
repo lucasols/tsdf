@@ -546,9 +546,9 @@ test('a fresh list-query tab still performs its first fetch after a sibling tab 
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 |
-    810ms | ⋯        | ui-initialized
-    820ms | ⋯        | 🔴 >list-fetch-started
-    1.62s | ⋯        | 🔴 <list-fetch-finished (value: {"count":2})
+    810ms | ···      | ui-initialized
+    820ms | ···      | 🔴 >list-fetch-started
+    1.62s | ···      | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Alice    | ui-changed
     "
   `);

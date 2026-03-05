@@ -652,8 +652,7 @@ test('collection fetch timing sync suppresses redundant low-priority work after 
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1  | item2  |
-    0     | Item 1 | -      | [item1] ui-initialized
-    .     | Item 1 | Item 2 | [item2] ui-changed
+    0     | Item 1 | Item 2 | [item1, item2] ui-initialized
     .     | Item 1 | Item 2 | [item1] scheduled-fetch-coalesced
     10ms  | Item 1 | Item 2 | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
     810ms | Item 1 | Item 2 | 🔴 <list-fetch-finished (value: {"count":2})
@@ -662,8 +661,7 @@ test('collection fetch timing sync suppresses redundant low-priority work after 
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1  | item2  |
-    0     | Item 1 | -      | [item1] ui-initialized
-    .     | Item 1 | Item 2 | [item2] ui-changed
+    0     | Item 1 | Item 2 | [item1, item2] ui-initialized
     810ms | Item 1 | Item 2 | [item1] <confirmed-snapshot-received (value: {"name":"Item 1"})
     .     | Item 1 | Item 2 | [item2] <confirmed-snapshot-received (value: {"name":"Item 2"})
     .     | Item 1 | Item 2 | [item1] scheduled-fetch-skipped
@@ -1061,9 +1059,9 @@ test('list query first item fetch stays local after a sibling batch item fetch f
     "
     time  | users||2 |
     1.81s | -        | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
-    .     | ⋯        | [users||2] ui-initialized
-    2.82s | ⋯        | 🔴 [users||2] >fetch-started
-    3.62s | ⋯        | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Bob"})
+    .     | ···      | [users||2] ui-initialized
+    2.82s | ···      | 🔴 [users||2] >fetch-started
+    3.62s | ···      | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Bob"})
     .     | Bob      | [users||2] ui-changed
     "
   `);
