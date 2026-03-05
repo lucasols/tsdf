@@ -970,6 +970,10 @@ export function createListQueryStore<
     });
 
     itemInvalidationWasTriggered.delete(message.itemKey);
+    if (message.item === null && message.itemQuery === null) {
+      itemFieldInvalidationPriorities.delete(message.itemKey);
+      itemPendingInvalidationFields.delete(message.itemKey);
+    }
     pruneItemInvalidationTracking();
     if (message.item === null && message.itemQuery === null) {
       if (payloadToCleanup) {

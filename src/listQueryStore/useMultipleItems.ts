@@ -286,6 +286,7 @@ export function useMultipleItems<
             : [];
 
         return {
+          status: itemQuery?.status ?? null,
           refetchOnMount: itemQuery?.refetchOnMount ?? null,
           missingRequestedFieldsKey: JSON.stringify(missingRequestedFields),
         };
@@ -410,6 +411,9 @@ export function useMultipleItems<
         if (hasMissingFields && !itemFetchIsActive) {
           shouldFetch = true;
           fieldsToFetch = missingFields;
+          if (fetchTypePriority.highPriority > fetchTypePriority[fetchType]) {
+            fetchType = 'highPriority';
+          }
 
           const invalidationPriority =
             itemFieldInvalidationPriorities.get(itemKey);

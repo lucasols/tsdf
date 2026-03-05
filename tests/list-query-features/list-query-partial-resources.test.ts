@@ -258,6 +258,47 @@ describe('useItem with partial resources', () => {
           time: '10ms -> 810ms | duration: 800ms'
       `);
   });
+
+  test('switching fields while loading still fetches the new missing fields', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const { result, rerender } = renderHook(
+      ({ fields }: { fields: string[] }) =>
+        env.apiStore.useItem('users||1', {
+          returnRefetchingStatus: true,
+          fields,
+        }),
+      { initialProps: { fields: ['id'] } },
+    );
+
+    await advanceTime(100);
+
+    act(() => {
+      rerender({ fields: ['name'] });
+    });
+
+    await flushAllTimers();
+
+    expect(env.serverTable.getRequestMadeHistory('item'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id']
+            itemId: 'users||1'
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['name']
+            itemId: 'users||1'
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
+    expect(pick(result.current, ['status', 'data', 'error']))
+      .toMatchInlineSnapshot(`
+        data: { name: 'User 1' }
+        error: null
+        status: 'success'
+      `);
+  });
 });
 
 describe('useListQuery with partial resources', () => {
@@ -1077,6 +1118,52 @@ describe('invalidateQueryAndItems with fields', () => {
           time: '820ms -> 1.62s | duration: 800ms'
       `);
   });
+
+  test('switching list fields while loading still triggers a follow-up list fetch', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const { result, rerender } = renderHook(
+      ({ fields }: { fields: string[] }) =>
+        env.apiStore.useListQuery(
+          { tableId: 'users' },
+          { returnRefetchingStatus: true, fields },
+        ),
+      { initialProps: { fields: ['id'] } },
+    );
+
+    await advanceTime(100);
+
+    act(() => {
+      rerender({ fields: ['name'] });
+    });
+
+    await flushAllTimers();
+
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['name']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
+    expect({
+      status: result.current.status,
+      firstItem: result.current.items[0],
+      error: result.current.error,
+    }).toMatchInlineSnapshot(`
+      error: null
+      firstItem: { name: 'User 1' }
+      status: 'success'
+    `);
+  });
 });
 
 describe('RTU with partial resources', () => {
@@ -1283,28 +1370,28 @@ describe('await* preload with partial resources', () => {
 
     // All fetches should have no fields (fields '*' = no projection)
     expect(env.serverTable.getRequestMadeHistory('all')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload: { itemId: 'users||1' }
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            pos: { limit: 2, offset: 0 }
-          returned_items: 2
-          time: '820ms -> 1.62s | duration: 800ms'
-        - _type: 'list'
-          payload:
-            pos: { limit: 4, offset: 0 }
-          returned_items: 4
-          time: '1.63s -> 2.43s | duration: 800ms'
-        - _type: 'item'
-          payload: { itemId: 'users||2' }
-          time: '2.44s -> 3.24s | duration: 800ms'
-        - _type: 'list'
-          payload:
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '2.44s -> 3.24s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          pos: { limit: 2, offset: 0 }
+        returned_items: 2
+        time: '820ms -> 1.62s | duration: 800ms'
+      - _type: 'list'
+        payload:
+          pos: { limit: 4, offset: 0 }
+        returned_items: 4
+        time: '1.63s -> 2.43s | duration: 800ms'
+      - _type: 'item'
+        payload: { itemId: 'users||2' }
+        time: '2.44s -> 3.24s | duration: 800ms'
+      - _type: 'list'
+        payload:
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '2.44s -> 3.24s | duration: 800ms'
+    `);
   });
 
   test('fetch methods throw when fields is missing', async () => {
