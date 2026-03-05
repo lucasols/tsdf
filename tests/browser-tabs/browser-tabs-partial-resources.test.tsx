@@ -602,9 +602,8 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     2.62s | Alice:30      | -- timeline-cleared
     .     | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30      | [users||1] received-ws-data-change-event
-    .     | ···           | [name-age-hook] ui-changed
-    2.63s | ···           | 🟠 [users||1] >fetch-started
-    3.43s | ···           | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    2.63s | Alice:30      | 🟠 [users||1] >fetch-started
+    3.43s | Alice:30      | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
     .     | Alicia:31     | [name-age-hook] ui-changed
     5.24s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
     "
@@ -614,11 +613,10 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     time  | city-hook | name-age-hook |
     2.62s | London    | Alice:30      | -- timeline-cleared
     .     | London    | Alice:30      | [users||1] received-ws-data-change-event
-    .     | ···       | ···           | [name-age-hook, city-hook] ui-changed
-    3.43s | ···       | ···           | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
-    .     | ···       | Alicia:31     | [name-age-hook] ui-changed
-    4.44s | ···       | Alicia:31     | 🟠 [users||1] >fetch-started
-    5.24s | ···       | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    3.43s | London    | Alice:30      | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .     | London    | Alicia:31     | [name-age-hook] ui-changed
+    4.44s | London    | Alicia:31     | 🟠 [users||1] >fetch-started
+    5.24s | London    | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
     .     | Lisbon    | Alicia:31     | [city-hook] ui-changed
     "
   `);
@@ -720,9 +718,8 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     2.62s | Alice:30  | -- timeline-cleared
     .     | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30  | [users||1] received-ws-data-change-event
-    .     | ···       | [name-age] ui-changed
-    2.63s | ···       | 🟠 [users||1] >fetch-started
-    3.43s | ···       | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    2.63s | Alice:30  | 🟠 [users||1] >fetch-started
+    3.43s | Alice:30  | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
     .     | Alicia:31 | [name-age] ui-changed
     5.24s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
     "
@@ -732,10 +729,10 @@ test('focused RTU item refetch lets a background tab reuse snapshot fields and r
     time  | name-age-city    |
     2.62s | Alice:30:London  | -- timeline-cleared
     .     | Alice:30:London  | [users||1] received-ws-data-change-event
-    .     | ···              | [name-age-city] ui-changed
-    3.43s | ···              | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
-    4.44s | ···              | 🟠 [users||1] >fetch-started
-    5.24s | ···              | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    3.43s | Alice:30:London  | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .     | Alicia:31:London | [name-age-city] ui-changed
+    4.44s | Alicia:31:London | 🟠 [users||1] >fetch-started
+    5.24s | Alicia:31:London | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
     .     | Alicia:31:Lisbon | [name-age-city] ui-changed
     "
   `);
@@ -821,10 +818,9 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
     2.62s | Alice:30   | Bob:25      | -- timeline-cleared
     .     | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
     .     | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
-    .     | ···        | ···         | [first-item, second-item] ui-changed
-    2.63s | ···        | ···         | 🟠 >list-fetch-started
-    3.43s | ···        | ···         | 🟠 <list-fetch-finished (value: {"count":2})
-    .     | Alicia:31  | Bob:25      | [first-item, second-item] ui-changed
+    2.63s | Alice:30   | Bob:25      | 🟠 >list-fetch-started
+    3.43s | Alice:30   | Bob:25      | 🟠 <list-fetch-finished (value: {"count":2})
+    .     | Alicia:31  | Bob:25      | [first-item] ui-changed
     5.24s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
@@ -833,11 +829,11 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
     time  | first-item       | second-item  |
     2.62s | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
     .     | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
-    .     | ···              | ···          | [first-item, second-item] ui-changed
-    3.43s | ···              | ···          | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    4.44s | ···              | ···          | 🟠 >list-fetch-started
-    5.24s | ···              | ···          | 🟠 <list-fetch-finished (value: {"count":2})
-    .     | Alicia:31:Lisbon | Bob:25:Paris | [first-item, second-item] ui-changed
+    3.43s | Alice:30:London  | Bob:25:Paris | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | Alicia:31:London | Bob:25:Paris | [first-item] ui-changed
+    4.44s | Alicia:31:London | Bob:25:Paris | 🟠 >list-fetch-started
+    5.24s | Alicia:31:London | Bob:25:Paris | 🟠 <list-fetch-finished (value: {"count":2})
+    .     | Alicia:31:Lisbon | Bob:25:Paris | [first-item] ui-changed
     "
   `);
   expect(backgroundTab.serverTable.getRequestHistory('list'))

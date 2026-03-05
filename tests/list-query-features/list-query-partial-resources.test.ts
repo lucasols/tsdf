@@ -833,7 +833,8 @@ describe('invalidateQueryAndItems with fields', () => {
 
       >>> Invalidate all fields
 
-      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
+      -> status: refetching ⋅ data: {id:1, name:User 1}
       -> status: success ⋅ data: {id:1, name:User 1}
       "
     `);
@@ -845,7 +846,8 @@ describe('invalidateQueryAndItems with fields', () => {
 
       >>> Invalidate all fields
 
-      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, address:Address 1}
+      -> status: refetching ⋅ data: {id:1, address:Address 1}
       -> status: success ⋅ data: {id:1, address:Address 1}
       "
     `);
@@ -1024,7 +1026,8 @@ describe('invalidateQueryAndItems with fields', () => {
 
     expect(nameHookRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {name:User 1}
+      -> status: refetching ⋅ data: {name:User 1}
       -> status: success ⋅ data: {name:User 1}
       "
     `);
@@ -1163,7 +1166,7 @@ describe('invalidateQueryAndItems with fields', () => {
 
       >>> Invalidate all fields
 
-      -> status: loading ⋅ items: []
+      -> status: refetching ⋅ items: [{id:1, name:User 1}, …(4 more)]
       -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
       "
     `);
@@ -1279,7 +1282,8 @@ describe('RTU with partial resources', () => {
 
       >>> Server update + RTU
 
-      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:User 1}
+      -> status: refetching ⋅ data: {id:1, name:User 1}
       -> status: success ⋅ data: {id:1, name:Updated User 1}
       "
     `);

@@ -57,7 +57,8 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - **Flag tests with sequential actions over time that don't include `timelineString` snapshots.** Whenever a test performs a sequence of actions over time (fetches, refetches, invalidations, syncs), `timelineString` snapshots should be the primary assertion — they make the full sequence of events and their timing visible at a glance, replacing scattered point assertions.
 - When a test involves multiple environments/tabs/stores, **all** timelines must be included so the reader can compare them side by side and trace connected actions across environments.
 - Prefer using the existing tracking helpers (`trackUIChanges`, `trackItemUI`, logger/test env helpers) so timeline snapshots show the state transitions a reader actually cares about.
-- Flag tests that use dense object assertions or raw fetch-history assertions where a focused `timelineString` snapshot would communicate the behavior more clearly.
+- Flag `createLoggerStore` timelines with multiple logical phases that don't use `.addMark('label')` to separate them — without markers, the reader must infer where each phase starts and ends.
+- Flag tests that use dense object assertions or raw fetch-history assertions where a focused `timelineString` or `.changesSnapshot` would communicate the behavior more clearly.
 - Flag tests that force the reader to reconstruct the scenario from many low-level assertions instead of showing the important behavior in one readable artifact.
 - Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.
 

@@ -36,6 +36,11 @@ export type UseMultipleItemsOptions<
   loadFromStateOnly?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
+  /**
+   * When requested fields are missing but cached partial data exists, return
+   * `refetching` instead of `loading`.
+   */
+  showPartialAsRefetching?: boolean;
   /** Only loads the data if it is not already loaded and skip any other refetches */
   disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
@@ -55,6 +60,7 @@ export function useMultipleItems<
     loadFromStateOnly,
     returnIdleStatus: allItemsReturnIdleStatus,
     returnRefetchingStatus: allItemsReturnRefetchingStatus,
+    showPartialAsRefetching: allItemsShowPartialAsRefetching,
     disableRefetches: allItemsDisableRefetches,
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
     isOffScreen: allItemsIsOffScreen,
@@ -86,6 +92,7 @@ export function useMultipleItems<
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
+    showPartialAsRefetching: boolean;
     isOffScreen: boolean;
     queryMetadata: QueryMetadata | undefined;
   };
@@ -108,6 +115,10 @@ export function useMultipleItems<
         itemProps.returnRefetchingStatus ??
         allItemsReturnRefetchingStatus ??
         false,
+      showPartialAsRefetching:
+        itemProps.showPartialAsRefetching ??
+        allItemsShowPartialAsRefetching ??
+        false,
       isOffScreen:
         itemProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
       queryMetadata: itemProps.queryMetadata,
@@ -120,6 +131,7 @@ export function useMultipleItems<
     allItemsIsOffScreen,
     allItemsReturnIdleStatus,
     allItemsReturnRefetchingStatus,
+    allItemsShowPartialAsRefetching,
     globalDisableRefetchOnMount,
     isOffScreenFromContext,
   ]);
@@ -133,10 +145,13 @@ export function useMultipleItems<
           fields,
           returnIdleStatus,
           returnRefetchingStatus,
+          showPartialAsRefetching,
           queryMetadata,
         }): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
           const itemQuery = state.itemQueries[itemKey];
           const rawItemState = state.items[itemKey];
+          const hasCachedDataInState =
+            rawItemState !== null && rawItemState !== undefined;
           let itemState = rawItemState;
 
           // Apply field selection for partial resources
@@ -214,25 +229,17 @@ export function useMultipleItems<
               (f) => !loadedFields.includes(f),
             );
             const hasMissingFields = missingFields.length > 0;
-            const missingFieldsAreFromPerFieldInvalidation =
-              !!itemFieldInvalidationFields &&
-              missingFields.every((f) =>
-                itemFieldInvalidationFields.includes(f),
-              );
             const missingFieldsAreAvailableInState =
               hasMissingFields &&
               !!rawItemState &&
               typeof rawItemState === 'object' &&
               missingFields.every((f) => f in rawItemState);
 
-            if (
-              hasMissingFields &&
-              !(
-                missingFieldsAreFromPerFieldInvalidation &&
-                missingFieldsAreAvailableInState
-              )
-            ) {
-              status = 'loading';
+            if (hasMissingFields && !missingFieldsAreAvailableInState) {
+              status =
+                hasCachedDataInState && showPartialAsRefetching
+                  ? 'refetching'
+                  : 'loading';
             }
           }
 
@@ -252,17 +259,19 @@ export function useMultipleItems<
             status = 'success';
           }
 
+          const shouldHideDataWhileLoading =
+            status === 'loading' && partialResources;
+
           return {
             itemStateKey: itemKey,
             status,
             error: itemQuery.error,
             isLoading: status === 'loading',
-            data:
-              status === 'loading' && partialResources
-                ? selector
-                  ? selector(null, itemQuery.payload)
-                  : __LEGIT_CAST__<Selected, null>(null)
-                : data,
+            data: shouldHideDataWhileLoading
+              ? selector
+                ? selector(null, itemQuery.payload)
+                : __LEGIT_CAST__<Selected, null>(null)
+              : data,
             payload,
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,

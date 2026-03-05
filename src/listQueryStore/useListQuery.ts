@@ -22,6 +22,11 @@ export type UseListQueryOptions<
 > = UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem> & {
   ensureIsLoaded?: boolean;
   fields?: FieldsInput;
+  /**
+   * When requested fields are missing but cached partial data exists, return
+   * `refetching` instead of `loading`.
+   */
+  showPartialAsRefetching?: boolean;
 };
 
 export function useListQuery<
@@ -38,6 +43,7 @@ export function useListQuery<
     disableRefetchOnMount,
     returnIdleStatus,
     returnRefetchingStatus,
+    showPartialAsRefetching,
     loadSize,
     isOffScreen,
     ensureIsLoaded,
@@ -73,6 +79,7 @@ export function useListQuery<
               disableRefetchOnMount,
               returnIdleStatus,
               returnRefetchingStatus,
+              showPartialAsRefetching,
               omitPayload,
               isOffScreen,
               loadSize,
@@ -88,6 +95,7 @@ export function useListQuery<
       payload,
       returnIdleStatus,
       returnRefetchingStatus,
+      showPartialAsRefetching,
     ],
   );
 
