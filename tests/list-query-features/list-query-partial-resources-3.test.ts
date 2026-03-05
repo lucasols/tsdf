@@ -111,21 +111,21 @@ describe('list query field accumulation edge cases', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 10
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            filters:
-              - { field: 'id', op: 'gt', value: 5 }
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          filters:
+            - { field: 'id', op: 'gt', value: 5 }
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('two list hooks mounted together with different fields coalesce into one fetch', async () => {
@@ -173,13 +173,13 @@ describe('list query field accumulation edge cases', () => {
     ).toMatchInlineSnapshot(`['address', 'id', 'name']`);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['address', 'id', 'name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 10
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['address', 'id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('list fields can accumulate across rerenders and satisfy a later item hook without item fetch', async () => {
@@ -242,19 +242,19 @@ describe('list query field accumulation edge cases', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 10
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'address']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 10
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('list field expansion refetches again when page membership changes during the missing-field fetch', async () => {
@@ -334,19 +334,19 @@ describe('list query field accumulation edge cases', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 2, offset: 0 }
-          returned_items: 2
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name', 'address']
-            pos: { limit: 2, offset: 0 }
-          returned_items: 2
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 2, offset: 0 }
+        returned_items: 2
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 2, offset: 0 }
+        returned_items: 2
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('list field rtu invalidation triggers full refetch on list queries', async () => {
@@ -404,18 +404,18 @@ describe('list query field accumulation edge cases', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name', 'address']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 10
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name', 'address']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 10
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 10
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 });

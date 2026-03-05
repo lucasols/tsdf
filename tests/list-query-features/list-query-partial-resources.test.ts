@@ -96,12 +96,12 @@ describe('useItem with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name', 'address']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name', 'address']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('fields "*" loads full item without projection', async () => {
@@ -134,10 +134,10 @@ describe('useItem with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload: { itemId: 'users||1' }
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('fields expand (3 -> 4): refetch triggers, data accumulates', async () => {
@@ -193,17 +193,17 @@ describe('useItem with partial resources', () => {
     ).toMatchInlineSnapshot(`['address', 'country', 'id', 'name']`);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name', 'address']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['country']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name', 'address']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['country']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('fields reduce (4 -> 3): cache hit, no fetch, instant success', async () => {
@@ -252,12 +252,12 @@ describe('useItem with partial resources', () => {
 
     // Only the initial fetch - no refetch on field reduction (cache hit)
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name', 'address', 'country']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name', 'address', 'country']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('switching fields while loading still fetches the new missing fields', async () => {
@@ -283,17 +283,17 @@ describe('useItem with partial resources', () => {
     await flushAllTimers();
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['name']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['name']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
     expect(pick(result.current, ['status', 'data', 'error']))
       .toMatchInlineSnapshot(`
         data: { name: 'User 1' }
@@ -330,13 +330,13 @@ describe('useListQuery with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('fields "*" loads full list items without projection', async () => {
@@ -369,13 +369,13 @@ describe('useListQuery with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: '*'
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('fields expand: refetch with new fields', async () => {
@@ -424,19 +424,19 @@ describe('useListQuery with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name', 'address']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('fields reduce: cache hit, immediate success', async () => {
@@ -485,13 +485,13 @@ describe('useListQuery with partial resources', () => {
 
     // Only the initial fetch - no refetch on field reduction (cache hit)
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name', 'address']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 });
 
@@ -557,17 +557,17 @@ describe('cross-hook field loading', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['address']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['address']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('hookA and hookB mounted together both reach success', async () => {
@@ -622,12 +622,12 @@ describe('cross-hook field loading', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['address', 'id', 'name']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['address', 'id', 'name']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 });
 
@@ -660,12 +660,12 @@ describe('deleteItemState with partial resources', () => {
     expect(env.store.state.items[storeItemKey]).toBeNull();
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 });
 
@@ -703,12 +703,12 @@ describe('updateItemState with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name', 'address']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name', 'address']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 });
 
@@ -776,17 +776,17 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['address', 'id', 'name']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['address']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['address', 'id', 'name']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['address']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('invalidation without fields: clears all loaded fields, all hooks refetch', async () => {
@@ -851,17 +851,17 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['address', 'id', 'name']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['address', 'id', 'name']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['address', 'id', 'name']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['address', 'id', 'name']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('per-field invalidation keeps the highest emitted priority for mounted full-resource hooks', async () => {
@@ -906,15 +906,15 @@ describe('invalidateQueryAndItems with fields', () => {
       `['highPriority', 'highPriority']`,
     );
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload: { itemId: 'users||1' }
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['age', 'name']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['age', 'name']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('upgrading field invalidation priority from low to high should escalate throttled full-list refetches', async () => {
@@ -955,19 +955,19 @@ describe('invalidateQueryAndItems with fields', () => {
     await flushAllTimers();
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: '*'
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: '*'
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '870ms -> 1.67s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '870ms -> 1.67s | duration: 800ms'
+    `);
   });
 
   test('full invalidation still clears all fields after a higher-priority field invalidation', async () => {
@@ -1029,17 +1029,17 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['name', 'age']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['name']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['name', 'age']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['name']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('useListQuery per-field invalidation: affected hook stays refetching and list query refetches', async () => {
@@ -1112,19 +1112,19 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name', 'address']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'address']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'address']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('useListQuery invalidation without fields: clears loaded fields and refetches the list hook', async () => {
@@ -1168,19 +1168,19 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 
   test('switching list fields while loading still triggers a follow-up list fetch', async () => {
@@ -1206,19 +1206,19 @@ describe('invalidateQueryAndItems with fields', () => {
     await flushAllTimers();
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['name']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['name']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
     expect({
       status: result.current.status,
       firstItem: result.current.items[0],
@@ -1285,17 +1285,17 @@ describe('RTU with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name']
-            itemId: 'users||1'
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name']
+          itemId: 'users||1'
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 });
 
@@ -1340,10 +1340,10 @@ describe('await* preload with partial resources', () => {
 
     // Only the preload fetch with '*' - no refetch from hook (cache hit)
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload: { itemId: 'users||1' }
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload: { itemId: 'users||1' }
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('awaitListQueryFetch with fields "*" satisfies later list hook without refetch', async () => {
@@ -1384,13 +1384,13 @@ describe('await* preload with partial resources', () => {
 
     // Only the preload fetch with '*' - no refetch from hook (cache hit)
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: '*'
-            pos: { limit: 50, offset: 0 }
-          returned_items: 5
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: '*'
+          pos: { limit: 50, offset: 0 }
+        returned_items: 5
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 
   test('fetch methods accept fields "*"', async () => {
