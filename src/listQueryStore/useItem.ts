@@ -22,6 +22,11 @@ export type UseItemOptions<
 > = UseMultipleItemsOptions<ItemState, Selected> & {
   ensureIsLoaded?: boolean;
   fields?: FieldsInput;
+  /**
+   * When requested fields are missing but cached partial data exists, return
+   * `refetching` instead of `loading`.
+   */
+  showPartialAsRefetching?: boolean;
 };
 
 export function useItem<
@@ -39,6 +44,7 @@ export function useItem<
     disableRefetchOnMount,
     returnIdleStatus,
     returnRefetchingStatus,
+    showPartialAsRefetching,
     isOffScreen,
     fields,
   }: UseItemOptions<ItemState, Selected>,
@@ -71,6 +77,7 @@ export function useItem<
               isOffScreen,
               returnIdleStatus,
               returnRefetchingStatus,
+              showPartialAsRefetching,
             },
           ],
     [
@@ -81,6 +88,7 @@ export function useItem<
       isOffScreen,
       returnIdleStatus,
       returnRefetchingStatus,
+      showPartialAsRefetching,
     ],
   );
 

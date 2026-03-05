@@ -115,6 +115,11 @@ export type ListQueryUseMultipleItemsQuery<
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
+  /**
+   * When requested fields are missing but cached partial data exists, return
+   * `refetching` instead of `loading`.
+   */
+  showPartialAsRefetching?: boolean;
   isOffScreen?: boolean;
 };
 
@@ -131,6 +136,11 @@ export type ListQueryUseMultipleListQueriesQuery<
   disableRefetchOnMount?: boolean;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
+  /**
+   * When requested fields are missing but cached partial data exists, return
+   * `refetching` instead of `loading`.
+   */
+  showPartialAsRefetching?: boolean;
   isOffScreen?: boolean;
   loadSize?: number;
 };

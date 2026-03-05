@@ -16,6 +16,7 @@ Use this checklist to evaluate test quality quickly and consistently.
 - If the test is time-based, cross-tab, or multi-store, does it use `timelineString` snapshots as the primary readable artifact?
 - When multiple environments are involved, are all relevant timelines shown side by side?
 - Are comments present where timing or sequencing is non-obvious, and do they explain why each step matters?
+- Do multi-phase `createLoggerStore` timelines use `.addMark('label')` to separate logical steps?
 - Are related assertions grouped into readable snapshots instead of scattered across many `expect` calls?
 - Is the test still readable if you ignore implementation details like raw store shape, fetch history, or transport internals?
 - If the answer to any of these is no, treat it as a real review finding rather than optional polish.

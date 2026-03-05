@@ -36,6 +36,11 @@ export type UseMultipleListQueriesOptions<
   ) => SelectedItem;
   returnIdleStatus?: boolean;
   returnRefetchingStatus?: boolean;
+  /**
+   * When requested fields are missing but cached partial data exists, return
+   * `refetching` instead of `loading`.
+   */
+  showPartialAsRefetching?: boolean;
   omitPayload?: boolean;
   /** Only loads the data if it is not already loaded and skip any other refetches */
   disableRefetches?: boolean;
@@ -56,6 +61,7 @@ export function useMultipleListQueries<
     itemSelector,
     returnIdleStatus: allItemsReturnIdleStatus,
     returnRefetchingStatus: allItemsReturnRefetchingStatus,
+    showPartialAsRefetching: allItemsShowPartialAsRefetching,
     omitPayload: allItemsOmitPayload,
     disableRefetches: allItemsDisableRefetches,
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
@@ -96,6 +102,7 @@ export function useMultipleListQueries<
     disableRefetchOnMount: boolean;
     returnIdleStatus: boolean;
     returnRefetchingStatus: boolean;
+    showPartialAsRefetching: boolean;
     omitPayload: boolean;
     isOffScreen: boolean;
     loadSize: number | undefined;
@@ -120,6 +127,10 @@ export function useMultipleListQueries<
         queryProps.returnRefetchingStatus ??
         allItemsReturnRefetchingStatus ??
         false,
+      showPartialAsRefetching:
+        queryProps.showPartialAsRefetching ??
+        allItemsShowPartialAsRefetching ??
+        false,
       omitPayload: queryProps.omitPayload ?? allItemsOmitPayload ?? false,
       isOffScreen:
         queryProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
@@ -136,6 +147,7 @@ export function useMultipleListQueries<
     allItemsOmitPayload,
     allItemsReturnIdleStatus,
     allItemsReturnRefetchingStatus,
+    allItemsShowPartialAsRefetching,
     globalDisableRefetchOnMount,
     isOffScreenFromContext,
   ]);
@@ -222,6 +234,7 @@ export function useMultipleListQueries<
           omitPayload,
           returnIdleStatus,
           returnRefetchingStatus,
+          showPartialAsRefetching,
           queryMetadata,
         }): TSFDUseListQueryReturn<
           SelectedItem,
@@ -249,6 +262,10 @@ export function useMultipleListQueries<
           }
 
           let status = query.status;
+          const hasCachedItemsInState = query.items.some((itemKey) => {
+            const item = state.items[itemKey];
+            return item !== null && item !== undefined;
+          });
 
           // Override status when partial resources has items with missing fields
           if (
@@ -261,6 +278,11 @@ export function useMultipleListQueries<
               const loadedFields = state.itemLoadedFields[itemKey] ?? [];
               return fields.some((f) => !loadedFields.includes(f));
             });
+            const someItemMissingFieldsInState = query.items.some((itemKey) => {
+              const item = state.items[itemKey];
+              if (!item || typeof item !== 'object') return true;
+              return fields.some((f) => !(f in item));
+            });
 
             const hasAffectedFieldInvalidation = query.items.some((itemKey) => {
               const itemFieldInvalidationFields =
@@ -272,10 +294,21 @@ export function useMultipleListQueries<
               );
             });
 
-            if (someItemMissingFields && hasAffectedFieldInvalidation) {
-              status = 'refetching';
-            } else if (someItemMissingFields) {
-              status = 'loading';
+            if (someItemMissingFields) {
+              if (!hasCachedItemsInState) {
+                status = 'loading';
+              } else if (someItemMissingFieldsInState) {
+                status = showPartialAsRefetching ? 'refetching' : 'loading';
+              } else if (
+                hasAffectedFieldInvalidation ||
+                showPartialAsRefetching
+              ) {
+                status = 'refetching';
+              } else {
+                // Requested fields are present in cached items; keep stale data
+                // visible and expose a refetching status while metadata catches up.
+                status = 'refetching';
+              }
             }
           } else if (
             partialResources &&
@@ -301,13 +334,15 @@ export function useMultipleListQueries<
             status = 'success';
           }
 
+          const shouldHideItemsWhileLoading =
+            status === 'loading' && partialResources;
+
           return {
             queryKey,
             status,
-            items:
-              status === 'loading' && partialResources
-                ? []
-                : getQueryItems(state, query, fields),
+            items: shouldHideItemsWhileLoading
+              ? []
+              : getQueryItems(state, query, fields),
             error: query.error,
             hasMore: query.hasMore,
             isLoading: status === 'loading',
