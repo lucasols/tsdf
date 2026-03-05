@@ -384,7 +384,7 @@ describe('localStorage: invalid data cleanup', () => {
   test('version mismatch cleans up localStorage entry', async () => {
     setCachedDocumentData('cleanup-v', 'sess1', { name: 'old', value: 1 }, 1);
 
-    createDocPersistenceEnv({
+    const env = createDocPersistenceEnv({
       storeName: 'cleanup-v',
       sessionKey: 'sess1',
       version: 2,
@@ -392,6 +392,9 @@ describe('localStorage: invalid data cleanup', () => {
 
     // Entry still exists before idle cleanup fires
     expect(localStorage.getItem('tsdf.sess1.cleanup-v')).not.toBeNull();
+
+    // First read triggers lazy localStorage hydration/cleanup logic
+    expect(env.store.state.data).toBeNull();
 
     // Advance past idle fallback timeout (2000ms)
     await advanceTime(2100);
@@ -409,12 +412,14 @@ describe('localStorage: invalid data cleanup', () => {
     };
     localStorage.setItem(key, JSON.stringify(entry));
 
-    createDocPersistenceEnv({
+    const env = createDocPersistenceEnv({
       storeName: 'cleanup-schema',
       sessionKey: 'sess1',
     });
 
     expect(localStorage.getItem(key)).not.toBeNull();
+
+    expect(env.store.state.data).toBeNull();
 
     await advanceTime(2100);
 
@@ -475,10 +480,14 @@ describe('localStorage: invalid data cleanup', () => {
       };
     localStorage.setItem(key, JSON.stringify(entry));
 
-    createDocPersistenceEnv({
+    const env = createDocPersistenceEnv({
       storeName: 'ts-refresh',
       sessionKey: 'sess1',
     });
+
+    expect(env.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'cached', value: 1 }
+    `);
 
     // Advance past idle fallback timeout
     await advanceTime(2100);
