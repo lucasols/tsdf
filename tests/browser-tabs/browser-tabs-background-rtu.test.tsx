@@ -575,12 +575,12 @@ test('collection RTU only triggers fetch in the tab that loaded the invalidated 
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 | item2  |
-    0     | -     | Item 2 | [item2] ui-initialized
-    5ms   | -     | Item 2 | 👁 window-focused
-    10ms  | -     | Item 2 | 🔕 window-blurred
-    20ms  | -     | Item 2 | [item1] received-ws-data-change-event
-    830ms | -     | Item 2 | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
+    time  | item2  |
+    0     | Item 2 | [item2] ui-initialized
+    5ms   | Item 2 | 👁 window-focused
+    10ms  | Item 2 | 🔕 window-blurred
+    20ms  | Item 2 | [item1] received-ws-data-change-event
+    830ms | Item 2 | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
     "
   `);
 });
@@ -642,28 +642,28 @@ test('collection RTU only triggers fetch in both tabs for different loaded items
   });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1     | item2 |
-    0     | Item 1    | -     | [item1] ui-initialized
-    .     | Item 1    | -     | 🔕 window-blurred
-    15ms  | Item 1    | -     | 👁 window-focused
-    20ms  | Item 1    | -     | [item1] server-data-changed (value: {"name":"Updated 1"})
-    .     | Item 1    | -     | received-ws-data-change-event
-    30ms  | Item 1    | -     | 🔴 [item1] >fetch-started
-    830ms | Item 1    | -     | 🔴 [item1] <fetch-finished (value: {"name":"Updated 1"})
-    .     | Updated 1 | -     | [item1] ui-changed
-    1.83s | Updated 1 | -     | [item2] <confirmed-snapshot-received (value: {"name":"Item 2"})
+    time  | item1     |
+    0     | Item 1    | [item1] ui-initialized
+    .     | Item 1    | 🔕 window-blurred
+    15ms  | Item 1    | 👁 window-focused
+    20ms  | Item 1    | [item1] server-data-changed (value: {"name":"Updated 1"})
+    .     | Item 1    | received-ws-data-change-event
+    30ms  | Item 1    | 🔴 [item1] >fetch-started
+    830ms | Item 1    | 🔴 [item1] <fetch-finished (value: {"name":"Updated 1"})
+    .     | Updated 1 | [item1] ui-changed
+    1.83s | Updated 1 | [item2] <confirmed-snapshot-received (value: {"name":"Item 2"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1 | item2  |
-    0     | -     | Item 2 | [item2] ui-initialized
-    5ms   | -     | Item 2 | 👁 window-focused
-    10ms  | -     | Item 2 | 🔕 window-blurred
-    20ms  | -     | Item 2 | received-ws-data-change-event
-    830ms | -     | Item 2 | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
-    1.03s | -     | Item 2 | 🔴 [item2] >fetch-started
-    1.83s | -     | Item 2 | 🔴 [item2] <fetch-finished (value: {"name":"Item 2"})
+    time  | item2  |
+    0     | Item 2 | [item2] ui-initialized
+    5ms   | Item 2 | 👁 window-focused
+    10ms  | Item 2 | 🔕 window-blurred
+    20ms  | Item 2 | received-ws-data-change-event
+    830ms | Item 2 | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
+    1.03s | Item 2 | 🔴 [item2] >fetch-started
+    1.83s | Item 2 | 🔴 [item2] <fetch-finished (value: {"name":"Item 2"})
     "
   `);
 });

@@ -209,9 +209,9 @@ describe('useItem with partial resources', () => {
         startedAt: 10
         type: 'fetch'
       - duration: 800
-        fields: ['id', 'name', 'address', 'country']
+        fields: ['country']
         itemId: 'users||1'
-        result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
+        result: { country: 'Country 1' }
         startedAt: 820
         type: 'fetch'
     `);
@@ -424,19 +424,19 @@ describe('useListQuery with partial resources', () => {
         startedAt: 10
         type: 'list'
       - duration: 800
-        fields: ['id', 'name', 'address']
+        fields: ['address']
         limit: 50
         offset: 0
         results:
-          - data: { address: 'Address 1', id: 1, name: 'User 1' }
+          - data: { address: 'Address 1' }
             itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2, name: 'User 2' }
+          - data: { address: 'Address 2' }
             itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3, name: 'User 3' }
+          - data: { address: 'Address 3' }
             itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4, name: 'User 4' }
+          - data: { address: 'Address 4' }
             itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5, name: 'User 5' }
+          - data: { address: 'Address 5' }
             itemId: 'users||5'
         startedAt: 820
         type: 'list'
@@ -583,9 +583,9 @@ describe('cross-hook field loading', () => {
         startedAt: 10
         type: 'fetch'
       - duration: 800
-        fields: ['id', 'address']
+        fields: ['address']
         itemId: 'users||1'
-        result: { address: 'Address 1', id: 1 }
+        result: { address: 'Address 1' }
         startedAt: 820
         type: 'fetch'
     `);
@@ -798,6 +798,7 @@ describe('invalidateQueryAndItems with fields', () => {
 
       >>> Invalidate address field
 
+      -> status: success ⋅ data: {id:1, address:Address 1}
       -> status: refetching ⋅ data: {id:1, address:Address 1}
       -> status: success ⋅ data: {id:1, address:Address 1}
       "
@@ -896,6 +897,136 @@ describe('invalidateQueryAndItems with fields', () => {
     `);
   });
 
+  test('per-field invalidation keeps the highest emitted priority for mounted full-resource hooks', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const emittedPriorities: string[] = [];
+    const stopListening = env.apiStore.events.on(
+      'invalidateItem',
+      ({ payload }) => {
+        emittedPriorities.push(payload.priority);
+      },
+    );
+
+    renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: '*',
+      }),
+    );
+    await flushAllTimers();
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        type: 'highPriority',
+        fields: ['age'],
+      });
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        type: 'lowPriority',
+        fields: ['name'],
+      });
+    });
+    await flushAllTimers();
+    stopListening();
+
+    expect(emittedPriorities).toMatchInlineSnapshot(
+      `['highPriority', 'highPriority']`,
+    );
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - duration: 800
+        itemId: 'users||1'
+        result: { address: 'Address 1', age: 10, country: 'Country 1', id: 1, name: 'User 1' }
+        startedAt: 10
+        type: 'fetch'
+      - duration: 800
+        fields: ['age', 'name']
+        itemId: 'users||1'
+        result: { age: 10, name: 'User 1' }
+        startedAt: 820
+        type: 'fetch'
+    `);
+  });
+
+  test('full invalidation still clears all fields after a higher-priority field invalidation', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const primeHook = renderHook(() =>
+      env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['name', 'age'],
+      }),
+    );
+    await flushAllTimers();
+    primeHook.unmount();
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        type: 'highPriority',
+        fields: ['age'],
+      });
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        type: 'lowPriority',
+      });
+    });
+
+    const itemKey = env.getStoreItemKeyFromRaw('users||1');
+    expect({
+      itemLoadedFields: env.store.state.itemLoadedFields[itemKey],
+      itemFieldInvalidationFields:
+        env.store.state.itemFieldInvalidationFields[itemKey],
+      refetchOnMount: env.store.state.itemQueries[itemKey]?.refetchOnMount,
+    }).toMatchInlineSnapshot(`
+      itemLoadedFields: []
+      refetchOnMount: 'highPriority'
+    `);
+
+    const nameHookRenders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        fields: ['name'],
+      });
+
+      nameHookRenders.add(pick(result, ['status', 'data']));
+    });
+
+    await flushAllTimers();
+
+    expect(nameHookRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {name:User 1}
+      "
+    `);
+    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
+      - duration: 800
+        fields: ['name', 'age']
+        itemId: 'users||1'
+        result: { age: 10, name: 'User 1' }
+        startedAt: 10
+        type: 'fetch'
+      - duration: 800
+        fields: ['name']
+        itemId: 'users||1'
+        result: { name: 'User 1' }
+        startedAt: 820
+        type: 'fetch'
+    `);
+  });
+
   test('useListQuery per-field invalidation: affected hook stays refetching and list query refetches', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
@@ -988,19 +1119,19 @@ describe('invalidateQueryAndItems with fields', () => {
         startedAt: 10
         type: 'list'
       - duration: 800
-        fields: ['id', 'address']
+        fields: ['address']
         limit: 50
         offset: 0
         results:
-          - data: { address: 'Address 1', id: 1 }
+          - data: { address: 'Address 1' }
             itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2 }
+          - data: { address: 'Address 2' }
             itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3 }
+          - data: { address: 'Address 3' }
             itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4 }
+          - data: { address: 'Address 4' }
             itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5 }
+          - data: { address: 'Address 5' }
             itemId: 'users||5'
         startedAt: 820
         type: 'list'

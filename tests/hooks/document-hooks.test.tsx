@@ -495,7 +495,7 @@ describe('isolated tests', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ isLoading: ✅ ⋅ data: {hello:world}
       -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
@@ -515,7 +515,7 @@ describe('isolated tests', () => {
     expect(env.serverMock.numOfFinishedFetches).toBe(3);
 
     // ignore refetching status
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
       "
@@ -552,7 +552,7 @@ describe('isolated tests', () => {
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
 
-    expect(renders.snapshot).toMatchInlineSnapshot(
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(
       `
         "
         -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
@@ -571,7 +571,7 @@ describe('isolated tests', () => {
 
     expect(env.serverMock.numOfFinishedFetches).toBe(2);
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ isLoading: ❌ ⋅ data: {hello:world}
       ⋅⋅⋅
@@ -627,7 +627,7 @@ test('RTU update works', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {hello:lucas}
     -> status: refetching ⋅ data: {hello:lucas}
@@ -666,7 +666,7 @@ test('initial data is invalidated on first load', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {hello:world}
     -> status: refetching ⋅ data: {hello:world}

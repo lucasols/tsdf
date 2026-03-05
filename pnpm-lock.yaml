@@ -18,8 +18,8 @@ importers:
         specifier: ^0.9.0
         version: 0.9.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/utils':
-        specifier: ^3.65.0
-        version: 3.65.0
+        specifier: ^3.71.1
+        version: 3.71.1
       evtmitter:
         specifier: ^1.0.2
         version: 1.0.2
@@ -435,6 +435,9 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@leeoniya/ufuzzy@1.0.19':
+    resolution: {integrity: sha512-0pikDeYt0IHEUPza5RTCDXc/17S1pTrYnReEMp8Aa6k1ovzw5QdZLwicW8TjljwEZRb6oYag0xmALohrcq/yOQ==}
+
   '@ls-stack/browser-utils@0.3.0':
     resolution: {integrity: sha512-C+TeJc76A4Os4+mi4Oyi9QXLC4kUy8PY/1otWrt1vqyrOwT8GVwEgQjEOuWLUPdqMw3NO1VxozEAiB8uy34yWw==}
     engines: {node: '>=20.0.0'}
@@ -462,6 +465,10 @@ packages:
 
   '@ls-stack/utils@3.65.0':
     resolution: {integrity: sha512-dOMK9LNuPmLRkraaRORBQqTq/JWGXyKHOKva25NhzWJgjOSZwPm/r8Ty8zd/bLCjaIO6aBUNl7zqJ6JTM6YaCQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@ls-stack/utils@3.71.1':
+    resolution: {integrity: sha512-jlkVu5A6BULoEuYukNbyBj7c4Xu7QYyWLVYrnNNab77Ie/boqTxruxBcupf9vMJWax4ll3RVRebGDkL5rZIFdQ==}
     engines: {node: '>=20.0.0'}
 
   '@nodelib/fs.scandir@2.1.5':
@@ -2296,6 +2303,8 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  '@leeoniya/ufuzzy@1.0.19': {}
+
   '@ls-stack/browser-utils@0.3.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@ls-stack/utils': 3.36.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -2355,6 +2364,12 @@ snapshots:
 
   '@ls-stack/utils@3.65.0':
     dependencies:
+      evtmitter: 1.0.2
+      t-result: 0.6.1
+
+  '@ls-stack/utils@3.71.1':
+    dependencies:
+      '@leeoniya/ufuzzy': 1.0.19
       evtmitter: 1.0.2
       t-result: 0.6.1
 

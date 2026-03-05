@@ -1051,20 +1051,20 @@ test('list query first item fetch stays local after a sibling batch item fetch f
   });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | users||2 |
-    1.01s | -        | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
-    1.81s | -        | 🔴 <list-fetch-finished (value: {"count":2})
-    3.62s | -        | <confirmed-item-snapshot-received (value: {"id":2,"name":"Bob"})
+    time  |
+    1.01s | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
+    1.81s | 🔴 <list-fetch-finished (value: {"count":2})
+    3.62s | <confirmed-item-snapshot-received (value: {"id":2,"name":"Bob"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | users||1 | users||2 |
-    1.81s | -        | -        | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
-    .     | -        | ⋯        | [users||2] ui-initialized
-    2.82s | -        | ⋯        | 🔴 [users||2] >fetch-started
-    3.62s | -        | ⋯        | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Bob"})
-    .     | -        | Bob      | [users||2] ui-changed
+    time  | users||2 |
+    1.81s | -        | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Alice"})
+    .     | ⋯        | [users||2] ui-initialized
+    2.82s | ⋯        | 🔴 [users||2] >fetch-started
+    3.62s | ⋯        | 🔴 [users||2] <fetch-finished (value: {"id":2,"name":"Bob"})
+    .     | Bob      | [users||2] ui-changed
     "
   `);
 });

@@ -82,7 +82,7 @@ test('disable should keep the selected data and not be affected by invalidation'
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> data: {hello:world} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
 
@@ -166,7 +166,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> data: {hello:world} ⋅ error: null ⋅ status: success ⋅ isLoading: ❌
 
@@ -217,14 +217,12 @@ test('useDocument selector result should remain stable across rerenders', async 
   rerender();
   rerender();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ changed: ✅
 
     >>> Rerenders
 
-    -> status: success ⋅ changed: ❌
-    -> status: success ⋅ changed: ❌
     -> status: success ⋅ changed: ❌
     "
   `);
@@ -255,7 +253,7 @@ test('mounting after medium priority invalidation on idle store loads data', asy
 
   expect(env.serverMock.fetchHistory[0]?.startTime).toBe(10);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
 
     >>> mount after invalidation
@@ -291,7 +289,7 @@ test('mounting after medium priority invalidation on loaded store triggers a med
 
   expect(env.serverMock.fetchHistory[0]?.startTime).toBe(300 + 10);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
 
     >>> mount after invalidation

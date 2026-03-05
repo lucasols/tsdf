@@ -765,6 +765,7 @@ export function createListQueryStore<
       });
     },
     onQueryFetchSettled: ({ requests, results, startedAt, duration }) => {
+      pruneItemInvalidationTracking();
       const successfulQueryKeys = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map(({ requestId }) => requestId);
@@ -785,6 +786,7 @@ export function createListQueryStore<
       }
     },
     onItemFetchSettled: ({ requests, results, startedAt, duration }) => {
+      pruneItemInvalidationTracking();
       const successfulItems = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map((request) => ({
@@ -819,6 +821,8 @@ export function createListQueryStore<
     storeEvents,
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
+    itemFieldInvalidationPriorities,
+    itemPendingInvalidationFields,
     invalidateQueryAndItems,
     invalidateItem,
     startItemMutation,
@@ -883,6 +887,32 @@ export function createListQueryStore<
     }
   }
 
+  function pruneItemInvalidationTracking(): void {
+    for (const [itemKey, pendingFields] of itemPendingInvalidationFields) {
+      const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+      const remainingFields = pendingFields.filter(
+        (field) => !loadedFields.includes(field),
+      );
+
+      if (remainingFields.length > 0) {
+        itemPendingInvalidationFields.set(itemKey, remainingFields);
+      } else {
+        itemPendingInvalidationFields.delete(itemKey);
+      }
+    }
+
+    for (const itemKey of itemFieldInvalidationPriorities.keys()) {
+      const hasPendingStateInvalidation =
+        !!store.state.itemFieldInvalidationFields[itemKey];
+      const hasPendingTrackedInvalidation =
+        (itemPendingInvalidationFields.get(itemKey)?.length ?? 0) > 0;
+
+      if (!hasPendingStateInvalidation && !hasPendingTrackedInvalidation) {
+        itemFieldInvalidationPriorities.delete(itemKey);
+      }
+    }
+  }
+
   function mergeIncomingItemSnapshot(
     currentItem: ItemState | null | undefined,
     incomingItem: ItemState | null,
@@ -940,6 +970,7 @@ export function createListQueryStore<
     });
 
     itemInvalidationWasTriggered.delete(message.itemKey);
+    pruneItemInvalidationTracking();
     if (message.item === null && message.itemQuery === null) {
       if (payloadToCleanup) {
         deleteItemFetchResources([
@@ -992,6 +1023,7 @@ export function createListQueryStore<
     });
 
     queryInvalidationWasTriggered.delete(message.queryKey);
+    pruneItemInvalidationTracking();
     lastQuerySyncVersions.set(
       message.queryKey,
       toBrowserTabsSyncVersion(message, message.consistency),
@@ -1182,6 +1214,8 @@ export function createListQueryStore<
         getQueryState,
         scheduleAutomaticListQueryFetch,
         queryInvalidationWasTriggered,
+        itemFieldInvalidationPriorities,
+        itemPendingInvalidationFields,
         globalDisableRefetchOnMount,
         partialResources,
       );
@@ -1237,6 +1271,8 @@ export function createListQueryStore<
       getItemKey,
       scheduleAutomaticItemFetch,
       itemInvalidationWasTriggered,
+      itemFieldInvalidationPriorities,
+      itemPendingInvalidationFields,
       globalDisableRefetchOnMount,
       fetchItemFn,
       partialResources,
