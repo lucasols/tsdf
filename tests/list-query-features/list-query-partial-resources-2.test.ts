@@ -378,19 +378,19 @@ describe('load more with partial resources', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 3, offset: 0 }
-          returned_items: 3
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name']
-            pos: { limit: 6, offset: 0 }
-          returned_items: 6
-          time: '820ms -> 1.62s | duration: 800ms'
-      `);
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 3, offset: 0 }
+        returned_items: 3
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name']
+          pos: { limit: 6, offset: 0 }
+        returned_items: 6
+        time: '820ms -> 1.62s | duration: 800ms'
+    `);
   });
 });
 
@@ -435,16 +435,16 @@ describe('concurrent fetches with different fields', () => {
     `);
 
     expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
-        - _type: 'item'
-          payload:
-            fields: ['id', 'name']
-            itemId: 'users||1'
-          time: '10ms -> 810ms | duration: 800ms'
-        - _type: 'item'
-          payload:
-            fields: ['address', 'country', 'id']
-            itemId: 'users||2'
-          time: '10ms -> 810ms | duration: 800ms'
-      `);
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name']
+          itemId: 'users||1'
+        time: '10ms -> 810ms | duration: 800ms'
+      - _type: 'item'
+        payload:
+          fields: ['address', 'country', 'id']
+          itemId: 'users||2'
+        time: '10ms -> 810ms | duration: 800ms'
+    `);
   });
 });
