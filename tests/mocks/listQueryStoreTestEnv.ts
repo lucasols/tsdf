@@ -590,6 +590,7 @@ export function createListQueryStoreTestEnv<
     clearTimeline() {
       clearActionTimeline();
     },
+    getRelativeTime,
   };
 
   bindFocusController?.onWindowFocus(() => {
