@@ -1,4 +1,5 @@
 import { compactSnapshot } from '@ls-stack/utils/testUtils';
+import { format } from 'node:util';
 import { expect } from 'vitest';
 
 expect.addSnapshotSerializer({
@@ -18,3 +19,16 @@ expect.addSnapshotSerializer({
       },
     }),
 });
+
+const originalConsoleError = console.error;
+
+console.error = (...args) => {
+  if (
+    args.length > 0 &&
+    typeof args[0] === 'string' &&
+    args[0].includes('was not wrapped in act')
+  ) {
+    throw new Error(format(...args));
+  }
+  originalConsoleError(...args);
+};
