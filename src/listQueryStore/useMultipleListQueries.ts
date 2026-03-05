@@ -174,7 +174,7 @@ export function useMultipleListQueries<
         (field) => !loadedFields.includes(field),
       );
     },
-    [store.state.itemLoadedFields, itemPendingInvalidationFields],
+    [itemPendingInvalidationFields, store],
   );
 
   const getHighestPendingInvalidationPriority = useCallback(
@@ -341,6 +341,7 @@ export function useMultipleListQueries<
               refetchOnMount: null,
               missingRequestedFieldsKey: '',
               unresolvedInvalidationFieldsKey: '',
+              pendingInvalidationPriority: null,
             };
           }
 
@@ -376,15 +377,28 @@ export function useMultipleListQueries<
             );
           }
 
+          const pendingInvalidationPriority =
+            fields === '*'
+              ? getHighestPendingInvalidationPriority(query.items, undefined)
+              : Array.isArray(fields) && fields.length > 0
+                ? getHighestPendingInvalidationPriority(query.items, fields)
+                : undefined;
+
           return {
             status: query.status,
             refetchOnMount: query.refetchOnMount,
             missingRequestedFieldsKey: JSON.stringify(missingRequestedFields),
             unresolvedInvalidationFieldsKey,
+            pendingInvalidationPriority: pendingInvalidationPriority ?? null,
           };
         });
       },
-      [getUnresolvedPendingInvalidationFields, partialResources, queriesWithId],
+      [
+        getHighestPendingInvalidationPriority,
+        getUnresolvedPendingInvalidationFields,
+        partialResources,
+        queriesWithId,
+      ],
     ),
     {
       equalityFn: deepEqual,
