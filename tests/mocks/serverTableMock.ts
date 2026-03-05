@@ -886,7 +886,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       return numOfFinishedFetches;
     },
     fetchHistory,
-    getRequestMadeHistory(fetchType: 'item' | 'list' | 'all' = 'all') {
+    getRequestHistory(fetchType: 'item' | 'list' | 'all' = 'all') {
       const history: Array<{
         _type: 'list' | 'item' | undefined;
         payload: unknown;
@@ -899,7 +899,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
           if (entry.type === 'fetch') {
             history.push({
               time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
-              _type: fetchType === 'all' ? 'item' : undefined,
+              _type: 'item',
               payload: {
                 itemId: entry.itemId,
                 fields: entry.fields,
@@ -908,12 +908,12 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
           } else {
             history.push({
               time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
-              _type: fetchType === 'all' ? 'list' : undefined,
+              _type: 'list',
               payload: {
                 itemIds: entry.itemIds,
                 pos: { offset: entry.offset, limit: entry.limit },
                 filters: entry.filters,
-                fields: entry.fields,
+                fields: entry.fields || '*',
               },
               returned_items: entry.results.length,
             });

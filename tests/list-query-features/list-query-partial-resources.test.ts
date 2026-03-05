@@ -95,9 +95,9 @@ describe('useItem with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name', 'address']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
@@ -133,9 +133,9 @@ describe('useItem with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload: { itemId: 'users||1' }
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
           time: '10ms -> 810ms | duration: 800ms'
       `);
   });
@@ -192,13 +192,14 @@ describe('useItem with partial resources', () => {
       env.store.state.itemLoadedFields[storeItemKey],
     ).toMatchInlineSnapshot(`['address', 'country', 'id', 'name']`);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name', 'address']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['country']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -250,9 +251,9 @@ describe('useItem with partial resources', () => {
     `);
 
     // Only the initial fetch - no refetch on field reduction (cache hit)
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name', 'address', 'country']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
@@ -281,13 +282,14 @@ describe('useItem with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['name']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -327,9 +329,9 @@ describe('useListQuery with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
@@ -366,9 +368,10 @@ describe('useListQuery with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: '*'
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '10ms -> 810ms | duration: 800ms'
@@ -420,14 +423,15 @@ describe('useListQuery with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'name', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
@@ -480,9 +484,9 @@ describe('useListQuery with partial resources', () => {
     `);
 
     // Only the initial fetch - no refetch on field reduction (cache hit)
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
@@ -552,13 +556,14 @@ describe('cross-hook field loading', () => {
       name: 'User 1'
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['address']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -616,9 +621,9 @@ describe('cross-hook field loading', () => {
       name: 'User 1'
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['address', 'id', 'name']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
@@ -654,9 +659,9 @@ describe('deleteItemState with partial resources', () => {
     expect(env.store.state.itemLoadedFields[storeItemKey]).toBeUndefined();
     expect(env.store.state.items[storeItemKey]).toBeNull();
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
@@ -697,9 +702,9 @@ describe('updateItemState with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name', 'address']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
@@ -770,13 +775,14 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['address', 'id', 'name']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['address']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -844,13 +850,14 @@ describe('invalidateQueryAndItems with fields', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['address', 'id', 'name']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['address', 'id', 'name']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -898,11 +905,12 @@ describe('invalidateQueryAndItems with fields', () => {
     expect(emittedPriorities).toMatchInlineSnapshot(
       `['highPriority', 'highPriority']`,
     );
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload: { itemId: 'users||1' }
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['age', 'name']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -946,13 +954,16 @@ describe('invalidateQueryAndItems with fields', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: '*'
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
+            fields: '*'
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '870ms -> 1.67s | duration: 800ms'
@@ -1017,13 +1028,14 @@ describe('invalidateQueryAndItems with fields', () => {
       -> status: success ⋅ data: {name:User 1}
       "
     `);
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['name', 'age']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['name']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -1099,14 +1111,15 @@ describe('invalidateQueryAndItems with fields', () => {
       -> status: success ⋅ items: [{id:1, address:Address 1}, …(4 more)]
       "
     `);
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
@@ -1154,14 +1167,15 @@ describe('invalidateQueryAndItems with fields', () => {
       -> status: success ⋅ items: [{id:1, name:User 1}, …(4 more)]
       "
     `);
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
@@ -1191,14 +1205,15 @@ describe('invalidateQueryAndItems with fields', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['name']
             pos: { limit: 50, offset: 0 }
           returned_items: 5
@@ -1269,13 +1284,14 @@ describe('RTU with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['id', 'name']
             itemId: 'users||1'
           time: '820ms -> 1.62s | duration: 800ms'
@@ -1323,9 +1339,9 @@ describe('await* preload with partial resources', () => {
     `);
 
     // Only the preload fetch with '*' - no refetch from hook (cache hit)
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload: { itemId: 'users||1' }
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload: { itemId: 'users||1' }
           time: '10ms -> 810ms | duration: 800ms'
       `);
   });
@@ -1367,9 +1383,10 @@ describe('await* preload with partial resources', () => {
     `);
 
     // Only the preload fetch with '*' - no refetch from hook (cache hit)
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: '*'
             pos: { limit: 50, offset: 0 }
           returned_items: 5
           time: '10ms -> 810ms | duration: 800ms'
@@ -1419,17 +1436,19 @@ describe('await* preload with partial resources', () => {
     await expect(awaitListPromise).resolves.toMatchObject({ error: null });
 
     // All fetches should have no fields (fields '*' = no projection)
-    expect(env.serverTable.getRequestMadeHistory('all')).toMatchInlineSnapshot(`
+    expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(`
       - _type: 'item'
         payload: { itemId: 'users||1' }
         time: '10ms -> 810ms | duration: 800ms'
       - _type: 'list'
         payload:
+          fields: '*'
           pos: { limit: 2, offset: 0 }
         returned_items: 2
         time: '820ms -> 1.62s | duration: 800ms'
       - _type: 'list'
         payload:
+          fields: '*'
           pos: { limit: 4, offset: 0 }
         returned_items: 4
         time: '1.63s -> 2.43s | duration: 800ms'
@@ -1438,6 +1457,7 @@ describe('await* preload with partial resources', () => {
         time: '2.44s -> 3.24s | duration: 800ms'
       - _type: 'list'
         payload:
+          fields: '*'
           pos: { limit: 50, offset: 0 }
         returned_items: 5
         time: '2.44s -> 3.24s | duration: 800ms'

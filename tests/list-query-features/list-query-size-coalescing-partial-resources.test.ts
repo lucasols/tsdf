@@ -79,9 +79,9 @@ describe('query coalescing with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 4, offset: 0 }
           returned_items: 4
@@ -116,9 +116,9 @@ describe('query coalescing with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['address', 'id', 'name']
             pos: { limit: 5, offset: 0 }
           returned_items: 5
@@ -153,9 +153,10 @@ describe('query coalescing with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: '*'
             pos: { limit: 5, offset: 0 }
           returned_items: 5
           time: '50ms -> 850ms | duration: 800ms'
@@ -225,14 +226,15 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id']
             pos: { limit: 2, offset: 0 }
           returned_items: 2
           time: '50ms -> 850ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['address', 'id', 'name']
             pos: { limit: 6, offset: 0 }
           returned_items: 6
@@ -273,14 +275,15 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
 
     await flushAllTimers();
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 2, offset: 0 }
           returned_items: 2
           time: '50ms -> 850ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['address', 'country', 'id']
             pos: { limit: 4, offset: 0 }
           returned_items: 4

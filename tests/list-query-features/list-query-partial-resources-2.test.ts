@@ -123,7 +123,7 @@ describe('list then load item: cross-source field accumulation', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('all')).toMatchInlineSnapshot(`
+    expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(`
       - _type: 'list'
         payload:
           fields: ['id', 'name', 'address']
@@ -305,7 +305,7 @@ describe('list then load item: cross-source field accumulation', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('all')).toMatchInlineSnapshot(`
+    expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(`
       - _type: 'list'
         payload:
           fields: ['id', 'name']
@@ -377,14 +377,15 @@ describe('load more with partial resources', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 3, offset: 0 }
           returned_items: 3
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 6, offset: 0 }
           returned_items: 6
@@ -433,13 +434,14 @@ describe('concurrent fetches with different fields', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('item'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('item')).toMatchInlineSnapshot(`
+        - _type: 'item'
+          payload:
             fields: ['id', 'name']
             itemId: 'users||1'
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'item'
+          payload:
             fields: ['address', 'country', 'id']
             itemId: 'users||2'
           time: '10ms -> 810ms | duration: 800ms'
