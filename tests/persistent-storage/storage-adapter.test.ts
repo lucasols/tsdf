@@ -82,7 +82,7 @@ describe('localStorage adapter', () => {
     expect(result).toBeNull();
   });
 
-  test('write handles quota exceeded gracefully', async () => {
+  test('write propagates quota exceeded error', async () => {
     const originalSetItem = localStorage.setItem.bind(localStorage);
     const setItemSpy = vi
       .spyOn(localStorage, 'setItem')
@@ -93,11 +93,9 @@ describe('localStorage adapter', () => {
         originalSetItem(key, value);
       });
 
-    // Should not throw
-    await adapter.write('quota-test', { large: 'data' });
-
-    const result = await adapter.read('quota-test');
-    expect(result).toBeNull();
+    expect(() => adapter.write('quota-test', { large: 'data' })).toThrow(
+      'QuotaExceededError',
+    );
 
     setItemSpy.mockRestore();
   });

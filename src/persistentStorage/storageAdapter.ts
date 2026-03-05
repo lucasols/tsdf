@@ -14,11 +14,7 @@ function createLocalStorageAdapter(): StorageAdapter {
     },
 
     write<T>(key: string, value: T): Promise<void> {
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-      } catch {
-        // Silently handle quota exceeded errors
-      }
+      localStorage.setItem(key, JSON.stringify(value));
       return Promise.resolve();
     },
 
@@ -135,17 +131,13 @@ function createOpfsAdapter(): StorageAdapter {
     },
 
     async write<T>(key: string, value: T): Promise<void> {
-      try {
-        const dir = await getCacheDir();
-        const fileHandle = await dir.getFileHandle(getFileName(key), {
-          create: true,
-        });
-        const writable = await fileHandle.createWritable();
-        await writable.write(JSON.stringify(value));
-        await writable.close();
-      } catch {
-        // Silently handle write errors
-      }
+      const dir = await getCacheDir();
+      const fileHandle = await dir.getFileHandle(getFileName(key), {
+        create: true,
+      });
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(value));
+      await writable.close();
     },
 
     async remove(key: string): Promise<void> {

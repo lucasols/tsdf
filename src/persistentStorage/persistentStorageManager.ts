@@ -46,6 +46,7 @@ export function createPersistentStorageHandle<T>(
   } = {},
 ): PersistentStorageHandle<T> {
   const version = config.version ?? 1;
+  const { onPersistentStorageError } = config;
   const adapter =
     adapterOverride ?? createStorageAdapter(config.backend ?? 'opfs');
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -85,7 +86,11 @@ export function createPersistentStorageHandle<T>(
       version,
     };
 
-    await adapter.write(key, entry);
+    try {
+      await adapter.write(key, entry);
+    } catch (error) {
+      onPersistentStorageError?.(error);
+    }
   }
 
   function scheduleSave(getData: () => T): void {

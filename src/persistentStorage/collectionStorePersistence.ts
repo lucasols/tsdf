@@ -41,10 +41,7 @@ function readCollectionFromLocalStorageSync(
       return null;
     }
 
-    const typedEntry = __LEGIT_CAST__<
-      { version: unknown; data: unknown },
-      object
-    >(entry);
+    const typedEntry = entry;
 
     if (typedEntry.version !== version) return null;
 

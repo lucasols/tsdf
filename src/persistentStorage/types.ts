@@ -60,6 +60,11 @@ export type PersistentStorageBaseConfig<T> = {
    * operations (load, save, clear) will be skipped until it returns a string.
    */
   getSessionKey: () => string | false;
+  /**
+   * Called when a storage write operation fails (e.g. quota exceeded, OPFS write error).
+   * Use this to log or report persistence failures to your error tracking service.
+   */
+  onPersistentStorageError?: (error: unknown) => void;
 };
 
 /** Store-level persistent storage config. Session scoping comes from the parent store. */
