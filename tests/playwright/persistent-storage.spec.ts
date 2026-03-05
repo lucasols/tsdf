@@ -5,9 +5,11 @@ import {
   type Page,
 } from '@playwright/test';
 
-type StorageBackend = 'localStorage' | 'opfs';
+
 
 const SAVE_DEBOUNCE_MS = 1000;
+
+type StorageBackend = 'localStorage' | 'opfs';
 
 async function openScenario(
   context: BrowserContext,

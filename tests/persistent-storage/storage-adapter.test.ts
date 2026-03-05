@@ -82,7 +82,7 @@ describe('localStorage adapter', () => {
     expect(result).toBeNull();
   });
 
-  test('write propagates quota exceeded error', async () => {
+  test('write propagates quota exceeded error', () => {
     const originalSetItem = localStorage.setItem.bind(localStorage);
     const setItemSpy = vi
       .spyOn(localStorage, 'setItem')
