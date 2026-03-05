@@ -848,7 +848,7 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
           pos: { limit: 2, offset: 0 }
         time: '1.82s -> 2.62s | duration: 800ms'
       - payload:
-          fields: ['city']
+          fields: ['name', 'age', 'city']
           pos: { limit: 2, offset: 0 }
         time: '4.44s -> 5.24s | duration: 800ms'
     `);
