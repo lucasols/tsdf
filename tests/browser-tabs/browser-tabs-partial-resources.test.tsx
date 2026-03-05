@@ -840,14 +840,16 @@ test('focused RTU list refetch lets makes a background tab correctly invalidate 
     .     | Alicia:31:Lisbon | Bob:25:Paris | [first-item, second-item] ui-changed
     "
   `);
-  expect(backgroundTab.serverTable.getRequestMadeHistory('list'))
+  expect(backgroundTab.serverTable.getRequestHistory('list'))
     .toMatchInlineSnapshot(`
-      - payload:
+      - _type: 'list'
+        payload:
           fields: ['name', 'age', 'city']
           pos: { limit: 2, offset: 0 }
         returned_items: 2
         time: '1.82s -> 2.62s | duration: 800ms'
-      - payload:
+      - _type: 'list'
+        payload:
           fields: ['name', 'age', 'city']
           pos: { limit: 2, offset: 0 }
         returned_items: 2

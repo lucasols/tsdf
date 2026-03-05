@@ -110,14 +110,15 @@ describe('list query field accumulation edge cases', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 50, offset: 0 }
           returned_items: 10
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             filters:
               - { field: 'id', op: 'gt', value: 5 }
@@ -171,9 +172,9 @@ describe('list query field accumulation edge cases', () => {
       env.store.state.itemLoadedFields[storeItemKey],
     ).toMatchInlineSnapshot(`['address', 'id', 'name']`);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['address', 'id', 'name']
             pos: { limit: 50, offset: 0 }
           returned_items: 10
@@ -240,14 +241,15 @@ describe('list query field accumulation edge cases', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 50, offset: 0 }
           returned_items: 10
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 10
@@ -331,14 +333,15 @@ describe('list query field accumulation edge cases', () => {
 
     expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name']
             pos: { limit: 2, offset: 0 }
           returned_items: 2
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'name', 'address']
             pos: { limit: 2, offset: 0 }
           returned_items: 2
@@ -400,14 +403,15 @@ describe('list query field accumulation edge cases', () => {
       "
     `);
 
-    expect(env.serverTable.getRequestMadeHistory('list'))
-      .toMatchInlineSnapshot(`
-        - payload:
+    expect(env.serverTable.getRequestHistory('list')).toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
             fields: ['id', 'name', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 10
           time: '10ms -> 810ms | duration: 800ms'
-        - payload:
+        - _type: 'list'
+          payload:
             fields: ['id', 'name', 'address']
             pos: { limit: 50, offset: 0 }
           returned_items: 10
