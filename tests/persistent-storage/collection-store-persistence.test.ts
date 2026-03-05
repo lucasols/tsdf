@@ -166,19 +166,20 @@ describe('localStorage: collection store persistence', () => {
     const keyB = getCompositeKey('b');
     const keyC = getCompositeKey('c');
 
+    // Pin 'c' — without pinning, 'c' would be evicted (added last, equal
+    // lastAccessedAt, maxItems=2 keeps only first 2 by insertion order).
+    // With pinning, 'c' is forced to the front and survives.
     const env = createColPersistenceEnv({
       storeName: 'col4',
       sessionKey: 'sess1',
       maxItems: 2,
-      pinnedItems: [keyA],
+      pinnedItems: [keyC],
     });
 
-    // Add 3 items
     env.apiStore.addItemToState('a', { value: { id: 'a', name: 'A' } });
     env.apiStore.addItemToState('b', { value: { id: 'b', name: 'B' } });
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'C' } });
 
-    // Wait for save debounce
     await advanceTime(1100);
 
     const cached = localStorage.getItem('tsdf.sess1.col4');
@@ -188,10 +189,10 @@ describe('localStorage: collection store persistence', () => {
     >(JSON.parse(cached ?? ''));
     const savedItemKeys = Object.keys(parsed.data.items);
 
-    // Pinned item 'a' is always kept; 'b' survives over 'c' by insertion order
+    // Pinned 'c' survives despite being last; 'a' survives by insertion order; 'b' evicted
+    expect(savedItemKeys).toContain(keyC);
     expect(savedItemKeys).toContain(keyA);
-    expect(savedItemKeys).toContain(keyB);
-    expect(savedItemKeys).not.toContain(keyC);
+    expect(savedItemKeys).not.toContain(keyB);
   });
 
   test('version mismatch discards cached data', () => {
@@ -245,7 +246,16 @@ describe('localStorage: collection store persistence', () => {
     });
 
     // Only valid item should be loaded (keyed by the cache key, not the payload)
-    expect(env.store.state['valid']).not.toBeUndefined();
+    expect(env.store.state['valid']).toMatchInlineSnapshot(`
+      data:
+        value: { id: 'v', name: 'Valid' }
+
+      error: null
+      payload: 'v'
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
     expect(env.store.state['invalid']).toBeUndefined();
   });
 

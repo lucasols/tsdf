@@ -178,6 +178,17 @@ describe('opfs adapter', () => {
     };
   }
 
+  test('read returns null for missing key', async () => {
+    const { cleanup } = setupMockOpfs();
+    try {
+      const adapter = createStorageAdapter('opfs');
+      const result = await adapter.read('nonexistent');
+      expect(result).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
   test('write and read roundtrip', async () => {
     const { cleanup } = setupMockOpfs();
     try {
@@ -216,6 +227,21 @@ describe('opfs adapter', () => {
     }
   });
 
+  test('remove deletes key', async () => {
+    const { cleanup } = setupMockOpfs();
+    try {
+      const adapter = createStorageAdapter('opfs');
+
+      await adapter.write('to-remove', { value: 42 });
+      await adapter.remove('to-remove');
+
+      const result = await adapter.read('to-remove');
+      expect(result).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
   test('listKeys correctly matches keys sharing a prefix', async () => {
     const { cleanup } = setupMockOpfs();
     try {
@@ -227,6 +253,8 @@ describe('opfs adapter', () => {
 
       const keys = await adapter.listKeys('tsdf.s1.');
 
+      // OPFS listKeys returns encoded filenames, so we only check count
+      // (the prefix filtering is the behavior under test)
       expect(keys).toHaveLength(2);
     } finally {
       cleanup();

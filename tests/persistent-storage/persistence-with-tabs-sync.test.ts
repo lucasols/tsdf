@@ -270,6 +270,29 @@ describe('persistence + browser tabs sync integration', () => {
       id: 1
       name: 'UpdatedAlice'
     `);
+
+    // Both timelines confirm the cross-tab fetch and sync flow
+    expect(tabA.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | scheduled-fetch-triggered
+      10ms  | 🔴 >list-fetch-started
+      810ms | 🔴 <list-fetch-finished (value: {"count":2})
+      1.81s | 🔕 window-blurred
+      2.63s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+      "
+    `);
+    expect(tabB.timelineString).toMatchInlineSnapshot(`
+      "
+      time   |
+      810ms  | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+      1.81s  | server-data-changed (value: {"id":1,"name":"UpdatedAlice"})
+      1.815s | 👁 window-focused
+      1.82s  | scheduled-fetch-triggered
+      1.83s  | 🔴 >list-fetch-started
+      2.63s  | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
   });
 
   test('rapid fetch-sync cycles result in only the final state being persisted', async () => {
@@ -347,11 +370,38 @@ describe('persistence + browser tabs sync integration', () => {
     await flushAllTimers();
     expect(tabB.store.state.items[ik1]?.name).toBe('V3');
 
-    // After all timer cycles, the final persisted state should be V3
+    // flushAllTimers fires all pending timers including the 1s debounced save,
+    // so the persisted data is already up to date after the last cycle.
     const cached = readCachedListQueryData(storeName, sessionKey);
     expect(cached?.items[ik1]).toMatchInlineSnapshot(`
       id: 1
       name: 'V3'
+    `);
+
+    // Both timelines show the rapid V1 → V2 → V3 progression
+    expect(tabA.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | scheduled-fetch-triggered
+      10ms  | 🔴 >list-fetch-started
+      810ms | 🔴 <list-fetch-finished (value: {"count":1})
+      1.81s | server-data-changed (value: {"id":1,"name":"V2"})
+      .     | scheduled-fetch-triggered
+      1.82s | 🟠 >list-fetch-started
+      2.62s | 🟠 <list-fetch-finished (value: {"count":1})
+      3.62s | server-data-changed (value: {"id":1,"name":"V3"})
+      .     | scheduled-fetch-triggered
+      3.63s | 🟡 >list-fetch-started
+      4.43s | 🟡 <list-fetch-finished (value: {"count":1})
+      "
+    `);
+    expect(tabB.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+      2.62s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+      4.43s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+      "
     `);
   });
 
@@ -458,14 +508,14 @@ describe('persistence + browser tabs sync integration', () => {
     // Both timelines show the full flow
     expect(tabA.timelineString).toMatchInlineSnapshot(`
       "
-      time  | users||1 |
-      0     | -        | scheduled-fetch-triggered
-      10ms  | -        | 🔴 >list-fetch-started
-      810ms | -        | 🔴 <list-fetch-finished (value: {"count":2})
-      1.81s | -        | server-data-changed (value: {"id":1,"name":"AliceUpdated"})
-      .     | -        | scheduled-fetch-triggered
-      1.82s | -        | 🟠 >list-fetch-started
-      2.62s | -        | 🟠 <list-fetch-finished (value: {"count":2})
+      time  |
+      0     | scheduled-fetch-triggered
+      10ms  | 🔴 >list-fetch-started
+      810ms | 🔴 <list-fetch-finished (value: {"count":2})
+      1.81s | server-data-changed (value: {"id":1,"name":"AliceUpdated"})
+      .     | scheduled-fetch-triggered
+      1.82s | 🟠 >list-fetch-started
+      2.62s | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
     expect(tabB.timelineString).toMatchInlineSnapshot(`

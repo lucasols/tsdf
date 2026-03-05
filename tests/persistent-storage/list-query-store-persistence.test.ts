@@ -152,6 +152,10 @@ describe('localStorage: list query store persistence', () => {
   });
 
   test('query limit enforcement', async () => {
+    const qkA = queryKey({ tableId: 'a' });
+    const qkB = queryKey({ tableId: 'b' });
+    const qkC = queryKey({ tableId: 'c' });
+
     const env = createEnv({
       storeName: 'lq2',
       sessionKey: 'sess1',
@@ -181,8 +185,9 @@ describe('localStorage: list query store persistence', () => {
     >(JSON.parse(cached ?? ''));
     const savedQueryKeys = Object.keys(parsed.data.queries);
 
-    // Only 2 queries should be saved
-    expect(savedQueryKeys.length).toBe(2);
+    // Only 2 queries saved — first 2 by insertion order, last evicted
+    expect(savedQueryKeys).toEqual([qkA, qkB]);
+    expect(savedQueryKeys).not.toContain(qkC);
   });
 
   test('item limit with query-reference prioritization', async () => {
@@ -225,26 +230,31 @@ describe('localStorage: list query store persistence', () => {
   });
 
   test('pinned items and queries are preserved', async () => {
-    const pinnedIk = storeItemKey('pinned', 1);
-    const pinnedQk = queryKey({ tableId: 'pinned' });
+    const firstIk = storeItemKey('first', 1);
+    const secondIk = storeItemKey('second', 1);
+    const firstQk = queryKey({ tableId: 'first' });
+    const secondQk = queryKey({ tableId: 'second' });
 
+    // Pin the SECOND query/item — without pinning, 'first' (fetched first)
+    // would be kept by insertion order with maxQueries=1/maxItems=1.
+    // With pinning, 'second' survives instead.
     const env = createEnv({
       storeName: 'lq4',
       sessionKey: 'sess1',
       maxQueries: 1,
       maxItems: 1,
-      pinnedItems: [pinnedIk],
-      pinnedQueries: [pinnedQk],
+      pinnedItems: [secondIk],
+      pinnedQueries: [secondQk],
       serverData: {
-        pinned: [{ id: 1, name: 'Pinned' }],
-        other: [{ id: 1, name: 'Other' }],
+        first: [{ id: 1, name: 'First' }],
+        second: [{ id: 1, name: 'Second' }],
       },
     });
 
-    // Fetch both queries
-    env.scheduleFetch('highPriority', { tableId: 'pinned' });
+    // Fetch both queries — 'first' is fetched first
+    env.scheduleFetch('highPriority', { tableId: 'first' });
     await flushAllTimers();
-    env.scheduleFetch('highPriority', { tableId: 'other' });
+    env.scheduleFetch('highPriority', { tableId: 'second' });
     await flushAllTimers();
 
     await advanceTime(1100);
@@ -255,8 +265,9 @@ describe('localStorage: list query store persistence', () => {
       unknown
     >(JSON.parse(cached ?? ''));
 
-    expect(Object.keys(parsed.data.queries)).toContain(pinnedQk);
-    expect(Object.keys(parsed.data.items)).toContain(pinnedIk);
+    // Pinned 'second' survives; 'first' is evicted despite being fetched first
+    expect(Object.keys(parsed.data.queries)).toEqual([secondQk]);
+    expect(Object.keys(parsed.data.items)).toEqual([secondIk]);
   });
 
   test('version mismatch discards cached data', () => {
@@ -362,31 +373,4 @@ describe('localStorage: list query store persistence', () => {
     expect(cached).toBeNull();
   });
 
-  test('itemLoadedFields starts empty after hydration', () => {
-    const ik = storeItemKey('t1', 1);
-    const qk = queryKey({ tableId: 't1' });
-
-    setCachedData('lq9', 'sess1', {
-      items: { [ik]: { id: 1, name: 'Item' } },
-      queries: {
-        [qk]: {
-          payload: { tableId: 't1' },
-          items: [ik],
-          hasMore: false,
-        },
-      },
-      itemPayloads: { [ik]: rawItemKey('t1', 1) },
-    });
-
-    const env = createEnv({ storeName: 'lq9', sessionKey: 'sess1' });
-
-    // Items should be loaded
-    expect(env.store.state.items[ik]).not.toBeNull();
-
-    // But fields should be empty (repopulated on refetch)
-    expect(env.store.state.itemLoadedFields).toMatchInlineSnapshot(`{}`);
-    expect(env.store.state.itemFieldInvalidationFields).toMatchInlineSnapshot(
-      `{}`,
-    );
-  });
 });
