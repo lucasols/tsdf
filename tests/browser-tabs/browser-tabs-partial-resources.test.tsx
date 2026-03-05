@@ -1,13 +1,15 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import {
-  createInMemoryBrowserTabsTransportFactory,
+  createInspectableInMemoryBrowserTabsTransportFactory,
   getNextStoreId,
 } from '../mocks/browserTabsTestUtils';
 import {
   createListQueryStoreTestEnv,
   createSharedListQueryServerTableState,
+  type ListQueryStoreTestScenario,
   type Row,
+  type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { setDefaultLowPriorityThrottleMs } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
@@ -15,6 +17,9 @@ import {
   countFetchHistoryEntries,
   createFocusChangeCoordinator,
   createUsersTable,
+  getMessageKinds,
+  getNonStatusMessages,
+  getPublisherTabIds,
   partialResourcesConfig,
   setupBrowserTabsTestLifecycle,
 } from './browser-tabs-test-helpers';
@@ -29,11 +34,11 @@ afterEach(() => {
   setDefaultLowPriorityThrottleMs(200);
 });
 
-function getTrackedAge(value: unknown): string {
-  return typeof value === 'number' ? String(value) : '-';
+function getTrackedAge(value: unknown): string | undefined {
+  return typeof value === 'number' ? String(value) : undefined;
 }
 
-function getTrackedUserSummary(value: unknown): string {
+function getTrackedUserSummary(value: unknown): string | undefined {
   if (
     typeof value === 'object' &&
     value !== null &&
@@ -45,29 +50,84 @@ function getTrackedUserSummary(value: unknown): string {
     return `${value.name}:${String(value.age)}`;
   }
 
-  return '-';
+  return undefined;
+}
+
+function getTrackedErrorMessage(value: unknown): string | undefined {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'message' in value &&
+    typeof value.message === 'string'
+  ) {
+    return value.message;
+  }
+
+  return undefined;
+}
+
+type EnvOverrides = {
+  testScenario?: ListQueryStoreTestScenario;
+  lowPriorityThrottleMs?: number;
+  usesRealTimeUpdates?: boolean;
+};
+
+function createEnvs({
+  storeId,
+  data,
+  focusedTab,
+  usesRealTimeUpdates,
+  lowPriorityThrottleMs,
+  envA: envAOverrides,
+  envB: envBOverrides,
+}: {
+  storeId: string;
+  data: Tables<Row>;
+  focusedTab: 'a' | 'b' | null;
+  usesRealTimeUpdates?: boolean;
+  lowPriorityThrottleMs?: number;
+  envA?: EnvOverrides;
+  envB?: EnvOverrides;
+}) {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId(storeId);
+  const tabs = createFocusChangeCoordinator(['a', 'b'], focusedTab);
+  const sharedServerTableState =
+    createSharedListQueryServerTableState<Row>(data);
+
+  const envA = createListQueryStoreTestEnv(data, {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transport.transportFactory,
+    bindFocusController: tabs.bind('a'),
+    partialResources: partialResourcesConfig,
+    usesRealTimeUpdates:
+      envAOverrides?.usesRealTimeUpdates ?? usesRealTimeUpdates,
+    lowPriorityThrottleMs:
+      envAOverrides?.lowPriorityThrottleMs ?? lowPriorityThrottleMs,
+    testScenario: envAOverrides?.testScenario,
+  });
+  const envB = createListQueryStoreTestEnv(data, {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transport.transportFactory,
+    bindFocusController: tabs.bind('b'),
+    partialResources: partialResourcesConfig,
+    usesRealTimeUpdates:
+      envBOverrides?.usesRealTimeUpdates ?? usesRealTimeUpdates,
+    lowPriorityThrottleMs:
+      envBOverrides?.lowPriorityThrottleMs ?? lowPriorityThrottleMs,
+    testScenario: envBOverrides?.testScenario,
+  });
+
+  return { envA, envB, tabs, transport, sharedServerTableState };
 }
 
 test('list query partial-resource snapshots do not seed an untouched sibling item tab', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-partial-background-item');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
-  const sharedServerTableState =
-    createSharedListQueryServerTableState(createUsersTable());
-
-  const envA = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('a'),
-    partialResources: partialResourcesConfig,
-  });
-  const envB = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('b'),
-    partialResources: partialResourcesConfig,
+  const { envA, envB, tabs, transport } = createEnvs({
+    storeId: 'list-query-partial-background-item',
+    data: createUsersTable(),
+    focusedTab: null,
   });
 
   // Both tabs become known to the transport, but neither one keeps local state
@@ -94,6 +154,12 @@ test('list query partial-resource snapshots do not seed an untouched sibling ite
   expect(envAFetchEntries[0]).toMatchObject({
     fields: ['name'],
   });
+  const messages = getNonStatusMessages(transport.getMessages());
+  expect(messages.length).toBeGreaterThan(0);
+  expect(getPublisherTabIds(messages).size).toBe(1);
+  expect(getMessageKinds(messages)).toEqual(
+    expect.arrayContaining(['list-item-snapshot']),
+  );
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
   ).toBeUndefined();
@@ -106,26 +172,13 @@ test('list query partial-resource snapshots do not seed an untouched sibling ite
 });
 
 test('a fresh partial-resource list-query tab still performs its first fetch after a sibling tab fetched earlier', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-partial-first-fetch-after-sibling');
-  const sharedServerTableState =
-    createSharedListQueryServerTableState(createUsersTable());
-
-  const envA = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    testScenario: { loaded: { tables: ['users'] } },
+  const { envA, envB, transport } = createEnvs({
+    storeId: 'list-query-partial-first-fetch-after-sibling',
+    data: createUsersTable(),
+    focusedTab: null,
     lowPriorityThrottleMs: 10_000,
-    partialResources: partialResourcesConfig,
-  });
-  const envB = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    testScenario: 'idle',
-    lowPriorityThrottleMs: 10_000,
-    partialResources: partialResourcesConfig,
+    envA: { testScenario: { loaded: { tables: ['users'] } } },
+    envB: { testScenario: 'idle' },
   });
 
   void envA.apiStore.scheduleListQueryFetch(
@@ -137,6 +190,19 @@ test('a fresh partial-resource list-query tab still performs its first fetch aft
     },
   );
   await flushAllTimers();
+
+  const queryKey = envB.getQueryKey({ tableId: 'users' });
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+  const messagesAfterSiblingFetch = getNonStatusMessages(
+    transport.getMessages(),
+  );
+  expect(messagesAfterSiblingFetch.length).toBeGreaterThan(0);
+  expect(getPublisherTabIds(messagesAfterSiblingFetch).size).toBe(1);
+  expect(getMessageKinds(messagesAfterSiblingFetch)).toEqual(
+    expect.arrayContaining(['list-query-snapshot']),
+  );
+  expect(envB.store.state.queries[queryKey]).toBeUndefined();
+  expect(envB.store.state.items[itemKey]).toBeUndefined();
 
   const envBQuery = renderHook(() => {
     const query = envB.apiStore.useListQuery(
@@ -151,9 +217,6 @@ test('a fresh partial-resource list-query tab still performs its first fetch aft
     return query;
   });
   await flushAllTimers();
-
-  const queryKey = envB.getQueryKey({ tableId: 'users' });
-  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
 
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
     1,
@@ -170,54 +233,28 @@ test('a fresh partial-resource list-query tab still performs its first fetch aft
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  |
-    10ms  | 🔴 >list-fetch-started
-    810ms | 🔴 <list-fetch-finished (value: {"count":2})
-    1.62s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    1.01s | 🔴 >list-fetch-started
+    1.81s | 🔴 <list-fetch-finished (value: {"count":2})
+    3.62s | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 |
-    810ms | ⋯        | ui-initialized
-    820ms | ⋯        | 🔴 >list-fetch-started
-    1.62s | ⋯        | 🔴 <list-fetch-finished (value: {"count":2})
+    1.81s | ···      | ui-initialized
+    2.82s | ···      | 🔴 >list-fetch-started
+    3.62s | ···      | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Alice    | ui-changed
     "
   `);
 });
 
 test('list query partial-resources field metadata updates an already-loaded sibling tab', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-fields');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-fields',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
   });
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
-  );
 
   void envB.apiStore.scheduleItemFetch('highPriority', 'users||1', {
     fields: ['age'],
@@ -235,7 +272,7 @@ test('list query partial-resources field metadata updates an already-loaded sibl
       fields: ['name'],
     });
 
-    envB.trackItemUI('name-hook', item.data?.name ?? '-');
+    envB.trackItemUI('name-hook', item.data?.name);
     return item;
   });
   await advanceTime(0);
@@ -284,48 +321,22 @@ test('list query partial-resources field metadata updates an already-loaded sibl
   );
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | name-hook | users||1 |
-    1.01s | -         | -        | 🔴 [users||1] >fetch-started
-    1.81s | -         | -        | 🔴 [users||1] <fetch-finished (value: {"age":30})
-    .     | -         | -        | [name-hook] ui-initialized
-    2.62s | -         | -        | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia"})
-    .     | Alicia    | -        | [name-hook] ui-changed
+    time  | name-hook |
+    1.01s | -         | 🔴 [users||1] >fetch-started
+    1.81s | -         | 🔴 [users||1] <fetch-finished (value: {"age":30})
+    .     | ···       | [name-hook] ui-initialized
+    2.62s | ···       | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia"})
+    .     | Alicia    | [name-hook] ui-changed
     "
   `);
 });
 
 test('focused partial-resource item refetch updates the matching background hook without refetching a sibling field hook', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-focused-item-refetch-name');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-focused-item-refetch-name',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
   });
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
-  );
 
   const envANameHook = renderHook(() => {
     const item = envA.apiStore.useItem('users||1', {
@@ -333,7 +344,7 @@ test('focused partial-resource item refetch updates the matching background hook
       fields: ['name'],
     });
 
-    envA.trackItemUI('name-hook', item.data?.name ?? '-');
+    envA.trackItemUI('name-hook', item.data?.name);
     return item;
   });
   await flushAllTimers();
@@ -348,7 +359,7 @@ test('focused partial-resource item refetch updates the matching background hook
       fields: ['age'],
     });
 
-    envB.trackItemUI('name-hook', name.data?.name ?? '-');
+    envB.trackItemUI('name-hook', name.data?.name);
     envB.trackItemUI('age-hook', getTrackedAge(age.data?.age));
 
     return { name, age };
@@ -432,51 +443,424 @@ test('focused partial-resource item refetch updates the matching background hook
   });
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | age-hook | name-hook | users||1 |
-    810ms | -        | -         | -        | [name-hook] ui-initialized
-    .     | -        | -         | -        | [age-hook] ui-changed
-    1.82s | -        | -         | -        | 🔴 [users||1] >fetch-started
-    2.62s | -        | -         | -        | 🔴 [users||1] <fetch-finished (value: {"age":30,"name":"Alice"})
-    .     | -        | Alice     | -        | [name-hook] ui-changed
-    .     | 30       | Alice     | -        | [age-hook] ui-changed
-    3.43s | 30       | Alice     | -        | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":30})
-    .     | 30       | Alicia    | -        | [name-hook] ui-changed
+    time  | age-hook | name-hook |
+    810ms | ···      | ···       | [name-hook, age-hook] ui-initialized
+    1.82s | ···      | ···       | 🔴 [users||1] >fetch-started
+    2.62s | ···      | ···       | 🔴 [users||1] <fetch-finished (value: {"age":30,"name":"Alice"})
+    .     | 30       | Alice     | [name-hook, age-hook] ui-changed
+    3.43s | 30       | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":30})
+    .     | 30       | Alicia    | [name-hook] ui-changed
     "
   `);
 });
 
-test('list query partial-resources remote query snapshots satisfy affected field-subset hooks without refetching unaffected sibling hooks', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-field-subset-invalidation');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+test('focused RTU item refetch lets a background tab reuse snapshot fields and refetch only its extra field', async () => {
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-focused-item-rtu-extra-field',
+    data: { users: [{ id: 1, name: 'Alice', age: 30, city: 'London' }] },
+    focusedTab: 'a',
+    usesRealTimeUpdates: true,
   });
 
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
+  // Tab A loads the overlapping fields first so tab B can later reuse the
+  // incoming snapshot for name/age and fetch only its extra city field.
+  const envAHook = renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name', 'age'],
+    });
+
+    envA.trackItemUI('name-age-hook', getTrackedUserSummary(item.data));
+    return item;
+  });
+  await flushAllTimers();
+
+  const envBHooks = renderHook(() => {
+    const nameAge = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name', 'age'],
+    });
+    const city = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['city'],
+    });
+
+    envB.trackItemUI('name-age-hook', getTrackedUserSummary(nameAge.data));
+    envB.trackItemUI(
+      'city-hook',
+      typeof city.data?.city === 'string' ? city.data.city : null,
+    );
+
+    return { nameAge, city };
+  });
+  await flushAllTimers();
+
+  const itemKey = envB.getStoreItemKeyFromRaw('users||1');
+  expect(envAHook.result.current).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alice',
+      age: 30,
     },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
+  });
+  expect(envBHooks.result.current.nameAge).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alice',
+      age: 30,
     },
+  });
+  expect(envBHooks.result.current.city).toMatchObject({
+    status: 'success',
+    data: {
+      city: 'London',
+    },
+  });
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
+  ).toEqual(['age', 'city', 'name']);
+
+  const envAFetchCountBeforeRTU = countFetchHistoryEntries(
+    envA.serverTable.fetchHistory,
+    'fetch',
   );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
+  const envBFetchCountBeforeRTU = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'fetch',
   );
+  expect(envAFetchCountBeforeRTU).toBe(1);
+  expect(envBFetchCountBeforeRTU).toBe(1);
+
+  envA.clearTimeline();
+  envB.clearTimeline();
+
+  // A real-time update changes all fields. The focused tab should refetch the
+  // overlapping name/age fields, while the background tab only refetches city.
+  act(() => {
+    envA.serverTable.setItem(
+      'users||1',
+      {
+        id: 1,
+        name: 'Alicia',
+        age: 31,
+        city: 'Lisbon',
+      },
+      { triggerRTUEvent: true },
+    );
+  });
+  await flushAllTimers();
+
+  const envAFetchEntries = envA.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  const envBFetchEntries = envB.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  expect(countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch')).toBe(
+    envAFetchCountBeforeRTU + 1,
+  );
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    envBFetchCountBeforeRTU + 1,
+  );
+  expect(envAFetchEntries.at(-1)).toMatchObject({
+    fields: ['age', 'name'],
+  });
+  expect(envBFetchEntries.at(-1)).toMatchObject({
+    fields: ['city'],
+  });
+  expect(envAHook.result.current).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alicia',
+      age: 31,
+    },
+  });
+  expect(envBHooks.result.current.nameAge).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alicia',
+      age: 31,
+    },
+  });
+  expect(envBHooks.result.current.city).toMatchObject({
+    status: 'success',
+    data: {
+      city: 'Lisbon',
+    },
+  });
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
+  ).toEqual(['age', 'city', 'name']);
+  expect(envB.store.state.items[itemKey]).toEqual({
+    age: 31,
+    city: 'Lisbon',
+    name: 'Alicia',
+  });
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | name-age-hook |
+    2.62s | Alice:30      | -- timeline-cleared
+    .     | Alice:30      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .     | Alice:30      | [users||1] received-ws-data-change-event
+    .     | ···           | [name-age-hook] ui-changed
+    2.63s | ···           | 🟠 [users||1] >fetch-started
+    3.43s | ···           | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    .     | Alicia:31     | [name-age-hook] ui-changed
+    5.24s | Alicia:31     | [users||1] <confirmed-item-snapshot-received (value: {"age":31,"city":"Lisbon","name":"Alicia"})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | city-hook | name-age-hook |
+    2.62s | London    | Alice:30      | -- timeline-cleared
+    .     | London    | Alice:30      | [users||1] received-ws-data-change-event
+    .     | ···       | ···           | [name-age-hook, city-hook] ui-changed
+    3.43s | ···       | ···           | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    .     | ···       | Alicia:31     | [name-age-hook] ui-changed
+    4.44s | ···       | Alicia:31     | 🟠 [users||1] >fetch-started
+    5.24s | ···       | Alicia:31     | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .     | Lisbon    | Alicia:31     | [city-hook] ui-changed
+    "
+  `);
+});
+
+test('focused RTU item refetch lets a background tab reuse snapshot fields and refetch only its extra field 2', async () => {
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-focused-item-rtu-extra-field',
+    data: { users: [{ id: 1, name: 'Alice', age: 30, city: 'London' }] },
+    focusedTab: 'a',
+    usesRealTimeUpdates: true,
+  });
+
+  // Tab A loads the overlapping fields first so tab B can later reuse the
+  // incoming snapshot for name/age and fetch only its extra city field.
+  const envAHook = renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name', 'age'],
+    });
+
+    return envA.trackItemUI(
+      'name-age',
+      item.data ? `${item.data.name}:${item.data.age}` : null,
+    );
+  });
+  await flushAllTimers();
+
+  const envBHooks = renderHook(() => {
+    const item = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      fields: ['name', 'age', 'city'],
+    });
+
+    return envB.trackItemUI(
+      'name-age-city',
+      item.data ? `${item.data.name}:${item.data.age}:${item.data.city}` : null,
+    );
+  });
+  await flushAllTimers();
+
+  expect(envAHook.result.current).toBe('Alice:30');
+  expect(envBHooks.result.current).toBe('Alice:30:London');
+
+  const envAFetchCountBeforeRTU = countFetchHistoryEntries(
+    envA.serverTable.fetchHistory,
+    'fetch',
+  );
+  const envBFetchCountBeforeRTU = countFetchHistoryEntries(
+    envB.serverTable.fetchHistory,
+    'fetch',
+  );
+  expect(envAFetchCountBeforeRTU).toBe(1);
+  expect(envBFetchCountBeforeRTU).toBe(1);
+
+  envA.clearTimeline();
+  envB.clearTimeline();
+
+  // A real-time update changes all fields. The focused tab should refetch the
+  // overlapping name/age fields, while the background tab only refetches city.
+  act(() => {
+    envA.serverTable.setItem(
+      'users||1',
+      {
+        id: 1,
+        name: 'Alicia',
+        age: 31,
+        city: 'Lisbon',
+      },
+      { triggerRTUEvent: true },
+    );
+  });
+  await flushAllTimers();
+
+  const envAFetchEntries = envA.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  const envBFetchEntries = envB.serverTable.fetchHistory.filter(
+    (entry) => entry.type === 'fetch',
+  );
+  expect(countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch')).toBe(
+    envAFetchCountBeforeRTU + 1,
+  );
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    envBFetchCountBeforeRTU + 1,
+  );
+  expect(envAFetchEntries.at(-1)).toMatchObject({
+    fields: ['age', 'name'],
+  });
+  expect(envBFetchEntries.at(-1)).toMatchObject({
+    fields: ['city'],
+  });
+  expect(envAHook.result.current).toBe('Alicia:31');
+  expect(envBHooks.result.current).toBe('Alicia:31:Lisbon');
+
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | name-age  |
+    2.62s | Alice:30  | -- timeline-cleared
+    .     | Alice:30  | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .     | Alice:30  | [users||1] received-ws-data-change-event
+    .     | ···       | [name-age] ui-changed
+    2.63s | ···       | 🟠 [users||1] >fetch-started
+    3.43s | ···       | 🟠 [users||1] <fetch-finished (value: {"age":31,"name":"Alicia"})
+    .     | Alicia:31 | [name-age] ui-changed
+    5.24s | Alicia:31 | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"Lisbon"})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | name-age-city    |
+    2.62s | Alice:30:London  | -- timeline-cleared
+    .     | Alice:30:London  | [users||1] received-ws-data-change-event
+    .     | ···              | [name-age-city] ui-changed
+    3.43s | ···              | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31,"city":"London"})
+    4.44s | ···              | 🟠 [users||1] >fetch-started
+    5.24s | ···              | 🟠 [users||1] <fetch-finished (value: {"city":"Lisbon"})
+    .     | Alicia:31:Lisbon | [name-age-city] ui-changed
+    "
+  `);
+});
+
+test('focused RTU list refetch lets makes a background tab correctly invalidate the list with extra fields', async () => {
+  const { envA: focusedTab, envB: backgroundTab } = createEnvs({
+    storeId: 'list-query-focused-item-rtu-extra-field',
+    data: {
+      users: [
+        { id: 1, name: 'Alice', age: 30, city: 'London' },
+        { id: 2, name: 'Bob', age: 25, city: 'Paris' },
+      ],
+    },
+    focusedTab: 'a',
+    usesRealTimeUpdates: true,
+  });
+
+  renderHook(() => {
+    const list = focusedTab.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        fields: ['name', 'age'],
+        loadSize: 2,
+      },
+    );
+
+    focusedTab.trackItemUI(
+      'first-item',
+      list.items[0] && `${list.items[0].name}:${list.items[0].age}`,
+    );
+    focusedTab.trackItemUI(
+      'second-item',
+      list.items[1] && `${list.items[1].name}:${list.items[1].age}`,
+    );
+  });
+  await flushAllTimers();
+
+  renderHook(() => {
+    const list = backgroundTab.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        fields: ['name', 'age', 'city'],
+        loadSize: 2,
+      },
+    );
+
+    backgroundTab.trackItemUI(
+      'first-item',
+      list.items[0] &&
+        `${list.items[0].name}:${list.items[0].age}:${list.items[0].city}`,
+    );
+    backgroundTab.trackItemUI(
+      'second-item',
+      list.items[1] &&
+        `${list.items[1].name}:${list.items[1].age}:${list.items[1].city}`,
+    );
+  });
+  await flushAllTimers();
+
+  focusedTab.clearTimeline();
+  backgroundTab.clearTimeline();
+
+  act(() => {
+    focusedTab.serverTable.setItem(
+      'users||1',
+      {
+        id: 1,
+        name: 'Alicia',
+        age: 31,
+        city: 'Lisbon',
+      },
+      { triggerRTUEvent: true },
+    );
+  });
+  await flushAllTimers();
+
+  expect(focusedTab.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | first-item | second-item |
+    2.62s | Alice:30   | Bob:25      | -- timeline-cleared
+    .     | Alice:30   | Bob:25      | [users||1] server-data-changed (value: {"id":1,"name":"Alicia","age":31,"city":"Lisbon"})
+    .     | Alice:30   | Bob:25      | [users||1] received-ws-data-change-event
+    .     | ···        | ···         | [first-item, second-item] ui-changed
+    2.63s | ···        | ···         | 🟠 >list-fetch-started
+    3.43s | ···        | ···         | 🟠 <list-fetch-finished (value: {"count":2})
+    .     | Alicia:31  | Bob:25      | [first-item, second-item] ui-changed
+    5.24s | Alicia:31  | Bob:25      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    "
+  `);
+  expect(backgroundTab.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | first-item       | second-item  |
+    2.62s | Alice:30:London  | Bob:25:Paris | -- timeline-cleared
+    .     | Alice:30:London  | Bob:25:Paris | [users||1] received-ws-data-change-event
+    .     | ···              | ···          | [first-item, second-item] ui-changed
+    3.43s | ···              | ···          | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    4.44s | ···              | ···          | 🟠 >list-fetch-started
+    5.24s | ···              | ···          | 🟠 <list-fetch-finished (value: {"count":2})
+    .     | Alicia:31:Lisbon | Bob:25:Paris | [first-item, second-item] ui-changed
+    "
+  `);
+  expect(backgroundTab.serverTable.getRequestMadeHistory('list'))
+    .toMatchInlineSnapshot(`
+      - payload:
+          fields: ['name', 'age', 'city']
+          pos: { limit: 2, offset: 0 }
+        returned_items: 2
+        time: '1.82s -> 2.62s | duration: 800ms'
+      - payload:
+          fields: ['name', 'age', 'city']
+          pos: { limit: 2, offset: 0 }
+        returned_items: 2
+        time: '4.44s -> 5.24s | duration: 800ms'
+    `);
+});
+
+test('list query partial-resources remote query snapshots satisfy affected field-subset hooks without refetching unaffected sibling hooks', async () => {
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-field-subset-invalidation',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
+  });
 
   void envB.apiStore.scheduleListQueryFetch(
     'highPriority',
@@ -536,7 +920,6 @@ test('list query partial-resources remote query snapshots satisfy affected field
       fields: ['age'],
     });
   });
-  await advanceTime(0);
 
   expect(envBQueries.result.current.name).toMatchObject({
     status: 'success',
@@ -575,10 +958,10 @@ test('list query partial-resources remote query snapshots satisfy affected field
   });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | users||1 |
-    1.81s | -        | server-data-changed (value: {"id":1,"name":"Alice","age":31})
-    1.82s | -        | 🔴 >list-fetch-started
-    2.62s | -        | 🔴 <list-fetch-finished (value: {"count":1})
+    time  |
+    1.81s | server-data-changed (value: {"id":1,"name":"Alice","age":31})
+    1.82s | 🔴 >list-fetch-started
+    2.62s | 🔴 <list-fetch-finished (value: {"count":1})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
@@ -586,8 +969,7 @@ test('list query partial-resources remote query snapshots satisfy affected field
     time  | age-query | name-query |
     1.01s | -         | -          | 🔴 >list-fetch-started
     1.81s | -         | -          | 🔴 <list-fetch-finished (value: {"count":1})
-    .     | -         | Alice      | [name-query] ui-initialized
-    .     | 30        | Alice      | [age-query] ui-changed
+    .     | 30        | Alice      | [name-query, age-query] ui-initialized
     2.62s | 30        | Alice      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
     .     | 31        | Alice      | [age-query] ui-changed
     "
@@ -595,37 +977,11 @@ test('list query partial-resources remote query snapshots satisfy affected field
 });
 
 test('list query partial-resources full-resource list hooks refetch in one tab and update a sibling tab via query snapshots', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-full-resource-fields-star');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'b');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-full-resource-fields-star',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'b',
   });
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
-  );
 
   // Start with both tabs holding a full-resource snapshot so the later
   // invalidation exercises the query-snapshot update path, not initial loading.
@@ -751,37 +1107,11 @@ test('list query partial-resources full-resource list hooks refetch in one tab a
 });
 
 test('list query partial-resources remote snapshots clear satisfied local invalidation fields for affected and unaffected item hooks', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-field-invalidation');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-field-invalidation',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
   });
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
-  );
 
   void envB.apiStore.scheduleItemFetch('highPriority', 'users||1', {
     fields: ['name', 'age'],
@@ -793,11 +1123,13 @@ test('list query partial-resources remote snapshots clear satisfied local invali
     [...(envB.store.state.itemLoadedFields[itemKey] ?? [])].sort(),
   ).toEqual(['age', 'name']);
 
-  envB.apiStore.invalidateQueryAndItems({
-    queryPayload: false,
-    itemPayload: 'users||1',
-    type: 'highPriority',
-    fields: ['age'],
+  act(() => {
+    envB.apiStore.invalidateQueryAndItems({
+      queryPayload: false,
+      itemPayload: 'users||1',
+      type: 'highPriority',
+      fields: ['age'],
+    });
   });
   await advanceTime(0);
 
@@ -827,7 +1159,7 @@ test('list query partial-resources remote snapshots clear satisfied local invali
       fields: '*',
     });
 
-    envB.trackItemUI('name-hook', name.data?.name ?? '-');
+    envB.trackItemUI('name-hook', name.data?.name);
     envB.trackItemUI('age-hook', getTrackedAge(age.data?.age));
     envB.trackItemUI('full-hook', getTrackedUserSummary(full.data));
 
@@ -897,51 +1229,23 @@ test('list query partial-resources remote snapshots clear satisfied local invali
   });
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
-    time  | age-hook | full-hook | name-hook | users||1 |
-    1.01s | -        | -         | -         | -        | 🔴 [users||1] >fetch-started
-    1.81s | -        | -         | -         | -        | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
-    .     | -        | -         | Alice     | -        | [name-hook] ui-initialized
-    .     | 30       | -         | Alice     | -        | [age-hook] ui-changed
-    .     | 30       | Alice:30  | Alice     | -        | [full-hook] ui-changed
-    2.62s | 30       | Alice:30  | Alice     | -        | [users||1] <confirmed-item-snapshot-received (value: {"age":31})
-    .     | 31       | Alice:30  | Alice     | -        | [age-hook] ui-changed
-    .     | 31       | Alice:31  | Alice     | -        | [full-hook] ui-changed
+    time  | age-hook | full-hook | name-hook |
+    1.01s | -        | -         | -         | 🔴 [users||1] >fetch-started
+    1.81s | -        | -         | -         | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
+    .     | 30       | Alice:30  | Alice     | [name-hook, age-hook, full-hook] ui-initialized
+    2.62s | 30       | Alice:30  | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"age":31})
+    .     | 31       | Alice:31  | Alice     | [age-hook, full-hook] ui-changed
     "
   `);
 });
 
+// review below this
 test('a sibling partial snapshot for one field does not clear a local invalidation for a different field', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-partial-cross-field-invalidation');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-partial-cross-field-invalidation',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
   });
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
-  );
 
   // Both tabs load name+age.
   void envB.apiStore.scheduleItemFetch('highPriority', 'users||1', {
@@ -950,16 +1254,50 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   await flushAllTimers();
 
   const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
+  const envBHooks = renderHook(() => {
+    const name = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetches: true,
+      fields: ['name'],
+    });
+    const age = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetches: true,
+      fields: ['age'],
+    });
+
+    envB.trackItemUI('name-hook', name.data?.name);
+    envB.trackItemUI('age-hook', getTrackedAge(age.data?.age));
+
+    return { name, age };
+  });
+  await advanceTime(0);
+
+  expect(envBHooks.result.current.name).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alice',
+    },
+  });
+  expect(envBHooks.result.current.age).toMatchObject({
+    status: 'success',
+    data: {
+      age: 30,
+    },
+  });
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
   ).toEqual(['age', 'name']);
 
-  // Tab B invalidates both fields.
-  envB.apiStore.invalidateQueryAndItems({
-    queryPayload: false,
-    itemPayload: 'users||1',
-    type: 'highPriority',
-    fields: ['name', 'age'],
+  // Tab B invalidates both fields, but disableRefetches keeps the hooks pinned to
+  // their cached values until sibling snapshots arrive.
+  act(() => {
+    envB.apiStore.invalidateQueryAndItems({
+      queryPayload: false,
+      itemPayload: 'users||1',
+      type: 'highPriority',
+      fields: ['name', 'age'],
+    });
   });
   await advanceTime(0);
 
@@ -967,9 +1305,22 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   expect(
     [...(envB.store.state.itemFieldInvalidationFields[itemKeyB] ?? [])].sort(),
   ).toEqual(['age', 'name']);
+  expect(envBHooks.result.current.name).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alice',
+    },
+  });
+  expect(envBHooks.result.current.age).toMatchObject({
+    status: 'success',
+    data: {
+      age: 30,
+    },
+  });
 
   // Tab A refetches only 'name'. The incoming snapshot should clear the name
-  // invalidation on tab B, but leave the age invalidation in place.
+  // invalidation on tab B, update only the matching hook, and leave the age
+  // invalidation in place.
   envA.serverTable.setItem('users||1', {
     id: 1,
     name: 'Alicia',
@@ -980,17 +1331,52 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
   });
   await flushAllTimers();
 
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    1,
+  );
+  expect(envBHooks.result.current.name).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alicia',
+    },
+  });
+  expect(envBHooks.result.current.age).toMatchObject({
+    status: 'success',
+    data: {
+      age: 30,
+    },
+  });
   expect(envB.store.state.itemLoadedFields[itemKeyB]).toEqual(['name']);
   expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
     'age',
   ]);
+  expect(envB.store.state.items[itemKeyB]).toEqual({
+    age: 30,
+    name: 'Alicia',
+  });
 
-  // A second fetch from tab A for 'age' clears the remaining invalidation.
+  // A second fetch from tab A for 'age' clears the remaining invalidation and
+  // updates the remaining stale hook.
   void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
     fields: ['age'],
   });
   await flushAllTimers();
 
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
+    1,
+  );
+  expect(envBHooks.result.current.name).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alicia',
+    },
+  });
+  expect(envBHooks.result.current.age).toMatchObject({
+    status: 'success',
+    data: {
+      age: 31,
+    },
+  });
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
   ).toEqual(['age', 'name']);
@@ -1001,40 +1387,206 @@ test('a sibling partial snapshot for one field does not clear a local invalidati
     age: 31,
     name: 'Alicia',
   });
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    1.81s | server-data-changed (value: {"id":1,"name":"Alicia","age":31})
+    1.82s | 🔴 >fetch-started
+    2.62s | 🔴 <fetch-finished (value: {"name":"Alicia"})
+    2.63s | 🟠 >fetch-started
+    3.43s | 🟠 <fetch-finished (value: {"age":31})
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | age-hook | name-hook |
+    1.01s | -        | -         | 🔴 [users||1] >fetch-started
+    1.81s | -        | -         | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
+    .     | 30       | Alice     | [name-hook, age-hook] ui-initialized
+    2.62s | 30       | Alice     | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia"})
+    .     | 30       | Alicia    | [name-hook] ui-changed
+    3.43s | 30       | Alicia    | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alicia","age":31})
+    .     | 31       | Alicia    | [age-hook] ui-changed
+    "
+  `);
+});
+
+test('failed partial-resource list query fetch does not broadcast stale metadata to sibling tab', async () => {
+  const { envA, envB, transport } = createEnvs({
+    storeId: 'list-query-partial-list-fetch-error',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
+  });
+
+  void envA.apiStore.scheduleListQueryFetch(
+    'highPriority',
+    { tableId: 'users' },
+    1,
+    {
+      fields: ['name', 'age'],
+    },
+  );
+  await flushAllTimers();
+  void envB.apiStore.scheduleListQueryFetch(
+    'highPriority',
+    { tableId: 'users' },
+    1,
+    {
+      fields: ['name', 'age'],
+    },
+  );
+  await flushAllTimers();
+
+  const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
+  ).toEqual(['age', 'name']);
+
+  envB.apiStore.invalidateQueryAndItems({
+    queryPayload: false,
+    itemPayload: 'users||1',
+    type: 'highPriority',
+    fields: ['age'],
+  });
+  await advanceTime(0);
+
+  expect(envB.store.state.itemLoadedFields[itemKeyB]).toEqual(['name']);
+  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
+    'age',
+  ]);
+
+  const envAQuery = renderHook(() => {
+    const query = envA.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetches: true,
+        fields: ['name', 'age'],
+        loadSize: 1,
+      },
+    );
+
+    envA.trackItemUI('query', getTrackedUserSummary(query.items[0]));
+    envA.trackItemUI('query-status', query.status);
+    envA.trackItemUI('query-error', getTrackedErrorMessage(query.error));
+
+    return query;
+  });
+  const envBQuery = renderHook(() => {
+    const query = envB.apiStore.useListQuery(
+      { tableId: 'users' },
+      {
+        returnRefetchingStatus: true,
+        disableRefetches: true,
+        fields: ['name', 'age'],
+        loadSize: 1,
+      },
+    );
+
+    envB.trackItemUI('query', getTrackedUserSummary(query.items[0]));
+    envB.trackItemUI('query-status', query.status);
+    envB.trackItemUI('query-error', getTrackedErrorMessage(query.error));
+
+    return query;
+  });
+  await advanceTime(0);
+
+  expect(envBQuery.result.current).toMatchObject({
+    status: 'refetching',
+    items: [{ name: 'Alice', age: 30 }],
+  });
+
+  const messagesBeforeFailedFetch = getNonStatusMessages(
+    transport.getMessages(),
+  ).length;
+
+  act(() => {
+    envA.serverTable.setItem('users||1', {
+      id: 1,
+      name: 'Alice',
+      age: 31,
+    });
+    envA.serverTable.setNextListFetchError('Network error');
+    void envA.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      { tableId: 'users' },
+      1,
+      {
+        fields: ['name', 'age'],
+      },
+    );
+  });
+  await flushAllTimers();
+
+  const messagesAfterFailedFetch = getNonStatusMessages(
+    transport.getMessages(),
+  ).slice(messagesBeforeFailedFetch);
+  expect(messagesAfterFailedFetch.length).toBeGreaterThan(0);
+  expect(getPublisherTabIds(messagesAfterFailedFetch).size).toBe(1);
+  expect(getMessageKinds(messagesAfterFailedFetch)).toEqual(
+    expect.arrayContaining(['fetch-start']),
+  );
+  expect(getMessageKinds(messagesAfterFailedFetch)).not.toContain(
+    'fetch-success',
+  );
+  expect(getMessageKinds(messagesAfterFailedFetch)).not.toContain(
+    'list-query-snapshot',
+  );
+
+  expect(envAQuery.result.current).toMatchObject({
+    status: 'error',
+    items: [{ name: 'Alice', age: 30 }],
+  });
+  expect(envAQuery.result.current.error).toMatchObject({
+    message: 'Network error',
+  });
+  expect(envBQuery.result.current).toMatchObject({
+    status: 'refetching',
+    items: [{ name: 'Alice', age: 30 }],
+  });
+  expect(
+    [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
+  ).toEqual(['name']);
+  expect(envB.store.state.itemFieldInvalidationFields[itemKeyB]).toEqual([
+    'age',
+  ]);
+  expect(envB.store.state.items[itemKeyB]).toEqual({
+    age: 30,
+    name: 'Alice',
+  });
+  expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list')).toBe(
+    1,
+  );
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | query    | query-error   | query-status |
+    10ms  | -        | -             | -            | 🔴 >list-fetch-started
+    810ms | -        | -             | -            | 🔴 <list-fetch-finished (value: {"count":1})
+    2.62s | -        | -             | -            | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+    .     | Alice:30 | ···           | success      | [query, query-status, query-error] ui-initialized
+    .     | Alice:30 | ···           | success      | [users||1] server-data-changed (value: {"id":1,"name":"Alice","age":31})
+    2.63s | Alice:30 | ···           | success      | 🟠 >list-fetch-started
+    .     | Alice:30 | ···           | refetching   | [query-status] ui-changed
+    3.43s | Alice:30 | ···           | refetching   | 🟠 <list-fetch-error (value: "error")
+    .     | Alice:30 | Network error | error        | [query-status, query-error] ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | query    | query-error | query-status |
+    1.82s | -        | -           | -            | 🔴 >list-fetch-started
+    2.62s | -        | -           | -            | 🔴 <list-fetch-finished (value: {"count":1})
+    .     | Alice:30 | ···         | refetching   | [query, query-status, query-error] ui-initialized
+    "
+  `);
 });
 
 test('failed partial-resource item fetch does not broadcast stale metadata to sibling tab', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-partial-fetch-error');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+  const { envA, envB, transport } = createEnvs({
+    storeId: 'list-query-partial-fetch-error',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
   });
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
-  );
 
   // Both tabs load all fields initially.
   void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
@@ -1049,12 +1601,42 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
   const itemKeyA = envA.getStoreItemKeyFromRaw('users||1');
   const itemKeyB = envB.getStoreItemKeyFromRaw('users||1');
 
+  const envAHook = renderHook(() => {
+    const item = envA.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetches: true,
+      fields: ['name', 'age'],
+    });
+
+    envA.trackItemUI('item', getTrackedUserSummary(item.data));
+    envA.trackItemUI('item-status', item.status);
+    envA.trackItemUI('item-error', getTrackedErrorMessage(item.error));
+
+    return item;
+  });
+  const envBHook = renderHook(() => {
+    const item = envB.apiStore.useItem('users||1', {
+      returnRefetchingStatus: true,
+      disableRefetches: true,
+      fields: ['name', 'age'],
+    });
+
+    envB.trackItemUI('item', getTrackedUserSummary(item.data));
+    envB.trackItemUI('item-status', item.status);
+    envB.trackItemUI('item-error', getTrackedErrorMessage(item.error));
+
+    return item;
+  });
+  await advanceTime(0);
+
   // Tab A invalidates 'age' and the subsequent refetch fails.
-  envA.apiStore.invalidateQueryAndItems({
-    queryPayload: false,
-    itemPayload: 'users||1',
-    type: 'highPriority',
-    fields: ['age'],
+  act(() => {
+    envA.apiStore.invalidateQueryAndItems({
+      queryPayload: false,
+      itemPayload: 'users||1',
+      type: 'highPriority',
+      fields: ['age'],
+    });
   });
   await advanceTime(0);
 
@@ -1063,14 +1645,45 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
     'age',
   ]);
 
-  envA.serverTable.setNextFetchError('users||1', 'Network error');
-  void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
-    fields: ['age'],
+  const messagesBeforeFailedFetch = getNonStatusMessages(
+    transport.getMessages(),
+  ).length;
+
+  act(() => {
+    envA.serverTable.setNextFetchError('users||1', 'Network error');
+    void envA.apiStore.scheduleItemFetch('highPriority', 'users||1', {
+      fields: ['age'],
+    });
   });
   await flushAllTimers();
 
+  const messagesAfterFailedFetch = getNonStatusMessages(
+    transport.getMessages(),
+  ).slice(messagesBeforeFailedFetch);
+  expect(messagesAfterFailedFetch.length).toBeGreaterThan(0);
+  expect(getPublisherTabIds(messagesAfterFailedFetch).size).toBe(1);
+  expect(getMessageKinds(messagesAfterFailedFetch)).toEqual(
+    expect.arrayContaining(['fetch-start']),
+  );
+  expect(getMessageKinds(messagesAfterFailedFetch)).not.toContain(
+    'fetch-success',
+  );
+  expect(getMessageKinds(messagesAfterFailedFetch)).not.toContain(
+    'list-item-snapshot',
+  );
+
   // After the error, tab A clears the invalidation marker but age remains
   // missing from loaded fields.
+  expect(envAHook.result.current).toMatchObject({
+    status: 'error',
+    data: {
+      name: 'Alice',
+      age: 30,
+    },
+  });
+  expect(envAHook.result.current.error).toMatchObject({
+    message: 'Network error',
+  });
   expect(envA.store.state.itemLoadedFields[itemKeyA]).toEqual(['name']);
   expect(
     envA.store.state.itemFieldInvalidationFields[itemKeyA],
@@ -1078,6 +1691,13 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
 
   // Tab B must be completely unaffected — no error snapshot is broadcast, and
   // the sibling's field metadata stays intact.
+  expect(envBHook.result.current).toMatchObject({
+    status: 'success',
+    data: {
+      name: 'Alice',
+      age: 30,
+    },
+  });
   expect(
     [...(envB.store.state.itemLoadedFields[itemKeyB] ?? [])].sort(),
   ).toEqual(['age', 'name']);
@@ -1091,40 +1711,34 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
   expect(countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch')).toBe(
     1,
   );
+  expect(envA.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item     | item-error    | item-status |
+    10ms  | -        | -             | -           | 🔴 [users||1] >fetch-started
+    810ms | -        | -             | -           | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
+    2.62s | -        | -             | -           | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alice","age":30})
+    .     | Alice:30 | ···           | success     | [item, item-status, item-error] ui-initialized
+    2.63s | Alice:30 | ···           | success     | 🟠 [users||1] >fetch-started
+    .     | Alice:30 | ···           | success     | 🟠 [users||1] <fetch-error (value: "error")
+    .     | Alice:30 | Network error | error       | [item-status, item-status, item-error] ui-changed
+    "
+  `);
+  expect(envB.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | item     | item-error | item-status |
+    1.82s | -        | -          | -           | 🔴 [users||1] >fetch-started
+    2.62s | -        | -          | -           | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
+    .     | Alice:30 | ···        | success     | [item, item-status, item-error] ui-initialized
+    "
+  `);
 });
 
 test('item deletion on one tab cleans up partial-resource field metadata on sibling tab', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-partial-deletion-cleanup');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], 'a');
-  const sharedServerTableState = createSharedListQueryServerTableState<Row>({
-    users: [{ id: 1, name: 'Alice', age: 30 }],
+  const { envA, envB } = createEnvs({
+    storeId: 'list-query-partial-deletion-cleanup',
+    data: { users: [{ id: 1, name: 'Alice', age: 30 }] },
+    focusedTab: 'a',
   });
-
-  const envA = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('a'),
-      partialResources: partialResourcesConfig,
-    },
-  );
-  const envB = createListQueryStoreTestEnv(
-    {
-      users: [{ id: 1, name: 'Alice', age: 30 }],
-    },
-    {
-      id,
-      sharedServerTableState,
-      browserTabsTransportFactory: transportFactory,
-      bindFocusController: tabs.bind('b'),
-      partialResources: partialResourcesConfig,
-    },
-  );
 
   // Load fields on both tabs and populate a query so we can verify removal.
   void envA.apiStore.scheduleListQueryFetch(

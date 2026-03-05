@@ -157,6 +157,8 @@ export function createMutationApi<
 
   const queryInvalidationWasTriggered = new Set<string>();
   const itemInvalidationWasTriggered = new Set<string>();
+  const itemFieldInvalidationPriorities = new Map<string, FetchType>();
+  const itemPendingInvalidationFields = new Map<string, string[]>();
 
   function invalidateQueryAndItems({
     itemPayload,
@@ -203,6 +205,46 @@ export function createMutationApi<
       if (partialResources && invalidateFields) {
         // Per-field invalidation: remove specified fields from itemLoadedFields
         const itemsKey = getItemsKeyArray(itemPayload);
+        const nextInvalidationPriorityByItemKey = new Map<string, FetchType>();
+        const nextPendingInvalidationFieldsByItemKey = new Map<
+          string,
+          string[]
+        >();
+
+        for (const { itemKey } of itemsKey) {
+          const existingPriority = itemFieldInvalidationPriorities.get(itemKey);
+          const existingPendingFields =
+            itemPendingInvalidationFields.get(itemKey) ?? [];
+          nextPendingInvalidationFieldsByItemKey.set(
+            itemKey,
+            Array.from(
+              new Set([...existingPendingFields, ...invalidateFields]),
+            ).sort(),
+          );
+
+          nextInvalidationPriorityByItemKey.set(
+            itemKey,
+            existingPriority &&
+              fetchTypePriority[existingPriority] > fetchTypePriority[priority]
+              ? existingPriority
+              : priority,
+          );
+        }
+
+        // Keep map-based tracking in sync before the state update so selectors
+        // that read these maps see the same invalidation transaction.
+        for (const [
+          itemKey,
+          itemPriority,
+        ] of nextInvalidationPriorityByItemKey) {
+          itemFieldInvalidationPriorities.set(itemKey, itemPriority);
+        }
+        for (const [
+          itemKey,
+          invalidationFields,
+        ] of nextPendingInvalidationFieldsByItemKey) {
+          itemPendingInvalidationFields.set(itemKey, invalidationFields);
+        }
 
         store.produceState(
           (draft) => {
@@ -213,8 +255,10 @@ export function createMutationApi<
               draft.itemLoadedFields[itemKey] = loadedFields.filter(
                 (f) => !invalidateFields.includes(f),
               );
+              const existingInvalidationFields =
+                draft.itemFieldInvalidationFields[itemKey] ?? [];
               draft.itemFieldInvalidationFields[itemKey] = Array.from(
-                new Set(invalidateFields),
+                new Set([...existingInvalidationFields, ...invalidateFields]),
               ).sort();
             }
           },
@@ -224,8 +268,10 @@ export function createMutationApi<
         // Emit invalidation events so hooks can detect missing fields and refetch
         for (const { itemKey } of itemsKey) {
           itemInvalidationWasTriggered.delete(itemKey);
+          const itemPriority =
+            nextInvalidationPriorityByItemKey.get(itemKey) ?? priority;
           emitInvalidateItem({
-            priority,
+            priority: itemPriority,
             itemKey,
             invalidateFields,
           });
@@ -249,10 +295,29 @@ export function createMutationApi<
 
       if (!item) continue;
 
+      const trackedInvalidationFields = partialResources
+        ? Array.from(
+            new Set([
+              ...(store.state.itemLoadedFields[itemKey] ?? []),
+              ...(itemPendingInvalidationFields.get(itemKey) ?? []),
+            ]),
+          ).sort()
+        : [];
+      const trackedInvalidationPriority =
+        trackedInvalidationFields.length > 0
+          ? itemFieldInvalidationPriorities.get(itemKey)
+          : undefined;
+      const nextInvalidationPriority =
+        trackedInvalidationPriority &&
+        fetchTypePriority[trackedInvalidationPriority] >
+          fetchTypePriority[priority]
+          ? trackedInvalidationPriority
+          : priority;
       const currentInvalidationPriority = item.refetchOnMount
         ? fetchTypePriority[item.refetchOnMount]
         : -1;
-      const newInvalidationPriority = fetchTypePriority[priority];
+      const newInvalidationPriority =
+        fetchTypePriority[nextInvalidationPriority];
 
       if (currentInvalidationPriority >= newInvalidationPriority) continue;
 
@@ -261,7 +326,7 @@ export function createMutationApi<
           const query = draft.itemQueries[itemKey];
           if (!query) return;
 
-          query.refetchOnMount = priority;
+          query.refetchOnMount = nextInvalidationPriority;
 
           // Clear loaded fields so all hooks refetch their fields
           if (partialResources) {
@@ -272,14 +337,25 @@ export function createMutationApi<
         { action: 'invalidate-item' },
       );
 
+      if (trackedInvalidationFields.length > 0) {
+        itemPendingInvalidationFields.set(itemKey, trackedInvalidationFields);
+        itemFieldInvalidationPriorities.set(itemKey, nextInvalidationPriority);
+      } else {
+        itemPendingInvalidationFields.delete(itemKey);
+        itemFieldInvalidationPriorities.delete(itemKey);
+      }
       itemInvalidationWasTriggered.delete(itemKey);
-      emitInvalidateItem({ priority, itemKey });
+      emitInvalidateItem({ priority: nextInvalidationPriority, itemKey });
 
       if (onInvalidateItem) {
         const itemState = store.state.items[itemKey];
 
         if (itemState) {
-          onInvalidateItem({ priority, itemState, payload });
+          onInvalidateItem({
+            priority: nextInvalidationPriority,
+            itemState,
+            payload,
+          });
         }
       }
     }
@@ -575,6 +651,8 @@ export function createMutationApi<
     );
 
     for (const { itemKey } of itemsId) {
+      itemFieldInvalidationPriorities.delete(itemKey);
+      itemPendingInvalidationFields.delete(itemKey);
       itemInvalidationWasTriggered.delete(itemKey);
       publishItemSnapshot(itemKey);
     }
@@ -589,6 +667,8 @@ export function createMutationApi<
   function resetInvalidationTracking() {
     queryInvalidationWasTriggered.clear();
     itemInvalidationWasTriggered.clear();
+    itemFieldInvalidationPriorities.clear();
+    itemPendingInvalidationFields.clear();
   }
 
   async function performMutation<T>(
@@ -684,6 +764,8 @@ export function createMutationApi<
     storeEvents,
     queryInvalidationWasTriggered,
     itemInvalidationWasTriggered,
+    itemFieldInvalidationPriorities,
+    itemPendingInvalidationFields,
     invalidateQueryAndItems,
     invalidateItem,
     startItemMutation,

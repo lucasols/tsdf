@@ -100,8 +100,7 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2     |
-    0     | Item 1  | -         | [item1] ui-initialized
-    .     | Item 1  | Item 2    | [item2] ui-changed
+    0     | Item 1  | Item 2    | [item1, item2] ui-initialized
     10ms  | Item 1  | Item 2    | 👁 window-focused
     15ms  | Item 1  | Item 2    | 🔕 window-blurred
     20ms  | Item 1  | Item 2    | [item1] server-data-changed (value: {"name":"Updated"})
@@ -110,19 +109,16 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
     .     | Item 1  | Item 2    | [item2] received-ws-data-change-event
     1.03s | Item 1  | Item 2    | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
     1.83s | Item 1  | Item 2    | 🔴 <list-fetch-finished (value: {"count":2})
-    .     | Updated | Item 2    | [item1] ui-changed
-    .     | Updated | Updated 2 | [item2] ui-changed
+    .     | Updated | Updated 2 | [item1, item2] ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2     |
-    0     | Item 1  | -         | [item1] ui-initialized
-    .     | Item 1  | Item 2    | [item2] ui-changed
+    0     | Item 1  | Item 2    | [item1, item2] ui-initialized
     .     | Item 1  | Item 2    | 👁 window-focused
     5ms   | Item 1  | Item 2    | 🔕 window-blurred
-    20ms  | Item 1  | Item 2    | [item1] received-ws-data-change-event
-    .     | Item 1  | Item 2    | [item2] received-ws-data-change-event
+    20ms  | Item 1  | Item 2    | [item1, item2] received-ws-data-change-event
     1.83s | Item 1  | Item 2    | [item1] <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | Item 2    | [item1] ui-changed
     .     | Updated | Item 2    | [item2] <confirmed-snapshot-received (value: {"name":"Updated 2"})
@@ -228,35 +224,29 @@ test('collection background RTU batch fetch includes the union of invalidated it
   });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | item1     | item2     | item3 |
-    0     | Item 1    | -         | -     | [item1] ui-initialized
-    .     | Item 1    | Item 2    | -     | [item2] ui-changed
-    10ms  | Item 1    | Item 2    | -     | 👁 window-focused
-    15ms  | Item 1    | Item 2    | -     | 🔕 window-blurred
-    20ms  | Item 1    | Item 2    | -     | [item1] server-data-changed (value: {"name":"Updated 1"})
-    .     | Item 1    | Item 2    | -     | [item1] received-ws-data-change-event
-    .     | Item 1    | Item 2    | -     | [item2] server-data-changed (value: {"name":"Updated 2"})
-    .     | Item 1    | Item 2    | -     | [item2] received-ws-data-change-event
-    .     | Item 1    | Item 2    | -     | [item3] server-data-changed (value: {"name":"Updated 3"})
-    .     | Item 1    | Item 2    | -     | [item3] received-ws-data-change-event
-    1.03s | Item 1    | Item 2    | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-    1.83s | Item 1    | Item 2    | -     | 🔴 <list-fetch-finished (value: {"count":2})
-    .     | Updated 1 | Item 2    | -     | [item1] ui-changed
-    .     | Updated 1 | Updated 2 | -     | [item2] ui-changed
-    2.83s | Updated 1 | Updated 2 | -     | [item3] <confirmed-snapshot-received (value: {"name":"Updated 3"})
+    time  | item1     | item2     |
+    0     | Item 1    | Item 2    | [item1, item2] ui-initialized
+    10ms  | Item 1    | Item 2    | 👁 window-focused
+    15ms  | Item 1    | Item 2    | 🔕 window-blurred
+    20ms  | Item 1    | Item 2    | [item1] server-data-changed (value: {"name":"Updated 1"})
+    .     | Item 1    | Item 2    | [item1] received-ws-data-change-event
+    .     | Item 1    | Item 2    | [item2] server-data-changed (value: {"name":"Updated 2"})
+    .     | Item 1    | Item 2    | [item2] received-ws-data-change-event
+    .     | Item 1    | Item 2    | [item3] server-data-changed (value: {"name":"Updated 3"})
+    .     | Item 1    | Item 2    | [item3] received-ws-data-change-event
+    1.03s | Item 1    | Item 2    | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+    1.83s | Item 1    | Item 2    | 🔴 <list-fetch-finished (value: {"count":2})
+    .     | Updated 1 | Updated 2 | [item1, item2] ui-changed
+    2.83s | Updated 1 | Updated 2 | [item3] <confirmed-snapshot-received (value: {"name":"Updated 3"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1     | item2     | item3     |
-    0     | Item 1    | -         | -         | [item1] ui-initialized
-    .     | Item 1    | Item 2    | -         | [item2] ui-changed
-    .     | Item 1    | Item 2    | Item 3    | [item3] ui-changed
+    0     | Item 1    | Item 2    | Item 3    | [item1, item2, item3] ui-initialized
     .     | Item 1    | Item 2    | Item 3    | 👁 window-focused
     5ms   | Item 1    | Item 2    | Item 3    | 🔕 window-blurred
-    20ms  | Item 1    | Item 2    | Item 3    | [item1] received-ws-data-change-event
-    .     | Item 1    | Item 2    | Item 3    | [item2] received-ws-data-change-event
-    .     | Item 1    | Item 2    | Item 3    | [item3] received-ws-data-change-event
+    20ms  | Item 1    | Item 2    | Item 3    | [item1, item2, item3] received-ws-data-change-event
     1.83s | Item 1    | Item 2    | Item 3    | [item1] <confirmed-snapshot-received (value: {"name":"Updated 1"})
     .     | Updated 1 | Item 2    | Item 3    | [item1] ui-changed
     .     | Updated 1 | Item 2    | Item 3    | [item2] <confirmed-snapshot-received (value: {"name":"Updated 2"})
@@ -433,8 +423,7 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     10ms  | Alice    | Bob      | 👁 window-focused
     15ms  | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
@@ -443,19 +432,16 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
     .     | Alice    | Bob      | [users||2] received-ws-data-change-event
     1.03s | Alice    | Bob      | 🔴 >list-fetch-started (value: {"itemIds":["users||1","users||2"]})
     1.83s | Alice    | Bob      | 🔴 <list-fetch-finished (value: {"count":2})
-    .     | Zoe      | Bob      | [users||1] ui-changed
-    .     | Zoe      | Yara     | [users||2] ui-changed
+    .     | Zoe      | Yara     | [users||1, users||2] ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | 👁 window-focused
     5ms   | Alice    | Bob      | 🔕 window-blurred
-    20ms  | Alice    | Bob      | [users||1] received-ws-data-change-event
-    .     | Alice    | Bob      | [users||2] received-ws-data-change-event
+    20ms  | Alice    | Bob      | [users||1, users||2] received-ws-data-change-event
     1.83s | Alice    | Bob      | [users||1] <confirmed-item-snapshot-received (value: {"id":1,"name":"Zoe"})
     .     | Zoe      | Bob      | [users||1] ui-changed
     .     | Zoe      | Bob      | [users||2] <confirmed-item-snapshot-received (value: {"id":2,"name":"Yara"})

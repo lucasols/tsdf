@@ -546,9 +546,9 @@ test('a fresh list-query tab still performs its first fetch after a sibling tab 
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 |
-    810ms | ⋯        | ui-initialized
-    820ms | ⋯        | 🔴 >list-fetch-started
-    1.62s | ⋯        | 🔴 <list-fetch-finished (value: {"count":2})
+    810ms | ···      | ui-initialized
+    820ms | ···      | 🔴 >list-fetch-started
+    1.62s | ···      | 🔴 <list-fetch-finished (value: {"count":2})
     .     | Alice    | ui-changed
     "
   `);
@@ -631,13 +631,13 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
   );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | users||1 |
-    0     | -        | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    .     | -        | <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
-    .     | -        | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    1ms   | -        | server-data-changed (value: {"id":1,"name":"Aaron"})
-    11ms  | -        | 🔴 >list-fetch-started
-    811ms | -        | 🔴 <list-fetch-finished (value: {"count":2})
+    time  |
+    0     | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    .     | <optimistic-item-snapshot-received (value: {"id":1,"name":"Zoe"})
+    .     | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    1ms   | server-data-changed (value: {"id":1,"name":"Aaron"})
+    11ms  | 🔴 >list-fetch-started
+    811ms | 🔴 <list-fetch-finished (value: {"count":2})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`
@@ -711,11 +711,11 @@ test('confirmed sibling item fetches do not overwrite a local optimistic list it
   );
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
-    time  | users||1 |
-    0     | -        | <optimistic-item-snapshot-received (value: {"id":1,"name":"Jane"})
-    .     | -        | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
-    10ms  | -        | 🔴 >fetch-started
-    810ms | -        | 🔴 <fetch-finished (value: {"id":1,"name":"Jane"})
+    time  |
+    0     | <optimistic-item-snapshot-received (value: {"id":1,"name":"Jane"})
+    .     | <optimistic-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+    10ms  | 🔴 >fetch-started
+    810ms | 🔴 <fetch-finished (value: {"id":1,"name":"Jane"})
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`

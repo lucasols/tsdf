@@ -65,10 +65,10 @@ describe('batch coalescing basic behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -99,10 +99,10 @@ describe('batch coalescing basic behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >fetch-started
-      850ms | -     | 🔴 <fetch-finished (value: {"v":1})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >fetch-started
+      850ms | 🔴 <fetch-finished (value: {"v":1})
       "
     `);
   });
@@ -144,10 +144,10 @@ describe('batch coalescing basic behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      100ms | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      900ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      100ms | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
+      900ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -186,10 +186,10 @@ describe('maxBatchSize behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      .     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      800ms | -     | 🔴 <list-fetch-finished (value: {"count":2})
+      time  |
+      0     | scheduled-fetch-triggered
+      .     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+      800ms | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -245,14 +245,13 @@ describe('maxBatchSize behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 | item3 | item4 |
-      0     | -     | -     | -     | [item1] scheduled-fetch-triggered
-      .     | -     | -     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      .     | -     | -     | -     | [item3] scheduled-fetch-scheduled
-      .     | -     | -     | -     | [item4] scheduled-fetch-scheduled
-      800ms | -     | -     | -     | 🔴 <list-fetch-finished (value: {"count":2})
-      900ms | -     | -     | -     | 🟠 >list-fetch-started (value: {"itemIds":["item3","item4"]})
-      1.7s  | -     | -     | -     | 🟠 <list-fetch-finished (value: {"count":2})
+      time  |
+      0     | [item1] scheduled-fetch-triggered
+      .     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+      .     | [item3, item4] scheduled-fetch-scheduled
+      800ms | 🔴 <list-fetch-finished (value: {"count":2})
+      900ms | 🟠 >list-fetch-started (value: {"itemIds":["item3","item4"]})
+      1.7s  | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -305,13 +304,13 @@ describe('requests during ongoing fetch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 | item3 |
-      0     | -     | -     | [item1] scheduled-fetch-triggered
-      50ms  | -     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      60ms  | -     | -     | [item3] scheduled-fetch-scheduled
-      850ms | -     | -     | 🔴 <list-fetch-finished (value: {"count":2})
-      900ms | -     | -     | 🟠 [item3] >fetch-started
-      1.7s  | -     | -     | 🟠 [item3] <fetch-finished (value: {"v":3})
+      time  |
+      0     | [item1] scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+      60ms  | [item3] scheduled-fetch-scheduled
+      850ms | 🔴 <list-fetch-finished (value: {"count":2})
+      900ms | 🟠 [item3] >fetch-started
+      1.7s  | 🟠 [item3] <fetch-finished (value: {"v":3})
       "
     `);
   });
@@ -373,8 +372,7 @@ describe('mutation handling', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1     | item2   |
-      0     | {"v":1}   | -       | [item1] ui-initialized
-      .     | {"v":1}   | {"v":2} | [item2] ui-changed
+      0     | {"v":1}   | {"v":2} | [item1, item2] ui-initialized
       .     | {"v":100} | {"v":2} | ⬜ [item1] optimistic-ui-commit
       .     | {"v":100} | {"v":2} | ⬜ [item1] >mutation-started (value: {"v":100})
       50ms  | {"v":100} | {"v":2} | 🔴 [item2] >fetch-started
@@ -418,10 +416,10 @@ describe('error handling in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | -     | 🔴 <list-fetch-error (value: "error")
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+      850ms | 🔴 <list-fetch-error (value: "error")
       "
     `);
   });
@@ -471,10 +469,10 @@ describe('awaitFetch with batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -510,10 +508,10 @@ describe('awaitFetch with batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | -     | 🔴 <list-fetch-error (value: "error")
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+      850ms | 🔴 <list-fetch-error (value: "error")
       "
     `);
   });
@@ -554,9 +552,9 @@ describe('awaitFetch with batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      50ms  | -     | 🔴 >fetch-started
-      850ms | -     | 🔴 <fetch-finished (value: {"v":1})
+      time  |
+      50ms  | 🔴 >fetch-started
+      850ms | 🔴 <fetch-finished (value: {"v":1})
       "
     `);
   });
@@ -639,10 +637,10 @@ describe('priority handling in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -681,10 +679,10 @@ describe('priority handling in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      50ms  | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
-      850ms | -     | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2","item3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -736,8 +734,7 @@ describe('batch with UI hooks', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1   | item2   |
-      0     | {"v":1} | -       | [item1] ui-initialized
-      .     | {"v":1} | {"v":2} | [item2] ui-changed
+      0     | {"v":1} | {"v":2} | [item1, item2] ui-initialized
       50ms  | {"v":1} | {"v":2} | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
       850ms | {"v":1} | {"v":2} | 🔴 <list-fetch-finished (value: {"count":2})
       "
@@ -772,12 +769,12 @@ describe('duplicate item requests in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 |
-      0     | -     | scheduled-fetch-triggered
-      .     | -     | scheduled-fetch-coalesced
-      .     | -     | scheduled-fetch-coalesced
-      50ms  | -     | 🔴 >fetch-started
-      850ms | -     | 🔴 <fetch-finished (value: {"v":1})
+      time  |
+      0     | scheduled-fetch-triggered
+      .     | scheduled-fetch-coalesced
+      .     | scheduled-fetch-coalesced
+      50ms  | 🔴 >fetch-started
+      850ms | 🔴 <fetch-finished (value: {"v":1})
       "
     `);
   });
@@ -815,12 +812,11 @@ describe('duplicate item requests in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | item1 | item2 |
-      0     | -     | -     | [item1] scheduled-fetch-triggered
-      .     | -     | -     | [item1] scheduled-fetch-coalesced
-      .     | -     | -     | [item2] scheduled-fetch-coalesced
-      50ms  | -     | -     | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
-      850ms | -     | -     | 🔴 <list-fetch-finished (value: {"count":2})
+      time  |
+      0     | [item1] scheduled-fetch-triggered
+      .     | [item1, item2] scheduled-fetch-coalesced
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });

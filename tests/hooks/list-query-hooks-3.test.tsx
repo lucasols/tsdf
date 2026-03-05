@@ -1,4 +1,7 @@
-import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import {
+  createLoggerStore,
+  setDefaultLoggerStoreOptions,
+} from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
 import { useCallback } from 'react';
@@ -26,6 +29,9 @@ const initialServerData: Tables = {
 
 beforeAll(() => {
   vi.useFakeTimers();
+  setDefaultLoggerStoreOptions({
+    changesOnly: true,
+  });
 });
 
 beforeEach(() => {
@@ -97,7 +103,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ itemStateKey: "users||1
@@ -110,6 +116,14 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
 
     >>> first update (✅)
 
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:User 1}
+    ⋅ payload: users||1
+    └─
     ┌─
     ⋅ itemStateKey: "users||1
     ⋅ status: refetching
@@ -139,6 +153,15 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     └─
 
     >>> ignored update (❌)
+
+    ┌─
+    ⋅ itemStateKey: "users||1
+    ⋅ status: success
+    ⋅ error: null
+    ⋅ isLoading: ❌
+    ⋅ data: {id:1, name:✅}
+    ⋅ payload: users||1
+    └─
 
     >>> enabled again
 
@@ -230,7 +253,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ queryKey: {tableId:"users"}
@@ -361,7 +384,7 @@ test('useItem: disable then enable isOffScreen', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
     -> status: refetching ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
@@ -422,7 +445,7 @@ test('useListQuery: disable then enable isOffScreen', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ status: success
@@ -486,13 +509,13 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-  expect(renders1.snapshot).toMatchInlineSnapshot(`
+  expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1 ⋅ rrfs: ❌
     -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1 ⋅ rrfs: ✅
     "
   `);
-  expect(renders2.snapshot).toMatchInlineSnapshot(`
+  expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {id:2, name:User 2} ⋅ payload: users||2 ⋅ rrfs: ❌
     -> status: success ⋅ data: {id:2, name:User 2} ⋅ payload: users||2 ⋅ rrfs: ✅
@@ -508,6 +531,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
 
   const renders = createLoggerStore({
     filterKeys: ['i', 'status', 'data', 'payload'],
+    dedupeKey: 'i',
   });
 
   const { rerender } = renderHook(
@@ -549,7 +573,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
 
   expect(env.serverTable.numOfFinishedFetches).toBe(4);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> i: 1 ⋅ status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
     -> i: 2 ⋅ status: success ⋅ data: {id:2, name:User 2} ⋅ payload: users||2
@@ -570,8 +594,6 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
     -> i: 1 ⋅ status: success ⋅ data: {id:2, name:User 2} ⋅ payload: users||2
     -> i: 2 ⋅ status: success ⋅ data: {id:3, name:User 3} ⋅ payload: users||3
     -> i: 3 ⋅ status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
-    -> i: 1 ⋅ status: success ⋅ data: {id:2, name:User 2} ⋅ payload: users||2
-    -> i: 2 ⋅ status: success ⋅ data: {id:3, name:User 3} ⋅ payload: users||3
     -> i: 3 ⋅ status: success ⋅ data: {id:1, name:changed} ⋅ payload: users||1
     "
   `);
@@ -585,7 +607,7 @@ test('useMultipleListQueries should not trigger a mount refetch when some option
 
   const filterKeys = ['i', 'status', 'items', 'payload', 'rrfs'];
 
-  const renders = createLoggerStore({ filterKeys });
+  const renders = createLoggerStore({ filterKeys, dedupeKey: 'i' });
 
   const { rerender } = renderHook(
     ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
@@ -611,7 +633,7 @@ test('useMultipleListQueries should not trigger a mount refetch when some option
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ i: 1
@@ -655,6 +677,7 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
 
   const renders = createLoggerStore({
     filterKeys: ['i', 'status', 'items', 'payload'],
+    dedupeKey: 'i',
   });
 
   const { rerender } = renderHook(
@@ -698,7 +721,7 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
 
   expect(env.serverTable.numOfFinishedFetches).toBe(4);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ i: 1
@@ -768,18 +791,6 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
     ⋅ status: success
     ⋅ items: [{id:1, name:Product 1}, …(49 more)]
     ⋅ payload: {tableId:products}
-    └─
-    ┌─
-    ⋅ i: 1
-    ⋅ status: success
-    ⋅ items: [{id:1, name:User 1}, …(4 more)]
-    ⋅ payload: {tableId:users}
-    └─
-    ┌─
-    ⋅ i: 2
-    ⋅ status: success
-    ⋅ items: [{id:1, name:Order 1}, …(49 more)]
-    ⋅ payload: {tableId:orders}
     └─
     ┌─
     ⋅ i: 3
@@ -844,7 +855,7 @@ test('Selected value should update when external dep changes (default selectorUs
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ useItem: {status:success, data:1/ok, payload:users||1}
@@ -895,14 +906,12 @@ test('useItem with selector should not trigger a rerender', async () => {
   rerender();
   rerender();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ changed: ✅
 
     >>> Rerenders
 
-    -> status: success ⋅ changed: ❌
-    -> status: success ⋅ changed: ❌
     -> status: success ⋅ changed: ❌
     "
   `);
@@ -938,14 +947,12 @@ test('useListQuery with selector should not trigger a rerender', async () => {
   rerender();
   rerender();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ changed: ✅
 
     >>> Rerenders
 
-    -> status: success ⋅ changed: ❌
-    -> status: success ⋅ changed: ❌
     -> status: success ⋅ changed: ❌
     "
   `);
@@ -976,7 +983,7 @@ test('medium priority on idle list query skips delay', async () => {
 
   expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(10);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
 
     >>> mount after scheduling
@@ -1017,7 +1024,7 @@ test('medium priority on loaded list query applies delay', async () => {
 
   expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(300 + 10);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
 
     >>> mount after invalidation

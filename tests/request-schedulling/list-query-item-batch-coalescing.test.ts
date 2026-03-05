@@ -78,10 +78,10 @@ describe('batch coalescing basic behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      50ms  | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
-      850ms | -         | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -112,10 +112,10 @@ describe('batch coalescing basic behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      50ms  | -         | 🔴 >fetch-started
-      850ms | -         | 🔴 <fetch-finished (value: {"id":1,"name":"Item 1"})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >fetch-started
+      850ms | 🔴 <fetch-finished (value: {"id":1,"name":"Item 1"})
       "
     `);
   });
@@ -154,10 +154,10 @@ describe('batch coalescing basic behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      100ms | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
-      900ms | -         | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      100ms | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
+      900ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -192,10 +192,10 @@ describe('maxItemBatchSize behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      .     | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
-      800ms | -         | 🔴 <list-fetch-finished (value: {"count":2})
+      time  |
+      0     | scheduled-fetch-triggered
+      .     | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
+      800ms | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -258,14 +258,13 @@ describe('maxItemBatchSize behavior', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 | table1||3 | table1||4 |
-      0     | -         | -         | -         | [table1||1] scheduled-fetch-triggered
-      .     | -         | -         | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
-      .     | -         | -         | -         | [table1||3] scheduled-fetch-scheduled
-      .     | -         | -         | -         | [table1||4] scheduled-fetch-scheduled
-      800ms | -         | -         | -         | 🔴 <list-fetch-finished (value: {"count":2})
-      900ms | -         | -         | -         | 🟠 >list-fetch-started (value: {"itemIds":["table1||3","table1||4"]})
-      1.7s  | -         | -         | -         | 🟠 <list-fetch-finished (value: {"count":2})
+      time  |
+      0     | [table1||1] scheduled-fetch-triggered
+      .     | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
+      .     | [table1||3, table1||4] scheduled-fetch-scheduled
+      800ms | 🔴 <list-fetch-finished (value: {"count":2})
+      900ms | 🟠 >list-fetch-started (value: {"itemIds":["table1||3","table1||4"]})
+      1.7s  | 🟠 <list-fetch-finished (value: {"count":2})
       "
     `);
   });
@@ -315,13 +314,13 @@ describe('requests during ongoing fetch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 | table1||3 |
-      0     | -         | -         | [table1||1] scheduled-fetch-triggered
-      50ms  | -         | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
-      60ms  | -         | -         | [table1||3] scheduled-fetch-scheduled
-      850ms | -         | -         | 🔴 <list-fetch-finished (value: {"count":2})
-      900ms | -         | -         | 🟠 [table1||3] >fetch-started
-      1.7s  | -         | -         | 🟠 [table1||3] <fetch-finished (value: {"id":3,"name":"Item 3"})
+      time  |
+      0     | [table1||1] scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
+      60ms  | [table1||3] scheduled-fetch-scheduled
+      850ms | 🔴 <list-fetch-finished (value: {"count":2})
+      900ms | 🟠 [table1||3] >fetch-started
+      1.7s  | 🟠 [table1||3] <fetch-finished (value: {"id":3,"name":"Item 3"})
       "
     `);
   });
@@ -393,8 +392,7 @@ describe('mutation handling', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | table1||1                 | table1||2                |
-      0     | {"id":1,"name":"Item 1"}  | -                        | [table1||1] ui-initialized
-      .     | {"id":1,"name":"Item 1"}  | {"id":2,"name":"Item 2"} | [table1||2] ui-changed
+      0     | {"id":1,"name":"Item 1"}  | {"id":2,"name":"Item 2"} | [table1||1, table1||2] ui-initialized
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | ⬜ [table1||1] optimistic-ui-commit
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | ⬜ [table1||1] >mutation-started (value: {"id":1,"name":"Updated"})
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | [table1||1] ui-changed
@@ -436,10 +434,10 @@ describe('error handling in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      50ms  | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
-      850ms | -         | 🔴 <list-fetch-error (value: "error")
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
+      850ms | 🔴 <list-fetch-error (value: "error")
       "
     `);
   });
@@ -486,10 +484,10 @@ describe('awaitItemFetch with batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      50ms  | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
-      850ms | -         | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -522,10 +520,10 @@ describe('awaitItemFetch with batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      50ms  | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
-      850ms | -         | 🔴 <list-fetch-error (value: "error")
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
+      850ms | 🔴 <list-fetch-error (value: "error")
       "
     `);
   });
@@ -563,9 +561,9 @@ describe('awaitItemFetch with batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      50ms  | -         | 🔴 >fetch-started
-      850ms | -         | 🔴 <fetch-finished (value: {"id":1,"name":"Item 1"})
+      time  |
+      50ms  | 🔴 >fetch-started
+      850ms | 🔴 <fetch-finished (value: {"id":1,"name":"Item 1"})
       "
     `);
   });
@@ -641,10 +639,10 @@ describe('priority handling in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      50ms  | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
-      850ms | -         | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -680,10 +678,10 @@ describe('priority handling in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      50ms  | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
-      850ms | -         | 🔴 <list-fetch-finished (value: {"count":3})
+      time  |
+      0     | scheduled-fetch-triggered
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2","table1||3"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":3})
       "
     `);
   });
@@ -748,8 +746,7 @@ describe('batch with UI hooks', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | table1||1                | table1||2                |
-      0     | {"id":1,"name":"Item 1"} | -                        | [table1||1] ui-initialized
-      .     | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | [table1||2] ui-changed
+      0     | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | [table1||1, table1||2] ui-initialized
       50ms  | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
       850ms | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | 🔴 <list-fetch-finished (value: {"count":2})
       "
@@ -781,12 +778,12 @@ describe('duplicate item requests in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 |
-      0     | -         | scheduled-fetch-triggered
-      .     | -         | scheduled-fetch-coalesced
-      .     | -         | scheduled-fetch-coalesced
-      50ms  | -         | 🔴 >fetch-started
-      850ms | -         | 🔴 <fetch-finished (value: {"id":1,"name":"Item 1"})
+      time  |
+      0     | scheduled-fetch-triggered
+      .     | scheduled-fetch-coalesced
+      .     | scheduled-fetch-coalesced
+      50ms  | 🔴 >fetch-started
+      850ms | 🔴 <fetch-finished (value: {"id":1,"name":"Item 1"})
       "
     `);
   });
@@ -821,12 +818,11 @@ describe('duplicate item requests in batch', () => {
 
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time  | table1||1 | table1||2 |
-      0     | -         | -         | [table1||1] scheduled-fetch-triggered
-      .     | -         | -         | [table1||1] scheduled-fetch-coalesced
-      .     | -         | -         | [table1||2] scheduled-fetch-coalesced
-      50ms  | -         | -         | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
-      850ms | -         | -         | 🔴 <list-fetch-finished (value: {"count":2})
+      time  |
+      0     | [table1||1] scheduled-fetch-triggered
+      .     | [table1||1, table1||2] scheduled-fetch-coalesced
+      50ms  | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
+      850ms | 🔴 <list-fetch-finished (value: {"count":2})
       "
     `);
   });

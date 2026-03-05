@@ -9,6 +9,17 @@ Use this checklist to evaluate test quality quickly and consistently.
 - Are failure expectations specific (error type/message/state), not generic?
 - Does the test scenario reflect a realistic production usage path, or does it force impossible conditions just to satisfy assertions?
 
+## Readability And Reviewability
+
+- Can a human reviewer understand the setup, action, and expected outcome at a glance?
+- Does the test tell a clear story top-to-bottom, or does it require reverse-engineering from low-level details?
+- If the test is time-based, cross-tab, or multi-store, does it use `timelineString` snapshots as the primary readable artifact?
+- When multiple environments are involved, are all relevant timelines shown side by side?
+- Are comments present where timing or sequencing is non-obvious, and do they explain why each step matters?
+- Are related assertions grouped into readable snapshots instead of scattered across many `expect` calls?
+- Is the test still readable if you ignore implementation details like raw store shape, fetch history, or transport internals?
+- If the answer to any of these is no, treat it as a real review finding rather than optional polish.
+
 ## Coverage
 
 - Are success, failure, and edge cases covered?
@@ -36,22 +47,9 @@ Use this checklist to evaluate test quality quickly and consistently.
 - Are snapshots small, intentional, and understandable?
 - Does each test cover a genuinely distinct behavior, or is it redundant with another test?
 
-## Readability
-
-- Do tests use inline snapshots for objects/arrays instead of chaining multiple `expect(obj.a.b).toBe(...)` assertions?
-- Do tests with sequential actions over time include `timelineString` snapshots? When multiple environments/tabs/stores are involved, are **all** timelines shown so the reader can compare and trace connected actions?
-- Do complex tests (multiple actions/assertions or non-obvious logic) have comments explaining **why** each step matters? Without comments, readers must reverse-engineer intent from raw code. Good: `// refetch while previous request is still in-flight — should deduplicate`. Bad: no comment at all, or trivial labels like `// trigger refetch`.
-- Does each test read top-to-bottom as a clear scenario: arrange, act, assert?
-- Are test values realistic and meaningful (e.g., `'user-123'`, `'Product A'`) rather than generic (`'foo'`, `'bar'`, `'test1'`)?
-- Are test scenarios, fixtures, and variables named descriptively (e.g., `storeWithExpiredCache`, `fetchThatFailsOnce`) rather than opaque labels (`scenarioA`, `scenarioB`, `store1`, `store2`)?
-- Are helper functions and variables named to convey intent (e.g., `waitForRefetch()`) rather than mechanics (e.g., `doStuff()`)?
-- Is nesting (`describe` depth) kept shallow — ideally at most 2 levels — so tests are easy to scan?
-- Are related assertions grouped into a single snapshot rather than scattered across many individual `expect` calls?
-- Are there redundant or noise assertions that don't add confidence (e.g., re-checking state that was already asserted, asserting obvious intermediate states, or verifying setup rather than behavior)?
-
 ## Severity Guide
 
 - P0: Tests give false confidence on critical behavior or mask production bugs.
 - P1: Important behavior is untested or tests are likely flaky.
-- P2: Tests are brittle, unclear, or hard to maintain.
+- P2: Tests are brittle, unclear, hard to review quickly, or hard to maintain.
 - P3: Minor readability or consistency issue with low risk.

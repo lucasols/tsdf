@@ -79,24 +79,14 @@ describe('query coalescing with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 4
-        offset: 0
-        results:
-          - data: { id: 1, name: 'Item 1' }
-            itemId: 'table1||1'
-          - data: { id: 2, name: 'Item 2' }
-            itemId: 'table1||2'
-          - data: { id: 3, name: 'Item 3' }
-            itemId: 'table1||3'
-          - data: { id: 4, name: 'Item 4' }
-            itemId: 'table1||4'
-        startedAt: 50
-        type: 'list'
-    `);
-    expect(env.serverTable.numOfFinishedFetches).toBe(1);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 4, offset: 0 }
+          returned_items: 4
+          time: '50ms -> 850ms | duration: 800ms'
+      `);
 
     const itemKey = env.getStoreItemKeyFromRaw('table1||1');
     expect(env.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
@@ -126,25 +116,14 @@ describe('query coalescing with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['address', 'id', 'name']
-        limit: 5
-        offset: 0
-        results:
-          - data: { address: 'Address 1', id: 1, name: 'Item 1' }
-            itemId: 'table1||1'
-          - data: { address: 'Address 2', id: 2, name: 'Item 2' }
-            itemId: 'table1||2'
-          - data: { address: 'Address 3', id: 3, name: 'Item 3' }
-            itemId: 'table1||3'
-          - data: { address: 'Address 4', id: 4, name: 'Item 4' }
-            itemId: 'table1||4'
-          - data: { address: 'Address 5', id: 5, name: 'Item 5' }
-            itemId: 'table1||5'
-        startedAt: 50
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['address', 'id', 'name']
+            pos: { limit: 5, offset: 0 }
+          returned_items: 5
+          time: '50ms -> 850ms | duration: 800ms'
+      `);
 
     const itemKey = env.getStoreItemKeyFromRaw('table1||1');
     expect(env.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
@@ -174,33 +153,13 @@ describe('query coalescing with partial resources', () => {
 
     await flushAllTimers();
 
-    expect(env.serverTable.numOfFinishedFetches).toBe(1);
-
-    const [firstFetch] = env.serverTable.fetchHistory;
-    expect(firstFetch?.type).toBe('list');
-    if (firstFetch?.type === 'list') {
-      expect(firstFetch.limit).toBe(5);
-      expect(firstFetch.fields).toBeUndefined();
-    }
-
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        limit: 5
-        offset: 0
-        results:
-          - data: { address: 'Address 1', country: 'Country 1', id: 1, name: 'Item 1' }
-            itemId: 'table1||1'
-          - data: { address: 'Address 2', country: 'Country 2', id: 2, name: 'Item 2' }
-            itemId: 'table1||2'
-          - data: { address: 'Address 3', country: 'Country 3', id: 3, name: 'Item 3' }
-            itemId: 'table1||3'
-          - data: { address: 'Address 4', country: 'Country 4', id: 4, name: 'Item 4' }
-            itemId: 'table1||4'
-          - data: { address: 'Address 5', country: 'Country 5', id: 5, name: 'Item 5' }
-            itemId: 'table1||5'
-        startedAt: 50
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            pos: { limit: 5, offset: 0 }
+          returned_items: 5
+          time: '50ms -> 850ms | duration: 800ms'
+      `);
 
     const itemKey = env.getStoreItemKeyFromRaw('table1||1');
     expect(env.store.state.itemLoadedFields[itemKey]).toMatchInlineSnapshot(
@@ -266,38 +225,19 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
 
     await flushAllTimers();
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id']
-        limit: 2
-        offset: 0
-        results:
-          - data: { id: 1 }
-            itemId: 'table1||1'
-          - data: { id: 2 }
-            itemId: 'table1||2'
-        startedAt: 50
-        type: 'list'
-      - duration: 800
-        fields: ['address', 'id', 'name']
-        limit: 6
-        offset: 0
-        results:
-          - data: { address: 'Address 1', id: 1, name: 'Item 1' }
-            itemId: 'table1||1'
-          - data: { address: 'Address 2', id: 2, name: 'Item 2' }
-            itemId: 'table1||2'
-          - data: { address: 'Address 3', id: 3, name: 'Item 3' }
-            itemId: 'table1||3'
-          - data: { address: 'Address 4', id: 4, name: 'Item 4' }
-            itemId: 'table1||4'
-          - data: { address: 'Address 5', id: 5, name: 'Item 5' }
-            itemId: 'table1||5'
-          - data: { address: 'Address 6', id: 6, name: 'Item 6' }
-            itemId: 'table1||6'
-        startedAt: 900
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id']
+            pos: { limit: 2, offset: 0 }
+          returned_items: 2
+          time: '50ms -> 850ms | duration: 800ms'
+        - payload:
+            fields: ['address', 'id', 'name']
+            pos: { limit: 6, offset: 0 }
+          returned_items: 6
+          time: '900ms -> 1.7s | duration: 800ms'
+      `);
   });
 
   test('loadMore + load coalesce as loadMore with merged fields and max size', async () => {
@@ -333,34 +273,19 @@ describe('size and field coalescing in scheduledRequests during active fetch', (
 
     await flushAllTimers();
 
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
-      - duration: 800
-        fields: ['id', 'name']
-        limit: 2
-        offset: 0
-        results:
-          - data: { id: 1, name: 'Item 1' }
-            itemId: 'table1||1'
-          - data: { id: 2, name: 'Item 2' }
-            itemId: 'table1||2'
-        startedAt: 50
-        type: 'list'
-      - duration: 800
-        fields: ['address', 'country', 'id']
-        limit: 4
-        offset: 0
-        results:
-          - data: { address: 'Address 1', country: 'Country 1', id: 1 }
-            itemId: 'table1||1'
-          - data: { address: 'Address 2', country: 'Country 2', id: 2 }
-            itemId: 'table1||2'
-          - data: { address: 'Address 3', country: 'Country 3', id: 3 }
-            itemId: 'table1||3'
-          - data: { address: 'Address 4', country: 'Country 4', id: 4 }
-            itemId: 'table1||4'
-        startedAt: 900
-        type: 'list'
-    `);
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 2, offset: 0 }
+          returned_items: 2
+          time: '50ms -> 850ms | duration: 800ms'
+        - payload:
+            fields: ['address', 'country', 'id']
+            pos: { limit: 4, offset: 0 }
+          returned_items: 4
+          time: '900ms -> 1.7s | duration: 800ms'
+      `);
 
     const queryAfterFetch = env.apiStore.getQueryState({ tableId: 'table1' });
     expect(queryAfterFetch?.status).toBe('success');

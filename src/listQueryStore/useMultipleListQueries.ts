@@ -6,10 +6,14 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
-import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { IsOffScreenContext } from '../isOffScreenContext';
+import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
-import { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  fetchTypePriority,
+  ValidPayload,
+  ValidStoreState,
+} from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
@@ -71,6 +75,8 @@ export function useMultipleListQueries<
     options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   queryInvalidationWasTriggered: Set<string>,
+  itemFieldInvalidationPriorities: Map<string, FetchType>,
+  itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
 ): readonly TSFDUseListQueryReturn<
@@ -157,6 +163,53 @@ export function useMultipleListQueries<
       });
     },
     [itemSelector, partialResources],
+  );
+
+  const getUnresolvedPendingInvalidationFields = useCallback(
+    (itemKey: string, state?: State): string[] => {
+      const loadedFields =
+        (state?.itemLoadedFields ?? store.state.itemLoadedFields)[itemKey] ??
+        [];
+      return (itemPendingInvalidationFields.get(itemKey) ?? []).filter(
+        (field) => !loadedFields.includes(field),
+      );
+    },
+    [itemPendingInvalidationFields, store],
+  );
+
+  const getHighestPendingInvalidationPriority = useCallback(
+    (
+      itemKeys: string[],
+      requestedFields: string[] | undefined,
+    ): FetchType | undefined => {
+      let highestPriority: FetchType | undefined;
+
+      for (const itemKey of itemKeys) {
+        const unresolvedInvalidationFields =
+          getUnresolvedPendingInvalidationFields(itemKey);
+        if (unresolvedInvalidationFields.length === 0) continue;
+        if (
+          requestedFields &&
+          !requestedFields.some((field) =>
+            unresolvedInvalidationFields.includes(field),
+          )
+        ) {
+          continue;
+        }
+
+        const itemPriority = itemFieldInvalidationPriorities.get(itemKey);
+        if (!itemPriority) continue;
+        if (
+          !highestPriority ||
+          fetchTypePriority[itemPriority] > fetchTypePriority[highestPriority]
+        ) {
+          highestPriority = itemPriority;
+        }
+      }
+
+      return highestPriority;
+    },
+    [getUnresolvedPendingInvalidationFields, itemFieldInvalidationPriorities],
   );
 
   const resultSelector = useCallback(
@@ -275,6 +328,82 @@ export function useMultipleListQueries<
   const storeState = store.useSelectorRC(resultSelector, {
     equalityFn: deepEqual,
   });
+  const autoFetchSignals = store.useSelectorRC(
+    useCallback(
+      (state: State) => {
+        if (!partialResources) return [];
+
+        return queriesWithId.map(({ key, fields }) => {
+          const query = state.queries[key];
+          if (!query) {
+            return {
+              status: null,
+              refetchOnMount: null,
+              missingRequestedFieldsKey: '',
+              unresolvedInvalidationFieldsKey: '',
+              pendingInvalidationPriority: null,
+            };
+          }
+
+          const unresolvedFields = Array.from(
+            new Set(
+              query.items.flatMap((itemKey) =>
+                getUnresolvedPendingInvalidationFields(itemKey, state),
+              ),
+            ),
+          ).sort();
+
+          const missingRequestedFields =
+            Array.isArray(fields) && fields.length > 0
+              ? query.items
+                  .flatMap((itemKey) => {
+                    const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+                    return fields.filter(
+                      (field) => !loadedFields.includes(field),
+                    );
+                  })
+                  .filter(
+                    (field, index, array) => array.indexOf(field) === index,
+                  )
+                  .sort()
+              : [];
+
+          let unresolvedInvalidationFieldsKey = '';
+          if (fields === '*') {
+            unresolvedInvalidationFieldsKey = JSON.stringify(unresolvedFields);
+          } else if (Array.isArray(fields) && fields.length > 0) {
+            unresolvedInvalidationFieldsKey = JSON.stringify(
+              unresolvedFields.filter((field) => fields.includes(field)),
+            );
+          }
+
+          const pendingInvalidationPriority =
+            fields === '*'
+              ? getHighestPendingInvalidationPriority(query.items, undefined)
+              : Array.isArray(fields) && fields.length > 0
+                ? getHighestPendingInvalidationPriority(query.items, fields)
+                : undefined;
+
+          return {
+            status: query.status,
+            refetchOnMount: query.refetchOnMount,
+            missingRequestedFieldsKey: JSON.stringify(missingRequestedFields),
+            unresolvedInvalidationFieldsKey,
+            pendingInvalidationPriority: pendingInvalidationPriority ?? null,
+          };
+        });
+      },
+      [
+        getHighestPendingInvalidationPriority,
+        getUnresolvedPendingInvalidationFields,
+        partialResources,
+        queriesWithId,
+      ],
+    ),
+    {
+      equalityFn: deepEqual,
+    },
+  );
 
   useOnEvtmitterEvent(events, 'invalidateQuery', ({ payload: event }) => {
     for (const {
@@ -326,11 +455,12 @@ export function useMultipleListQueries<
 
       const queryState = getQueryState(payload);
       let fetchType = queryState?.refetchOnMount || 'lowPriority';
+      let fieldsToFetch = fields;
 
       let shouldFetch =
         !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
 
-      // For partial resources, fetch again when requested fields are missing
+      // For partial resources, refetch when the requested field set changes
       // or when a full-resource hook is affected by field invalidation.
       if (partialResources && !shouldFetch && queryState) {
         const isQueryFetchInFlight =
@@ -339,45 +469,69 @@ export function useMultipleListQueries<
           queryState.status === 'loadingMore';
 
         if (Array.isArray(fields) && fields.length > 0) {
-          const someItemMissingFields = queryState.items.some((itemKey) => {
+          const hasMissingRequestedFields = queryState.items.some((itemKey) => {
             const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-            return fields.some((f) => !loadedFields.includes(f));
+            return fields.some((field) => !loadedFields.includes(field));
           });
 
-          if (someItemMissingFields && !isQueryFetchInFlight) {
+          if (hasMissingRequestedFields && !isQueryFetchInFlight) {
             shouldFetch = true;
+            fieldsToFetch = fields;
+            // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+            // Keep stronger priorities intact; only lift low priority.
+            if (fetchType === 'lowPriority') {
+              fetchType = 'highPriority';
+            }
+          }
 
-            const hasAffectedFieldInvalidation = queryState.items.some(
-              (itemKey) => {
-                const itemFieldInvalidationFields =
-                  store.state.itemFieldInvalidationFields[itemKey];
+          const hasAffectedFieldInvalidation = queryState.items.some(
+            (itemKey) => {
+              const itemFieldInvalidationFields =
+                getUnresolvedPendingInvalidationFields(itemKey);
 
-                return (
-                  !!itemFieldInvalidationFields &&
-                  fields.some((f) => itemFieldInvalidationFields.includes(f))
-                );
-              },
+              return (
+                itemFieldInvalidationFields.length > 0 &&
+                fields.some((f) => itemFieldInvalidationFields.includes(f))
+              );
+            },
+          );
+
+          if (hasAffectedFieldInvalidation && !isQueryFetchInFlight) {
+            shouldFetch = true;
+            fieldsToFetch = fields;
+
+            const invalidationPriority = getHighestPendingInvalidationPriority(
+              queryState.items,
+              fields,
             );
 
-            if (hasAffectedFieldInvalidation && fetchType === 'lowPriority') {
-              fetchType = 'highPriority';
+            if (
+              invalidationPriority &&
+              fetchTypePriority[invalidationPriority] >
+                fetchTypePriority[fetchType]
+            ) {
+              fetchType = invalidationPriority;
             }
           }
         } else if (fields === '*') {
           const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
-            const itemFieldInvalidationFields =
-              store.state.itemFieldInvalidationFields[itemKey];
-            return (
-              !!itemFieldInvalidationFields &&
-              itemFieldInvalidationFields.length > 0
-            );
+            return getUnresolvedPendingInvalidationFields(itemKey).length > 0;
           });
 
           if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
             shouldFetch = true;
 
-            if (fetchType === 'lowPriority') {
-              fetchType = 'highPriority';
+            const invalidationPriority = getHighestPendingInvalidationPriority(
+              queryState.items,
+              undefined,
+            );
+
+            if (
+              invalidationPriority &&
+              fetchTypePriority[invalidationPriority] >
+                fetchTypePriority[fetchType]
+            ) {
+              fetchType = invalidationPriority;
             }
           }
         }
@@ -399,7 +553,7 @@ export function useMultipleListQueries<
         })
       ) {
         scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
-          fields,
+          fields: fieldsToFetch,
         });
       }
     }
@@ -411,10 +565,14 @@ export function useMultipleListQueries<
     getQueryState,
     ignoreQueriesInRefetchOnMount,
     queriesWithId,
+    store,
     scheduleAutomaticListQueryFetch,
     partialResources,
-    store.state.itemLoadedFields,
-    store.state.itemFieldInvalidationFields,
+    autoFetchSignals,
+    itemFieldInvalidationPriorities,
+    itemPendingInvalidationFields,
+    getHighestPendingInvalidationPriority,
+    getUnresolvedPendingInvalidationFields,
   ]);
 
   return storeState;

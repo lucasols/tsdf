@@ -654,7 +654,7 @@ describe('useQuery', () => {
 
     await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ isLoading: ✅ ⋅ items: [User 1, …(4 more)]
       -> status: success ⋅ isLoading: ❌ ⋅ items: [User 1, …(4 more)]
@@ -681,7 +681,7 @@ describe('useQuery', () => {
 
     await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ isLoading: ❌ ⋅ items: [User 1, …(4 more)]
       "
@@ -713,7 +713,7 @@ describe('useQuery', () => {
 
     const { rerender } = render(<Comp />);
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ items: []
       "
@@ -723,7 +723,7 @@ describe('useQuery', () => {
 
     await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ items: []
       ⋅⋅⋅
@@ -768,7 +768,7 @@ describe('useQuery', () => {
     // wait some time to make sure the query is not refetched
     await advanceTime(200);
 
-    expect(compRenders.snapshot).toMatchInlineSnapshot(`
+    expect(compRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
       "
@@ -869,7 +869,7 @@ describe('useItem', () => {
 
     await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ isLoading: ❌ ⋅ data: User 1
       "
@@ -910,7 +910,7 @@ describe('useItem', () => {
 
     await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ isLoading: ✅ ⋅ data: User 1
       -> status: success ⋅ isLoading: ❌ ⋅ data: User 1
@@ -941,7 +941,7 @@ describe('useItem', () => {
 
     const { rerender } = render(<Comp />);
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: idle ⋅ payload: null ⋅ isLoading: ❌ ⋅ data: null
       "
@@ -951,7 +951,7 @@ describe('useItem', () => {
 
     await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: idle ⋅ payload: null ⋅ isLoading: ❌ ⋅ data: null
       ⋅⋅⋅
@@ -980,7 +980,7 @@ describe('useItem', () => {
     // wait some time to make sure the query is not refetched
     await advanceTime(200);
 
-    expect(compRenders.snapshot).toMatchInlineSnapshot(`
+    expect(compRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ data: {id:1, name:User 1}
       "
@@ -1013,7 +1013,7 @@ describe('useItem', () => {
 
     await flushAllTimers();
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ payload: users||2 ⋅ data: {id:2, name:User 2}
       -> status: deleted ⋅ payload: users||2 ⋅ data: null
@@ -1159,7 +1159,7 @@ test('initial data is invalidated on first load in item query', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {id:1, name:User 1}
     -> status: refetching ⋅ data: {id:1, name:User 1}
@@ -1194,7 +1194,7 @@ test('initial data is invalidated on first load in list query', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ items: [{id:\\users||1, data:{id:1, name:User 1}}, …(4 more)]
     ┌─

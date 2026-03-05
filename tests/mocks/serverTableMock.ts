@@ -3,7 +3,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
 import { evtmitter } from 'evtmitter';
 import type { StoreError } from '../../src/utils/storeShared';
-import { FetchError, TEST_INITIAL_TIME } from './testEnvUtils';
+import { FetchError, formatTimeMs, TEST_INITIAL_TIME } from './testEnvUtils';
 
 export const DEFAULT_FETCH_DURATION_MS = 800;
 export const DEFAULT_MUTATION_DURATION_MS = 1200;
@@ -886,5 +886,42 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       return numOfFinishedFetches;
     },
     fetchHistory,
+    getRequestMadeHistory(fetchType: 'item' | 'list' | 'all' = 'all') {
+      const history: Array<{
+        _type: 'list' | 'item' | undefined;
+        payload: unknown;
+        time: string;
+        returned_items?: number;
+      }> = [];
+      for (const entry of fetchHistory) {
+        const normalizedFetchType = entry.type === 'fetch' ? 'item' : 'list';
+        if (fetchType === 'all' || fetchType === normalizedFetchType) {
+          if (entry.type === 'fetch') {
+            history.push({
+              time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
+              _type: fetchType === 'all' ? 'item' : undefined,
+              payload: {
+                itemId: entry.itemId,
+                fields: entry.fields,
+              },
+            });
+          } else {
+            history.push({
+              time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
+              _type: fetchType === 'all' ? 'list' : undefined,
+              payload: {
+                itemIds: entry.itemIds,
+                pos: { offset: entry.offset, limit: entry.limit },
+                filters: entry.filters,
+                fields: entry.fields,
+              },
+              returned_items: entry.results.length,
+            });
+          }
+        }
+      }
+
+      return history;
+    },
   };
 }
