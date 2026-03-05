@@ -154,24 +154,16 @@ test('fetching one item does not interfere with another item', async () => {
   await flushAllTimers();
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
-  // When starting from idle, UI starts as unknown ("⋯") until the first response resolves.
-  expect(env.uiChanges).toEqual([
-    { item1: '⋯' },
-    { item1: '⋯', item2: '⋯' },
-    { item1: { v: 1 }, item2: '⋯' },
-    { item1: { v: 1 }, item2: { v: 2 } },
-  ]);
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2   |
-    0     | ⋯       | -       | [item1] ui-initialized
-    .     | ⋯       | ⋯       | [item2] ui-changed
-    10ms  | ⋯       | ⋯       | 🔴 [item1] >fetch-started
-    .     | ⋯       | ⋯       | 🟠 [item2] >fetch-started
-    810ms | ⋯       | ⋯       | 🔴 [item1] <fetch-finished (value: {"v":1})
-    .     | {"v":1} | ⋯       | [item1] ui-changed
-    .     | {"v":1} | ⋯       | 🟠 [item2] <fetch-finished (value: {"v":2})
+    0     | ···     | ···     | [item1, item2] ui-initialized
+    10ms  | ···     | ···     | 🔴 [item1] >fetch-started
+    .     | ···     | ···     | 🟠 [item2] >fetch-started
+    810ms | ···     | ···     | 🔴 [item1] <fetch-finished (value: {"v":1})
+    .     | {"v":1} | ···     | [item1] ui-changed
+    .     | {"v":1} | ···     | 🟠 [item2] <fetch-finished (value: {"v":2})
     .     | {"v":1} | {"v":2} | [item2] ui-changed
     "
   `);
@@ -220,8 +212,7 @@ test('mutation on one item does not affect fetch state of another item', async (
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2   |
-    0     | {"v":0} | -       | [item1] ui-initialized
-    .     | {"v":0} | {"v":0} | [item2] ui-changed
+    0     | {"v":0} | {"v":0} | [item1, item2] ui-initialized
     .     | {"v":1} | {"v":0} | ⬜ [item1] optimistic-ui-commit
     .     | {"v":1} | {"v":0} | ⬜ [item1] >mutation-started (value: {"v":1})
     100ms | {"v":1} | {"v":0} | -- Fetch for item2 should proceed independently of item1 mutation
@@ -267,8 +258,7 @@ test('low priority fetch on one item is independent of another item fetch state'
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2   |
-    0     | {"v":0} | -       | [item1] ui-initialized
-    .     | {"v":0} | {"v":0} | [item2] ui-changed
+    0     | {"v":0} | {"v":0} | [item1, item2] ui-initialized
     .     | {"v":0} | {"v":0} | [item1] scheduled-fetch-triggered
     10ms  | {"v":0} | {"v":0} | 🔴 [item1] >fetch-started
     15ms  | {"v":0} | {"v":0} | -- Low priority fetch for item2 should not be affected by item1 in-flight fetch

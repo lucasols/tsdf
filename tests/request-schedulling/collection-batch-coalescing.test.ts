@@ -372,8 +372,7 @@ describe('mutation handling', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1     | item2   |
-      0     | {"v":1}   | -       | [item1] ui-initialized
-      .     | {"v":1}   | {"v":2} | [item2] ui-changed
+      0     | {"v":1}   | {"v":2} | [item1, item2] ui-initialized
       .     | {"v":100} | {"v":2} | ⬜ [item1] optimistic-ui-commit
       .     | {"v":100} | {"v":2} | ⬜ [item1] >mutation-started (value: {"v":100})
       50ms  | {"v":100} | {"v":2} | 🔴 [item2] >fetch-started
@@ -735,8 +734,7 @@ describe('batch with UI hooks', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | item1   | item2   |
-      0     | {"v":1} | -       | [item1] ui-initialized
-      .     | {"v":1} | {"v":2} | [item2] ui-changed
+      0     | {"v":1} | {"v":2} | [item1, item2] ui-initialized
       50ms  | {"v":1} | {"v":2} | 🔴 >list-fetch-started (value: {"itemIds":["item1","item2"]})
       850ms | {"v":1} | {"v":2} | 🔴 <list-fetch-finished (value: {"count":2})
       "

@@ -392,8 +392,7 @@ describe('mutation handling', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | table1||1                 | table1||2                |
-      0     | {"id":1,"name":"Item 1"}  | -                        | [table1||1] ui-initialized
-      .     | {"id":1,"name":"Item 1"}  | {"id":2,"name":"Item 2"} | [table1||2] ui-changed
+      0     | {"id":1,"name":"Item 1"}  | {"id":2,"name":"Item 2"} | [table1||1, table1||2] ui-initialized
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | ⬜ [table1||1] optimistic-ui-commit
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | ⬜ [table1||1] >mutation-started (value: {"id":1,"name":"Updated"})
       .     | {"id":1,"name":"Updated"} | {"id":2,"name":"Item 2"} | [table1||1] ui-changed
@@ -747,8 +746,7 @@ describe('batch with UI hooks', () => {
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | table1||1                | table1||2                |
-      0     | {"id":1,"name":"Item 1"} | -                        | [table1||1] ui-initialized
-      .     | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | [table1||2] ui-changed
+      0     | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | [table1||1, table1||2] ui-initialized
       50ms  | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | 🔴 >list-fetch-started (value: {"itemIds":["table1||1","table1||2"]})
       850ms | {"id":1,"name":"Item 1"} | {"id":2,"name":"Item 2"} | 🔴 <list-fetch-finished (value: {"count":2})
       "

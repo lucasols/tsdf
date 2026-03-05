@@ -366,7 +366,7 @@ export function createPerItemUITracker(
     itemId: string,
     value: string | number | undefined | null,
   ): string | number {
-    const valueToUse = value ?? '⋯';
+    const valueToUse = value ?? '···';
     if (itemUIValues[itemId] === valueToUse) return valueToUse;
 
     itemUIValues[itemId] = valueToUse;
@@ -600,11 +600,16 @@ function formatMultiItemTimelineString(
     const prev = groups[groups.length - 1];
     const prevEntry = prev?.[prev.length - 1];
 
+    const normalizeEntryAction =
+      entry.action === 'ui-initialized' ? 'ui-changed' : entry.action;
+    const normalizePrevEntryAction =
+      prevEntry?.action === 'ui-initialized' ? 'ui-changed' : prevEntry?.action;
+
     if (
       prevEntry &&
       showItemIdInAction &&
       entry.time === prevEntry.time &&
-      entry.action === prevEntry.action &&
+      normalizeEntryAction === normalizePrevEntryAction &&
       entry.itemId !== undefined &&
       prevEntry.itemId !== undefined &&
       entry.actionValue === undefined &&

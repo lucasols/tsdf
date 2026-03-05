@@ -723,8 +723,7 @@ test('list query RTU fetch in the active tab updates the background tab without 
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
     .     | Alice    | Bob      | [users||1] received-ws-data-change-event
     10ms  | Alice    | Bob      | 🔴 >list-fetch-started
@@ -735,8 +734,7 @@ test('list query RTU fetch in the active tab updates the background tab without 
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | [users||1] received-ws-data-change-event
     810ms | Alice    | Bob      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Zoe      | Bob      | [users||1] ui-changed
@@ -798,8 +796,7 @@ test('list query RTU failures stay local to the fetching tab', async () => {
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
     .     | Alice    | Bob      | [users||1] received-ws-data-change-event
     10ms  | Alice    | Bob      | 🔴 >list-fetch-started
@@ -809,8 +806,7 @@ test('list query RTU failures stay local to the fetching tab', async () => {
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time | users||1 | users||2 |
-    0    | Alice    | -        | [users||1] ui-initialized
-    .    | Alice    | Bob      | [users||2] ui-changed
+    0    | Alice    | Bob      | [users||1, users||2] ui-initialized
     .    | Alice    | Bob      | [users||1] received-ws-data-change-event
     "
   `);
@@ -877,8 +873,7 @@ test('list query realtime invalidations stay isolated across different store ids
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | 👁 window-focused
     5ms   | Alice    | Bob      | 🔕 window-blurred
     10ms  | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
@@ -890,8 +885,7 @@ test('list query realtime invalidations stay isolated across different store ids
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time | users||1 | users||2 |
-    0    | Alice    | -        | [users||1] ui-initialized
-    .    | Alice    | Bob      | [users||2] ui-changed
+    0    | Alice    | Bob      | [users||1, users||2] ui-initialized
     10ms | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
     "
   `);
@@ -960,8 +954,7 @@ test('list query background RTU invalidations dedupe to one query fetch when all
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     10ms  | Alice    | Bob      | 👁 window-focused
     15ms  | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
@@ -974,8 +967,7 @@ test('list query background RTU invalidations dedupe to one query fetch when all
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | 👁 window-focused
     5ms   | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1] received-ws-data-change-event
@@ -1050,8 +1042,7 @@ test('list query RTU fetch in the active tab updates the background tab that use
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
     .     | Alice    | Bob      | [users||1] received-ws-data-change-event
     10ms  | Alice    | Bob      | 🔴 >list-fetch-started

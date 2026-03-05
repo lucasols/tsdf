@@ -100,8 +100,7 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2     |
-    0     | Item 1  | -         | [item1] ui-initialized
-    .     | Item 1  | Item 2    | [item2] ui-changed
+    0     | Item 1  | Item 2    | [item1, item2] ui-initialized
     10ms  | Item 1  | Item 2    | 👁 window-focused
     15ms  | Item 1  | Item 2    | 🔕 window-blurred
     20ms  | Item 1  | Item 2    | [item1] server-data-changed (value: {"name":"Updated"})
@@ -116,8 +115,7 @@ test('collection background RTU invalidations dedupe to one batch fetch when all
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1   | item2     |
-    0     | Item 1  | -         | [item1] ui-initialized
-    .     | Item 1  | Item 2    | [item2] ui-changed
+    0     | Item 1  | Item 2    | [item1, item2] ui-initialized
     .     | Item 1  | Item 2    | 👁 window-focused
     5ms   | Item 1  | Item 2    | 🔕 window-blurred
     20ms  | Item 1  | Item 2    | [item1, item2] received-ws-data-change-event
@@ -227,8 +225,7 @@ test('collection background RTU batch fetch includes the union of invalidated it
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1     | item2     |
-    0     | Item 1    | -         | [item1] ui-initialized
-    .     | Item 1    | Item 2    | [item2] ui-changed
+    0     | Item 1    | Item 2    | [item1, item2] ui-initialized
     10ms  | Item 1    | Item 2    | 👁 window-focused
     15ms  | Item 1    | Item 2    | 🔕 window-blurred
     20ms  | Item 1    | Item 2    | [item1] server-data-changed (value: {"name":"Updated 1"})
@@ -246,8 +243,7 @@ test('collection background RTU batch fetch includes the union of invalidated it
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | item1     | item2     | item3     |
-    0     | Item 1    | -         | -         | [item1] ui-initialized
-    .     | Item 1    | Item 2    | Item 3    | [item2, item3] ui-changed
+    0     | Item 1    | Item 2    | Item 3    | [item1, item2, item3] ui-initialized
     .     | Item 1    | Item 2    | Item 3    | 👁 window-focused
     5ms   | Item 1    | Item 2    | Item 3    | 🔕 window-blurred
     20ms  | Item 1    | Item 2    | Item 3    | [item1, item2, item3] received-ws-data-change-event
@@ -427,8 +423,7 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     10ms  | Alice    | Bob      | 👁 window-focused
     15ms  | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1] server-data-changed (value: {"id":1,"name":"Zoe"})
@@ -443,8 +438,7 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
   expect(envB.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
-    0     | Alice    | -        | [users||1] ui-initialized
-    .     | Alice    | Bob      | [users||2] ui-changed
+    0     | Alice    | Bob      | [users||1, users||2] ui-initialized
     .     | Alice    | Bob      | 👁 window-focused
     5ms   | Alice    | Bob      | 🔕 window-blurred
     20ms  | Alice    | Bob      | [users||1, users||2] received-ws-data-change-event
