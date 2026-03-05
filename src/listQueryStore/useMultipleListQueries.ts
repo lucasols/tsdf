@@ -463,7 +463,9 @@ export function useMultipleListQueries<
           if (hasMissingRequestedFields && !isQueryFetchInFlight) {
             shouldFetch = true;
             fieldsToFetch = fields;
-            if (fetchTypePriority.highPriority > fetchTypePriority[fetchType]) {
+            // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+            // Keep stronger priorities intact; only lift low priority.
+            if (fetchType === 'lowPriority') {
               fetchType = 'highPriority';
             }
           }
