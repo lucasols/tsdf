@@ -424,19 +424,19 @@ describe('useListQuery with partial resources', () => {
         startedAt: 10
         type: 'list'
       - duration: 800
-        fields: ['address']
+        fields: ['id', 'name', 'address']
         limit: 50
         offset: 0
         results:
-          - data: { address: 'Address 1' }
+          - data: { address: 'Address 1', id: 1, name: 'User 1' }
             itemId: 'users||1'
-          - data: { address: 'Address 2' }
+          - data: { address: 'Address 2', id: 2, name: 'User 2' }
             itemId: 'users||2'
-          - data: { address: 'Address 3' }
+          - data: { address: 'Address 3', id: 3, name: 'User 3' }
             itemId: 'users||3'
-          - data: { address: 'Address 4' }
+          - data: { address: 'Address 4', id: 4, name: 'User 4' }
             itemId: 'users||4'
-          - data: { address: 'Address 5' }
+          - data: { address: 'Address 5', id: 5, name: 'User 5' }
             itemId: 'users||5'
         startedAt: 820
         type: 'list'
@@ -1119,19 +1119,19 @@ describe('invalidateQueryAndItems with fields', () => {
         startedAt: 10
         type: 'list'
       - duration: 800
-        fields: ['address']
+        fields: ['id', 'address']
         limit: 50
         offset: 0
         results:
-          - data: { address: 'Address 1' }
+          - data: { address: 'Address 1', id: 1 }
             itemId: 'users||1'
-          - data: { address: 'Address 2' }
+          - data: { address: 'Address 2', id: 2 }
             itemId: 'users||2'
-          - data: { address: 'Address 3' }
+          - data: { address: 'Address 3', id: 3 }
             itemId: 'users||3'
-          - data: { address: 'Address 4' }
+          - data: { address: 'Address 4', id: 4 }
             itemId: 'users||4'
-          - data: { address: 'Address 5' }
+          - data: { address: 'Address 5', id: 5 }
             itemId: 'users||5'
         startedAt: 820
         type: 'list'

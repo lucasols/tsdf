@@ -19,7 +19,12 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, pick, range } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  pick,
+  range,
+} from '../utils/genericTestUtils';
 
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
@@ -318,29 +323,29 @@ describe('list query field accumulation edge cases', () => {
         startedAt: 10
         type: 'list'
       - duration: 800
-        fields: ['address']
+        fields: ['id', 'address']
         limit: 50
         offset: 0
         results:
-          - data: { address: 'Address 1' }
+          - data: { address: 'Address 1', id: 1 }
             itemId: 'users||1'
-          - data: { address: 'Address 2' }
+          - data: { address: 'Address 2', id: 2 }
             itemId: 'users||2'
-          - data: { address: 'Address 3' }
+          - data: { address: 'Address 3', id: 3 }
             itemId: 'users||3'
-          - data: { address: 'Address 4' }
+          - data: { address: 'Address 4', id: 4 }
             itemId: 'users||4'
-          - data: { address: 'Address 5' }
+          - data: { address: 'Address 5', id: 5 }
             itemId: 'users||5'
-          - data: { address: 'Address 6' }
+          - data: { address: 'Address 6', id: 6 }
             itemId: 'users||6'
-          - data: { address: 'Address 7' }
+          - data: { address: 'Address 7', id: 7 }
             itemId: 'users||7'
-          - data: { address: 'Address 8' }
+          - data: { address: 'Address 8', id: 8 }
             itemId: 'users||8'
-          - data: { address: 'Address 9' }
+          - data: { address: 'Address 9', id: 9 }
             itemId: 'users||9'
-          - data: { address: 'Address 10' }
+          - data: { address: 'Address 10', id: 10 }
             itemId: 'users||10'
         startedAt: 820
         type: 'list'
@@ -353,7 +358,6 @@ describe('list query field accumulation edge cases', () => {
     });
 
     const renders = createLoggerStore();
-    const startTime = Date.now();
 
     const { rerender } = renderHook(
       ({ fields }: { fields: string[] }) => {
@@ -391,25 +395,38 @@ describe('list query field accumulation edge cases', () => {
       rerender({ fields: ['id', 'name', 'address'] });
     });
 
-    await flushAllTimers();
+    await advanceTime(900);
+
+    env.serverTable.setItem(
+      'users||10',
+      {
+        id: 10,
+        name: 'User 10',
+        address: 'Address 10',
+        age: 10,
+        country: 'Country 10',
+      },
+      { prepend: true },
+    );
+
+    await advanceTime(2000);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-      -> status: loading ⋅ items: [] ⋅ time: 0
-      -> status: loading ⋅ items: [] ⋅ time: 10
-      -> status: success ⋅ items: [{id:1, name:User 1}, {id:2, name:User 2}] ⋅ time: 810
+      -> status: loading ⋅ items: []
+      -> status: success ⋅ items: [{id:1, name:User 1}, {id:2, name:User 2}]
 
       >>> Expand fields
 
-      -> status: loading ⋅ items: [] ⋅ time: 810
-      -> status: loading ⋅ items: [] ⋅ time: 1620
+      -> status: loading ⋅ items: []
       ┌─
       ⋅ status: success
       ⋅ items: [{id:0, name:User 0, address:Address 0}, {id:1, name:User 1, address:Address 1}]
-      ⋅ time: 2430
       └─
       "
     `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
     expect(env.serverTable.getRequestMadeHistory('list'))
       .toMatchInlineSnapshot(`
@@ -418,15 +435,76 @@ describe('list query field accumulation edge cases', () => {
             pos: { limit: 2, offset: 0 }
           time: '10ms -> 810ms | duration: 800ms'
         - payload:
-            fields: ['address']
+            fields: ['id', 'name', 'address']
             pos: { limit: 2, offset: 0 }
           time: '820ms -> 1.62s | duration: 800ms'
-        - payload:
-            fields: ['id', 'name']
-            pos: { limit: 2, offset: 0 }
-          time: '1.63s -> 2.43s | duration: 800ms'
       `);
   });
 
-  test('list field invalidation triggers full refetch', async () => {});
+  test('list field rtu invalidation triggers full refetch on list queries', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+      usesRealTimeUpdates: true,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const result = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: ['id', 'name', 'address'] },
+      );
+
+      renders.add(pick(result, ['status', 'items']));
+    });
+
+    await flushAllTimers();
+
+    renders.addMark('Field RTU invalidation');
+
+    // Simulate RTU that invalidates specific fields on all items
+    env.serverTable.setItem('users||1', {
+      id: 1,
+      name: 'Updated User 1',
+      address: 'Updated Address 1',
+    });
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: (item) => item.startsWith('users||'),
+        type: 'realtimeUpdate',
+        fields: ['name'],
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ items: []
+      -> status: success ⋅ items: [{id:1, name:User 1, address:Address 1}, …(9 more)]
+
+      >>> Field RTU invalidation
+
+      -> status: refetching ⋅ items: [{id:1, name:User 1, address:Address 1}, …(9 more)]
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:1, name:Updated User 1, address:Updated Address 1}, …(9 more)]
+      └─
+      "
+    `);
+
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name', 'address']
+            pos: { limit: 50, offset: 0 }
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['id', 'name', 'address']
+            pos: { limit: 50, offset: 0 }
+          time: '820ms -> 1.62s | duration: 800ms'
+      `);
+  });
 });
