@@ -126,7 +126,7 @@ describe('useMultipleItems', () => {
       });
     });
 
-    expect(renders1.snapshot).toMatchInlineSnapshot(`
+    expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
       "
@@ -195,7 +195,7 @@ describe('useMultipleItems', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ data: {title:todo, completed:❌}
       -> status: success ⋅ data: {title:was invalidated, completed:✅}
@@ -607,7 +607,7 @@ describe('useItem', () => {
       await flushAllTimers();
     });
 
-    expect(compRenders.snapshot).toMatchInlineSnapshot(`
+    expect(compRenders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ data: null
       -> status: success ⋅ data: {title:todo, completed:❌}
@@ -622,7 +622,7 @@ describe('useItem', () => {
       await flushAllTimers();
     });
 
-    expect(comp2Renders.snapshot).toMatchInlineSnapshot(`
+    expect(comp2Renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ data: {title:todo, completed:❌}
       "
@@ -664,7 +664,7 @@ describe('useItem', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ payload: 1 ⋅ data: {title:todo, completed:❌}
       -> status: success ⋅ payload: 1 ⋅ data: {title:was updated, completed:❌}
@@ -706,7 +706,7 @@ describe('useItem isolated tests', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: success ⋅ payload: 2 ⋅ data: {title:todo, completed:❌}
       -> status: deleted ⋅ payload: 2 ⋅ data: null
@@ -759,7 +759,7 @@ describe('useItem isolated tests', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: deleted ⋅ payload: 2 ⋅ data: null
       "
@@ -819,7 +819,7 @@ describe('useItem isolated tests', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ payload: 1 ⋅ isLoading: ✅ ⋅ data: {title:todo, completed:❌}
       -> status: success ⋅ payload: 1 ⋅ isLoading: ❌ ⋅ data: {title:todo, completed:❌}
@@ -849,7 +849,7 @@ describe('useItem isolated tests', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ isLoading: ✅ ⋅ data: null
       -> status: success ⋅ isLoading: ❌ ⋅ data: {title:todo, completed:❌}
@@ -883,7 +883,7 @@ describe('useItem isolated tests', () => {
       { initialProps: { itemPayload: false satisfies string | false } },
     );
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ data: null
       "
@@ -895,7 +895,7 @@ describe('useItem isolated tests', () => {
       await flushAllTimers();
     });
 
-    expect(renders.snapshot).toMatchInlineSnapshot(`
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: idle ⋅ payload: undefined ⋅ isLoading: ❌ ⋅ data: null
       ⋅⋅⋅
@@ -971,7 +971,7 @@ test('RTU update works', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {title:todo, completed:❌}
     -> status: refetching ⋅ data: {title:todo, completed:❌}
@@ -1030,7 +1030,7 @@ test('fetch error then mount component without error', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: error ⋅ data: null
     -> status: loading ⋅ data: null
@@ -1060,7 +1060,7 @@ test('initial data is invalidated on first load', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {title:todo, completed:❌}
     -> status: refetching ⋅ data: {title:todo, completed:❌}
@@ -1119,7 +1119,7 @@ test('emulate load resource during its mutation', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: loading ⋅ data: null ⋅ error: null
     -> status: success ⋅ data: {title:todo, completed:❌} ⋅ error: null

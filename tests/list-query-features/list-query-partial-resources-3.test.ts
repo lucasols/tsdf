@@ -318,32 +318,115 @@ describe('list query field accumulation edge cases', () => {
         startedAt: 10
         type: 'list'
       - duration: 800
-        fields: ['id', 'address']
+        fields: ['address']
         limit: 50
         offset: 0
         results:
-          - data: { address: 'Address 1', id: 1 }
+          - data: { address: 'Address 1' }
             itemId: 'users||1'
-          - data: { address: 'Address 2', id: 2 }
+          - data: { address: 'Address 2' }
             itemId: 'users||2'
-          - data: { address: 'Address 3', id: 3 }
+          - data: { address: 'Address 3' }
             itemId: 'users||3'
-          - data: { address: 'Address 4', id: 4 }
+          - data: { address: 'Address 4' }
             itemId: 'users||4'
-          - data: { address: 'Address 5', id: 5 }
+          - data: { address: 'Address 5' }
             itemId: 'users||5'
-          - data: { address: 'Address 6', id: 6 }
+          - data: { address: 'Address 6' }
             itemId: 'users||6'
-          - data: { address: 'Address 7', id: 7 }
+          - data: { address: 'Address 7' }
             itemId: 'users||7'
-          - data: { address: 'Address 8', id: 8 }
+          - data: { address: 'Address 8' }
             itemId: 'users||8'
-          - data: { address: 'Address 9', id: 9 }
+          - data: { address: 'Address 9' }
             itemId: 'users||9'
-          - data: { address: 'Address 10', id: 10 }
+          - data: { address: 'Address 10' }
             itemId: 'users||10'
         startedAt: 820
         type: 'list'
     `);
   });
+
+  test('list field expansion refetches again when page membership changes during the missing-field fetch', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+    });
+
+    const renders = createLoggerStore();
+    const startTime = Date.now();
+
+    const { rerender } = renderHook(
+      ({ fields }: { fields: string[] }) => {
+        const query = env.apiStore.useListQuery(
+          { tableId: 'users' },
+          {
+            returnRefetchingStatus: true,
+            fields,
+            loadSize: 2,
+          },
+        );
+
+        renders.add(pick(query, ['status', 'items']));
+      },
+      { initialProps: { fields: ['id', 'name'] } },
+    );
+
+    await flushAllTimers();
+
+    env.serverTable.setItem(
+      'users||0',
+      {
+        id: 0,
+        name: 'User 0',
+        address: 'Address 0',
+        age: 0,
+        country: 'Country 0',
+      },
+      { prepend: true },
+    );
+
+    renders.addMark('Expand fields');
+
+    act(() => {
+      rerender({ fields: ['id', 'name', 'address'] });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ items: [] ⋅ time: 0
+      -> status: loading ⋅ items: [] ⋅ time: 10
+      -> status: success ⋅ items: [{id:1, name:User 1}, {id:2, name:User 2}] ⋅ time: 810
+
+      >>> Expand fields
+
+      -> status: loading ⋅ items: [] ⋅ time: 810
+      -> status: loading ⋅ items: [] ⋅ time: 1620
+      ┌─
+      ⋅ status: success
+      ⋅ items: [{id:0, name:User 0, address:Address 0}, {id:1, name:User 1, address:Address 1}]
+      ⋅ time: 2430
+      └─
+      "
+    `);
+
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 2, offset: 0 }
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            fields: ['address']
+            pos: { limit: 2, offset: 0 }
+          time: '820ms -> 1.62s | duration: 800ms'
+        - payload:
+            fields: ['id', 'name']
+            pos: { limit: 2, offset: 0 }
+          time: '1.63s -> 2.43s | duration: 800ms'
+      `);
+  });
+
+  test('list field invalidation triggers full refetch', async () => {});
 });

@@ -8,7 +8,11 @@ import { Store } from 't-state';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
-import { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  fetchTypePriority,
+  ValidPayload,
+  ValidStoreState,
+} from '../utils/storeShared';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
@@ -64,6 +68,8 @@ export function useMultipleItems<
     options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   itemInvalidationWasTriggered: Set<string>,
+  itemFieldInvalidationPriorities: Map<string, FetchType>,
+  itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
   partialResources?: PartialResourcesConfig<ItemState>,
@@ -269,7 +275,29 @@ export function useMultipleItems<
     [loadFromStateOnly, queriesWithId, selector, partialResources],
   );
 
+  const autoFetchSignalSelector = useCallback(
+    (state: State) => {
+      return queriesWithId.map(({ itemKey, fields }) => {
+        const itemQuery = state.itemQueries[itemKey];
+        const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+        const missingRequestedFields =
+          partialResources && Array.isArray(fields) && fields.length > 0
+            ? fields.filter((field) => !loadedFields.includes(field)).sort()
+            : [];
+
+        return {
+          refetchOnMount: itemQuery?.refetchOnMount ?? null,
+          missingRequestedFieldsKey: JSON.stringify(missingRequestedFields),
+        };
+      });
+    },
+    [partialResources, queriesWithId],
+  );
+
   const storeState = store.useSelectorRC(resultSelector, {
+    equalityFn: deepEqual,
+  });
+  const autoFetchSignals = store.useSelectorRC(autoFetchSignalSelector, {
     equalityFn: deepEqual,
   });
 
@@ -342,7 +370,8 @@ export function useMultipleItems<
       if (isOffScreen) continue;
 
       const itemState = store.state.itemQueries[itemKey];
-      const fetchType = itemState?.refetchOnMount || 'lowPriority';
+      let fetchType = itemState?.refetchOnMount || 'lowPriority';
+      let fieldsToFetch = fields;
 
       if (itemState === null) {
         // Deleted items should stay deleted until explicitly fetched/invalidated.
@@ -353,6 +382,8 @@ export function useMultipleItems<
         itemState === undefined ||
         !itemState.wasLoaded ||
         itemState.refetchOnMount;
+      const itemFetchIsActive =
+        itemState?.status === 'loading' || itemState?.status === 'refetching';
 
       // For partial resources, check if all requested fields are loaded
       if (
@@ -362,10 +393,34 @@ export function useMultipleItems<
         fields.length > 0
       ) {
         const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-        const hasMissingFields = fields.some((f) => !loadedFields.includes(f));
+        const missingFields = fields.filter((f) => !loadedFields.includes(f));
+        const hasMissingFields = missingFields.length > 0;
+        const pendingInvalidationFields =
+          itemPendingInvalidationFields.get(itemKey);
+        const unresolvedPendingInvalidationFields =
+          pendingInvalidationFields?.filter(
+            (field) => !loadedFields.includes(field),
+          ) ?? [];
+        const hasAffectedFieldInvalidation =
+          unresolvedPendingInvalidationFields.length > 0 &&
+          fields.some((field) =>
+            unresolvedPendingInvalidationFields.includes(field),
+          );
 
-        if (hasMissingFields) {
+        if (hasMissingFields && !itemFetchIsActive) {
           shouldFetch = true;
+          fieldsToFetch = missingFields;
+
+          const invalidationPriority =
+            itemFieldInvalidationPriorities.get(itemKey);
+          if (
+            hasAffectedFieldInvalidation &&
+            invalidationPriority &&
+            fetchTypePriority[invalidationPriority] >
+              fetchTypePriority[fetchType]
+          ) {
+            fetchType = invalidationPriority;
+          }
         }
       }
 
@@ -384,7 +439,9 @@ export function useMultipleItems<
           skipFreshFetch: !!partialResources,
         })
       ) {
-        scheduleAutomaticItemFetch(fetchType, payload, { fields });
+        scheduleAutomaticItemFetch(fetchType, payload, {
+          fields: fieldsToFetch,
+        });
       }
     }
 
@@ -396,10 +453,12 @@ export function useMultipleItems<
     loadFromStateOnly,
     queriesWithId,
     scheduleAutomaticItemFetch,
-    store.state.itemQueries,
-    store.state.itemLoadedFields,
+    autoFetchSignals,
     fetchItemFn,
+    itemFieldInvalidationPriorities,
+    itemPendingInvalidationFields,
     partialResources,
+    store,
   ]);
 
   return storeState;

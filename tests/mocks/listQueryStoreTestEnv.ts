@@ -69,6 +69,8 @@ function getStoreItemKey(tableId: string, id: number): string {
 export type Row = {
   id: number;
   name: string;
+  age?: number;
+  city?: string;
   [key: string]: unknown;
 };
 
@@ -175,6 +177,7 @@ export function createListQueryStoreTestEnv<
     addTimelineComments,
     getTimelineString,
     getRelativeTime,
+    clearTimeline: clearActionTimeline,
   } = createActionTracker();
   const { getMutationEmoji } = createEmojiCyclers();
 
@@ -583,6 +586,9 @@ export function createListQueryStoreTestEnv<
     },
     get timelineString() {
       return getTimelineString();
+    },
+    clearTimeline() {
+      clearActionTimeline();
     },
   };
 

@@ -100,7 +100,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     ┌─
     ⋅ status: success
@@ -212,7 +212,7 @@ test('disable then enable isOffScreen', async () => {
 
   await flushAllTimers();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
     -> status: refetching ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
@@ -282,13 +282,13 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
 
   expect(env.serverTable.numOfFinishedFetches).toBe(2);
 
-  expect(renders1.snapshot).toMatchInlineSnapshot(`
+  expect(renders1.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1 ⋅ rrfs: ❌
     -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1 ⋅ rrfs: ✅
     "
   `);
-  expect(renders2.snapshot).toMatchInlineSnapshot(`
+  expect(renders2.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2 ⋅ rrfs: ❌
     -> status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2 ⋅ rrfs: ✅
@@ -366,7 +366,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
 
   expect(env.serverTable.numOfFinishedFetches).toBe(4);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> i: 1 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 1
     -> i: 2 ⋅ status: success ⋅ data: {title:todo, completed:❌} ⋅ payload: 2
@@ -477,7 +477,7 @@ test('Selected value should update when selectorUsesExternalDeps is true', async
 
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: todo/ok ⋅ payload: 1
 
@@ -521,7 +521,7 @@ test('medium priority on idle collection item skips delay', async () => {
 
   expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(10);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
 
     >>> mount after scheduling
@@ -557,7 +557,7 @@ test('medium priority on loaded collection item applies delay', async () => {
 
   expect(env.serverTable.fetchHistory[0]?.startedAt).toBe(300 + 10);
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
 
     >>> mount after invalidation
@@ -599,14 +599,12 @@ test('useItem with selector should not trigger a rerender', async () => {
   rerender();
   rerender();
 
-  expect(renders.snapshot).toMatchInlineSnapshot(`
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ changed: ✅
 
     >>> Rerenders
 
-    -> status: success ⋅ changed: ❌
-    -> status: success ⋅ changed: ❌
     -> status: success ⋅ changed: ❌
     "
   `);

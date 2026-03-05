@@ -40,9 +40,10 @@ export async function executeItemBatchFetch<
   batchKey?: string,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
+  type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
 
   function applyItemResult(
-    draft: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+    draft: State,
     itemKey: string,
     data: ItemState,
     fields?: string[],
@@ -67,14 +68,28 @@ export async function executeItemBatchFetch<
     }
   }
 
-  function requestSatisfiesFieldInvalidation(
+  function clearSatisfiedItemInvalidationFields(
+    draft: State,
+    itemKey: string,
     requestFields: string[] | undefined,
-    invalidationFields: string[] | undefined,
-  ): boolean {
-    if (!requestFields || requestFields.length === 0) return false;
-    if (!invalidationFields || invalidationFields.length === 0) return false;
+  ): void {
+    const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
+    if (!invalidationFields) return;
 
-    return invalidationFields.every((field) => requestFields.includes(field));
+    if (!requestFields || requestFields.length === 0) {
+      delete draft.itemFieldInvalidationFields[itemKey];
+      return;
+    }
+
+    const remainingFields = invalidationFields.filter(
+      (field) => !requestFields.includes(field),
+    );
+
+    if (remainingFields.length > 0) {
+      draft.itemFieldInvalidationFields[itemKey] = remainingFields;
+    } else {
+      delete draft.itemFieldInvalidationFields[itemKey];
+    }
   }
 
   for (const { requestId, payload: data } of requests) {
@@ -85,14 +100,6 @@ export async function executeItemBatchFetch<
     (draft) => {
       for (const { requestId: itemKey, payload: data } of requests) {
         const itemQuery = draft.itemQueries[itemKey];
-        const invalidationFields = draft.itemFieldInvalidationFields[itemKey];
-        if (
-          invalidationFields &&
-          !requestSatisfiesFieldInvalidation(data.fields, invalidationFields)
-        ) {
-          delete draft.itemFieldInvalidationFields[itemKey];
-        }
-
         if (!itemQuery) {
           draft.itemQueries[itemKey] = {
             status: 'loading',
@@ -153,7 +160,7 @@ export async function executeItemBatchFetch<
               applyItemResult(draft, itemKey, result, data.fields);
               itemQuery.status = 'success';
               itemQuery.wasLoaded = true;
-              delete draft.itemFieldInvalidationFields[itemKey];
+              clearSatisfiedItemInvalidationFields(draft, itemKey, data.fields);
               results.set(itemKey, true);
             } else {
               itemQuery.error = errorNormalizer(
@@ -219,7 +226,11 @@ export async function executeItemBatchFetch<
             applyItemResult(draft, itemKey, data, requestData.fields);
             itemQuery.status = 'success';
             itemQuery.wasLoaded = true;
-            delete draft.itemFieldInvalidationFields[itemKey];
+            clearSatisfiedItemInvalidationFields(
+              draft,
+              itemKey,
+              requestData.fields,
+            );
           },
           { action: 'item-fetch-success' },
         );

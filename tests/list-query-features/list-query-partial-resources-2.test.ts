@@ -259,9 +259,9 @@ describe('list then load item: cross-source field accumulation', () => {
         startedAt: 10
         type: 'list'
       - duration: 800
-        fields: ['id', 'name', 'address', 'country']
+        fields: ['address', 'country']
         itemId: 'users||1'
-        result: { address: 'Address 1', country: 'Country 1', id: 1, name: 'User 1' }
+        result: { address: 'Address 1', country: 'Country 1' }
         startedAt: 820
         type: 'fetch'
     `);
@@ -504,7 +504,7 @@ describe('concurrent fetches with different fields', () => {
         startedAt: 10
         type: 'fetch'
       - duration: 800
-        fields: ['id', 'address', 'country']
+        fields: ['address', 'country', 'id']
         itemId: 'users||2'
         result: { address: 'Address 2', country: 'Country 2', id: 2 }
         startedAt: 10

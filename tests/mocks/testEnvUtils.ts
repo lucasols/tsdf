@@ -97,6 +97,8 @@ export type Action = {
   actionValue?: unknown;
   id?: string | number;
   itemId?: string;
+  /** Batch UI values for multiple items in a single action (e.g. timeline-cleared) */
+  itemUiValues?: Record<string, unknown>;
 };
 
 export type ActionReference = Pick<Action, 'id' | 'action'>;
@@ -260,12 +262,45 @@ export function createActionTracker() {
     return formatTimelineString(actionsHistory);
   }
 
+  function clearTimeline() {
+    // Preserve the last UI value per itemId so columns don't reset to '-'
+    const lastUIPerItem = new Map<string, unknown>();
+    for (const action of actionsHistory) {
+      if (action.uiValue !== undefined && action.itemId !== undefined) {
+        lastUIPerItem.set(action.itemId, action.uiValue);
+      }
+    }
+
+    actionsHistory.length = 0;
+    pendingBeforeNextActionComments.length = 0;
+    pendingActionReferenceComments.length = 0;
+
+    // Re-seed with current UI values at the clear point as a single action
+    const time = getRelativeTime();
+
+    if (lastUIPerItem.size > 0) {
+      actionsHistory.push({
+        action: '-- timeline-cleared',
+        time,
+        uiValue: undefined,
+        itemUiValues: Object.fromEntries(lastUIPerItem),
+      });
+    } else {
+      actionsHistory.push({
+        action: '-- timeline-cleared',
+        time,
+        uiValue: undefined,
+      });
+    }
+  }
+
   return {
     actionsHistory,
     addAction,
     addTimelineComments,
     getTimelineString,
     getRelativeTime,
+    clearTimeline,
   };
 }
 
@@ -327,9 +362,12 @@ export function createPerItemUITracker(
   const uiChanges: Array<Record<string, unknown>> = [];
   let uiInitialized = false;
 
-  function trackItemUI(itemId: string, value: unknown) {
+  function trackItemUI(
+    itemId: string,
+    value: string | number | undefined | null,
+  ): string | number {
     const valueToUse = value ?? '⋯';
-    if (itemUIValues[itemId] === valueToUse) return;
+    if (itemUIValues[itemId] === valueToUse) return valueToUse;
 
     itemUIValues[itemId] = valueToUse;
     uiChanges.push({ ...itemUIValues });
@@ -345,7 +383,7 @@ export function createPerItemUITracker(
           action.itemId === itemId,
       )
     ) {
-      return;
+      return valueToUse;
     }
 
     addAction(!uiInitialized ? 'ui-initialized' : 'ui-changed', {
@@ -353,6 +391,7 @@ export function createPerItemUITracker(
       itemId,
     });
     uiInitialized = true;
+    return valueToUse;
   }
 
   return {
@@ -452,11 +491,15 @@ const secondsFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
 });
 
-function formatTime(ms: number, prevMs: number | undefined): string {
-  if (prevMs !== undefined && ms === prevMs) return '.';
+export function formatTimeMs(ms: number): string {
   if (ms === 0) return '0';
   if (ms >= 1000) return `${secondsFormatter.format(ms / 1000)}s`;
   return `${ms}ms`;
+}
+
+function formatTime(ms: number, prevMs: number | undefined): string {
+  if (prevMs !== undefined && ms === prevMs) return '.';
+  return formatTimeMs(ms);
 }
 
 function formatId(id: string | number | undefined): string {
@@ -475,6 +518,11 @@ export function formatTimelineString(actionsHistory: Action[]): string {
   for (const action of sortedActions) {
     if (action.itemId !== undefined) {
       itemIds.add(action.itemId);
+    }
+    if (action.itemUiValues) {
+      for (const key of Object.keys(action.itemUiValues)) {
+        itemIds.add(key);
+      }
     }
   }
 
@@ -524,33 +572,68 @@ function formatMultiItemTimelineString(
   sortedActions: Action[],
   itemIds: string[],
 ): string {
+  // Only create columns for itemIds that have at least one tracked UI value
+  const itemIdsWithUI = itemIds.filter((id) =>
+    sortedActions.some(
+      (a) =>
+        (a.itemId === id && a.uiValue !== undefined) ||
+        (a.itemUiValues && id in a.itemUiValues),
+    ),
+  );
+
   const currentUIPerItem: Record<string, unknown> = {};
-  for (const itemId of itemIds) {
+  for (const itemId of itemIdsWithUI) {
     currentUIPerItem[itemId] = undefined;
   }
 
   const showItemIdInAction = itemIds.length > 1;
   let prevTime: number | undefined = undefined;
 
-  const rows: Array<{ cols: string[] }> = [{ cols: ['time', ...itemIds, ''] }];
+  const rows: Array<{ cols: string[] }> = [
+    { cols: ['time', ...itemIdsWithUI, ''] },
+  ];
 
-  for (const {
-    action,
-    time,
-    uiValue,
-    actionValue,
-    id,
-    itemId,
-  } of sortedActions) {
-    // Update UI value for the specific item
-    if (uiValue !== undefined && itemId !== undefined) {
-      currentUIPerItem[itemId] = uiValue;
+  // Group consecutive actions that can be merged into a single row:
+  // same time, same action string, different itemIds, no actionValue
+  const groups: Action[][] = [];
+  for (const entry of sortedActions) {
+    const prev = groups[groups.length - 1];
+    const prevEntry = prev?.[prev.length - 1];
+
+    if (
+      prevEntry &&
+      showItemIdInAction &&
+      entry.time === prevEntry.time &&
+      entry.action === prevEntry.action &&
+      entry.itemId !== undefined &&
+      prevEntry.itemId !== undefined &&
+      entry.actionValue === undefined &&
+      prevEntry.actionValue === undefined &&
+      entry.id === prevEntry.id
+    ) {
+      prev.push(entry);
+    } else {
+      groups.push([entry]);
+    }
+  }
+
+  for (const group of groups) {
+    // Apply all UI updates in the group
+    for (const { uiValue, itemId, itemUiValues } of group) {
+      if (itemUiValues) {
+        for (const [batchItemId, batchValue] of Object.entries(itemUiValues)) {
+          currentUIPerItem[batchItemId] = batchValue;
+        }
+      } else if (uiValue !== undefined && itemId !== undefined) {
+        currentUIPerItem[itemId] = uiValue;
+      }
     }
 
-    const timeStr = formatTime(time, prevTime);
+    const first = group[0];
+    const timeStr = formatTime(first.time, prevTime);
 
-    // Create UI columns for each item
-    const uiCols = itemIds.map((colItemId) => {
+    // Create UI columns for each item with tracked values
+    const uiCols = itemIdsWithUI.map((colItemId) => {
       const val = currentUIPerItem[colItemId];
       if (val === undefined) return '-';
       if (typeof val === 'number' || typeof val === 'string')
@@ -558,16 +641,25 @@ function formatMultiItemTimelineString(
       return JSON.stringify(val);
     });
 
-    const idStr = formatId(id);
-    const itemIdStr =
-      showItemIdInAction && itemId !== undefined ? `[${itemId}] ` : '';
-    let actionStr = `${idStr}${itemIdStr}${action}`;
-    if (actionValue !== undefined) {
-      actionStr += ` (value: ${JSON.stringify(actionValue)})`;
+    const idStr = formatId(first.id);
+
+    let itemIdStr = '';
+    if (showItemIdInAction && group.length > 1) {
+      const mergedIds = group
+        .map((a) => a.itemId)
+        .filter((id) => id !== undefined);
+      itemIdStr = `[${mergedIds.join(', ')}] `;
+    } else if (showItemIdInAction && first.itemId !== undefined) {
+      itemIdStr = `[${first.itemId}] `;
+    }
+
+    let actionStr = `${idStr}${itemIdStr}${first.action}`;
+    if (first.actionValue !== undefined) {
+      actionStr += ` (value: ${JSON.stringify(first.actionValue)})`;
     }
 
     rows.push({ cols: [timeStr, ...uiCols, actionStr] });
-    prevTime = time;
+    prevTime = first.time;
   }
 
   return ['\n', formatTableString(rows), '\n'].join('');
