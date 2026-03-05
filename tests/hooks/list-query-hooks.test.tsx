@@ -1063,9 +1063,11 @@ describe('useItem', () => {
 
     env.serverTable.updateItem('users||2', { name: 'Updated User 2' });
 
-    listQueryStore.invalidateQueryAndItems({
-      queryPayload: false,
-      itemPayload: 'users||2',
+    act(() => {
+      listQueryStore.invalidateQueryAndItems({
+        queryPayload: false,
+        itemPayload: 'users||2',
+      });
     });
 
     await flushAllTimers();

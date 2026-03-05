@@ -1,9 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { act } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { Row } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime } from '../utils/genericTestUtils';
 
 export function setupBrowserTabsTestLifecycle(): void {
   beforeEach(() => {
@@ -139,23 +139,31 @@ export function createFocusChangeCoordinator<T extends string>(
       if (currentFocused === tab) return;
 
       if (currentFocused !== null) {
-        getFlag(currentFocused).set(false);
-        notifyBlur(currentFocused);
-        await advanceTime(5);
+        const previousTab = currentFocused;
+        getFlag(previousTab).set(false);
+        act(() => {
+          notifyBlur(previousTab);
+        });
+        await vi.advanceTimersByTimeAsync(5);
       }
 
       getFlag(tab).set(true);
-      notifyFocus(tab);
-      await advanceTime(5);
+      act(() => {
+        notifyFocus(tab);
+      });
+      await vi.advanceTimersByTimeAsync(5);
       currentFocused = tab;
     },
 
     async blur() {
       if (currentFocused === null) return;
 
-      getFlag(currentFocused).set(false);
-      notifyBlur(currentFocused);
-      await advanceTime(5);
+      const tab = currentFocused;
+      getFlag(tab).set(false);
+      act(() => {
+        notifyBlur(tab);
+      });
+      await vi.advanceTimersByTimeAsync(5);
       currentFocused = null;
     },
   };

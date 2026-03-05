@@ -1,5 +1,5 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
-import { cleanup, render, renderHook } from '@testing-library/react';
+import { act, cleanup, render, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
 import {
   afterAll,
@@ -457,9 +457,11 @@ describe('syncMutationAndInvalidation', () => {
       comp3Renders.add({ status, error, items });
     });
 
-    store.invalidateQueryAndItems({
-      itemPayload: 'users||1',
-      queryPayload: (payload) => payload.tableId === 'users',
+    act(() => {
+      store.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: (payload) => payload.tableId === 'users',
+      });
     });
 
     await flushAllTimers();
@@ -550,9 +552,11 @@ describe('syncMutationAndInvalidation', () => {
       </>,
     );
 
-    store.invalidateQueryAndItems({
-      itemPayload: (payload) => payload.startsWith('users||'),
-      queryPayload: (payload) => payload.tableId === 'users',
+    act(() => {
+      store.invalidateQueryAndItems({
+        itemPayload: (payload) => payload.startsWith('users||'),
+        queryPayload: (payload) => payload.tableId === 'users',
+      });
     });
 
     await flushAllTimers();
@@ -660,11 +664,13 @@ test('receive a RTU', async () => {
     />,
   );
 
-  env.serverTable.setItem(
-    'users||1',
-    { id: 1, name: 'User 1 updated' },
-    { triggerRTUEvent: true },
-  );
+  act(() => {
+    env.serverTable.setItem(
+      'users||1',
+      { id: 1, name: 'User 1 updated' },
+      { triggerRTUEvent: true },
+    );
+  });
 
   await flushAllTimers();
 

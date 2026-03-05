@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import {
   afterEach,
   beforeAll,
@@ -355,18 +355,22 @@ describe('mutation handling', () => {
     await flushAllTimers();
 
     // Start mutation on table1||1
-    void env.performClientItemUpdateAction(
-      'table1||1',
-      { id: 1, name: 'Updated' },
-      {
-        withOptimisticUpdate: true,
-        withRevalidation: true,
-      },
-    );
+    act(() => {
+      void env.performClientItemUpdateAction(
+        'table1||1',
+        { id: 1, name: 'Updated' },
+        {
+          withOptimisticUpdate: true,
+          withRevalidation: true,
+        },
+      );
+    });
 
     // Try to batch fetch both items
-    env.apiStore.invalidateItem('table1||1', 'highPriority');
-    env.apiStore.invalidateItem('table1||2', 'highPriority');
+    act(() => {
+      env.apiStore.invalidateItem('table1||1', 'highPriority');
+      env.apiStore.invalidateItem('table1||2', 'highPriority');
+    });
 
     await flushAllTimers();
 
@@ -714,8 +718,10 @@ describe('batch with UI hooks', () => {
     });
 
     // Items have initial data, now invalidate them to trigger batch fetch
-    env.apiStore.invalidateItem('table1||1', 'highPriority');
-    env.apiStore.invalidateItem('table1||2', 'highPriority');
+    act(() => {
+      env.apiStore.invalidateItem('table1||1', 'highPriority');
+      env.apiStore.invalidateItem('table1||2', 'highPriority');
+    });
 
     await flushAllTimers();
 
