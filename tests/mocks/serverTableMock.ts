@@ -302,9 +302,9 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
     }
 
     const result =
-      options?.fields && options.fields.length > 0 ?
-        selectFields(item, options.fields)
-      : item;
+      options?.fields && options.fields.length > 0
+        ? selectFields(item, options.fields)
+        : item;
 
     fetchHistory.push({
       type: 'fetch',

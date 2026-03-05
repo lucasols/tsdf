@@ -1282,8 +1282,7 @@ describe('await* preload with partial resources', () => {
     await expect(awaitListPromise).resolves.toMatchObject({ error: null });
 
     // All fetches should have no fields (fields '*' = no projection)
-    expect(env.serverTable.getRequestMadeHistory('all'))
-      .toMatchInlineSnapshot(`
+    expect(env.serverTable.getRequestMadeHistory('all')).toMatchInlineSnapshot(`
         - _type: 'item'
           payload: { itemId: 'users||1' }
           time: '10ms -> 810ms | duration: 800ms'
