@@ -274,203 +274,264 @@ describe('localStorage: document store persistence', () => {
     expect(env.store.state.status).toBe('idle');
   });
 
-//   test('save uses current session key when getSessionKey changes', async () => {
-//     let currentSession = 'sess-old';
+  test('save uses current session key when getSessionKey changes', async () => {
+    let currentSession = 'sess-old';
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'dynamic-session-doc',
-//       serverData: { name: 'data', value: 1 },
-//       getSessionKey: () => currentSession,
-//     });
+    const env = createDocPersistenceEnv({
+      storeName: 'dynamic-session-doc',
+      serverData: { name: 'data', value: 1 },
+      getSessionKey: () => currentSession,
+    });
 
-//     // Fetch data in old session
-//     renderHook(() => env.apiStore.useDocument());
-//     await flushAllTimers();
+    // Fetch data in old session
+    renderHook(() => env.apiStore.useDocument());
+    await flushAllTimers();
 
-//     // Wait for debounced save
-//     await advanceTime(1100);
+    // Wait for debounced save
+    await advanceTime(1100);
 
-//     // Data should be saved under old session key
-//     expect(
-//       localStorage.getItem('tsdf.sess-old.dynamic-session-doc'),
-//     ).not.toBeNull();
+    // Data should be saved under old session key
+    expect(
+      localStorage.getItem('tsdf.sess-old.dynamic-session-doc'),
+    ).not.toBeNull();
 
-//     // Session changes (e.g., tenant switch)
-//     currentSession = 'sess-new';
+    // Session changes (e.g., tenant switch)
+    currentSession = 'sess-new';
 
-//     // Trigger another save by invalidating
-//     env.apiStore.invalidateData('highPriority');
-//     await flushAllTimers();
-//     await advanceTime(1100);
+    // Trigger another save by invalidating
+    env.apiStore.invalidateData('highPriority');
+    await flushAllTimers();
+    await advanceTime(1100);
 
-//     // Data should be saved under NEW session key, not old one
-//     expect(
-//       localStorage.getItem('tsdf.sess-new.dynamic-session-doc'),
-//     ).not.toBeNull();
-//   });
+    // Data should be saved under NEW session key, not old one
+    expect(
+      localStorage.getItem('tsdf.sess-new.dynamic-session-doc'),
+    ).not.toBeNull();
+  });
 
-//   test('getSessionKey returning false skips all storage operations', async () => {
-//     let sessionReady: string | false = false;
+  test('getSessionKey returning false skips all storage operations', async () => {
+    let sessionReady: string | false = false;
 
-//     setCachedDocumentData('skip-doc', 'eventually-ready', {
-//       name: 'cached',
-//       value: 1,
-//     });
+    setCachedDocumentData('skip-doc', 'eventually-ready', {
+      name: 'cached',
+      value: 1,
+    });
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'skip-doc',
-//       serverData: { name: 'server', value: 99 },
-//       getSessionKey: () => sessionReady,
-//     });
+    const env = createDocPersistenceEnv({
+      storeName: 'skip-doc',
+      serverData: { name: 'server', value: 99 },
+      getSessionKey: () => sessionReady,
+    });
 
-//     // Session not ready — should not have loaded cached data
-//     expect(env.store.state.data).toBeNull();
-//     expect(env.store.state.status).toBe('idle');
+    // Session not ready — should not have loaded cached data
+    expect(env.store.state.data).toBeNull();
+    expect(env.store.state.status).toBe('idle');
 
-//     // Fetch data while session is still not ready
-//     renderHook(() => env.apiStore.useDocument());
-//     await flushAllTimers();
-//     await advanceTime(1100);
+    // Fetch data while session is still not ready
+    renderHook(() => env.apiStore.useDocument());
+    await flushAllTimers();
+    await advanceTime(1100);
 
-//     // Data should NOT have been saved (session not ready)
-//     expect(localStorage.getItem('tsdf.false.skip-doc')).toBeNull();
+    // Data should NOT have been saved (session not ready)
+    expect(localStorage.getItem('tsdf.false.skip-doc')).toBeNull();
 
-//     // Session becomes ready
-//     sessionReady = 'eventually-ready';
+    // Session becomes ready
+    sessionReady = 'eventually-ready';
 
-//     // Trigger another save
-//     env.apiStore.invalidateData('highPriority');
-//     await flushAllTimers();
-//     await advanceTime(1100);
+    // Trigger another save
+    env.apiStore.invalidateData('highPriority');
+    await flushAllTimers();
+    await advanceTime(1100);
 
-//     // Now data should be saved under the real session key
-//     expect(
-//       localStorage.getItem('tsdf.eventually-ready.skip-doc'),
-//     ).not.toBeNull();
-//   });
+    // Now data should be saved under the real session key
+    expect(
+      localStorage.getItem('tsdf.eventually-ready.skip-doc'),
+    ).not.toBeNull();
+  });
 
-//   test('cached data shows refetching status before settling with server data', async () => {
-//     setCachedDocumentData('doc-revalidation', 'sess1', { name: 'stale', value: 1 });
+  test('cached data shows refetching status before settling with server data', async () => {
+    setCachedDocumentData('doc-revalidation', 'sess1', {
+      name: 'stale',
+      value: 1,
+    });
 
-//     const env = createDocPersistenceEnv({
-//       storeName: 'doc-revalidation',
-//       sessionKey: 'sess1',
-//       serverData: { name: 'fresh', value: 99 },
-//     });
+    const env = createDocPersistenceEnv({
+      storeName: 'doc-revalidation',
+      sessionKey: 'sess1',
+      serverData: { name: 'fresh', value: 99 },
+    });
 
-//     const renders = createLoggerStore();
+    const renders = createLoggerStore();
 
-//     renderHook(() => {
-//       const { data, status } = env.apiStore.useDocument({
-//         returnRefetchingStatus: true,
-//         disableRefetchOnMount: true,
-//       });
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
 
-//       renders.add({ status, data: data?.value ?? null });
-//     });
+      renders.add({ status, data: data?.value ?? null });
+    });
 
-//     await flushAllTimers();
+    await flushAllTimers();
 
-//     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
-//       "
-//       -> status: success ⋅ data: {name:stale, value:1}
-//       -> status: refetching ⋅ data: {name:stale, value:1}
-//       -> status: success ⋅ data: {name:fresh, value:99}
-//       "
-//     `);
-//   });
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {name:stale, value:1}
+      -> status: refetching ⋅ data: {name:stale, value:1}
+      -> status: success ⋅ data: {name:fresh, value:99}
+      "
+    `);
+  });
+});
 
-// });
+describe('localStorage: invalid data cleanup', () => {
+  test('version mismatch cleans up localStorage entry', async () => {
+    setCachedDocumentData('cleanup-v', 'sess1', { name: 'old', value: 1 }, 1);
 
-// describe('standard schema support', () => {
-//   test('works with Standard Schema v1 via rc_to_standard', () => {
-//     const standardSchema = rc_to_standard(testDataSchema);
+    createDocPersistenceEnv({
+      storeName: 'cleanup-v',
+      sessionKey: 'sess1',
+      version: 2,
+    });
 
-//     const key = 'tsdf.sess-std.std-doc';
-//     const entry: StorageCacheEntry<{ data: TestData }> = {
-//       data: { data: { name: 'standard', value: 99 } },
-//       timestamp: Date.now(),
-//       version: 1,
-//     };
-//     localStorage.setItem(key, JSON.stringify(entry));
+    // Entry still exists before idle cleanup fires
+    expect(localStorage.getItem('tsdf.sess1.cleanup-v')).not.toBeNull();
 
-//     const store = createDocumentStore<TestData>({
-//       id: 'std-doc',
-//       getSessionKey: () => 'sess-std',
-//       fetchFn: () => Promise.resolve({ name: 'fresh', value: 1 }),
-//       errorNormalizer: normalizeError,
-//       lowPriorityThrottleMs: 200,
-//       baseCoalescingWindowMs: 10,
-//       blockWindowClose: null,
-//       persistentStorage: {
-//         storeName: 'std-doc',
-//         backend: 'localStorage',
-//         schema: standardSchema,
-//       },
-//     });
+    // Advance past idle fallback timeout (2000ms)
+    await advanceTime(2100);
 
-//     expect(store.store.state.data).toMatchInlineSnapshot(`
-//       name: 'standard'
-//       value: 99
-//     `);
-//   });
-// });
+    // Entry should be cleaned up
+    expect(localStorage.getItem('tsdf.sess1.cleanup-v')).toBeNull();
+  });
 
-// describe('opfs: stale hydration guard', () => {
-//   function createMockAdapter(readDelayMs: number) {
-//     const storage = new Map<string, string>();
+  test('schema validation failure cleans up localStorage entry', async () => {
+    const key = 'tsdf.sess1.cleanup-schema';
+    const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
+      data: { data: { invalid: true } },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    localStorage.setItem(key, JSON.stringify(entry));
 
-//     const adapter: StorageAdapter = {
-//       async read<T>(key: string): Promise<T | null> {
-//         if (readDelayMs > 0) {
-//           await new Promise<void>((resolve) =>
-//             setTimeout(resolve, readDelayMs),
-//           );
-//         }
-//         const raw = storage.get(key);
-//         if (!raw) return null;
-//         return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
-//       },
-//       write<T>(key: string, value: T): Promise<void> {
-//         storage.set(key, JSON.stringify(value));
-//         return Promise.resolve();
-//       },
-//       remove(key: string): Promise<void> {
-//         storage.delete(key);
-//         return Promise.resolve();
-//       },
-//       removeByPrefix(prefix: string): Promise<void> {
-//         for (const key of [...storage.keys()]) {
-//           if (key.startsWith(prefix)) storage.delete(key);
-//         }
-//         return Promise.resolve();
-//       },
-//       listKeys(prefix: string): Promise<string[]> {
-//         return Promise.resolve(
-//           [...storage.keys()].filter((k) => k.startsWith(prefix)),
-//         );
-//       },
-//     };
+    createDocPersistenceEnv({
+      storeName: 'cleanup-schema',
+      sessionKey: 'sess1',
+    });
 
-//     return { adapter, storage };
-//   }
+    expect(localStorage.getItem(key)).not.toBeNull();
 
-//   function populateStorage(
-//     storage: Map<string, string>,
-//     storeName: string,
-//     sessionKey: string,
-//     data: TestData,
-//     version = 1,
-//   ) {
-//     const key = `tsdf.${sessionKey}.${storeName}`;
-//     const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
-//       {
-//         data: { data: { value: data } },
-//         timestamp: Date.now(),
-//         version,
-//       };
-//     storage.set(key, JSON.stringify(entry));
-//   }
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('malformed cache entry cleans up localStorage entry', async () => {
+    const key = 'tsdf.sess1.cleanup-malformed';
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        timestamp: Date.now(),
+        version: 1,
+        wrongShape: true,
+      }),
+    );
+
+    const env = createDocPersistenceEnv({
+      storeName: 'cleanup-malformed',
+      sessionKey: 'sess1',
+    });
+
+    expect(env.store.state.data).toBeNull();
+    expect(env.store.state.status).toBe('idle');
+    expect(localStorage.getItem(key)).not.toBeNull();
+
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('invalid JSON cleans up localStorage entry', async () => {
+    const key = 'tsdf.sess1.cleanup-invalid-json';
+    localStorage.setItem(key, '{invalid');
+
+    const env = createDocPersistenceEnv({
+      storeName: 'cleanup-invalid-json',
+      sessionKey: 'sess1',
+    });
+
+    expect(env.store.state.data).toBeNull();
+    expect(env.store.state.status).toBe('idle');
+    expect(localStorage.getItem(key)).not.toBeNull();
+
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('timestamp is refreshed on successful localStorage read', async () => {
+    const originalTimestamp = Date.now() - 100_000;
+    const key = 'tsdf.sess1.ts-refresh';
+    const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
+      {
+        data: { data: { value: { name: 'cached', value: 1 } } },
+        timestamp: originalTimestamp,
+        version: 1,
+      };
+    localStorage.setItem(key, JSON.stringify(entry));
+
+    createDocPersistenceEnv({
+      storeName: 'ts-refresh',
+      sessionKey: 'sess1',
+    });
+
+    // Advance past idle fallback timeout
+    await advanceTime(2100);
+
+    const raw = localStorage.getItem(key);
+    expect(raw).not.toBeNull();
+
+    const parsed = rc_parse_json(raw ?? '', cacheEntryTimestampSchema);
+    expect(parsed.ok).toBe(true);
+
+    if (parsed.ok) {
+      expect(parsed.value.timestamp).toBeGreaterThan(originalTimestamp);
+    }
+  });
+
+
+describe('standard schema support', () => {
+  test('works with Standard Schema v1 via rc_to_standard', () => {
+    const standardSchema = rc_to_standard(testDataSchema);
+
+    const key = 'tsdf.sess-std.std-doc';
+    const entry: StorageCacheEntry<{ data: TestData }> = {
+      data: { data: { name: 'standard', value: 99 } },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    localStorage.setItem(key, JSON.stringify(entry));
+
+    const store = createDocumentStore<TestData>({
+      id: 'std-doc',
+      getSessionKey: () => 'sess-std',
+      fetchFn: () => Promise.resolve({ name: 'fresh', value: 1 }),
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs: 200,
+      baseCoalescingWindowMs: 10,
+      blockWindowClose: null,
+      persistentStorage: {
+        storeName: 'std-doc',
+        backend: 'localStorage',
+        schema: standardSchema,
+      },
+    });
+
+    expect(store.store.state.data).toMatchInlineSnapshot(`
+      name: 'standard'
+      value: 99
+    `);
+  });
+});
 
 //   test('OPFS hydration works when persistence is still attached', async () => {
 //     const { adapter, storage } = createMockAdapter(100);
