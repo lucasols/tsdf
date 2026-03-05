@@ -231,6 +231,21 @@ export function createMutationApi<
           );
         }
 
+        // Keep map-based tracking in sync before the state update so selectors
+        // that read these maps see the same invalidation transaction.
+        for (const [
+          itemKey,
+          itemPriority,
+        ] of nextInvalidationPriorityByItemKey) {
+          itemFieldInvalidationPriorities.set(itemKey, itemPriority);
+        }
+        for (const [
+          itemKey,
+          invalidationFields,
+        ] of nextPendingInvalidationFieldsByItemKey) {
+          itemPendingInvalidationFields.set(itemKey, invalidationFields);
+        }
+
         store.produceState(
           (draft) => {
             for (const { itemKey } of itemsKey) {
@@ -249,19 +264,6 @@ export function createMutationApi<
           },
           { action: 'invalidate-item-fields' },
         );
-
-        for (const [
-          itemKey,
-          itemPriority,
-        ] of nextInvalidationPriorityByItemKey) {
-          itemFieldInvalidationPriorities.set(itemKey, itemPriority);
-        }
-        for (const [
-          itemKey,
-          invalidationFields,
-        ] of nextPendingInvalidationFieldsByItemKey) {
-          itemPendingInvalidationFields.set(itemKey, invalidationFields);
-        }
 
         // Emit invalidation events so hooks can detect missing fields and refetch
         for (const { itemKey } of itemsKey) {

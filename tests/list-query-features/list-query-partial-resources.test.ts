@@ -909,6 +909,56 @@ describe('invalidateQueryAndItems with fields', () => {
       `);
   });
 
+  test('upgrading field invalidation priority from low to high should escalate throttled full-list refetches', async () => {
+    const env = createListQueryStoreTestEnv(initialServerData, {
+      partialResources: partialResourcesConfig,
+      lowPriorityThrottleMs: 5_000,
+    });
+
+    renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, fields: '*' },
+      ),
+    );
+
+    await flushAllTimers();
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        type: 'lowPriority',
+        fields: ['name'],
+      });
+    });
+
+    await advanceTime(50);
+
+    act(() => {
+      env.apiStore.invalidateQueryAndItems({
+        itemPayload: 'users||1',
+        queryPayload: false,
+        type: 'highPriority',
+        fields: ['name'],
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(env.serverTable.getRequestMadeHistory('list'))
+      .toMatchInlineSnapshot(`
+        - payload:
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '10ms -> 810ms | duration: 800ms'
+        - payload:
+            pos: { limit: 50, offset: 0 }
+          returned_items: 5
+          time: '870ms -> 1.67s | duration: 800ms'
+      `);
+  });
+
   test('full invalidation still clears all fields after a higher-priority field invalidation', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       partialResources: partialResourcesConfig,
