@@ -79,7 +79,9 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
 - Tests use a YAML snapshot serializer instead of the default vitest snapshot serializer. Using `compactSnapshot` from `@ls-stack/utils/testUtils` to serialize the snapshot. Boolean values are serialized as `❌` or `✅` instead of `true` or `false`.
 - Tests should be optimized for human readability
 - Prefer using vitest fake timers
-- Use `createLoggerStore` util for create a human readable values timelines for snapshot testing
+- When value changes over time are relevant, use `createLoggerStore` or `timelineString` to create human-readable timeline snapshots instead of multiple `expect` statements at different points in time.
+  - `createLoggerStore`: log values with `.add(value)`, assert with `.changesSnapshot`, and use `.addMark('label')` to annotate the timeline with markers separating phases of the test.
+  - `timelineString`: provided by test envs, captures the full timeline of fetches, mutations, and UI changes automatically.
 - Use realistic times to match real usage, use as reference the default fetch durations used in the server mocks
 - Use utility functions from `tests/utils/genericTestUtils.ts` when possible:
   - `flushAllTimers()`: wraps `vi.runAllTimersAsync()` in `act()` — use instead of calling `vi.runAllTimersAsync()` directly
