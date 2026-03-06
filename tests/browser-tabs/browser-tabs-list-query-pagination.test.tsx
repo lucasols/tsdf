@@ -77,9 +77,7 @@ function renderQueryTimeline(env: PaginationEnv): void {
 function getQuerySummary(env: PaginationEnv) {
   const query = env.apiStore.getQueryState({ tableId: 'users' });
 
-  if (!query) {
-    return null;
-  }
+  if (!query) return null;
 
   return {
     hasMore: query.hasMore,
