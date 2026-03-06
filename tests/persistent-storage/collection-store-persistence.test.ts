@@ -421,6 +421,46 @@ describe('localStorage: collection store persistence', () => {
     expect(localStorage.getItem(key)).toBeNull();
   });
 
+  test('invalid cached entries are also cleaned up after a hook read', async () => {
+    const key = setCachedCollectionItem(
+      'col-invalid-hook',
+      'sess1',
+      'bad',
+      { value: { id: 'bad', name: 'Old' } },
+      1,
+    );
+
+    const env = createEnv({
+      storeName: 'col-invalid-hook',
+      sessionKey: 'sess1',
+      version: 2,
+    });
+
+    expect(localStorage.getItem(key)).not.toBeNull();
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem('bad', {
+        disableRefetchOnMount: true,
+        returnIdleStatus: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: idle ⋅ data: null
+      "
+    `);
+
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
   test('reset clears all persisted item entries for the store', async () => {
     const env = createEnv({
       storeName: 'col-reset',

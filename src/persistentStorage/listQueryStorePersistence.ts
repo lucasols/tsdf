@@ -33,9 +33,17 @@ function toItemState<
 >(
   persisted: PersistedListQueryItemData<unknown>,
   config: ListQueryPersistentStorageConfig<ItemState>,
-): { item: ItemState; itemQuery: TSDFItemQuery<ItemPayload> } | null {
+): {
+  item: ItemState;
+  itemQuery: TSDFItemQuery<ItemPayload>;
+  loadedFields: string[];
+} | null {
   const validated = validateWithSchema(config.schema, persisted.data);
   if (validated === null) return null;
+
+  const loadedFields = Array.isArray(persisted.loadedFields)
+    ? Array.from(new Set(persisted.loadedFields)).sort()
+    : Object.keys(validated).sort();
 
   return {
     item: validated,
@@ -46,6 +54,7 @@ function toItemState<
       status: 'success',
       wasLoaded: true,
     },
+    loadedFields,
   };
 }
 
@@ -81,6 +90,7 @@ function defineLazyLocalStorageItem<
         value: undefined,
         writable: true,
       });
+      delete state.itemLoadedFields[itemKey];
       return undefined;
     }
 
@@ -103,6 +113,7 @@ function defineLazyLocalStorageItem<
         value: undefined,
         writable: true,
       });
+      delete state.itemLoadedFields[itemKey];
       return undefined;
     }
 
@@ -120,6 +131,7 @@ function defineLazyLocalStorageItem<
       value: itemState.itemQuery,
       writable: true,
     });
+    state.itemLoadedFields[itemKey] = itemState.loadedFields;
 
     return itemState.item;
   }
@@ -351,6 +363,7 @@ export function setupListQueryPersistence<
             if (draft.itemQueries[itemKey] === undefined) {
               draft.items[itemKey] = itemState.item;
               draft.itemQueries[itemKey] = itemState.itemQuery;
+              draft.itemLoadedFields[itemKey] = itemState.loadedFields;
             }
           },
           { action: 'persistent-storage-hydrate' },
@@ -557,6 +570,7 @@ export function setupListQueryPersistence<
         itemNamespace.save(itemKey, {
           data: item,
           payload: itemQuery.payload,
+          loadedFields: state.itemLoadedFields[itemKey],
         }),
       );
     }

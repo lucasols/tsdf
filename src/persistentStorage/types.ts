@@ -119,6 +119,7 @@ export type PersistedCollectionItemData<State> = {
 export type PersistedListQueryItemData<State> = {
   data: State;
   payload: unknown;
+  loadedFields?: string[];
 };
 
 /** Shape of a single persisted list query entry. */
