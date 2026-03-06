@@ -97,33 +97,23 @@ afterEach(() => {
 });
 
 describe('localStorage: collection store persistence', () => {
-  test('multiple items loaded from cache', () => {
-    const key1 = getCompositeKey('1');
-    const key2 = getCompositeKey('2');
-
-    setCachedCollectionData('col1', 'sess1', {
-      [key1]: {
-        data: { value: { id: '1', name: 'Alice' } },
-        payload: '1',
-        lastAccessedAt: 1000,
-      },
-      [key2]: {
-        data: { value: { id: '2', name: 'Bob' } },
-        payload: '2',
-        lastAccessedAt: 2000,
-      },
+  test('direct key reads lazily hydrate only the requested cached items', () => {
+    setCachedCollectionItem('col-local', 'sess1', '1', {
+      value: { id: '1', name: 'Alice' },
+    });
+    setCachedCollectionItem('col-local', 'sess1', '2', {
+      value: { id: '2', name: 'Bob' },
     });
 
-    const env = createColPersistenceEnv({
-      storeName: 'col1',
+    const env = createEnv({
+      storeName: 'col-local',
       sessionKey: 'sess1',
     });
 
-    // Both items should be loaded
-    const item1 = env.store.state[key1];
-    const item2 = env.store.state[key2];
+    expect(env.store.isInitialized).toBe(false);
+    expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
 
-    expect(item1).toMatchInlineSnapshot(`
+    expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
       data:
         value: { id: '1', name: 'Alice' }
 
@@ -134,15 +124,18 @@ describe('localStorage: collection store persistence', () => {
       wasLoaded: '✅'
     `);
 
-    expect(item2).toMatchInlineSnapshot(`
-      data:
-        value: { id: '2', name: 'Bob' }
+    expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`
+      - data:
+          value: { id: '1', name: 'Alice' }
+        error: null
+        payload: '1'
+        refetchOnMount: 'lowPriority'
+        status: 'success'
+        wasLoaded: '✅'
+    `);
 
-      error: null
-      payload: '2'
-      refetchOnMount: 'lowPriority'
-      status: 'success'
-      wasLoaded: '✅'
+    expect(env.apiStore.getItemState('2')?.data).toMatchInlineSnapshot(`
+      value: { id: '2', name: 'Bob' }
     `);
   });
 
