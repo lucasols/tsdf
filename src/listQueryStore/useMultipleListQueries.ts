@@ -474,14 +474,13 @@ export function useMultipleListQueries<
   const ignoreQueriesInRefetchOnMount = useConst(() => new Set<string>());
 
   useEffect(() => {
-    let cancelled = false;
+    const effectState = { cancelled: false };
 
     void (async () => {
       if (preloadQueries && queriesWithId.length > 0) {
         await preloadQueries(queriesWithId.map(({ payload }) => payload));
+        if (effectState.cancelled) return;
       }
-
-      if (cancelled) return;
 
       const removedQueries = new Set(ignoreQueriesInRefetchOnMount);
 
@@ -501,9 +500,9 @@ export function useMultipleListQueries<
         const queryState = getQueryState(payload);
         let fetchType = queryState?.refetchOnMount || 'lowPriority';
         let fieldsToFetch = fields;
+        let requiredFetch = queryState === undefined || !queryState.wasLoaded;
 
-        let shouldFetch =
-          !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
+        let shouldFetch = requiredFetch || !!queryState?.refetchOnMount;
 
         // For partial resources, refetch when the requested field set changes
         // or when a full-resource hook is affected by field invalidation.
@@ -524,6 +523,7 @@ export function useMultipleListQueries<
 
             if (hasMissingRequestedFields && !isQueryFetchInFlight) {
               shouldFetch = true;
+              requiredFetch = true;
               fieldsToFetch = fields;
               // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
               // Keep stronger priorities intact; only lift low priority.
@@ -546,6 +546,7 @@ export function useMultipleListQueries<
 
             if (hasAffectedFieldInvalidation && !isQueryFetchInFlight) {
               shouldFetch = true;
+              requiredFetch = true;
               fieldsToFetch = fields;
 
               const invalidationPriority =
@@ -566,6 +567,7 @@ export function useMultipleListQueries<
 
             if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
               shouldFetch = true;
+              requiredFetch = true;
 
               const invalidationPriority =
                 getHighestPendingInvalidationPriority(
@@ -593,9 +595,11 @@ export function useMultipleListQueries<
         if (
           shouldScheduleAutomaticFetch({
             wasLoaded: queryState?.wasLoaded,
-            shouldFetch: !!shouldFetch,
+            shouldFetch,
+            requiredFetch,
             disableRefetches,
             disableRefetchOnMount,
+            refetchOnMount: queryState?.refetchOnMount ?? false,
             skipFreshFetch: !!partialResources,
           })
         ) {
@@ -611,7 +615,7 @@ export function useMultipleListQueries<
     })();
 
     return () => {
-      cancelled = true;
+      effectState.cancelled = true;
     };
   }, [
     getQueryState,

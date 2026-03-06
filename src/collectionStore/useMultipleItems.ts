@@ -226,14 +226,13 @@ export function useMultipleItems<
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
   useEffect(() => {
-    let cancelled = false;
+    const effectState = { cancelled: false };
 
     void (async () => {
       if (preloadItems && queriesWithId.length > 0) {
         await preloadItems(queriesWithId.map(({ payload }) => payload));
+        if (effectState.cancelled) return;
       }
-
-      if (cancelled) return;
 
       const removedQueries = new Set(ignoreItemsInRefetchOnMount);
 
@@ -251,13 +250,14 @@ export function useMultipleItems<
         if (itemId) {
           const itemState = getItemState(payload);
           const fetchType = itemState?.refetchOnMount || 'lowPriority';
+          const requiredFetch = !itemState?.wasLoaded;
 
           if (itemState === null) {
             // Deleted items should stay deleted until a caller explicitly refetches them.
             continue;
           }
 
-          const shouldFetch = !itemState?.wasLoaded || itemState.refetchOnMount;
+          const shouldFetch = requiredFetch || !!itemState.refetchOnMount;
 
           if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemId)) {
             continue;
@@ -268,9 +268,11 @@ export function useMultipleItems<
           if (
             shouldScheduleAutomaticFetch({
               wasLoaded: itemState?.wasLoaded,
-              shouldFetch: !!shouldFetch,
+              shouldFetch,
+              requiredFetch,
               disableRefetches,
               disableRefetchOnMount,
+              refetchOnMount: itemState?.refetchOnMount ?? false,
             })
           ) {
             scheduleAutomaticFetch(fetchType, payload);
@@ -284,7 +286,7 @@ export function useMultipleItems<
     })();
 
     return () => {
-      cancelled = true;
+      effectState.cancelled = true;
     };
   }, [
     getItemState,

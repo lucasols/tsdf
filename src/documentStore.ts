@@ -58,6 +58,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
+import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -811,35 +812,40 @@ export function createDocumentStore<State extends ValidStoreState>({
     });
 
     useEffect(() => {
-      let cancelled = false;
+      const effectState = { cancelled: false };
 
       void (async () => {
         if (persistence?.hasAsyncPreload) {
           await persistence.preloadPersistentStorage();
+          if (effectState.cancelled) return;
         }
 
-        if (cancelled || disabled) return;
+        if (disabled) return;
 
         const fetchType = store.state.refetchOnMount || 'lowPriority';
+        const wasLoaded =
+          store.state.status === 'success' ||
+          store.state.status === 'refetching';
+        const requiredFetch =
+          store.state.status === 'idle' || store.state.status === 'error';
+        const shouldFetch = requiredFetch || !!store.state.refetchOnMount;
 
-        if (disableRefetches) {
-          if (store.state.status === 'idle' || store.state.status === 'error') {
-            scheduleFetch(fetchType);
-          }
-        } else if (disableRefetchOnMount) {
-          const shouldFetch =
-            store.state.refetchOnMount || store.state.status === 'idle';
-
-          if (shouldFetch) {
-            scheduleFetch(fetchType);
-          }
-        } else {
+        if (
+          shouldScheduleAutomaticFetch({
+            wasLoaded,
+            shouldFetch,
+            requiredFetch,
+            disableRefetches: !!disableRefetches,
+            disableRefetchOnMount: !!disableRefetchOnMount,
+            refetchOnMount: store.state.refetchOnMount,
+          })
+        ) {
           scheduleFetch(fetchType);
         }
       })();
 
       return () => {
-        cancelled = true;
+        effectState.cancelled = true;
       };
     }, [disableRefetchOnMount, disableRefetches, disabled]);
 

@@ -364,14 +364,15 @@ export function useMultipleItems<
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
   useEffect(() => {
-    let cancelled = false;
+    const effectState = { cancelled: false };
 
     void (async () => {
       if (preloadItems && queriesWithId.length > 0) {
         await preloadItems(queriesWithId.map(({ payload }) => payload));
+        if (effectState.cancelled) return;
       }
 
-      if (cancelled || loadFromStateOnly || !fetchItemFn) return;
+      if (loadFromStateOnly || !fetchItemFn) return;
 
       const removedItems = new Set(ignoreItemsInRefetchOnMount);
 
@@ -390,16 +391,14 @@ export function useMultipleItems<
         const itemState = store.state.itemQueries[itemKey];
         let fetchType = itemState?.refetchOnMount || 'lowPriority';
         let fieldsToFetch = fields;
+        let requiredFetch = itemState === undefined || !itemState?.wasLoaded;
 
         if (itemState === null) {
           // Deleted items should stay deleted until explicitly fetched/invalidated.
           continue;
         }
 
-        let shouldFetch =
-          itemState === undefined ||
-          !itemState.wasLoaded ||
-          itemState.refetchOnMount;
+        let shouldFetch = requiredFetch || !!itemState?.refetchOnMount;
         const itemFetchIsActive =
           itemState?.status === 'loading' || itemState?.status === 'refetching';
 
@@ -427,6 +426,7 @@ export function useMultipleItems<
 
           if (hasMissingFields && !itemFetchIsActive) {
             shouldFetch = true;
+            requiredFetch = true;
             fieldsToFetch = missingFields;
             // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
             // Keep stronger priorities intact; only lift low priority.
@@ -456,9 +456,11 @@ export function useMultipleItems<
         if (
           shouldScheduleAutomaticFetch({
             wasLoaded: itemState?.wasLoaded,
-            shouldFetch: !!shouldFetch,
+            shouldFetch,
+            requiredFetch,
             disableRefetches,
             disableRefetchOnMount,
+            refetchOnMount: itemState?.refetchOnMount ?? false,
             skipFreshFetch: !!partialResources,
           })
         ) {
@@ -474,7 +476,7 @@ export function useMultipleItems<
     })();
 
     return () => {
-      cancelled = true;
+      effectState.cancelled = true;
     };
   }, [
     ignoreItemsInRefetchOnMount,
