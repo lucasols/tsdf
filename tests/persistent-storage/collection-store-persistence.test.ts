@@ -65,30 +65,26 @@ function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
   return keys;
 }
 
-function createColPersistenceEnv(options: {
+function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   version?: number;
   maxItems?: number;
   pinnedItems?: string[];
+  serverData?: Record<string, ItemState>;
 }) {
-  const getSessionKey = () => options.sessionKey ?? 'session1';
-
-  return createCollectionStoreTestEnv(
-    {},
-    {
-      ignoreInitialTimeCheck: true,
-      getSessionKey,
-      persistentStorage: {
-        storeName: options.storeName,
-        backend: 'localStorage',
-        schema: wrappedItemSchema,
-        version: options.version,
-        maxItems: options.maxItems,
-        pinnedItems: options.pinnedItems,
-      },
+  return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    ignoreInitialTimeCheck: true,
+    getSessionKey: () => options.sessionKey ?? 'session1',
+    persistentStorage: {
+      storeName: options.storeName,
+      backend: 'localStorage',
+      schema: wrappedItemSchema,
+      version: options.version,
+      maxItems: options.maxItems,
+      pinnedItems: options.pinnedItems,
     },
-  );
+  });
 }
 
 beforeAll(() => {
