@@ -1,5 +1,5 @@
 import { type RcType } from 'runcheck';
-import type { ValidStoreState } from '../utils/storeShared';
+import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 
 // --- Storage Adapter ---
 
@@ -80,11 +80,12 @@ export type DocumentPersistentStorageConfig<State extends ValidStoreState> =
 /** Persistent storage config for CollectionStore. */
 export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload = ValidPayload,
 > = StorePersistentStorageBaseConfig<ItemState> & {
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
   maxItems?: number;
-  /** Item keys that should never be evicted from storage. */
-  pinnedItems?: string[];
+  /** Item payloads that should never be evicted from storage. */
+  pinnedItems?: ItemPayload[];
 };
 
 /** Persistent storage config for ListQueryStore. */

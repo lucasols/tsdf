@@ -71,7 +71,10 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
-  persistentStorage?: CollectionPersistentStorageConfig<CollectionTestItem<D>>;
+  persistentStorage?: CollectionPersistentStorageConfig<
+    CollectionTestItem<D>,
+    string
+  >;
   storageAdapter?: StorageAdapter;
   ignoreInitialTimeCheck?: boolean;
 };

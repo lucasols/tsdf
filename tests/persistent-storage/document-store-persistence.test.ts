@@ -52,6 +52,7 @@ function createDocPersistenceEnv(options: {
   version?: number;
   getSessionKey?: () => string | false;
   serverData?: TestData;
+  onPersistentStorageError?: (error: unknown) => void;
 }) {
   const getSessionKey =
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
@@ -64,6 +65,7 @@ function createDocPersistenceEnv(options: {
       backend: 'localStorage',
       schema: wrappedSchema,
       version: options.version,
+      onPersistentStorageError: options.onPersistentStorageError,
     },
   });
 }
@@ -185,6 +187,22 @@ describe('localStorage: document store persistence', () => {
     expect(parsed.data.data).toMatchInlineSnapshot(
       `value: { name: 'test', value: 42 }`,
     );
+  });
+
+  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+    const onPersistentStorageError = vi.fn();
+    const env = createDocPersistenceEnv({
+      storeName: 'doc-preload-local',
+      sessionKey: 'sess1',
+      onPersistentStorageError,
+    });
+
+    await env.apiStore.preloadPersistentStorage();
+
+    expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
+    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
+      message: 'Async preload is not available',
+    });
   });
 
   test('save is debounced - only final state is saved', async () => {
@@ -362,7 +380,6 @@ describe('localStorage: document store persistence', () => {
     renderHook(() => {
       const { data, status } = env.apiStore.useDocument({
         returnRefetchingStatus: true,
-        disableRefetchOnMount: true,
       });
 
       renders.add({ status, data: data?.value ?? null });
@@ -377,6 +394,42 @@ describe('localStorage: document store persistence', () => {
       -> status: success ⋅ data: {name:fresh, value:99}
       "
     `);
+
+    expect(env.serverMock.numOfFinishedFetches).toBe(1);
+  });
+
+  test('disableRefetchOnMount keeps cached data without refetching', async () => {
+    setCachedDocumentData('doc-revalidation-no-refetch', 'sess1', {
+      name: 'stale',
+      value: 1,
+    });
+
+    const env = createDocPersistenceEnv({
+      storeName: 'doc-revalidation-no-refetch',
+      sessionKey: 'sess1',
+      serverData: { name: 'fresh', value: 99 },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {name:stale, value:1}
+      "
+    `);
+
+    expect(env.serverMock.numOfFinishedFetches).toBe(0);
   });
 });
 

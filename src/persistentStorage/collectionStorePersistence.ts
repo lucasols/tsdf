@@ -1,4 +1,5 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
@@ -29,7 +30,7 @@ function toCollectionItemState<
   ItemPayload extends ValidPayload,
 >(
   persisted: PersistedCollectionItemData<unknown>,
-  config: CollectionPersistentStorageConfig<ItemState>,
+  config: CollectionPersistentStorageConfig<ItemState, ItemPayload>,
 ): TSFDCollectionItem<ItemState, ItemPayload> | null {
   const validated = validateWithSchema(config.schema, persisted.data);
   if (validated === null) return null;
@@ -52,7 +53,7 @@ function defineLazyLocalStorageItem<
   itemKey: string,
   storageKey: string,
   version: number,
-  config: CollectionPersistentStorageConfig<ItemState>,
+  config: CollectionPersistentStorageConfig<ItemState, ItemPayload>,
 ): void {
   Object.defineProperty(state, itemKey, {
     configurable: true,
@@ -120,17 +121,22 @@ export function setupCollectionPersistence<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 >(
-  config: CollectionPersistentStorageConfig<ItemState> & {
+  config: CollectionPersistentStorageConfig<ItemState, ItemPayload> & {
     getSessionKey: () => string | false;
   },
   options: {
     adapter?: StorageAdapter;
+    getItemKey?: (payload: ItemPayload) => string;
   } = {},
 ): CollectionPersistenceSetup<ItemState, ItemPayload> {
   const version = config.version ?? 1;
   const backend = config.backend ?? 'opfs';
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
-  const pinnedItems = new Set(config.pinnedItems ?? []);
+  const resolveItemKey =
+    options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
+  const pinnedItemKeys = new Set(
+    (config.pinnedItems ?? []).map((payload) => resolveItemKey(payload)),
+  );
 
   const namespace = createPersistentStorageNamespaceHandle<
     PersistedCollectionItemData<ItemState>
@@ -255,8 +261,8 @@ export function setupCollectionPersistence<
     if (validEntries.length <= maxItems) return;
 
     validEntries.sort((a, b) => {
-      const aPinned = pinnedItems.has(a.itemKey);
-      const bPinned = pinnedItems.has(b.itemKey);
+      const aPinned = pinnedItemKeys.has(a.itemKey);
+      const bPinned = pinnedItemKeys.has(b.itemKey);
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;

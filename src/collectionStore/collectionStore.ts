@@ -210,7 +210,7 @@ export type CollectionStoreOptions<
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
-  persistentStorage?: CollectionPersistentStorageConfig<ItemState>;
+  persistentStorage?: CollectionPersistentStorageConfig<ItemState, ItemPayload>;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -306,7 +306,7 @@ export function createCollectionStore<
           ...persistentStorageConfig,
           getSessionKey,
         },
-        { adapter: testOptions?.storageAdapter },
+        { adapter: testOptions?.storageAdapter, getItemKey },
       )
     : null;
 
