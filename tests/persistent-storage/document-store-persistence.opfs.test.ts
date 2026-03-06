@@ -80,7 +80,7 @@ describe('opfs: document store persistence', () => {
       1,
     );
 
-    createDocPersistenceEnv({
+    const env = createDocPersistenceEnv({
       storeName: 'opfs-version-mismatch',
       sessionKey: 'sess1',
       version: 2,
@@ -88,10 +88,13 @@ describe('opfs: document store persistence', () => {
     });
 
     expect(mockAdapter.has(key)).toBe(true);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
+    await env.apiStore.preloadPersistentStorage();
     await advanceTime(2100);
     await flushAllTimers();
 
+    expect(mockAdapter.readRequests).toEqual([key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -106,19 +109,25 @@ describe('opfs: document store persistence', () => {
       };
     mockAdapter.setValue(key, entry);
 
-    createDocPersistenceEnv({
+    const env = createDocPersistenceEnv({
       storeName: 'opfs-cleanup',
       storageAdapter: mockAdapter.adapter,
     });
 
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+
+    const preloadPromise = env.apiStore.preloadPersistentStorage();
+    await advanceTime(50);
+    await preloadPromise;
     await advanceTime(3000);
 
+    expect(mockAdapter.readRequests).toEqual([key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
-  test('hydrates cached data asynchronously and refetches on mount', async () => {
+  test('loads cached data on first read and refetches on mount', async () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
-    populateStorage(mockAdapter, 'opfs-doc', 'session1', {
+    const key = populateStorage(mockAdapter, 'opfs-doc', 'session1', {
       name: 'cached',
       value: 42,
     });
@@ -130,9 +139,54 @@ describe('opfs: document store persistence', () => {
 
     const renders = createLoggerStore();
 
-    await advanceTime(200);
+    expect(env.store.state).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      refetchOnMount: '❌'
+      status: 'idle'
+    `);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
-    renders.addMark('after hydration');
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(mockAdapter.readRequests).toEqual([key]);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {name:cached, value:42}
+      -> status: refetching ⋅ data: {name:cached, value:42}
+      -> status: success ⋅ data: {name:test, value:42}
+      "
+    `);
+  });
+
+  test('explicit preload hydrates cached data before mount', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    populateStorage(mockAdapter, 'opfs-preload', 'session1', {
+      name: 'cached',
+      value: 7,
+    });
+
+    const env = createDocPersistenceEnv({
+      storeName: 'opfs-preload',
+      storageAdapter: mockAdapter.adapter,
+      serverData: { name: 'fresh', value: 8 },
+    });
+
+    const preloadPromise = env.apiStore.preloadPersistentStorage();
+    await advanceTime(100);
+    await preloadPromise;
+
+    const renders = createLoggerStore();
 
     renderHook(() => {
       const { data, status } = env.apiStore.useDocument({
@@ -146,12 +200,9 @@ describe('opfs: document store persistence', () => {
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
-
-      >>> after hydration
-
-      -> status: success ⋅ data: {name:cached, value:42}
-      -> status: refetching ⋅ data: {name:cached, value:42}
-      -> status: success ⋅ data: {name:test, value:42}
+      -> status: success ⋅ data: {name:cached, value:7}
+      -> status: refetching ⋅ data: {name:cached, value:7}
+      -> status: success ⋅ data: {name:fresh, value:8}
       "
     `);
   });
