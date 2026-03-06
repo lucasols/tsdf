@@ -72,6 +72,7 @@ function createEnv(options: {
   maxItems?: number;
   pinnedItems?: string[];
   serverData?: Record<string, ItemState>;
+  onPersistentStorageError?: (error: unknown) => void;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     ignoreInitialTimeCheck: true,
@@ -83,6 +84,7 @@ function createEnv(options: {
       version: options.version,
       maxItems: options.maxItems,
       pinnedItems: options.pinnedItems,
+      onPersistentStorageError: options.onPersistentStorageError,
     },
   });
 }
@@ -155,44 +157,78 @@ describe('localStorage: collection store persistence', () => {
       value: { id: '1', name: 'Cached' }
     `);
   });
-      sessionKey: 'sess1',
-      maxItems: 2,
+
+  test('first hook read returns cached data then refetches', async () => {
+    setCachedCollectionItem('col-hook', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
     });
 
-    // Add 3 items to the store
-    env.apiStore.addItemToState('a', { value: { id: 'a', name: 'A' } });
-    env.apiStore.addItemToState('b', { value: { id: 'b', name: 'B' } });
-    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'C' } });
+    const env = createEnv({
+      storeName: 'col-hook',
+      sessionKey: 'sess1',
+      serverData: {
+        '1': { id: '1', name: 'Fresh' },
+      },
+    });
 
-    // Wait for save debounce
-    await advanceTime(1100);
+    const renders = createLoggerStore();
 
-    const cached = localStorage.getItem('tsdf.sess1.col3');
-    expect(cached).not.toBeNull();
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+      });
 
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedCollectionData<CollectionTestItem<ItemState>>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    const savedItemKeys = Object.keys(parsed.data.items);
+      renders.add({ status, data: data?.value ?? null });
+    });
 
-    // Only 2 items should be saved — last item evicted (all have equal
-    // lastAccessedAt since they were saved together, so insertion order decides)
-    expect(savedItemKeys).toContain(keyA);
-    expect(savedItemKeys).toContain(keyB);
-    expect(savedItemKeys).not.toContain(keyC);
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Cached}
+      -> status: refetching ⋅ data: {id:1, name:Cached}
+      -> status: success ⋅ data: {id:1, name:Fresh}
+      "
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(1);
   });
 
-  test('pinned items are never evicted', async () => {
-    const keyA = getCompositeKey('a');
-    const keyB = getCompositeKey('b');
-    const keyC = getCompositeKey('c');
+  test('disableRefetchOnMount keeps cached data without refetching', async () => {
+    setCachedCollectionItem('col-hook-no-refetch', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
 
-    // Pin 'c' — without pinning, 'c' would be evicted (added last, equal
-    // lastAccessedAt, maxItems=2 keeps only first 2 by insertion order).
-    // With pinning, 'c' is forced to the front and survives.
-    const env = createColPersistenceEnv({
-      storeName: 'col4',
+    const env = createEnv({
+      storeName: 'col-hook-no-refetch',
+      sessionKey: 'sess1',
+      serverData: {
+        '1': { id: '1', name: 'Fresh' },
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Cached}
+      "
+    `);
+
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+  });
+
       sessionKey: 'sess1',
       maxItems: 2,
       pinnedItems: [keyC],
