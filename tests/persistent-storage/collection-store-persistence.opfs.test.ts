@@ -1,0 +1,244 @@
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { renderHook } from '@testing-library/react';
+import { rc_object, rc_string } from 'runcheck';
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import type {
+  PersistedCollectionItemData,
+  StorageCacheEntry,
+} from '../../src/persistentStorage/types';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+
+const wrappedItemSchema = rc_object({
+  value: rc_object({ id: rc_string, name: rc_string }),
+});
+
+function itemKey(payload: string): string {
+  return getCompositeKey(payload);
+}
+
+function itemStorageKey(
+  storeName: string,
+  sessionKey: string,
+  payload: string,
+): string {
+  return `tsdf.${sessionKey}.${storeName}.collection.item.${itemKey(payload)}`;
+}
+
+type ItemState = { id: string; name: string };
+
+type PersistedItemState = { value: ItemState };
+
+function setCachedCollectionItem(
+  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
+  storeName: string,
+  sessionKey: string,
+  payload: string,
+  data: PersistedItemState,
+  version = 1,
+): string {
+  const key = itemStorageKey(storeName, sessionKey, payload);
+  const entry: StorageCacheEntry<
+    PersistedCollectionItemData<PersistedItemState>
+  > = {
+    data: { data, payload },
+    timestamp: Date.now(),
+    version,
+  };
+
+  mockAdapter.setValue(key, entry);
+
+  return key;
+}
+
+function createEnv(options: {
+  storeName: string;
+  sessionKey?: string;
+  storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
+  serverData?: Record<string, ItemState>;
+}) {
+  return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    ignoreInitialTimeCheck: true,
+    getSessionKey: () => options.sessionKey ?? 'session1',
+    storageAdapter: options.storageAdapter,
+    persistentStorage: {
+      storeName: options.storeName,
+      backend: 'opfs',
+      schema: wrappedItemSchema,
+    },
+  });
+}
+
+beforeAll(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+  localStorage.clear();
+});
+
+describe('opfs: collection store persistence', () => {
+  test('first hook read hydrates only the requested cached item and refetches', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const hotKey = setCachedCollectionItem(
+      mockAdapter,
+      'col-opfs-hook',
+      'sess1',
+      '1',
+      {
+        value: { id: '1', name: 'Cached' },
+      },
+    );
+    const coldKey = setCachedCollectionItem(
+      mockAdapter,
+      'col-opfs-hook',
+      'sess1',
+      '2',
+      {
+        value: { id: '2', name: 'Cold' },
+      },
+    );
+
+    const env = createEnv({
+      storeName: 'col-opfs-hook',
+      sessionKey: 'sess1',
+      storageAdapter: mockAdapter.adapter,
+      serverData: {
+        '1': { id: '1', name: 'Fresh' },
+      },
+    });
+
+    expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getItemState('1')).toBeUndefined();
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(mockAdapter.readRequests).toContain(hotKey);
+    expect(mockAdapter.readRequests).not.toContain(coldKey);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null
+      -> status: success ⋅ data: {id:1, name:Cached}
+      -> status: refetching ⋅ data: {id:1, name:Cached}
+      -> status: success ⋅ data: {id:1, name:Fresh}
+      "
+    `);
+
+    expect(env.apiStore.getItemState(() => true).map((item) => item.payload))
+      .toMatchInlineSnapshot(`
+        ['1']
+      `);
+  });
+
+  test('explicit preload hydrates cached data before mount', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    setCachedCollectionItem(mockAdapter, 'col-opfs-preload', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
+
+    const env = createEnv({
+      storeName: 'col-opfs-preload',
+      sessionKey: 'sess1',
+      storageAdapter: mockAdapter.adapter,
+      serverData: {
+        '1': { id: '1', name: 'Fresh' },
+      },
+    });
+
+    const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('1');
+    await advanceTime(100);
+    await preloadPromise;
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Cached}
+      -> status: refetching ⋅ data: {id:1, name:Cached}
+      -> status: success ⋅ data: {id:1, name:Fresh}
+      "
+    `);
+  });
+
+  test('invalid cached items are removed during targeted preload', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const key = itemStorageKey('col-opfs-invalid', 'sess1', 'bad');
+    const entry: StorageCacheEntry<PersistedCollectionItemData<{ bad: true }>> =
+      {
+        data: { data: { bad: true }, payload: 'bad' },
+        timestamp: Date.now(),
+        version: 1,
+      };
+    mockAdapter.setValue(key, entry);
+
+    const env = createEnv({
+      storeName: 'col-opfs-invalid',
+      sessionKey: 'sess1',
+      storageAdapter: mockAdapter.adapter,
+    });
+
+    const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('bad');
+    await advanceTime(50);
+    await preloadPromise;
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(mockAdapter.has(key)).toBe(false);
+  });
+
+  test('stale async preload does not overwrite live state', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    setCachedCollectionItem(mockAdapter, 'col-opfs-race', 'sess1', '1', {
+      value: { id: '1', name: 'Stale' },
+    });
+
+    const env = createEnv({
+      storeName: 'col-opfs-race',
+      sessionKey: 'sess1',
+      storageAdapter: mockAdapter.adapter,
+    });
+
+    const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('1');
+
+    env.apiStore.addItemToState('1', { value: { id: '1', name: 'Live' } });
+
+    await advanceTime(100);
+    await preloadPromise;
+
+    expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
+      data:
+        value: { id: '1', name: 'Live' }
+
+      error: null
+      payload: '1'
+      refetchOnMount: '❌'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+  });
+});
