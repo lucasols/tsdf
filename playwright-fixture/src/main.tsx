@@ -56,7 +56,8 @@ type ScenarioName =
   | 'collection'
   | 'list'
   | 'persist-document'
-  | 'persist-collection';
+  | 'persist-collection'
+  | 'persist-list';
 
 function getQueryParams(): {
   pageId: string;
@@ -572,6 +573,7 @@ function PersistDocumentScenario({
 }
 
 const collectionItemSchema = rc_object({ name: rc_string });
+const listItemSchema = rc_object({ id: rc_number, name: rc_string });
 
 function PersistCollectionScenario({
   pageId,
@@ -653,6 +655,101 @@ function PersistCollectionScenario({
   );
 }
 
+function PersistListScenario({
+  pageId,
+  storeId,
+  sessionKey,
+  backend,
+}: {
+  pageId: string;
+  storeId: string;
+  sessionKey: string | false;
+  backend: StorageBackend;
+}) {
+  const [store] = useState(() =>
+    createListQueryStore<UserRow, ListQueryPayload, string>({
+      id: storeId,
+      getSessionKey: () => sessionKey,
+      fetchListFn: async (payload, size, { signal }) => {
+        const searchParams = new URLSearchParams({
+          tableId: payload.tableId,
+          limit: String(size),
+        });
+
+        return requestJson<{
+          items: Array<{ itemPayload: string; data: UserRow }>;
+          hasMore: boolean;
+        }>(pageId, `/api/list?${searchParams.toString()}`, { signal });
+      },
+      fetchItemFn: async (itemPayload, { signal }) => {
+        const [tableId, rowId] = itemPayload.split('||');
+
+        return requestJson<UserRow>(pageId, `/api/item/${tableId}/${rowId}`, {
+          signal,
+        });
+      },
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs: 10_000,
+      defaultQuerySize: 10,
+      persistentStorage: {
+        storeName: `persist-list-${storeId}`,
+        backend,
+        schema: listItemSchema,
+      },
+    }),
+  );
+
+  const query = store.useListQuery(
+    { tableId: 'users' },
+    { returnRefetchingStatus: true },
+  );
+
+  return (
+    <section>
+      <h1>Persist List</h1>
+      <div data-testid="persist-list-names">
+        {query.items.map((item) => item.name).join(',') || 'null'}
+      </div>
+      <div data-testid="persist-list-status">{query.status}</div>
+      <button
+        data-testid="persist-list-mutate-user1"
+        onClick={() => {
+          void store.performMutation('users||1', {
+            optimisticUpdate: () => {
+              store.updateItemState('users||1', (draft) => {
+                draft.name = 'Persisted';
+              });
+            },
+            mutation: async () => {
+              return requestJson<UserRow>(pageId, '/api/item/users/1/mutate', {
+                method: 'POST',
+                body: JSON.stringify({
+                  patch: { name: 'Persisted' },
+                }),
+              });
+            },
+            getRelatedQueries: (payload) => payload.tableId === 'users',
+          });
+        }}
+        type="button"
+      >
+        mutate user1
+      </button>
+      <button
+        data-testid="persist-list-clear-storage"
+        onClick={() => {
+          if (sessionKey !== false) {
+            void clearSessionStorage(sessionKey, backend);
+          }
+        }}
+        type="button"
+      >
+        clear storage
+      </button>
+    </section>
+  );
+}
+
 function App() {
   const { pageId, scenario, storeId, sessionKey, backend } = getQueryParams();
   const resolvedStoreId =
@@ -699,6 +796,14 @@ function App() {
       ) : null}
       {scenario === 'persist-collection' ? (
         <PersistCollectionScenario
+          pageId={pageId}
+          storeId={resolvedStoreId}
+          sessionKey={resolvedSessionKey}
+          backend={backend}
+        />
+      ) : null}
+      {scenario === 'persist-list' ? (
+        <PersistListScenario
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}

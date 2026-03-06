@@ -6,7 +6,7 @@ type StorageBackend = 'localStorage' | 'opfs';
 
 async function openScenario(
   context: BrowserContext,
-  scenario: 'persist-document' | 'persist-collection',
+  scenario: 'persist-document' | 'persist-collection' | 'persist-list',
   pageId: string,
   options: {
     storeId: string;
@@ -210,6 +210,89 @@ for (const backend of ['localStorage', 'opfs'] as const) {
       await expect(page.getByTestId('persist-col-item1-name')).toHaveText(
         'null',
       );
+
+      await context.close();
+    });
+
+    test('list query store persists list data and restores on reload', async ({
+      browser,
+    }) => {
+      const context = await browser.newContext();
+      const page = await openScenario(context, 'persist-list', 'page-a', {
+        storeId: `list-${backend}-basic`,
+        backend,
+      });
+
+      await expect(page.getByTestId('persist-list-status')).toHaveText(
+        'success',
+      );
+      await expect(page.getByTestId('persist-list-names')).toHaveText(
+        'Alice,Bob',
+      );
+
+      await waitForDebounce(page);
+      await page.reload();
+
+      await expect(page.getByTestId('persist-list-status')).toHaveText(
+        'success',
+      );
+      await expect(page.getByTestId('persist-list-names')).toHaveText(
+        'Alice,Bob',
+      );
+
+      await context.close();
+    });
+
+    test('list query store restores mutated data after reload', async ({
+      browser,
+    }) => {
+      const context = await browser.newContext();
+      const page = await openScenario(context, 'persist-list', 'page-a', {
+        storeId: `list-${backend}-mutate`,
+        backend,
+      });
+
+      await expect(page.getByTestId('persist-list-status')).toHaveText(
+        'success',
+      );
+
+      await page.getByTestId('persist-list-mutate-user1').click();
+      await expect(page.getByTestId('persist-list-names')).toHaveText(
+        'Persisted,Bob',
+      );
+
+      await waitForDebounce(page);
+      await page.reload();
+
+      await expect(page.getByTestId('persist-list-status')).toHaveText(
+        'success',
+      );
+      await expect(page.getByTestId('persist-list-names')).toHaveText(
+        'Persisted,Bob',
+      );
+
+      await context.close();
+    });
+
+    test('list query store does not restore data after clearing storage', async ({
+      browser,
+    }) => {
+      const context = await browser.newContext();
+      const page = await openScenario(context, 'persist-list', 'page-a', {
+        storeId: `list-${backend}-clear`,
+        backend,
+      });
+
+      await expect(page.getByTestId('persist-list-status')).toHaveText(
+        'success',
+      );
+      await waitForDebounce(page);
+
+      await page.getByTestId('persist-list-clear-storage').click();
+      await page.waitForTimeout(200);
+      await page.reload();
+
+      await expect(page.getByTestId('persist-list-names')).toHaveText('null');
 
       await context.close();
     });
