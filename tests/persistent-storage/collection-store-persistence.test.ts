@@ -315,6 +315,55 @@ describe('localStorage: collection store persistence', () => {
     ]);
   });
 
+  test('when maxItems is exceeded, a cached item read by a hook is kept over an unread older entry', async () => {
+    setCachedCollectionItem('col-max-items-read', 'sess1', 'a', {
+      value: { id: 'a', name: 'Oldest cached' },
+    });
+    await advanceTime(100);
+    setCachedCollectionItem('col-max-items-read', 'sess1', 'b', {
+      value: { id: 'b', name: 'Newer cached' },
+    });
+
+    const env = createEnv({
+      storeName: 'col-max-items-read',
+      sessionKey: 'sess1',
+      maxItems: 2,
+    });
+
+    const renders = createLoggerStore();
+
+    // Mounting the hook for "a" refreshes its cached timestamp before maxItems cleanup runs.
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem('a', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:a, name:Oldest cached}
+      "
+    `);
+
+    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Fresh' } });
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      listStoredItemPayloads('col-max-items-read', 'sess1').sort(),
+    ).toEqual(['a', 'c']);
+    expect(listStoredItemKeys('col-max-items-read', 'sess1').sort()).toEqual([
+      itemKey('a'),
+      itemKey('c'),
+    ]);
+  });
+
   test('preload reports unavailable async preload through persistent storage error handler', async () => {
     const onPersistentStorageError = vi.fn();
     const env = createEnv({
