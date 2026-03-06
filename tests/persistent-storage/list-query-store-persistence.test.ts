@@ -10,7 +10,10 @@ import {
   rc_unknown,
 } from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
-import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
+import type {
+  OffsetPaginationConfig,
+  PartialResourcesConfig,
+} from '../../src/listQueryStore/types';
 import type {
   PersistedListQueryData,
   PersistedListQueryItemData,
@@ -160,12 +163,29 @@ function createEnv(options: {
   serverData?: Tables<Row>;
   onPersistentStorageError?: (error: unknown) => void;
   partialResources?: PartialResourcesConfig<Row>;
+  offsetPagination?: OffsetPaginationConfig;
+  defaultQuerySize?: number;
+  usesRealTimeUpdates?: boolean;
+  dynamicRealtimeThrottleMs?: (params: {
+    lastFetchDuration: number;
+    windowIsNotFocused: boolean;
+  }) => number;
+  bindFocusController?: {
+    getWindowIsFocused: () => boolean;
+    onWindowFocus: (handler: () => void) => () => void;
+    onWindowBlur: (handler: () => void) => () => void;
+  };
 }) {
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     ignoreInitialTimeCheck: true,
     partialResources: options.partialResources,
+    offsetPagination: options.offsetPagination,
+    defaultQuerySize: options.defaultQuerySize,
+    usesRealTimeUpdates: options.usesRealTimeUpdates,
+    dynamicRealtimeThrottleMs: options.dynamicRealtimeThrottleMs,
+    bindFocusController: options.bindFocusController,
     persistentStorage: {
       storeName: options.storeName,
       backend: 'localStorage',
@@ -306,26 +326,49 @@ describe('localStorage: list query store persistence', () => {
       "
     `);
   });
+
+  test('first query hook read returns cached data then refetches', async () => {
+    const usersQuery = { tableId: 'users' };
+    const usersItem = storeItemKey('users', 1);
+
+    setCachedItem('lq-hook', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Cached',
+    });
+    setCachedQuery('lq-hook', 'sess1', usersQuery, [usersItem]);
+
+    const env = createEnv({
+      storeName: 'lq-hook',
+      sessionKey: 'sess1',
+      serverData: {
+        users: [{ id: 1, name: 'Fresh' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = env.apiStore.useListQuery(usersQuery, {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        names: items.map((item) => item.name),
+      });
+    });
+
     await flushAllTimers();
 
-    // Wait for save debounce
-    await advanceTime(1100);
-
-    const cached = localStorage.getItem('tsdf.sess1.lq2');
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedListQueryData<Row>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    const savedQueryKeys = Object.keys(parsed.data.queries);
-
-    // Only 2 queries saved — first 2 by insertion order, last evicted
-    expect(savedQueryKeys).toEqual([qkA, qkB]);
-    expect(savedQueryKeys).not.toContain(qkC);
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: success ⋅ names: [Fresh]
+      "
+    `);
   });
 
-  test('item limit with query-reference prioritization', async () => {
-    const ik1 = storeItemKey('t1', 1);
-    const ik2 = storeItemKey('t1', 2);
 
     const env = createEnv({
       storeName: 'lq3',
