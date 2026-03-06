@@ -369,11 +369,58 @@ describe('localStorage: list query store persistence', () => {
     `);
   });
 
+  test('disableRefetchOnMount keeps cached query data without refetching and refreshes stored timestamps', async () => {
+    const usersQuery = { tableId: 'users' };
+    const usersItem = setCachedItem('lq-hook-no-refetch', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Cached',
+    });
+    const usersQueryKey = setCachedQuery(
+      'lq-hook-no-refetch',
+      'sess1',
+      usersQuery,
+      [storeItemKey('users', 1)],
+    );
+    const originalItemTimestamp = getStoredEntryTimestamp(usersItem);
+    const originalQueryTimestamp = getStoredEntryTimestamp(usersQueryKey);
 
     const env = createEnv({
-      storeName: 'lq3',
+      storeName: 'lq-hook-no-refetch',
       sessionKey: 'sess1',
-      maxItems: 2,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = env.apiStore.useListQuery(usersQuery, {
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({
+        status,
+        names: items.map((item) => item.name),
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached]
+      "
+    `);
+    expect(env.serverTable.numOfFinishedFetches).toBe(0);
+    expect(getStoredEntryTimestamp(usersItem)).toBeGreaterThan(
+      originalItemTimestamp,
+    );
+    expect(getStoredEntryTimestamp(usersQueryKey)).toBeGreaterThan(
+      originalQueryTimestamp,
+    );
+  });
       serverData: {
         t1: [
           { id: 1, name: 'Referenced 1' },
