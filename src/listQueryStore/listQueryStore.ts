@@ -700,7 +700,12 @@ export function createListQueryStore<
   async function preloadQueryFromPersistentStorage(
     payload: QueryPayload | QueryPayload[],
   ): Promise<void> {
-    if (!persistence?.hasAsyncPreload) return;
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return;
+    }
 
     const payloads = Array.isArray(payload) ? payload : [payload];
     await persistence.preloadQueries(
@@ -711,7 +716,12 @@ export function createListQueryStore<
   async function preloadItemFromPersistentStorage(
     payload: ItemPayload | ItemPayload[],
   ): Promise<void> {
-    if (!persistence?.hasAsyncPreload) return;
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return;
+    }
 
     const payloads = Array.isArray(payload) ? payload : [payload];
     await persistence.preloadItems(

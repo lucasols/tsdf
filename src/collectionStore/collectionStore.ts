@@ -12,6 +12,11 @@ import { Store } from 't-state';
 import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
+import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
+import type {
+  CollectionPersistentStorageConfig,
+  StorageAdapter,
+} from '../persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -28,17 +33,18 @@ import {
 } from '../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinatorWithPriority,
+  isBrowserTabsSyncVersionNewer,
+  toBrowserTabsSyncVersion,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
-  isBrowserTabsSyncVersionNewer,
   type SnapshotConsistency,
-  toBrowserTabsSyncVersion,
 } from '../utils/browserTabsSync';
 import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from '../utils/performMutation';
+import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   fetchTypePriority,
   StoreFetchError,
@@ -47,12 +53,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
-import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
-import type {
-  CollectionPersistentStorageConfig,
-  StorageAdapter,
-} from '../persistentStorage/types';
-import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -1000,27 +1000,24 @@ export function createCollectionStore<
         payload,
       }));
 
-      if (persistence?.hasAsyncPreload) {
-        void persistence.preloadItems(itemKeys.map(({ itemKey }) => itemKey));
-      }
-
       return filterAndMap(itemKeys, ({ itemKey }) => {
         return store.state[itemKey] || false;
       });
     }
 
     const itemKey = getItemKey(params);
-    if (persistence?.hasAsyncPreload) {
-      void persistence.preloadItems([itemKey]);
-    }
-
     return store.state[itemKey];
   }
 
   async function preloadItemFromPersistentStorage(
     params: ItemPayload | ItemPayload[],
   ): Promise<void> {
-    if (!persistence?.hasAsyncPreload) return;
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return;
+    }
 
     const payloads = Array.isArray(params) ? params : [params];
     await persistence.preloadItems(

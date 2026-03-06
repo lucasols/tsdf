@@ -139,14 +139,22 @@ describe('localStorage: collection store persistence', () => {
     `);
   });
 
-  test('LRU eviction when exceeding maxItems', async () => {
-    const keyA = getCompositeKey('a');
-    const keyB = getCompositeKey('b');
-    const keyC = getCompositeKey('c');
+  test('filter-based reads stay in-memory only and do not scan cold persisted items', () => {
+    setCachedCollectionItem('col-filter', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
 
-    // Create a store with maxItems=2
-    const env = createColPersistenceEnv({
-      storeName: 'col3',
+    const env = createEnv({
+      storeName: 'col-filter',
+      sessionKey: 'sess1',
+    });
+
+    expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
+    expect(env.store.isInitialized).toBe(true);
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached' }
+    `);
+  });
       sessionKey: 'sess1',
       maxItems: 2,
     });

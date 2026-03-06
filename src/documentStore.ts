@@ -597,7 +597,14 @@ export function createDocumentStore<State extends ValidStoreState>({
   }
 
   async function preloadPersistentStorage(): Promise<void> {
-    await persistence?.preloadPersistentStorage();
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return;
+    }
+
+    await persistence.preloadPersistentStorage();
   }
 
   function invalidateData(priority: FetchType = 'highPriority'): void {
