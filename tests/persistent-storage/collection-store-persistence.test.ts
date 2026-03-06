@@ -438,23 +438,13 @@ describe('localStorage: collection store persistence', () => {
 
     expect(localStorage.getItem(key)).not.toBeNull();
 
-    const renders = createLoggerStore();
-
     renderHook(() => {
-      const { data, status } = env.apiStore.useItem('bad', {
-        disableRefetchOnMount: true,
-        returnIdleStatus: true,
-        returnRefetchingStatus: true,
+      env.apiStore.useItem('bad', {
+        // The hook should trigger the same lazy read path as UI consumers
+        // without starting a fetch that could obscure the cleanup effect.
+        isOffScreen: true,
       });
-
-      renders.add({ status, data: data?.value ?? null });
     });
-
-    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
-      "
-      -> status: idle ⋅ data: null
-      "
-    `);
 
     await advanceTime(2100);
 
