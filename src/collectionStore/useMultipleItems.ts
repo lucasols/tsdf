@@ -56,6 +56,7 @@ export function useMultipleItems<
   getItemState: (
     payload: ItemPayload,
   ) => TSFDCollectionItem<ItemState, ItemPayload> | null | undefined,
+  preloadItems: ((payloads: ItemPayload[]) => Promise<void>) | undefined,
   scheduleAutomaticFetch: (fetchType: FetchType, payload: ItemPayload) => void,
   invalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
@@ -195,7 +196,6 @@ export function useMultipleItems<
   const storeState = store.useSelectorRC(resultSelector, {
     equalityFn: deepEqual,
   });
-
   useOnEvtmitterEvent(events, 'invalidateData', ({ payload: event }) => {
     for (const {
       itemKey,
@@ -226,55 +226,70 @@ export function useMultipleItems<
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
   useEffect(() => {
-    const removedQueries = new Set(ignoreItemsInRefetchOnMount);
+    let cancelled = false;
 
-    for (const {
-      itemKey: itemId,
-      payload,
-      isOffScreen,
-      disableRefetches,
-      disableRefetchOnMount,
-    } of queriesWithId) {
-      removedQueries.delete(itemId);
+    void (async () => {
+      if (preloadItems && queriesWithId.length > 0) {
+        await preloadItems(queriesWithId.map(({ payload }) => payload));
+      }
 
-      if (isOffScreen) continue;
+      if (cancelled) return;
 
-      if (itemId) {
-        const itemState = getItemState(payload);
-        const fetchType = itemState?.refetchOnMount || 'lowPriority';
+      const removedQueries = new Set(ignoreItemsInRefetchOnMount);
 
-        if (itemState === null) {
-          // Deleted items should stay deleted until a caller explicitly refetches them.
-          continue;
-        }
+      for (const {
+        itemKey: itemId,
+        payload,
+        isOffScreen,
+        disableRefetches,
+        disableRefetchOnMount,
+      } of queriesWithId) {
+        removedQueries.delete(itemId);
 
-        const shouldFetch = !itemState?.wasLoaded || itemState.refetchOnMount;
+        if (isOffScreen) continue;
 
-        if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemId)) {
-          continue;
-        }
+        if (itemId) {
+          const itemState = getItemState(payload);
+          const fetchType = itemState?.refetchOnMount || 'lowPriority';
 
-        ignoreItemsInRefetchOnMount.add(itemId);
+          if (itemState === null) {
+            // Deleted items should stay deleted until a caller explicitly refetches them.
+            continue;
+          }
 
-        if (
-          shouldScheduleAutomaticFetch({
-            wasLoaded: itemState?.wasLoaded,
-            shouldFetch: !!shouldFetch,
-            disableRefetches,
-            disableRefetchOnMount,
-          })
-        ) {
-          scheduleAutomaticFetch(fetchType, payload);
+          const shouldFetch = !itemState?.wasLoaded || itemState.refetchOnMount;
+
+          if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemId)) {
+            continue;
+          }
+
+          ignoreItemsInRefetchOnMount.add(itemId);
+
+          if (
+            shouldScheduleAutomaticFetch({
+              wasLoaded: itemState?.wasLoaded,
+              shouldFetch: !!shouldFetch,
+              disableRefetches,
+              disableRefetchOnMount,
+            })
+          ) {
+            scheduleAutomaticFetch(fetchType, payload);
+          }
         }
       }
-    }
 
-    for (const itemId of removedQueries) {
-      ignoreItemsInRefetchOnMount.delete(itemId);
-    }
+      for (const itemId of removedQueries) {
+        ignoreItemsInRefetchOnMount.delete(itemId);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     getItemState,
     ignoreItemsInRefetchOnMount,
+    preloadItems,
     queriesWithId,
     scheduleAutomaticFetch,
   ]);

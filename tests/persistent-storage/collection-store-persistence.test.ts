@@ -1,26 +1,12 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
-import {
-  rc_number,
-  rc_object,
-  rc_parse_json,
-  rc_string,
-  rc_unknown,
-} from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import type {
-  PersistedCollectionData,
+  PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-
-const cacheEntryTimestampSchema = rc_object({
-  data: rc_unknown,
-  timestamp: rc_number,
-  version: rc_number,
-});
-import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -28,30 +14,55 @@ const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
 });
 
-type ItemState = { id: string; name: string };
+function itemKey(payload: string): string {
+  return getCompositeKey(payload);
+}
 
-function setCachedCollectionData(
+function itemStorageKey(
   storeName: string,
   sessionKey: string,
-  items: Record<
-    string,
-    {
-      data: CollectionTestItem<ItemState>;
-      payload: unknown;
-      lastAccessedAt: number;
-    }
-  >,
+  payload: string,
+): string {
+  return `tsdf.${sessionKey}.${storeName}.collection.item.${itemKey(payload)}`;
+}
+
+type ItemState = { id: string; name: string };
+
+type PersistedItemState = { value: ItemState };
+
+function setCachedCollectionItem(
+  storeName: string,
+  sessionKey: string,
+  payload: string,
+  data: PersistedItemState,
   version = 1,
-) {
-  const key = `tsdf.${sessionKey}.${storeName}`;
+): string {
+  const key = itemStorageKey(storeName, sessionKey, payload);
   const entry: StorageCacheEntry<
-    PersistedCollectionData<CollectionTestItem<ItemState>>
+    PersistedCollectionItemData<PersistedItemState>
   > = {
-    data: { items },
+    data: { data, payload },
     timestamp: Date.now(),
     version,
   };
+
   localStorage.setItem(key, JSON.stringify(entry));
+
+  return key;
+}
+
+function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
+  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const keys: string[] = [];
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(prefix)) {
+      keys.push(key.slice(prefix.length));
+    }
+  }
+
+  return keys;
 }
 
 function createColPersistenceEnv(options: {

@@ -74,6 +74,7 @@ export function useMultipleListQueries<
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
+  preloadQueries: ((payloads: QueryPayload[]) => Promise<void>) | undefined,
   scheduleAutomaticListQueryFetch: (
     fetchType: FetchType,
     payload: QueryPayload,
@@ -473,132 +474,149 @@ export function useMultipleListQueries<
   const ignoreQueriesInRefetchOnMount = useConst(() => new Set<string>());
 
   useEffect(() => {
-    const removedQueries = new Set(ignoreQueriesInRefetchOnMount);
+    let cancelled = false;
 
-    for (const {
-      key: queryId,
-      payload,
-      fields,
-      isOffScreen,
-      loadSize,
-      disableRefetches,
-      disableRefetchOnMount,
-    } of queriesWithId) {
-      removedQueries.delete(queryId);
+    void (async () => {
+      if (preloadQueries && queriesWithId.length > 0) {
+        await preloadQueries(queriesWithId.map(({ payload }) => payload));
+      }
 
-      if (isOffScreen) continue;
+      if (cancelled) return;
 
-      const queryState = getQueryState(payload);
-      let fetchType = queryState?.refetchOnMount || 'lowPriority';
-      let fieldsToFetch = fields;
+      const removedQueries = new Set(ignoreQueriesInRefetchOnMount);
 
-      let shouldFetch =
-        !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
+      for (const {
+        key: queryId,
+        payload,
+        fields,
+        isOffScreen,
+        loadSize,
+        disableRefetches,
+        disableRefetchOnMount,
+      } of queriesWithId) {
+        removedQueries.delete(queryId);
 
-      // For partial resources, refetch when the requested field set changes
-      // or when a full-resource hook is affected by field invalidation.
-      if (partialResources && !shouldFetch && queryState) {
-        const isQueryFetchInFlight =
-          queryState.status === 'loading' ||
-          queryState.status === 'refetching' ||
-          queryState.status === 'loadingMore';
+        if (isOffScreen) continue;
 
-        if (Array.isArray(fields) && fields.length > 0) {
-          const hasMissingRequestedFields = queryState.items.some((itemKey) => {
-            const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-            return fields.some((field) => !loadedFields.includes(field));
-          });
+        const queryState = getQueryState(payload);
+        let fetchType = queryState?.refetchOnMount || 'lowPriority';
+        let fieldsToFetch = fields;
 
-          if (hasMissingRequestedFields && !isQueryFetchInFlight) {
-            shouldFetch = true;
-            fieldsToFetch = fields;
-            // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
-            // Keep stronger priorities intact; only lift low priority.
-            if (fetchType === 'lowPriority') {
-              fetchType = 'highPriority';
-            }
-          }
+        let shouldFetch =
+          !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
 
-          const hasAffectedFieldInvalidation = queryState.items.some(
-            (itemKey) => {
-              const itemFieldInvalidationFields =
-                getUnresolvedPendingInvalidationFields(itemKey);
+        // For partial resources, refetch when the requested field set changes
+        // or when a full-resource hook is affected by field invalidation.
+        if (partialResources && !shouldFetch && queryState) {
+          const isQueryFetchInFlight =
+            queryState.status === 'loading' ||
+            queryState.status === 'refetching' ||
+            queryState.status === 'loadingMore';
 
-              return (
-                itemFieldInvalidationFields.length > 0 &&
-                fields.some((f) => itemFieldInvalidationFields.includes(f))
-              );
-            },
-          );
-
-          if (hasAffectedFieldInvalidation && !isQueryFetchInFlight) {
-            shouldFetch = true;
-            fieldsToFetch = fields;
-
-            const invalidationPriority = getHighestPendingInvalidationPriority(
-              queryState.items,
-              fields,
+          if (Array.isArray(fields) && fields.length > 0) {
+            const hasMissingRequestedFields = queryState.items.some(
+              (itemKey) => {
+                const loadedFields =
+                  store.state.itemLoadedFields[itemKey] ?? [];
+                return fields.some((field) => !loadedFields.includes(field));
+              },
             );
 
-            if (
-              invalidationPriority &&
-              fetchTypePriority[invalidationPriority] >
-                fetchTypePriority[fetchType]
-            ) {
-              fetchType = invalidationPriority;
+            if (hasMissingRequestedFields && !isQueryFetchInFlight) {
+              shouldFetch = true;
+              fieldsToFetch = fields;
+              // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+              // Keep stronger priorities intact; only lift low priority.
+              if (fetchType === 'lowPriority') {
+                fetchType = 'highPriority';
+              }
             }
-          }
-        } else if (fields === '*') {
-          const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
-            return getUnresolvedPendingInvalidationFields(itemKey).length > 0;
-          });
 
-          if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
-            shouldFetch = true;
+            const hasAffectedFieldInvalidation = queryState.items.some(
+              (itemKey) => {
+                const itemFieldInvalidationFields =
+                  getUnresolvedPendingInvalidationFields(itemKey);
 
-            const invalidationPriority = getHighestPendingInvalidationPriority(
-              queryState.items,
-              undefined,
+                return (
+                  itemFieldInvalidationFields.length > 0 &&
+                  fields.some((f) => itemFieldInvalidationFields.includes(f))
+                );
+              },
             );
 
-            if (
-              invalidationPriority &&
-              fetchTypePriority[invalidationPriority] >
-                fetchTypePriority[fetchType]
-            ) {
-              fetchType = invalidationPriority;
+            if (hasAffectedFieldInvalidation && !isQueryFetchInFlight) {
+              shouldFetch = true;
+              fieldsToFetch = fields;
+
+              const invalidationPriority =
+                getHighestPendingInvalidationPriority(queryState.items, fields);
+
+              if (
+                invalidationPriority &&
+                fetchTypePriority[invalidationPriority] >
+                  fetchTypePriority[fetchType]
+              ) {
+                fetchType = invalidationPriority;
+              }
+            }
+          } else if (fields === '*') {
+            const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
+              return getUnresolvedPendingInvalidationFields(itemKey).length > 0;
+            });
+
+            if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
+              shouldFetch = true;
+
+              const invalidationPriority =
+                getHighestPendingInvalidationPriority(
+                  queryState.items,
+                  undefined,
+                );
+
+              if (
+                invalidationPriority &&
+                fetchTypePriority[invalidationPriority] >
+                  fetchTypePriority[fetchType]
+              ) {
+                fetchType = invalidationPriority;
+              }
             }
           }
         }
+
+        if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(queryId)) {
+          continue;
+        }
+
+        ignoreQueriesInRefetchOnMount.add(queryId);
+
+        if (
+          shouldScheduleAutomaticFetch({
+            wasLoaded: queryState?.wasLoaded,
+            shouldFetch: !!shouldFetch,
+            disableRefetches,
+            disableRefetchOnMount,
+            skipFreshFetch: !!partialResources,
+          })
+        ) {
+          scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
+            fields: fieldsToFetch,
+          });
+        }
       }
 
-      if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(queryId)) {
-        continue;
+      for (const queryId of removedQueries) {
+        ignoreQueriesInRefetchOnMount.delete(queryId);
       }
+    })();
 
-      ignoreQueriesInRefetchOnMount.add(queryId);
-
-      if (
-        shouldScheduleAutomaticFetch({
-          wasLoaded: queryState?.wasLoaded,
-          shouldFetch: !!shouldFetch,
-          disableRefetches,
-          disableRefetchOnMount,
-          skipFreshFetch: !!partialResources,
-        })
-      ) {
-        scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
-          fields: fieldsToFetch,
-        });
-      }
-    }
-
-    for (const queryId of removedQueries) {
-      ignoreQueriesInRefetchOnMount.delete(queryId);
-    }
+    return () => {
+      cancelled = true;
+    };
   }, [
     getQueryState,
     ignoreQueriesInRefetchOnMount,
+    preloadQueries,
     queriesWithId,
     store,
     scheduleAutomaticListQueryFetch,

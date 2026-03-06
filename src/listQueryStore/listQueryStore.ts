@@ -243,7 +243,7 @@ type ListQueryStoreOptionsBase<
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   /** Opt-in persistent storage configuration. When provided, cached items and queries
-   * are loaded from storage on initialization and saved back on successful fetches.
+   * are loaded from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
   persistentStorage?: ListQueryPersistentStorageConfig<ItemState>;
 } & ([TPartialResources] extends [true]
@@ -493,18 +493,13 @@ export function createListQueryStore<
   const store = new Store<State>({
     debugName,
     state: () => {
-      let initialState: State = {
+      const initialState: State = {
         items: {},
         queries: {},
         itemQueries: {},
         itemLoadedFields: {},
         itemFieldInvalidationFields: {},
       };
-
-      // Merge persisted state first (will be overridden by test data if both exist)
-      if (persistence?.initialState) {
-        initialState = { ...persistence.initialState };
-      }
 
       if (import.meta.env.TEST && testOptions) {
         const initialData = testOptions.initialData;
@@ -541,7 +536,7 @@ export function createListQueryStore<
         }
       }
 
-      return initialState;
+      return persistence?.createInitialState(initialState) ?? initialState;
     },
   });
 
@@ -702,6 +697,28 @@ export function createListQueryStore<
     recordItemSyncVersion(itemKey, message, consistency);
   }
 
+  async function preloadQueryFromPersistentStorage(
+    payload: QueryPayload | QueryPayload[],
+  ): Promise<void> {
+    if (!persistence?.hasAsyncPreload) return;
+
+    const payloads = Array.isArray(payload) ? payload : [payload];
+    await persistence.preloadQueries(
+      payloads.map((queryPayload) => getQueryKey(queryPayload)),
+    );
+  }
+
+  async function preloadItemFromPersistentStorage(
+    payload: ItemPayload | ItemPayload[],
+  ): Promise<void> {
+    if (!persistence?.hasAsyncPreload) return;
+
+    const payloads = Array.isArray(payload) ? payload : [payload];
+    await persistence.preloadItems(
+      payloads.map((itemPayload) => getItemKey(itemPayload)),
+    );
+  }
+
   const {
     getQueryState,
     getQueriesKeyArray,
@@ -740,6 +757,12 @@ export function createListQueryStore<
     getQueryKey,
     getItemKey,
     normalizeFieldsOption,
+    preloadQueries: persistence?.hasAsyncPreload
+      ? (queryKeys) => persistence.preloadQueries(queryKeys)
+      : undefined,
+    preloadItems: persistence?.hasAsyncPreload
+      ? (itemKeys) => persistence.preloadItems(itemKeys)
+      : undefined,
     testInitialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
     noFetchItemFnError,
     onQueryFetchStart: (requests, startedAt) => {
@@ -1223,6 +1246,12 @@ export function createListQueryStore<
         events,
         getQueryKey,
         getQueryState,
+        persistence?.hasAsyncPreload
+          ? (payloads) =>
+              persistence.preloadQueries(
+                payloads.map((payload) => getQueryKey(payload)),
+              )
+          : undefined,
         scheduleAutomaticListQueryFetch,
         queryInvalidationWasTriggered,
         itemFieldInvalidationPriorities,
@@ -1281,6 +1310,12 @@ export function createListQueryStore<
       events,
       getItemKey,
       scheduleAutomaticItemFetch,
+      persistence?.hasAsyncPreload
+        ? (payloads) =>
+            persistence.preloadItems(
+              payloads.map((payload) => getItemKey(payload)),
+            )
+        : undefined,
       itemInvalidationWasTriggered,
       itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,
@@ -1377,13 +1412,21 @@ export function createListQueryStore<
     persistence?.dispose();
     void persistence?.clear();
 
-    store.setState({
-      items: {},
-      queries: {},
-      itemQueries: {},
-      itemLoadedFields: {},
-      itemFieldInvalidationFields: {},
-    });
+    store.setState(
+      persistence?.createInitialState({
+        items: {},
+        queries: {},
+        itemQueries: {},
+        itemLoadedFields: {},
+        itemFieldInvalidationFields: {},
+      }) ?? {
+        items: {},
+        queries: {},
+        itemQueries: {},
+        itemLoadedFields: {},
+        itemFieldInvalidationFields: {},
+      },
+    );
     focusLifecycle.reset();
     persistence?.attach(store);
   }
@@ -1526,9 +1569,11 @@ export function createListQueryStore<
     getQueriesState,
     getQueriesRelatedToItem,
     awaitListQueryFetch: awaitListQueryFetchApi,
+    preloadQueryFromPersistentStorage,
     loadMore: loadMoreApi,
     getItemKey,
     getItemState,
+    preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,
     invalidateQueryAndItems,

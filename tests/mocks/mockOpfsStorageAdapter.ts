@@ -5,6 +5,7 @@ export function createMockOpfsStorageAdapter({
   readDelayMs = 0,
 }: { readDelayMs?: number } = {}) {
   const storage = new Map<string, string>();
+  const readRequests: string[] = [];
 
   async function waitForReadDelay() {
     if (readDelayMs <= 0) return;
@@ -17,6 +18,7 @@ export function createMockOpfsStorageAdapter({
   const adapter: StorageAdapter = {
     async read<T>(key: string): Promise<T | null> {
       try {
+        readRequests.push(key);
         await waitForReadDelay();
 
         const raw = storage.get(key);
@@ -55,6 +57,10 @@ export function createMockOpfsStorageAdapter({
 
   return {
     adapter,
+    readRequests,
+    clearReadRequests() {
+      readRequests.length = 0;
+    },
     getRaw(key: string) {
       return storage.get(key) ?? null;
     },

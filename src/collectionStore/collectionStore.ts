@@ -208,7 +208,7 @@ export type CollectionStoreOptions<
   blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
-   * from storage on initialization and saved back on successful fetches.
+   * from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
   persistentStorage?: CollectionPersistentStorageConfig<ItemState>;
   /** @internal */
@@ -315,11 +315,6 @@ export function createCollectionStore<
     state: () => {
       const initialState: CollectionState = {};
 
-      // Merge persisted items first (will be overridden by test data if both exist)
-      if (persistence?.initialItems) {
-        Object.assign(initialState, persistence.initialItems);
-      }
-
       if (initialData) {
         for (const item of initialData) {
           const itemKey = getItemKey(item.payload);
@@ -335,7 +330,7 @@ export function createCollectionStore<
         }
       }
 
-      return initialState;
+      return persistence?.createInitialState(initialState) ?? initialState;
     },
   });
 
@@ -991,7 +986,7 @@ export function createCollectionStore<
   function getItemState(
     params: ItemPayload | ItemPayload[] | FilterItemsFn,
   ): CollectionItem | CollectionItem[] | undefined | null {
-    if (typeof params === 'function' || Array.isArray(params)) {
+    if (typeof params === 'function') {
       const itemsId = getItemsKeyArray(params);
 
       return filterAndMap(itemsId, ({ itemKey }) => {
@@ -999,7 +994,38 @@ export function createCollectionStore<
       });
     }
 
-    return store.state[getItemKey(params)];
+    if (Array.isArray(params)) {
+      const itemKeys = params.map((payload) => ({
+        itemKey: getItemKey(payload),
+        payload,
+      }));
+
+      if (persistence?.hasAsyncPreload) {
+        void persistence.preloadItems(itemKeys.map(({ itemKey }) => itemKey));
+      }
+
+      return filterAndMap(itemKeys, ({ itemKey }) => {
+        return store.state[itemKey] || false;
+      });
+    }
+
+    const itemKey = getItemKey(params);
+    if (persistence?.hasAsyncPreload) {
+      void persistence.preloadItems([itemKey]);
+    }
+
+    return store.state[itemKey];
+  }
+
+  async function preloadItemFromPersistentStorage(
+    params: ItemPayload | ItemPayload[],
+  ): Promise<void> {
+    if (!persistence?.hasAsyncPreload) return;
+
+    const payloads = Array.isArray(params) ? params : [params];
+    await persistence.preloadItems(
+      payloads.map((payload) => getItemKey(payload)),
+    );
   }
 
   function useMultipleItems<
@@ -1021,6 +1047,12 @@ export function createCollectionStore<
       events,
       getItemKey,
       getItemState,
+      persistence?.hasAsyncPreload
+        ? (payloads) =>
+            persistence.preloadItems(
+              payloads.map((payload) => getItemKey(payload)),
+            )
+        : undefined,
       scheduleAutomaticFetch,
       invalidationWasTriggered,
       globalDisableRefetchOnMount,
@@ -1279,7 +1311,7 @@ export function createCollectionStore<
     persistence?.dispose();
     void persistence?.clear();
 
-    store.setState({});
+    store.setState(persistence?.createInitialState({}) ?? {});
     focusLifecycle.reset();
     persistence?.attach(store);
   }
@@ -1422,6 +1454,7 @@ export function createCollectionStore<
     useListItemIsDeleted,
     useListItem,
     reset,
+    preloadItemFromPersistentStorage,
     getItemKey,
     getItemState,
     startMutation,

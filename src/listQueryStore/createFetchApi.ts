@@ -92,6 +92,8 @@ export type CreateFetchApiOptions<
   normalizeFieldsOption: (
     fields: FieldsInput | undefined,
   ) => string[] | undefined;
+  preloadQueries?: (queryKeys: string[]) => Promise<void>;
+  preloadItems?: (itemKeys: string[]) => Promise<void>;
   testInitialLastFetchStartTime?: number;
   noFetchItemFnError: string;
   onQueryFetchStart?: (
@@ -140,6 +142,8 @@ export function createFetchApi<
   getQueryKey,
   getItemKey,
   normalizeFieldsOption,
+  preloadQueries,
+  preloadItems,
   testInitialLastFetchStartTime,
   noFetchItemFnError,
   onQueryFetchStart,
@@ -584,7 +588,12 @@ export function createFetchApi<
   }
 
   function getQueryState(params: QueryPayload): Query | undefined {
-    return store.state.queries[getQueryKey(params)];
+    const queryKey = getQueryKey(params);
+    if (preloadQueries) {
+      void preloadQueries([queryKey]);
+    }
+
+    return store.state.queries[queryKey];
   }
 
   function getQueriesKeyArray(
@@ -613,6 +622,10 @@ export function createFetchApi<
     params: QueryPayload[] | FilterQueryFn<QueryPayload>,
   ): { query: Query; key: string }[] {
     const queryKeys = getQueriesKeyArray(params);
+
+    if (preloadQueries && Array.isArray(params)) {
+      void preloadQueries(queryKeys.map(({ key }) => key));
+    }
 
     return filterAndMap(queryKeys, ({ key }) => {
       const query = store.state.queries[key];
@@ -674,7 +687,7 @@ export function createFetchApi<
     | null
     | undefined
     | { payload: ItemPayload; data: ItemState }[] {
-    if (typeof itemPayload === 'function' || Array.isArray(itemPayload)) {
+    if (typeof itemPayload === 'function') {
       const itemsId = getItemsKeyArray(itemPayload);
 
       return filterAndMap(itemsId, ({ itemKey }) => {
@@ -685,7 +698,24 @@ export function createFetchApi<
       });
     }
 
-    return store.state.items[getItemKey(itemPayload)];
+    if (Array.isArray(itemPayload)) {
+      const itemsId = getItemsKeyArray(itemPayload);
+      if (preloadItems) {
+        void preloadItems(itemsId.map(({ itemKey }) => itemKey));
+      }
+
+      return filterAndMap(itemsId, ({ itemKey, payload }) => {
+        const item = store.state.items[itemKey];
+        return !item ? false : { payload, data: item };
+      });
+    }
+
+    const itemKey = getItemKey(itemPayload);
+    if (preloadItems) {
+      void preloadItems([itemKey]);
+    }
+
+    return store.state.items[itemKey];
   }
 
   function scheduleListQueryFetch(

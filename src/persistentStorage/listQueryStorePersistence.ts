@@ -1,3 +1,4 @@
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
@@ -7,230 +8,197 @@ import type {
 } from '../listQueryStore/types';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
-  createPersistentStorageHandle,
-  getStorageKeyForStore,
+  createPersistentStorageNamespaceHandle,
+  getStoragePrefixForStoreNamespace,
+  listLocalStorageKeysSync,
+  readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   ListQueryPersistentStorageConfig,
   PersistedListQueryData,
-  PersistedQuery,
+  PersistedListQueryItemData,
   StorageAdapter,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 100;
 const DEFAULT_MAX_QUERIES = 20;
+const SAVE_DEBOUNCE_MS = 1000;
 
-/**
- * Synchronously reads persisted list query data from localStorage.
- */
-function readListQueryFromLocalStorageSync(
-  key: string,
-  version: number,
-): PersistedListQueryData<unknown> | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
+function toItemState<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+>(
+  persisted: PersistedListQueryItemData<unknown>,
+  config: ListQueryPersistentStorageConfig<ItemState>,
+): { item: ItemState; itemQuery: TSDFItemQuery<ItemPayload> } | null {
+  const validated = validateWithSchema(config.schema, persisted.data);
+  if (validated === null) return null;
 
-    const entry: unknown = JSON.parse(raw);
-
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      !('version' in entry) ||
-      !('data' in entry)
-    ) {
-      return null;
-    }
-
-    const typedEntry = entry;
-
-    if (typedEntry.version !== version) return null;
-
-    const data = typedEntry.data;
-
-    if (
-      !data ||
-      typeof data !== 'object' ||
-      !('items' in data) ||
-      !('queries' in data)
-    ) {
-      return null;
-    }
-
-    return __LEGIT_CAST__<PersistedListQueryData<unknown>, object>(data);
-  } catch {
-    return null;
-  }
+  return {
+    item: validated,
+    itemQuery: {
+      error: null,
+      payload: __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload),
+      refetchOnMount: 'lowPriority',
+      status: 'success',
+      wasLoaded: true,
+    },
+  };
 }
 
-/**
- * Validates persisted items and reconstructs ListQueryStore state.
- */
-function validatePersistedListQueryData<
+function defineLazyLocalStorageItem<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 >(
-  persisted: PersistedListQueryData<unknown>,
+  state: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+  itemKey: string,
+  storageKey: string,
+  version: number,
   config: ListQueryPersistentStorageConfig<ItemState>,
-): TSFDListQueryState<ItemState, QueryPayload, ItemPayload> | null {
-  const items: Record<string, ItemState | null> = {};
-  const queries: Record<string, TSFDListQuery<QueryPayload>> = {};
-  const itemQueries: Record<string, TSDFItemQuery<ItemPayload> | null> = {};
-  let hasValidData = false;
+): void {
+  function readItemFromLocalStorage():
+    | ItemState
+    | TSDFItemQuery<ItemPayload>
+    | undefined {
+    const cacheEntry = readStorageEntryFromLocalStorageSync<
+      PersistedListQueryItemData<unknown>
+    >(storageKey, version);
 
-  // Validate items
-  for (const [itemKey, itemData] of Object.entries(persisted.items)) {
-    const validated = validateWithSchema(config.schema, itemData);
-    if (validated === null) continue;
-
-    items[itemKey] = validated;
-    hasValidData = true;
-
-    // Reconstruct item query from persisted itemPayloads
-    const itemPayload = persisted.itemPayloads[itemKey];
-    if (itemPayload !== undefined) {
-      itemQueries[itemKey] = {
-        error: null,
-        status: 'success',
-        wasLoaded: true,
-        refetchOnMount: 'lowPriority',
-        payload: __LEGIT_CAST__<ItemPayload, unknown>(itemPayload),
-      };
+    if (!cacheEntry) {
+      Object.defineProperty(state.items, itemKey, {
+        configurable: true,
+        enumerable: false,
+        value: undefined,
+        writable: true,
+      });
+      Object.defineProperty(state.itemQueries, itemKey, {
+        configurable: true,
+        enumerable: false,
+        value: undefined,
+        writable: true,
+      });
+      return undefined;
     }
+
+    const itemState = toItemState<ItemState, ItemPayload>(
+      cacheEntry.data,
+      config,
+    );
+
+    if (!itemState) {
+      scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+      Object.defineProperty(state.items, itemKey, {
+        configurable: true,
+        enumerable: false,
+        value: undefined,
+        writable: true,
+      });
+      Object.defineProperty(state.itemQueries, itemKey, {
+        configurable: true,
+        enumerable: false,
+        value: undefined,
+        writable: true,
+      });
+      return undefined;
+    }
+
+    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+
+    Object.defineProperty(state.items, itemKey, {
+      configurable: true,
+      enumerable: true,
+      value: itemState.item,
+      writable: true,
+    });
+    Object.defineProperty(state.itemQueries, itemKey, {
+      configurable: true,
+      enumerable: true,
+      value: itemState.itemQuery,
+      writable: true,
+    });
+
+    return itemState.item;
   }
 
-  // Reconstruct queries
-  for (const [queryKey, query] of Object.entries(persisted.queries)) {
-    // Only include queries whose items all exist in the validated items
-    const validItems = query.items.filter((itemKey) => itemKey in items);
-
-    queries[queryKey] = {
-      error: null,
-      status: 'success',
-      payload: __LEGIT_CAST__<QueryPayload, unknown>(query.payload),
-      hasMore: query.hasMore,
-      wasLoaded: true,
-      refetchOnMount: 'lowPriority',
-      items: validItems,
-    };
-    hasValidData = true;
-  }
-
-  if (!hasValidData) return null;
-
-  return {
-    items,
-    queries,
-    itemQueries,
-    // Fields start empty — will be repopulated on refetch
-    itemLoadedFields: {},
-    itemFieldInvalidationFields: {},
-  };
+  Object.defineProperty(state.items, itemKey, {
+    configurable: true,
+    enumerable: false,
+    get: readItemFromLocalStorage,
+  });
+  Object.defineProperty(state.itemQueries, itemKey, {
+    configurable: true,
+    enumerable: false,
+    get() {
+      readItemFromLocalStorage();
+      return state.itemQueries[itemKey];
+    },
+  });
 }
 
-/**
- * Applies eviction limits to queries and items before saving.
- */
-function evictListQueryData<State>(
-  data: PersistedListQueryData<State>,
-  maxQueries: number,
-  maxItems: number,
-  pinnedQueries: Set<string>,
-  pinnedItems: Set<string>,
-): PersistedListQueryData<State> {
-  // Evict queries: pinned first, then most recent
-  const queryEntries = Object.entries(data.queries);
+function defineLazyLocalStorageQuery<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+>(
+  state: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+  queryKey: string,
+  storageKey: string,
+  version: number,
+): void {
+  Object.defineProperty(state.queries, queryKey, {
+    configurable: true,
+    enumerable: false,
+    get() {
+      const cacheEntry =
+        readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
+          storageKey,
+          version,
+        );
 
-  let keptQueries: [string, PersistedQuery][];
+      if (!cacheEntry) {
+        Object.defineProperty(state.queries, queryKey, {
+          configurable: true,
+          enumerable: false,
+          value: undefined,
+          writable: true,
+        });
+        return undefined;
+      }
 
-  if (queryEntries.length <= maxQueries) {
-    keptQueries = queryEntries;
-  } else {
-    queryEntries.sort(([keyA], [keyB]) => {
-      const aPinned = pinnedQueries.has(keyA);
-      const bPinned = pinnedQueries.has(keyB);
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
 
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
+      const filteredItemKeys = cacheEntry.data.items.filter((itemKey) => {
+        void state.itemQueries[itemKey];
+        return (
+          state.items[itemKey] !== undefined &&
+          state.itemQueries[itemKey] !== undefined
+        );
+      });
 
-      return 0;
-    });
+      const queryState: TSFDListQuery<QueryPayload> = {
+        error: null,
+        hasMore: cacheEntry.data.hasMore,
+        items: filteredItemKeys,
+        payload: __LEGIT_CAST__<QueryPayload, unknown>(cacheEntry.data.payload),
+        refetchOnMount: 'lowPriority',
+        status: 'success',
+        wasLoaded: true,
+      };
 
-    keptQueries = queryEntries.slice(0, maxQueries);
-  }
+      Object.defineProperty(state.queries, queryKey, {
+        configurable: true,
+        enumerable: true,
+        value: queryState,
+        writable: true,
+      });
 
-  const evictedQueries: Record<string, PersistedQuery> = {};
-  const referencedItems = new Set<string>();
-
-  for (const [key, query] of keptQueries) {
-    evictedQueries[key] = query;
-
-    for (const itemKey of query.items) {
-      referencedItems.add(itemKey);
-    }
-  }
-
-  // Evict items: query-referenced items first, then pinned, then rest
-  const itemEntries = Object.entries(data.items);
-
-  let keptItems: [string, State][];
-
-  if (itemEntries.length <= maxItems) {
-    keptItems = itemEntries;
-  } else {
-    itemEntries.sort(([keyA], [keyB]) => {
-      const aReferenced = referencedItems.has(keyA);
-      const bReferenced = referencedItems.has(keyB);
-
-      if (aReferenced && !bReferenced) return -1;
-      if (!aReferenced && bReferenced) return 1;
-
-      const aPinned = pinnedItems.has(keyA);
-      const bPinned = pinnedItems.has(keyB);
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-
-      return 0;
-    });
-
-    keptItems = itemEntries.slice(0, maxItems);
-  }
-
-  const evictedItems: Record<string, State> = {};
-  const keptItemKeys = new Set<string>();
-
-  for (const [key, item] of keptItems) {
-    evictedItems[key] = item;
-    keptItemKeys.add(key);
-  }
-
-  // Filter itemPayloads to only include kept items
-  const evictedItemPayloads: Record<string, unknown> = {};
-
-  for (const [key, payload] of Object.entries(data.itemPayloads)) {
-    if (keptItemKeys.has(key)) {
-      evictedItemPayloads[key] = payload;
-    }
-  }
-
-  // Update query items to only reference kept items
-  for (const [key, query] of Object.entries(evictedQueries)) {
-    evictedQueries[key] = {
-      ...query,
-      items: query.items.filter((itemKey) => keptItemKeys.has(itemKey)),
-    };
-  }
-
-  return {
-    items: evictedItems,
-    queries: evictedQueries,
-    itemPayloads: evictedItemPayloads,
-  };
+      return queryState;
+    },
+  });
 }
 
 export type ListQueryPersistenceSetup<
@@ -238,21 +206,19 @@ export type ListQueryPersistenceSetup<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 > = {
-  /** Initial state from synchronous localStorage read. Null if not available. */
-  initialState: TSFDListQueryState<ItemState, QueryPayload, ItemPayload> | null;
-  /** Attach to the store to enable async hydration and save subscriptions. */
+  createInitialState(
+    baseState: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+  ): TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
   attach(
     store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   ): void;
-  /** Dispose subscriptions and cancel pending saves. */
+  preloadItems(itemKeys: string[]): Promise<void>;
+  preloadQueries(queryKeys: string[]): Promise<void>;
+  hasAsyncPreload: boolean;
   dispose(): void;
-  /** Clear persisted data. */
   clear(): Promise<void>;
 };
 
-/**
- * Sets up persistent storage for a ListQueryStore.
- */
 export function setupListQueryPersistence<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -274,140 +240,383 @@ export function setupListQueryPersistence<
   const pinnedItems = new Set(config.pinnedItems ?? []);
   const pinnedQueries = new Set(config.pinnedQueries ?? []);
 
-  const handle = createPersistentStorageHandle<
-    PersistedListQueryData<ItemState>
-  >(config, { adapter: options.adapter });
+  const itemNamespace = createPersistentStorageNamespaceHandle<
+    PersistedListQueryItemData<ItemState>
+  >(
+    {
+      ...config,
+      entryPrefix: 'listQuery.item',
+    },
+    { adapter: options.adapter },
+  );
+  const queryNamespace =
+    createPersistentStorageNamespaceHandle<PersistedListQueryData>(
+      {
+        ...config,
+        entryPrefix: 'listQuery.query',
+      },
+      { adapter: options.adapter },
+    );
 
-  // Synchronous initial state (localStorage only)
-  let initialState: ListQueryPersistenceSetup<
-    ItemState,
-    QueryPayload,
-    ItemPayload
-  >['initialState'] = null;
+  let storeRef: Store<State> | null = null;
+  let unsubscribe: (() => void) | null = null;
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
+  const pendingItemPreloads = new Map<string, Promise<void>>();
+  const pendingQueryPreloads = new Map<string, Promise<void>>();
 
-  if (backend === 'localStorage') {
-    const sessionKey = config.getSessionKey();
-
-    if (sessionKey !== false) {
-      const key = getStorageKeyForStore(sessionKey, config.storeName);
-      const hasEntry = localStorage.getItem(key) !== null;
-      const persisted = readListQueryFromLocalStorageSync(key, version);
-
-      if (persisted) {
-        initialState = validatePersistedListQueryData<
-          ItemState,
-          QueryPayload,
-          ItemPayload
-        >(persisted, config);
-
-        if (initialState !== null) {
-          scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
-        } else {
-          scheduleIdleCleanup(() => localStorage.removeItem(key));
-        }
-      } else if (hasEntry) {
-        scheduleIdleCleanup(() => localStorage.removeItem(key));
-      }
+  function clearSaveTimer(): void {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
     }
   }
 
-  let unsubscribe: (() => void) | null = null;
-  let disposed = false;
+  function createInitialState(baseState: State): State {
+    if (backend !== 'localStorage') return baseState;
 
-  function attach(store: Store<State>): void {
-    // Async hydration for OPFS
-    if (backend === 'opfs') {
-      void handle.load().then((cached) => {
-        if (!cached || disposed) return;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return baseState;
 
-        const currentState = store.state;
-        const hasExistingData =
-          Object.keys(currentState.items).length > 0 ||
-          Object.keys(currentState.queries).length > 0;
-        if (hasExistingData) return;
+    const itemPrefix = getStoragePrefixForStoreNamespace(
+      sessionKey,
+      config.storeName,
+      'listQuery.item',
+    );
+    const queryPrefix = getStoragePrefixForStoreNamespace(
+      sessionKey,
+      config.storeName,
+      'listQuery.query',
+    );
 
-        const validated = validatePersistedListQueryData<
-          ItemState,
-          QueryPayload,
-          ItemPayload
-        >(cached, config);
+    const initialState: State = {
+      items: { ...baseState.items },
+      queries: { ...baseState.queries },
+      itemQueries: { ...baseState.itemQueries },
+      itemLoadedFields: { ...baseState.itemLoadedFields },
+      itemFieldInvalidationFields: { ...baseState.itemFieldInvalidationFields },
+    };
 
-        if (!validated) {
-          scheduleIdleCleanup(() => void handle.clear());
+    for (const storageKey of listLocalStorageKeysSync(itemPrefix)) {
+      const itemKey = storageKey.slice(itemPrefix.length);
+      if (
+        itemKey in initialState.items ||
+        itemKey in initialState.itemQueries
+      ) {
+        continue;
+      }
+
+      defineLazyLocalStorageItem(
+        initialState,
+        itemKey,
+        storageKey,
+        version,
+        config,
+      );
+    }
+
+    for (const storageKey of listLocalStorageKeysSync(queryPrefix)) {
+      const queryKey = storageKey.slice(queryPrefix.length);
+      if (queryKey in initialState.queries) continue;
+
+      defineLazyLocalStorageQuery(initialState, queryKey, storageKey, version);
+    }
+
+    return initialState;
+  }
+
+  async function preloadItem(itemKey: string): Promise<void> {
+    if (backend !== 'opfs' || !storeRef) return;
+    if (storeRef.state.itemQueries[itemKey] !== undefined) return;
+
+    const existingPromise = pendingItemPreloads.get(itemKey);
+    if (existingPromise) return existingPromise;
+
+    const currentGeneration = generation;
+    const promise = itemNamespace
+      .load(itemKey)
+      .then((cached) => {
+        if (!cached || currentGeneration !== generation || !storeRef) return;
+
+        const itemState = toItemState<ItemState, ItemPayload>(cached, config);
+        if (!itemState) {
+          scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
           return;
         }
 
-        store.setPartialState(validated, {
-          action: 'persistent-storage-hydrate',
-        });
+        if (storeRef.state.itemQueries[itemKey] !== undefined) return;
+
+        storeRef.produceState(
+          (draft) => {
+            if (draft.itemQueries[itemKey] === undefined) {
+              draft.items[itemKey] = itemState.item;
+              draft.itemQueries[itemKey] = itemState.itemQuery;
+            }
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      })
+      .finally(() => {
+        if (currentGeneration === generation) {
+          pendingItemPreloads.delete(itemKey);
+        }
       });
+
+    pendingItemPreloads.set(itemKey, promise);
+    return promise;
+  }
+
+  async function preloadItems(itemKeys: string[]): Promise<void> {
+    if (backend !== 'opfs') return;
+    await Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+  }
+
+  async function preloadQuery(queryKey: string): Promise<void> {
+    if (backend !== 'opfs' || !storeRef) return;
+    if (storeRef.state.queries[queryKey] !== undefined) return;
+
+    const existingPromise = pendingQueryPreloads.get(queryKey);
+    if (existingPromise) return existingPromise;
+
+    const currentGeneration = generation;
+    const promise = queryNamespace
+      .load(queryKey)
+      .then(async (cached) => {
+        if (!cached || currentGeneration !== generation || !storeRef) return;
+        const activeStore = storeRef;
+
+        await preloadItems(cached.items);
+        if (currentGeneration !== generation || activeStore !== storeRef)
+          return;
+        if (activeStore.state.queries[queryKey] !== undefined) return;
+
+        const filteredItemKeys = cached.items.filter((itemKey) => {
+          return (
+            activeStore.state.items[itemKey] !== undefined &&
+            activeStore.state.itemQueries[itemKey] !== undefined
+          );
+        });
+
+        activeStore.produceState(
+          (draft) => {
+            if (draft.queries[queryKey] === undefined) {
+              draft.queries[queryKey] = {
+                error: null,
+                hasMore: cached.hasMore,
+                items: filteredItemKeys,
+                payload: __LEGIT_CAST__<QueryPayload, unknown>(cached.payload),
+                refetchOnMount: 'lowPriority',
+                status: 'success',
+                wasLoaded: true,
+              };
+            }
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      })
+      .finally(() => {
+        if (currentGeneration === generation) {
+          pendingQueryPreloads.delete(queryKey);
+        }
+      });
+
+    pendingQueryPreloads.set(queryKey, promise);
+    return promise;
+  }
+
+  async function preloadQueries(queryKeys: string[]): Promise<void> {
+    if (backend !== 'opfs') return;
+    await Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
+  }
+
+  async function evictStoredQueries(): Promise<Set<string>> {
+    const queryKeys = await queryNamespace.listKeys();
+    const entries = await Promise.all(
+      queryKeys.map(async (queryKey) => ({
+        queryKey,
+        entry: await queryNamespace.readEntry(queryKey),
+      })),
+    );
+
+    const validEntries = filterAndMap(entries, ({ queryKey, entry }) => {
+      return entry ? { queryKey, entry } : false;
+    });
+
+    validEntries.sort((a, b) => {
+      const aPinned = pinnedQueries.has(a.queryKey);
+      const bPinned = pinnedQueries.has(b.queryKey);
+
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+
+      return b.entry.timestamp - a.entry.timestamp;
+    });
+
+    const keptQueryKeys = new Set(
+      validEntries.slice(0, maxQueries).map(({ queryKey }) => queryKey),
+    );
+
+    await Promise.all(
+      validEntries
+        .filter(({ queryKey }) => !keptQueryKeys.has(queryKey))
+        .map(({ queryKey }) => queryNamespace.remove(queryKey)),
+    );
+
+    return keptQueryKeys;
+  }
+
+  async function evictStoredItems(keptQueryKeys: Set<string>): Promise<void> {
+    const queryEntries = await Promise.all(
+      [...keptQueryKeys].map(async (queryKey) => ({
+        queryKey,
+        entry: await queryNamespace.readEntry(queryKey),
+      })),
+    );
+
+    const referencedItems = new Set<string>();
+    for (const { entry } of queryEntries) {
+      if (!entry) continue;
+
+      for (const itemKey of entry.data.items) {
+        referencedItems.add(itemKey);
+      }
     }
 
-    // Subscribe to state changes for saving
-    unsubscribe = store.subscribe(({ current }) => {
-      handle.scheduleSave(() => {
-        const stateToSave = store.state;
-        const persistedItems: Record<string, ItemState> = {};
-        const persistedQueries: Record<string, PersistedQuery> = {};
-        const persistedItemPayloads: Record<string, unknown> = {};
+    const itemKeys = await itemNamespace.listKeys();
+    const itemEntries = await Promise.all(
+      itemKeys.map(async (itemKey) => ({
+        itemKey,
+        entry: await itemNamespace.readEntry(itemKey),
+      })),
+    );
 
-        // Collect items
-        for (const [itemKey, itemData] of Object.entries(stateToSave.items)) {
-          if (itemData !== null) {
-            persistedItems[itemKey] = itemData;
-          }
-        }
+    const validItemEntries = filterAndMap(itemEntries, ({ itemKey, entry }) => {
+      return entry ? { itemKey, entry } : false;
+    });
 
-        // Collect item payloads from itemQueries
-        for (const [itemKey, itemQuery] of Object.entries(
-          stateToSave.itemQueries,
-        )) {
-          if (itemQuery) {
-            persistedItemPayloads[itemKey] = itemQuery.payload;
-          }
-        }
+    validItemEntries.sort((a, b) => {
+      const aReferenced = referencedItems.has(a.itemKey);
+      const bReferenced = referencedItems.has(b.itemKey);
 
-        // Collect queries
-        for (const [queryKey, query] of Object.entries(stateToSave.queries)) {
-          if (query.status === 'success' || query.wasLoaded) {
-            persistedQueries[queryKey] = {
-              payload: query.payload,
-              items: query.items,
-              hasMore: query.hasMore,
-            };
-          }
-        }
+      if (aReferenced && !bReferenced) return -1;
+      if (!aReferenced && bReferenced) return 1;
 
-        const data: PersistedListQueryData<ItemState> = {
-          items: persistedItems,
-          queries: persistedQueries,
-          itemPayloads: persistedItemPayloads,
-        };
+      const aPinned = pinnedItems.has(a.itemKey);
+      const bPinned = pinnedItems.has(b.itemKey);
 
-        return evictListQueryData(
-          data,
-          maxQueries,
-          maxItems,
-          pinnedQueries,
-          pinnedItems,
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+
+      return b.entry.timestamp - a.entry.timestamp;
+    });
+
+    const keptItemKeys = new Set(
+      validItemEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+    );
+
+    await Promise.all(
+      validItemEntries
+        .filter(({ itemKey }) => !keptItemKeys.has(itemKey))
+        .map(({ itemKey }) => itemNamespace.remove(itemKey)),
+    );
+
+    await Promise.all(
+      [...keptQueryKeys].map(async (queryKey) => {
+        const entry = await queryNamespace.load(queryKey);
+        if (!entry) return;
+
+        const filteredItems = entry.items.filter((itemKey) =>
+          keptItemKeys.has(itemKey),
         );
-      });
 
-      // Suppress unused variable warning
-      void current;
+        if (filteredItems.length === entry.items.length) return;
+
+        await queryNamespace.save(queryKey, {
+          ...entry,
+          items: filteredItems,
+        });
+      }),
+    );
+  }
+
+  async function flushPersistedState(): Promise<void> {
+    if (!storeRef) return;
+
+    const state = storeRef.state;
+    const tasks: Promise<void>[] = [];
+
+    for (const [itemKey, item] of Object.entries(state.items)) {
+      const itemQuery = state.itemQueries[itemKey];
+
+      if (item === null || itemQuery === null || itemQuery === undefined) {
+        tasks.push(itemNamespace.remove(itemKey));
+        continue;
+      }
+
+      tasks.push(
+        itemNamespace.save(itemKey, {
+          data: item,
+          payload: itemQuery.payload,
+        }),
+      );
+    }
+
+    for (const [queryKey, query] of Object.entries(state.queries)) {
+      if (query.status !== 'success' && !query.wasLoaded) continue;
+
+      tasks.push(
+        queryNamespace.save(queryKey, {
+          payload: query.payload,
+          items: query.items,
+          hasMore: query.hasMore,
+        }),
+      );
+    }
+
+    await Promise.all(tasks);
+    const keptQueryKeys = await evictStoredQueries();
+    await evictStoredItems(keptQueryKeys);
+  }
+
+  function schedulePersistedStateFlush(): void {
+    clearSaveTimer();
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void flushPersistedState();
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  function attach(store: Store<State>): void {
+    storeRef = store;
+    unsubscribe = store.subscribe(() => {
+      schedulePersistedStateFlush();
     });
   }
 
   function dispose(): void {
-    disposed = true;
+    generation++;
+    pendingItemPreloads.clear();
+    pendingQueryPreloads.clear();
+    clearSaveTimer();
     unsubscribe?.();
     unsubscribe = null;
-    handle.dispose();
+    storeRef = null;
+    itemNamespace.dispose();
+    queryNamespace.dispose();
   }
 
   async function clear(): Promise<void> {
-    await handle.clear();
+    clearSaveTimer();
+    await Promise.all([itemNamespace.clear(), queryNamespace.clear()]);
   }
 
-  return { initialState, attach, dispose, clear };
+  return {
+    createInitialState,
+    attach,
+    preloadItems,
+    preloadQueries,
+    hasAsyncPreload: backend === 'opfs',
+    dispose,
+    clear,
+  };
 }

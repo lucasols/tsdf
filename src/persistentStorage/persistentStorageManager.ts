@@ -166,6 +166,126 @@ export function createPersistentStorageHandle<T>(
   return { load, scheduleSave, saveNow, clear, dispose };
 }
 
+export type PersistentStorageNamespaceHandle<T> = {
+  readEntry(entryKey: string): Promise<StorageCacheEntry<T> | null>;
+  load(entryKey: string): Promise<T | null>;
+  save(entryKey: string, data: T): Promise<void>;
+  remove(entryKey: string): Promise<void>;
+  listKeys(): Promise<string[]>;
+  clear(): Promise<void>;
+  dispose(): void;
+};
+
+export function createPersistentStorageNamespaceHandle<T>(
+  config: Omit<PersistentStorageBaseConfig<never>, 'schema'> & {
+    entryPrefix: string;
+  },
+  {
+    adapter: adapterOverride,
+  }: {
+    adapter?: StorageAdapter;
+  } = {},
+): PersistentStorageNamespaceHandle<T> {
+  const version = config.version ?? 1;
+  const backendKey: StorageBackend = config.backend ?? 'opfs';
+  const { onPersistentStorageError } = config;
+  const adapter = adapterOverride ?? createStorageAdapter(backendKey);
+
+  if (!adapterOverride && !scannedBackends.has(backendKey)) {
+    scannedBackends.add(backendKey);
+    scheduleIdleCleanup(() => {
+      void runExpirationScan(adapter, getMaxAgeForBackend(backendKey));
+    });
+  }
+
+  function getPrefix(): string | false {
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return false;
+
+    return `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
+  }
+
+  function getKey(entryKey: string): string | false {
+    const prefix = getPrefix();
+    if (prefix === false) return false;
+    return `${prefix}${entryKey}`;
+  }
+
+  async function readEntry(
+    entryKey: string,
+  ): Promise<StorageCacheEntry<T> | null> {
+    const key = getKey(entryKey);
+    if (key === false) return null;
+
+    const entry = await adapter.read<StorageCacheEntry<T>>(key);
+    if (!entry) return null;
+
+    if (entry.version !== version) {
+      scheduleIdleCleanup(() => void adapter.remove(key));
+      return null;
+    }
+
+    return entry;
+  }
+
+  async function load(entryKey: string): Promise<T | null> {
+    const key = getKey(entryKey);
+    const entry = await readEntry(entryKey);
+    if (!key || !entry) return null;
+
+    scheduleIdleCleanup(() => {
+      void adapter.write(key, { ...entry, timestamp: Date.now() });
+    });
+
+    return entry.data;
+  }
+
+  async function save(entryKey: string, data: T): Promise<void> {
+    const key = getKey(entryKey);
+    if (key === false) return;
+
+    const entry: StorageCacheEntry<T> = {
+      data,
+      timestamp: Date.now(),
+      version,
+    };
+
+    try {
+      await adapter.write(key, entry);
+    } catch (error) {
+      onPersistentStorageError?.(error);
+    }
+  }
+
+  async function remove(entryKey: string): Promise<void> {
+    const key = getKey(entryKey);
+    if (key === false) return;
+
+    await adapter.remove(key);
+  }
+
+  async function listKeys(): Promise<string[]> {
+    const prefix = getPrefix();
+    if (prefix === false) return [];
+
+    const keys = await adapter.listKeys(prefix);
+    return keys.map((key) => key.slice(prefix.length));
+  }
+
+  async function clear(): Promise<void> {
+    const prefix = getPrefix();
+    if (prefix === false) return;
+
+    await adapter.removeByPrefix(prefix);
+  }
+
+  function dispose(): void {
+    // No-op for namespaced handles: debouncing lives in the store integrations.
+  }
+
+  return { readEntry, load, save, remove, listKeys, clear, dispose };
+}
+
 /**
  * Synchronously reads from localStorage for initial state hydration.
  * Only works with localStorage backend. Returns null if data is not found,
@@ -205,6 +325,29 @@ export function readFromLocalStorageSync<T>(
   }
 }
 
+export function readStorageEntryFromLocalStorageSync<T>(
+  key: string,
+  version: number,
+): StorageCacheEntry<T> | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return null;
+
+    const entry = __LEGIT_CAST__<StorageCacheEntry<T>, unknown>(
+      JSON.parse(raw),
+    );
+    if (entry.version !== version) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return null;
+    }
+
+    return entry;
+  } catch {
+    scheduleIdleCleanup(() => localStorage.removeItem(key));
+    return null;
+  }
+}
+
 /**
  * Gets the storage key for a given session and store name.
  * Exported for use by store persistence integrations.
@@ -214,6 +357,27 @@ export function getStorageKeyForStore(
   storeName: string,
 ): string {
   return getStorageKey(sessionKey, storeName);
+}
+
+export function getStoragePrefixForStoreNamespace(
+  sessionKey: string,
+  storeName: string,
+  entryPrefix: string,
+): string {
+  return `${getStorageKey(sessionKey, storeName)}.${entryPrefix}.`;
+}
+
+export function listLocalStorageKeysSync(prefix: string): string[] {
+  const keys: string[] = [];
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(prefix)) {
+      keys.push(key);
+    }
+  }
+
+  return keys;
 }
 
 /** Clears all persistent storage entries for a given session key and backend. */

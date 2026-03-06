@@ -1,7 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type { DocumentStoreState } from '../documentStore';
-import type { FetchType } from '../requestScheduler';
 import type { ValidStoreState } from '../utils/storeShared';
 import {
   createPersistentStorageHandle,
@@ -59,29 +58,16 @@ function readDocumentFromLocalStorageSync(
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {
-  /** Initial state from synchronous localStorage read. Null if not available. */
-  initialState: {
-    data: State;
-    status: 'success';
-    refetchOnMount: FetchType;
-  } | null;
-  /** Attach to the store to enable async hydration and save subscriptions. */
-  attach(
-    store: Store<DocumentStoreState<State>>,
-    invalidateData: (priority: FetchType) => void,
-  ): void;
-  /** Dispose subscriptions and cancel pending saves. */
+  createInitialState(
+    baseState: DocumentStoreState<State>,
+  ): DocumentStoreState<State>;
+  attach(store: Store<DocumentStoreState<State>>): void;
+  preloadPersistentStorage(): Promise<void>;
+  hasAsyncPreload: boolean;
   dispose(): void;
-  /** Clear persisted data. */
   clear(): Promise<void>;
 };
 
-/**
- * Sets up persistent storage for a DocumentStore.
- *
- * For localStorage backend, provides synchronous initial state.
- * For OPFS backend, performs async hydration after store creation.
- */
 export function setupDocumentPersistence<State extends ValidStoreState>(
   config: DocumentPersistentStorageConfig<State> & {
     getSessionKey: () => string | false;
@@ -92,53 +78,68 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
 ): DocumentPersistenceSetup<State> {
   const version = config.version ?? 1;
   const backend = config.backend ?? 'opfs';
-
   const handle = createPersistentStorageHandle<PersistedDocumentData<State>>(
     config,
     { adapter: options.adapter },
   );
 
-  // Synchronous initial state (localStorage only)
-  let initialState: DocumentPersistenceSetup<State>['initialState'] = null;
+  let storeRef: Store<DocumentStoreState<State>> | null = null;
+  let unsubscribe: (() => void) | null = null;
+  let generation = 0;
+  let preloadPromise: Promise<void> | null = null;
 
-  if (backend === 'localStorage') {
+  function createInitialState(
+    baseState: DocumentStoreState<State>,
+  ): DocumentStoreState<State> {
+    if (
+      baseState.status !== 'idle' ||
+      baseState.data !== null ||
+      baseState.error !== null
+    ) {
+      return baseState;
+    }
+
+    if (backend !== 'localStorage') return baseState;
+
     const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return baseState;
 
-    if (sessionKey !== false) {
-      const key = getStorageKeyForStore(sessionKey, config.storeName);
-      const hasEntry = localStorage.getItem(key) !== null;
-      const persisted = readDocumentFromLocalStorageSync(key, version);
+    const key = getStorageKeyForStore(sessionKey, config.storeName);
+    const hasEntry = localStorage.getItem(key) !== null;
+    const persisted = readDocumentFromLocalStorageSync(key, version);
 
-      if (persisted) {
-        const validated = validateWithSchema(config.schema, persisted.data);
-
-        if (validated !== null) {
-          initialState = {
-            data: validated,
-            status: 'success',
-            refetchOnMount: 'lowPriority',
-          };
-          scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
-        } else {
-          scheduleIdleCleanup(() => localStorage.removeItem(key));
-        }
-      } else if (hasEntry) {
+    if (!persisted) {
+      if (hasEntry) {
         scheduleIdleCleanup(() => localStorage.removeItem(key));
       }
+      return baseState;
     }
+
+    const validated = validateWithSchema(config.schema, persisted.data);
+    if (validated === null) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return baseState;
+    }
+
+    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+
+    return {
+      ...baseState,
+      data: validated,
+      status: 'success',
+      refetchOnMount: 'lowPriority',
+    };
   }
 
-  let unsubscribe: (() => void) | null = null;
-  let disposed = false;
+  async function preloadPersistentStorage(): Promise<void> {
+    if (backend !== 'opfs' || !storeRef) return;
+    if (preloadPromise) return preloadPromise;
 
-  function attach(
-    store: Store<DocumentStoreState<State>>,
-    invalidateData: (priority: FetchType) => void,
-  ): void {
-    // Async hydration for OPFS
-    if (backend === 'opfs') {
-      void handle.load().then((cached) => {
-        if (!cached || disposed) return;
+    const currentGeneration = generation;
+    preloadPromise = handle
+      .load()
+      .then((cached) => {
+        if (!cached || currentGeneration !== generation || !storeRef) return;
 
         const validated = validateWithSchema(config.schema, cached.data);
         if (validated === null) {
@@ -146,12 +147,12 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
           return;
         }
 
-        // Only hydrate if store is still idle with no data
-        const currentState = store.state;
-        if (currentState.status !== 'idle' || currentState.data !== null)
+        const currentState = storeRef.state;
+        if (currentState.status !== 'idle' || currentState.data !== null) {
           return;
+        }
 
-        store.setPartialState(
+        storeRef.setPartialState(
           {
             data: validated,
             status: 'success',
@@ -159,12 +160,19 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
           },
           { action: 'persistent-storage-hydrate' },
         );
-
-        invalidateData('lowPriority');
+      })
+      .finally(() => {
+        if (currentGeneration === generation) {
+          preloadPromise = null;
+        }
       });
-    }
 
-    // Subscribe to state changes for saving
+    return preloadPromise;
+  }
+
+  function attach(store: Store<DocumentStoreState<State>>): void {
+    storeRef = store;
+
     unsubscribe = store.subscribe(({ current }) => {
       if (current.status === 'success' && current.data !== null) {
         const capturedData = current.data;
@@ -178,9 +186,11 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   }
 
   function dispose(): void {
-    disposed = true;
+    generation++;
+    preloadPromise = null;
     unsubscribe?.();
     unsubscribe = null;
+    storeRef = null;
     handle.dispose();
   }
 
@@ -188,5 +198,12 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
     await handle.clear();
   }
 
-  return { initialState, attach, dispose, clear };
+  return {
+    createInitialState,
+    attach,
+    preloadPersistentStorage,
+    hasAsyncPreload: backend === 'opfs',
+    dispose,
+    clear,
+  };
 }

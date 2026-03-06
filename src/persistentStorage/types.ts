@@ -108,28 +108,21 @@ export type PersistedDocumentData<State> = {
   data: State;
 };
 
-/** Shape of a single persisted collection item. */
-export type PersistedCollectionItem<State> = {
+/** Shape of a single persisted collection item entry. */
+export type PersistedCollectionItemData<State> = {
   data: State;
   payload: unknown;
-  lastAccessedAt: number;
 };
 
-/** Shape of persisted data for CollectionStore. */
-export type PersistedCollectionData<State> = {
-  items: Record<string, PersistedCollectionItem<State>>;
+/** Shape of a single persisted list item entry. */
+export type PersistedListQueryItemData<State> = {
+  data: State;
+  payload: unknown;
 };
 
-/** Shape of a single persisted query. */
-export type PersistedQuery = {
+/** Shape of a single persisted list query entry. */
+export type PersistedListQueryData = {
   payload: unknown;
   items: string[];
   hasMore: boolean;
-};
-
-/** Shape of persisted data for ListQueryStore. */
-export type PersistedListQueryData<State> = {
-  items: Record<string, State>;
-  queries: Record<string, PersistedQuery>;
-  itemPayloads: Record<string, unknown>;
 };

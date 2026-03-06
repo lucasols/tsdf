@@ -1,3 +1,4 @@
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
@@ -6,145 +7,115 @@ import type {
 } from '../collectionStore/collectionStore';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
-  createPersistentStorageHandle,
-  getStorageKeyForStore,
+  createPersistentStorageNamespaceHandle,
+  getStoragePrefixForStoreNamespace,
+  listLocalStorageKeysSync,
+  readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   CollectionPersistentStorageConfig,
-  PersistedCollectionData,
-  PersistedCollectionItem,
+  PersistedCollectionItemData,
   StorageAdapter,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 50;
+const SAVE_DEBOUNCE_MS = 1000;
 
-/**
- * Synchronously reads persisted collection data from localStorage.
- */
-function readCollectionFromLocalStorageSync(
-  key: string,
-  version: number,
-): PersistedCollectionData<unknown> | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
-
-    const entry: unknown = JSON.parse(raw);
-
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      !('version' in entry) ||
-      !('data' in entry)
-    ) {
-      return null;
-    }
-
-    const typedEntry = entry;
-
-    if (typedEntry.version !== version) return null;
-
-    const data = typedEntry.data;
-
-    if (!data || typeof data !== 'object' || !('items' in data)) {
-      return null;
-    }
-
-    return __LEGIT_CAST__<PersistedCollectionData<unknown>, object>(data);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Validates and reconstructs collection items from persisted data.
- */
-function validatePersistedItems<
+function toCollectionItemState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 >(
-  persisted: PersistedCollectionData<unknown>,
+  persisted: PersistedCollectionItemData<unknown>,
   config: CollectionPersistentStorageConfig<ItemState>,
-): Record<string, TSFDCollectionItem<ItemState, ItemPayload>> | null {
-  const result: Record<string, TSFDCollectionItem<ItemState, ItemPayload>> = {};
-  let hasValidItems = false;
+): TSFDCollectionItem<ItemState, ItemPayload> | null {
+  const validated = validateWithSchema(config.schema, persisted.data);
+  if (validated === null) return null;
 
-  for (const [itemKey, item] of Object.entries(persisted.items)) {
-    const validated = validateWithSchema(config.schema, item.data);
-    if (validated === null) continue;
-
-    hasValidItems = true;
-    result[itemKey] = {
-      data: validated,
-      error: null,
-      status: 'success',
-      payload: __LEGIT_CAST__<ItemPayload, unknown>(item.payload),
-      refetchOnMount: 'lowPriority',
-      wasLoaded: true,
-    };
-  }
-
-  return hasValidItems ? result : null;
+  return {
+    data: validated,
+    error: null,
+    payload: __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload),
+    refetchOnMount: 'lowPriority',
+    status: 'success',
+    wasLoaded: true,
+  };
 }
 
-/**
- * Applies LRU eviction to collection items before saving.
- * Returns items sorted by: pinned first, then by lastAccessedAt descending,
- * capped at maxItems.
- */
-function evictLruItems<State>(
-  items: Record<string, PersistedCollectionItem<State>>,
-  maxItems: number,
-  pinnedItems: Set<string>,
-): Record<string, PersistedCollectionItem<State>> {
-  const entries = Object.entries(items);
+function defineLazyLocalStorageItem<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+>(
+  state: TSFDCollectionState<ItemState, ItemPayload>,
+  itemKey: string,
+  storageKey: string,
+  version: number,
+  config: CollectionPersistentStorageConfig<ItemState>,
+): void {
+  Object.defineProperty(state, itemKey, {
+    configurable: true,
+    enumerable: false,
+    get() {
+      const cacheEntry = readStorageEntryFromLocalStorageSync<
+        PersistedCollectionItemData<unknown>
+      >(storageKey, version);
 
-  if (entries.length <= maxItems) return items;
+      if (!cacheEntry) {
+        Object.defineProperty(state, itemKey, {
+          configurable: true,
+          enumerable: false,
+          value: undefined,
+          writable: true,
+        });
+        return undefined;
+      }
 
-  // Sort: pinned first, then by lastAccessedAt descending
-  entries.sort(([keyA, a], [keyB, b]) => {
-    const aPinned = pinnedItems.has(keyA);
-    const bPinned = pinnedItems.has(keyB);
+      const item = toCollectionItemState<ItemState, ItemPayload>(
+        cacheEntry.data,
+        config,
+      );
 
-    if (aPinned && !bPinned) return -1;
-    if (!aPinned && bPinned) return 1;
+      if (!item) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        Object.defineProperty(state, itemKey, {
+          configurable: true,
+          enumerable: false,
+          value: undefined,
+          writable: true,
+        });
+        return undefined;
+      }
 
-    return b.lastAccessedAt - a.lastAccessedAt;
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+
+      Object.defineProperty(state, itemKey, {
+        configurable: true,
+        enumerable: true,
+        value: item,
+        writable: true,
+      });
+
+      return item;
+    },
   });
-
-  const kept = entries.slice(0, maxItems);
-  const result: Record<string, PersistedCollectionItem<State>> = {};
-
-  for (const [key, value] of kept) {
-    result[key] = value;
-  }
-
-  return result;
 }
 
 export type CollectionPersistenceSetup<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 > = {
-  /** Initial items from synchronous localStorage read. Empty record if not available. */
-  initialItems: Record<
-    string,
-    TSFDCollectionItem<ItemState, ItemPayload>
-  > | null;
-  /** Attach to the store to enable async hydration and save subscriptions. */
+  createInitialState(
+    baseState: TSFDCollectionState<ItemState, ItemPayload>,
+  ): TSFDCollectionState<ItemState, ItemPayload>;
   attach(store: Store<TSFDCollectionState<ItemState, ItemPayload>>): void;
-  /** Dispose subscriptions and cancel pending saves. */
+  preloadItems(itemKeys: string[]): Promise<void>;
+  hasAsyncPreload: boolean;
   dispose(): void;
-  /** Clear persisted data. */
   clear(): Promise<void>;
 };
 
-/**
- * Sets up persistent storage for a CollectionStore.
- */
 export function setupCollectionPersistence<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -161,111 +132,211 @@ export function setupCollectionPersistence<
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
   const pinnedItems = new Set(config.pinnedItems ?? []);
 
-  const handle = createPersistentStorageHandle<
-    PersistedCollectionData<ItemState>
-  >(config, { adapter: options.adapter });
+  const namespace = createPersistentStorageNamespaceHandle<
+    PersistedCollectionItemData<ItemState>
+  >(
+    {
+      ...config,
+      entryPrefix: 'collection.item',
+    },
+    { adapter: options.adapter },
+  );
 
-  // Synchronous initial state (localStorage only)
-  let initialItems: CollectionPersistenceSetup<
-    ItemState,
-    ItemPayload
-  >['initialItems'] = null;
+  let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =
+    null;
+  let unsubscribe: (() => void) | null = null;
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
+  const pendingPreloads = new Map<string, Promise<void>>();
 
-  if (backend === 'localStorage') {
-    const sessionKey = config.getSessionKey();
-
-    if (sessionKey !== false) {
-      const key = getStorageKeyForStore(sessionKey, config.storeName);
-      const hasEntry = localStorage.getItem(key) !== null;
-      const persisted = readCollectionFromLocalStorageSync(key, version);
-
-      if (persisted) {
-        initialItems = validatePersistedItems<ItemState, ItemPayload>(
-          persisted,
-          config,
-        );
-
-        if (initialItems !== null) {
-          scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
-        } else {
-          scheduleIdleCleanup(() => localStorage.removeItem(key));
-        }
-      } else if (hasEntry) {
-        scheduleIdleCleanup(() => localStorage.removeItem(key));
-      }
+  function clearSaveTimer(): void {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
     }
   }
 
-  let unsubscribe: (() => void) | null = null;
-  let disposed = false;
+  function createInitialState(
+    baseState: TSFDCollectionState<ItemState, ItemPayload>,
+  ): TSFDCollectionState<ItemState, ItemPayload> {
+    if (backend !== 'localStorage') return baseState;
 
-  function attach(
-    store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
-  ): void {
-    // Async hydration for OPFS
-    if (backend === 'opfs') {
-      void handle.load().then((cached) => {
-        if (!cached || disposed) return;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return baseState;
 
-        const currentState = store.state;
-        const hasExistingData = Object.keys(currentState).length > 0;
-        if (hasExistingData) return;
+    const prefix = getStoragePrefixForStoreNamespace(
+      sessionKey,
+      config.storeName,
+      'collection.item',
+    );
 
-        const validated = validatePersistedItems<ItemState, ItemPayload>(
+    const initialState = { ...baseState };
+
+    for (const storageKey of listLocalStorageKeysSync(prefix)) {
+      const itemKey = storageKey.slice(prefix.length);
+      if (itemKey in initialState) continue;
+
+      defineLazyLocalStorageItem(
+        initialState,
+        itemKey,
+        storageKey,
+        version,
+        config,
+      );
+    }
+
+    return initialState;
+  }
+
+  async function preloadItem(itemKey: string): Promise<void> {
+    if (backend !== 'opfs' || !storeRef) return;
+    if (storeRef.state[itemKey] !== undefined) return;
+
+    const existingPromise = pendingPreloads.get(itemKey);
+    if (existingPromise) return existingPromise;
+
+    const currentGeneration = generation;
+    const promise = namespace
+      .load(itemKey)
+      .then((cached) => {
+        if (!cached || currentGeneration !== generation || !storeRef) return;
+
+        const validated = toCollectionItemState<ItemState, ItemPayload>(
           cached,
           config,
         );
 
         if (!validated) {
-          scheduleIdleCleanup(() => void handle.clear());
+          scheduleIdleCleanup(() => void namespace.remove(itemKey));
           return;
         }
 
-        store.setPartialState(validated, {
-          action: 'persistent-storage-hydrate',
-        });
+        if (storeRef.state[itemKey] !== undefined) return;
+
+        storeRef.produceState(
+          (draft) => {
+            if (draft[itemKey] === undefined) {
+              draft[itemKey] = validated;
+            }
+          },
+          { action: 'persistent-storage-hydrate' },
+        );
+      })
+      .finally(() => {
+        if (currentGeneration === generation) {
+          pendingPreloads.delete(itemKey);
+        }
       });
+
+    pendingPreloads.set(itemKey, promise);
+    return promise;
+  }
+
+  async function preloadItems(itemKeys: string[]): Promise<void> {
+    if (backend !== 'opfs') return;
+    await Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+  }
+
+  async function evictStoredItems(): Promise<void> {
+    const keys = await namespace.listKeys();
+    if (keys.length <= maxItems) return;
+
+    const entries = await Promise.all(
+      keys.map(async (itemKey) => ({
+        itemKey,
+        entry: await namespace.readEntry(itemKey),
+      })),
+    );
+
+    const validEntries = filterAndMap(entries, ({ itemKey, entry }) => {
+      return entry ? { itemKey, entry } : false;
+    });
+
+    if (validEntries.length <= maxItems) return;
+
+    validEntries.sort((a, b) => {
+      const aPinned = pinnedItems.has(a.itemKey);
+      const bPinned = pinnedItems.has(b.itemKey);
+
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+
+      return b.entry.timestamp - a.entry.timestamp;
+    });
+
+    const keptKeys = new Set(
+      validEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+    );
+
+    await Promise.all(
+      validEntries
+        .filter(({ itemKey }) => !keptKeys.has(itemKey))
+        .map(({ itemKey }) => namespace.remove(itemKey)),
+    );
+  }
+
+  async function flushPersistedState(): Promise<void> {
+    if (!storeRef) return;
+
+    const state = storeRef.state;
+    const tasks: Promise<void>[] = [];
+
+    for (const [itemKey, item] of Object.entries(state)) {
+      if (!item?.data) {
+        tasks.push(namespace.remove(itemKey));
+        continue;
+      }
+
+      tasks.push(
+        namespace.save(itemKey, {
+          data: item.data,
+          payload: item.payload,
+        }),
+      );
     }
 
-    // Subscribe to state changes for saving
-    unsubscribe = store.subscribe(({ current }) => {
-      handle.scheduleSave(() => {
-        const stateToSave = store.state;
-        const persistedItems: Record<
-          string,
-          PersistedCollectionItem<ItemState>
-        > = {};
+    await Promise.all(tasks);
+    await evictStoredItems();
+  }
 
-        for (const [itemKey, item] of Object.entries(stateToSave)) {
-          if (!item?.data) continue;
+  function schedulePersistedStateFlush(): void {
+    clearSaveTimer();
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void flushPersistedState();
+    }, SAVE_DEBOUNCE_MS);
+  }
 
-          persistedItems[itemKey] = {
-            data: item.data,
-            payload: item.payload,
-            lastAccessedAt: Date.now(),
-          };
-        }
-
-        const evicted = evictLruItems(persistedItems, maxItems, pinnedItems);
-
-        return { items: evicted };
-      });
-
-      // Suppress unused variable warning — current is used by the subscribe API
-      void current;
+  function attach(
+    store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
+  ): void {
+    storeRef = store;
+    unsubscribe = store.subscribe(() => {
+      schedulePersistedStateFlush();
     });
   }
 
   function dispose(): void {
-    disposed = true;
+    generation++;
+    pendingPreloads.clear();
+    clearSaveTimer();
     unsubscribe?.();
     unsubscribe = null;
-    handle.dispose();
+    storeRef = null;
+    namespace.dispose();
   }
 
   async function clear(): Promise<void> {
-    await handle.clear();
+    clearSaveTimer();
+    await namespace.clear();
   }
 
-  return { initialItems, attach, dispose, clear };
+  return {
+    createInitialState,
+    attach,
+    preloadItems,
+    hasAsyncPreload: backend === 'opfs',
+    dispose,
+    clear,
+  };
 }
