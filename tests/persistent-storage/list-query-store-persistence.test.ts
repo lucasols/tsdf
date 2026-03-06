@@ -1,54 +1,114 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import type {
   PersistedListQueryData,
+  PersistedListQueryItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 const rowSchema = rc_object({ id: rc_number, name: rc_string });
 
-// --- Key helpers matching the test env's internal format ---
-
-function rawItemKey(tableId: string, id: number): string {
+function rawItemPayload(tableId: string, id: number): string {
   return `${tableId}||${id}`;
 }
 
 function storeItemKey(tableId: string, id: number): string {
-  return getCompositeKey(rawItemKey(tableId, id));
+  return getCompositeKey(rawItemPayload(tableId, id));
 }
 
-function queryKey(params: ListQueryParams): string {
+function storeQueryKey(params: ListQueryParams): string {
   return getCompositeKey(params);
 }
 
-// --- localStorage helpers ---
-
-function setCachedData(
+function itemStorageKey(
   storeName: string,
   sessionKey: string,
-  data: PersistedListQueryData<Row>,
+  tableId: string,
+  id: number,
+): string {
+  return `tsdf.${sessionKey}.${storeName}.listQuery.item.${storeItemKey(tableId, id)}`;
+}
+
+function queryStorageKey(
+  storeName: string,
+  sessionKey: string,
+  params: ListQueryParams,
+): string {
+  return `tsdf.${sessionKey}.${storeName}.listQuery.query.${storeQueryKey(params)}`;
+}
+
+function setCachedItem(
+  storeName: string,
+  sessionKey: string,
+  tableId: string,
+  id: number,
+  data: Row,
   version = 1,
-) {
-  const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedListQueryData<Row>> = {
-    data,
+): string {
+  const key = itemStorageKey(storeName, sessionKey, tableId, id);
+  const entry: StorageCacheEntry<PersistedListQueryItemData<Row>> = {
+    data: {
+      data,
+      payload: rawItemPayload(tableId, id),
+    },
     timestamp: Date.now(),
     version,
   };
+
   localStorage.setItem(key, JSON.stringify(entry));
+
+  return key;
+}
+
+function setCachedQuery(
+  storeName: string,
+  sessionKey: string,
+  params: ListQueryParams,
+  items: string[],
+  hasMore = false,
+  version = 1,
+): string {
+  const key = queryStorageKey(storeName, sessionKey, params);
+  const entry: StorageCacheEntry<PersistedListQueryData> = {
+    data: {
+      payload: params,
+      items,
+      hasMore,
+    },
+    timestamp: Date.now(),
+    version,
+  };
+
+  localStorage.setItem(key, JSON.stringify(entry));
+
+  return key;
+}
+
+function listStoredKeys(prefix: string): string[] {
+  const keys: string[] = [];
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(prefix)) {
+      keys.push(key.slice(prefix.length));
+    }
+  }
+
+  return keys;
 }
 
 function createEnv(options: {
-  storeName?: string;
+  storeName: string;
   sessionKey?: string;
   version?: number;
   maxItems?: number;
@@ -56,26 +116,24 @@ function createEnv(options: {
   pinnedItems?: string[];
   pinnedQueries?: string[];
   serverData?: Tables<Row>;
+  onPersistentStorageError?: (error: unknown) => void;
 }) {
-  const storeName = options.storeName ?? 'test-lq';
-  return createListQueryStoreTestEnv(
-    options.serverData ?? {},
-    {
-      id: storeName,
-      getSessionKey: () => options.sessionKey ?? 'test-session',
-      ignoreInitialTimeCheck: true,
-      persistentStorage: {
-        storeName,
-        backend: 'localStorage',
-        schema: rowSchema,
-        version: options.version,
-        maxItems: options.maxItems,
-        maxQueries: options.maxQueries,
-        pinnedItems: options.pinnedItems,
-        pinnedQueries: options.pinnedQueries,
-      },
+  return createListQueryStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
+    getSessionKey: () => options.sessionKey ?? 'session1',
+    ignoreInitialTimeCheck: true,
+    persistentStorage: {
+      storeName: options.storeName,
+      backend: 'localStorage',
+      schema: rowSchema,
+      version: options.version,
+      maxItems: options.maxItems,
+      maxQueries: options.maxQueries,
+      pinnedItems: options.pinnedItems,
+      pinnedQueries: options.pinnedQueries,
+      onPersistentStorageError: options.onPersistentStorageError,
     },
-  );
+  });
 }
 
 beforeAll(() => {
@@ -88,67 +146,54 @@ afterEach(() => {
 });
 
 describe('localStorage: list query store persistence', () => {
-  test('items and queries loaded from cache', () => {
-    const ik1 = storeItemKey('t1', 1);
-    const ik2 = storeItemKey('t1', 2);
-    const qk = queryKey({ tableId: 't1' });
+  test('direct query reads lazily hydrate only the requested query and its items', () => {
+    const usersQuery = { tableId: 'users' };
+    const projectsQuery = { tableId: 'projects' };
+    const usersItem1 = storeItemKey('users', 1);
+    const usersItem2 = storeItemKey('users', 2);
+    const projectsItem1 = storeItemKey('projects', 1);
 
-    setCachedData('lq1', 'sess1', {
-      items: {
-        [ik1]: { id: 1, name: 'First' },
-        [ik2]: { id: 2, name: 'Second' },
-      },
-      queries: {
-        [qk]: {
-          payload: { tableId: 't1' },
-          items: [ik1, ik2],
-          hasMore: true,
-        },
-      },
-      itemPayloads: {
-        [ik1]: rawItemKey('t1', 1),
-        [ik2]: rawItemKey('t1', 2),
-      },
+    setCachedItem('lq-local', 'sess1', 'users', 1, { id: 1, name: 'Alice' });
+    setCachedItem('lq-local', 'sess1', 'users', 2, { id: 2, name: 'Bob' });
+    setCachedItem('lq-local', 'sess1', 'projects', 1, {
+      id: 1,
+      name: 'Secret',
+    });
+    setCachedQuery('lq-local', 'sess1', usersQuery, [usersItem1, usersItem2]);
+    setCachedQuery('lq-local', 'sess1', projectsQuery, [projectsItem1]);
+
+    const env = createEnv({
+      storeName: 'lq-local',
+      sessionKey: 'sess1',
     });
 
-    const env = createEnv({ storeName: 'lq1', sessionKey: 'sess1' });
-
-    // Items should be loaded
-    expect(env.store.state.items[ik1]).toMatchInlineSnapshot(`
-      id: 1
-      name: 'First'
-    `);
-    expect(env.store.state.items[ik2]).toMatchInlineSnapshot(`
-      id: 2
-      name: 'Second'
-    `);
-
-    // Query should be loaded
-    const query = env.store.state.queries[qk];
-    expect(query).toMatchInlineSnapshot(`
-      error: null
-      hasMore: '✅'
-      items: ['"t1||1', '"t1||2']
-      payload: { tableId: 't1' }
-      refetchOnMount: 'lowPriority'
-      status: 'success'
-      wasLoaded: '✅'
-    `);
-
-    // Item queries should be reconstructed
-    expect(env.store.state.itemQueries[ik1]).toMatchInlineSnapshot(`
-      error: null
-      payload: 't1||1'
-      refetchOnMount: 'lowPriority'
-      status: 'success'
-      wasLoaded: '✅'
-    `);
-
-    // Fields should start empty
-    expect(env.store.state.itemLoadedFields).toMatchInlineSnapshot(`{}`);
-    expect(env.store.state.itemFieldInvalidationFields).toMatchInlineSnapshot(
-      `{}`,
+    expect(env.apiStore.getQueriesState(() => true)).toMatchInlineSnapshot(
+      `[]`,
     );
+    expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getQueriesRelatedToItem(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        []
+      `);
+
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1', '"users||2']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+
+    expect(env.apiStore.getQueriesState(() => true).map(({ key }) => key))
+      .toMatchInlineSnapshot(`
+        ['{tableId:"users"}']
+      `);
+    expect(env.apiStore.getItemState(() => true).map(({ payload }) => payload))
+      .toMatchInlineSnapshot(`
+        ['users||1', 'users||2']
+      `);
   });
 
   test('query limit enforcement', async () => {

@@ -46,6 +46,20 @@ function setCachedDocumentData(
   localStorage.setItem(key, JSON.stringify(entry));
 }
 
+function getStoredEntryTimestamp(key: string): number {
+  const raw = localStorage.getItem(key);
+  if (raw === null) {
+    throw new Error(`Missing localStorage entry for ${key}`);
+  }
+
+  const parsed = rc_parse_json(raw, cacheEntryTimestampSchema);
+  if (!parsed.ok) {
+    throw new Error(`Invalid localStorage entry for ${key}`);
+  }
+
+  return parsed.value.timestamp;
+}
+
 function createDocPersistenceEnv(options: {
   storeName: string;
   sessionKey?: string;
@@ -403,6 +417,8 @@ describe('localStorage: document store persistence', () => {
       name: 'stale',
       value: 1,
     });
+    const key = 'tsdf.sess1.doc-revalidation-no-refetch';
+    const originalTimestamp = getStoredEntryTimestamp(key);
 
     const env = createDocPersistenceEnv({
       storeName: 'doc-revalidation-no-refetch',
@@ -430,6 +446,7 @@ describe('localStorage: document store persistence', () => {
     `);
 
     expect(env.serverMock.numOfFinishedFetches).toBe(0);
+    expect(getStoredEntryTimestamp(key)).toBeGreaterThan(originalTimestamp);
   });
 });
 

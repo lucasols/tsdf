@@ -96,6 +96,20 @@ function listStoredItemPayloads(
   return payloads;
 }
 
+function getStoredCollectionItemTimestamp(key: string): number {
+  const rawEntry = localStorage.getItem(key);
+  if (rawEntry === null) {
+    throw new Error(`Missing localStorage entry for ${key}`);
+  }
+
+  const parsed = rc_parse_json(rawEntry, cachedCollectionItemEntrySchema);
+  if (!parsed.ok) {
+    throw new Error(`Invalid localStorage entry for ${key}`);
+  }
+
+  return parsed.value.timestamp;
+}
+
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
@@ -226,9 +240,10 @@ describe('localStorage: collection store persistence', () => {
   });
 
   test('disableRefetchOnMount keeps cached data without refetching', async () => {
-    setCachedCollectionItem('col-hook-no-refetch', 'sess1', '1', {
+    const key = setCachedCollectionItem('col-hook-no-refetch', 'sess1', '1', {
       value: { id: '1', name: 'Cached' },
     });
+    const originalTimestamp = getStoredCollectionItemTimestamp(key);
 
     const env = createEnv({
       storeName: 'col-hook-no-refetch',
@@ -258,6 +273,9 @@ describe('localStorage: collection store persistence', () => {
     `);
 
     expect(env.serverTable.numOfFinishedFetches).toBe(0);
+    expect(getStoredCollectionItemTimestamp(key)).toBeGreaterThan(
+      originalTimestamp,
+    );
   });
 
   test('items are saved as separate localStorage entries', async () => {
