@@ -65,6 +65,29 @@ function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
   return keys;
 }
 
+function listStoredItemPayloads(
+  storeName: string,
+  sessionKey: string,
+): string[] {
+  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const payloads: string[] = [];
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(prefix)) continue;
+
+    const rawEntry = localStorage.getItem(key);
+    if (!rawEntry) continue;
+
+    const entry = JSON.parse(rawEntry) as StorageCacheEntry<
+      PersistedCollectionItemData<PersistedItemState>
+    >;
+    payloads.push(entry.data.payload as string);
+  }
+
+  return payloads;
+}
+
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
@@ -229,33 +252,24 @@ describe('localStorage: collection store persistence', () => {
     expect(env.serverTable.numOfFinishedFetches).toBe(0);
   });
 
+  test('items are saved as separate localStorage entries', async () => {
+    const env = createEnv({
+      storeName: 'col-entries',
       sessionKey: 'sess1',
-      maxItems: 2,
-      pinnedItems: [keyC],
     });
 
     env.apiStore.addItemToState('a', { value: { id: 'a', name: 'A' } });
     env.apiStore.addItemToState('b', { value: { id: 'b', name: 'B' } });
-    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'C' } });
 
     await advanceTime(1100);
+    await flushAllTimers();
 
-    const cached = localStorage.getItem('tsdf.sess1.col4');
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedCollectionData<CollectionTestItem<ItemState>>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    const savedItemKeys = Object.keys(parsed.data.items);
-
-    // Pinned 'c' survives despite being last; 'a' survives by insertion order; 'b' evicted
-    expect(savedItemKeys).toContain(keyC);
-    expect(savedItemKeys).toContain(keyA);
-    expect(savedItemKeys).not.toContain(keyB);
+    expect(localStorage.getItem('tsdf.sess1.col-entries')).toBeNull();
+    expect(listStoredItemKeys('col-entries', 'sess1').sort()).toEqual([
+      itemKey('a'),
+      itemKey('b'),
+    ]);
   });
-
-  test('version mismatch discards cached data', () => {
-    setCachedCollectionData(
-      'col5',
       'sess1',
       {
         old: {
@@ -344,21 +358,20 @@ describe('localStorage: collection store persistence', () => {
     setItemSpy.mockRestore();
   });
 
-  test('session isolation - different sessions do not share data', () => {
-    setCachedCollectionData('col8', 'sess-a', {
-      x: {
-        data: { value: { id: 'x', name: 'Session A' } },
-        payload: 'x',
-        lastAccessedAt: 1000,
-      },
+  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+    const onPersistentStorageError = vi.fn();
+    const env = createEnv({
+      storeName: 'col-preload-local',
+      sessionKey: 'sess1',
+      onPersistentStorageError,
     });
 
-    const env = createColPersistenceEnv({
-      storeName: 'col8',
-      sessionKey: 'sess-b',
-    });
+    await env.apiStore.preloadItemFromPersistentStorage('1');
 
-    expect(Object.keys(env.store.state).length).toBe(0);
+    expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
+    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
+      message: 'Async preload is not available',
+    });
   });
 
   test('reset clears persisted storage', async () => {
