@@ -1,8 +1,16 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import {
+  rc_number,
+  rc_object,
+  rc_parse_json,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type {
   PersistedListQueryData,
   PersistedListQueryItemData,
@@ -17,6 +25,26 @@ import {
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 const rowSchema = rc_object({ id: rc_number, name: rc_string });
+const cacheEntryTimestampSchema = rc_object({
+  data: rc_unknown,
+  timestamp: rc_number,
+  version: rc_number,
+});
+const partialResourcesConfig: PartialResourcesConfig<Row> = {
+  mergeItems: (prev, fetched) => {
+    if (!prev) return fetched;
+    return { ...prev, ...fetched };
+  },
+  selectFields: (fields, item) => {
+    const result: Record<string, unknown> = {};
+    for (const field of fields) {
+      if (field in item) {
+        result[field] = item[field];
+      }
+    }
+    return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
+  },
+};
 
 function rawItemPayload(tableId: string, id: number): string {
   return `${tableId}||${id}`;
@@ -107,6 +135,20 @@ function listStoredKeys(prefix: string): string[] {
   return keys;
 }
 
+function getStoredEntryTimestamp(key: string): number {
+  const raw = localStorage.getItem(key);
+  if (raw === null) {
+    throw new Error(`Missing localStorage entry for ${key}`);
+  }
+
+  const parsed = rc_parse_json(raw, cacheEntryTimestampSchema);
+  if (!parsed.ok) {
+    throw new Error(`Invalid localStorage entry for ${key}`);
+  }
+
+  return parsed.value.timestamp;
+}
+
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
@@ -117,11 +159,13 @@ function createEnv(options: {
   pinnedQueries?: string[];
   serverData?: Tables<Row>;
   onPersistentStorageError?: (error: unknown) => void;
+  partialResources?: PartialResourcesConfig<Row>;
 }) {
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     ignoreInitialTimeCheck: true,
+    partialResources: options.partialResources,
     persistentStorage: {
       storeName: options.storeName,
       backend: 'localStorage',
@@ -196,28 +240,72 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
-  test('query limit enforcement', async () => {
-    const qkA = queryKey({ tableId: 'a' });
-    const qkB = queryKey({ tableId: 'b' });
-    const qkC = queryKey({ tableId: 'c' });
+  test('direct item reads lazily hydrate only the requested cached item', () => {
+    setCachedItem('lq-item-local', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Alice',
+    });
+    setCachedItem('lq-item-local', 'sess1', 'users', 2, {
+      id: 2,
+      name: 'Bob',
+    });
 
     const env = createEnv({
-      storeName: 'lq2',
+      storeName: 'lq-item-local',
       sessionKey: 'sess1',
-      maxQueries: 2,
+    });
+
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Alice'
+      `);
+    expect(env.apiStore.getItemState(() => true).map(({ payload }) => payload))
+      .toMatchInlineSnapshot(`
+        ['users||1']
+      `);
+  });
+
+  test('first item hook read returns cached data then refetches', async () => {
+    setCachedItem('lq-item-hook', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Cached',
+    });
+
+    const env = createEnv({
+      storeName: 'lq-item-hook',
+      sessionKey: 'sess1',
       serverData: {
-        a: [{ id: 1, name: 'Item 1' }],
-        b: [{ id: 1, name: 'Item 2' }],
-        c: [{ id: 1, name: 'Item 3' }],
+        users: [{ id: 1, name: 'Fresh' }],
       },
     });
 
-    // Populate 3 queries via fetches
-    env.scheduleFetch('highPriority', { tableId: 'a' });
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem(
+        rawItemPayload('users', 1),
+        {
+          returnRefetchingStatus: true,
+        },
+      );
+
+      renders.add({
+        status,
+        name: data?.name ?? null,
+      });
+    });
+
     await flushAllTimers();
-    env.scheduleFetch('highPriority', { tableId: 'b' });
-    await flushAllTimers();
-    env.scheduleFetch('highPriority', { tableId: 'c' });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      -> status: refetching ⋅ name: Cached
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+  });
     await flushAllTimers();
 
     // Wait for save debounce
