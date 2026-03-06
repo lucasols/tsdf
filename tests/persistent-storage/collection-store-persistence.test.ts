@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
-import { rc_object, rc_string } from 'runcheck';
+import { rc_number, rc_object, rc_parse_json, rc_string } from 'runcheck';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import type {
   PersistedCollectionItemData,
@@ -12,6 +12,14 @@ import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
+});
+const cachedCollectionItemEntrySchema = rc_object({
+  data: rc_object({
+    data: wrappedItemSchema,
+    payload: rc_string,
+  }),
+  timestamp: rc_number,
+  version: rc_number,
 });
 
 function itemKey(payload: string): string {
@@ -79,10 +87,10 @@ function listStoredItemPayloads(
     const rawEntry = localStorage.getItem(key);
     if (!rawEntry) continue;
 
-    const entry = JSON.parse(rawEntry) as StorageCacheEntry<
-      PersistedCollectionItemData<PersistedItemState>
-    >;
-    payloads.push(entry.data.payload as string);
+    const parsed = rc_parse_json(rawEntry, cachedCollectionItemEntrySchema);
+    if (!parsed.ok) continue;
+
+    payloads.push(parsed.value.data.payload);
   }
 
   return payloads;
@@ -270,92 +278,41 @@ describe('localStorage: collection store persistence', () => {
       itemKey('b'),
     ]);
   });
-      'sess1',
-      {
-        old: {
-          data: { value: { id: 'old', name: 'Old' } },
-          payload: 'old',
-          lastAccessedAt: 1000,
-        },
-      },
-      1,
-    );
 
-    const env = createColPersistenceEnv({
-      storeName: 'col5',
-      sessionKey: 'sess1',
-      version: 2,
+  test('when maxItems is exceeded, pinnedItems keeps that payload in storage', async () => {
+    // Seed distinct timestamps so the kept payloads are easy to understand.
+    setCachedCollectionItem('col-max-items', 'sess1', 'a', {
+      value: { id: 'a', name: 'Pinned and old' },
+    });
+    await advanceTime(100);
+    setCachedCollectionItem('col-max-items', 'sess1', 'b', {
+      value: { id: 'b', name: 'Older' },
+    });
+    await advanceTime(100);
+    setCachedCollectionItem('col-max-items', 'sess1', 'c', {
+      value: { id: 'c', name: 'Newest cached' },
     });
 
-    expect(Object.keys(env.store.state).length).toBe(0);
-  });
-
-  test('schema validation failure discards invalid items', () => {
-    const key = 'tsdf.sess1.col6';
-    const entry: StorageCacheEntry<PersistedCollectionData<unknown>> = {
-      data: {
-        items: {
-          valid: {
-            data: { value: { id: 'v', name: 'Valid' } },
-            payload: 'v',
-            lastAccessedAt: 1000,
-          },
-          invalid: {
-            data: { badField: true },
-            payload: 'bad',
-            lastAccessedAt: 2000,
-          },
-        },
-      },
-      timestamp: Date.now(),
-      version: 1,
-    };
-    localStorage.setItem(key, JSON.stringify(entry));
-
-    const env = createColPersistenceEnv({
-      storeName: 'col6',
+    const env = createEnv({
+      storeName: 'col-max-items',
       sessionKey: 'sess1',
+      maxItems: 2,
+      pinnedItems: ['a'],
     });
 
-    // Only valid item should be loaded (keyed by the cache key, not the payload)
-    expect(env.store.state['valid']).toMatchInlineSnapshot(`
-      data:
-        value: { id: 'v', name: 'Valid' }
+    env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fresh' } });
 
-      error: null
-      payload: 'v'
-      refetchOnMount: 'lowPriority'
-      status: 'success'
-      wasLoaded: '✅'
-    `);
-    expect(env.store.state['invalid']).toBeUndefined();
-  });
-
-  test('save debouncing - only saves once per debounce window', async () => {
-    const env = createColPersistenceEnv({
-      storeName: 'col7',
-      sessionKey: 'sess1',
-    });
-
-    const setItemSpy = vi.spyOn(localStorage, 'setItem');
-
-    // Add multiple items rapidly
-    env.apiStore.addItemToState('a', { value: { id: 'a', name: 'A' } });
-    env.apiStore.addItemToState('b', { value: { id: 'b', name: 'B' } });
-    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'C' } });
-
-    // Wait for debounce
     await advanceTime(1100);
+    await flushAllTimers();
 
-    // Count writes to our specific key
-    const writeCount = setItemSpy.mock.calls.filter(
-      ([key]) => key === 'tsdf.sess1.col7',
-    ).length;
-
-    // Should only have written once (debounced)
-    expect(writeCount).toBe(1);
-
-    setItemSpy.mockRestore();
+    expect(listStoredItemPayloads('col-max-items', 'sess1').sort()).toEqual([
+      'a',
+      'd',
+    ]);
+    expect(listStoredItemKeys('col-max-items', 'sess1').sort()).toEqual([
+      itemKey('a'),
+      itemKey('d'),
+    ]);
   });
 
   test('preload reports unavailable async preload through persistent storage error handler', async () => {
@@ -374,26 +331,46 @@ describe('localStorage: collection store persistence', () => {
     });
   });
 
-  test('reset clears persisted storage', async () => {
-    setCachedCollectionData('col9', 'sess1', {
-      x: {
-        data: { value: { id: 'x', name: 'X' } },
-        payload: 'x',
-        lastAccessedAt: 1000,
-      },
+  test('invalid cached entries are cleaned up only after the item is read', async () => {
+    const key = setCachedCollectionItem(
+      'col-invalid',
+      'sess1',
+      'bad',
+      { value: { id: 'bad', name: 'Old' } },
+      1,
+    );
+
+    const env = createEnv({
+      storeName: 'col-invalid',
+      sessionKey: 'sess1',
+      version: 2,
     });
 
-    const env = createColPersistenceEnv({
-      storeName: 'col9',
+    expect(localStorage.getItem(key)).not.toBeNull();
+    expect(env.apiStore.getItemState('bad')).toBeUndefined();
+
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('reset clears all persisted item entries for the store', async () => {
+    const env = createEnv({
+      storeName: 'col-reset',
       sessionKey: 'sess1',
     });
 
-    expect(env.store.state['x']).not.toBeNull();
+    env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
+    env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listStoredItemKeys('col-reset', 'sess1')).toHaveLength(2);
 
     env.apiStore.reset();
     await flushAllTimers();
 
-    const cached = localStorage.getItem('tsdf.sess1.col9');
-    expect(cached).toBeNull();
+    expect(listStoredItemKeys('col-reset', 'sess1')).toHaveLength(0);
   });
 });
