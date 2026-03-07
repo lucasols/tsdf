@@ -35,7 +35,7 @@ If three `useItem` hooks mount within 100ms, their fetches are grouped and execu
 
 ### Background Multiplier
 
-When the browser tab is not focused, the coalescing window is extended:
+When synced browser tabs are open, the coalescing window can be extended in background tabs:
 
 ```
 backgroundCoalescingWindowMultiplier: 3
@@ -43,6 +43,8 @@ backgroundCoalescingWindowMultiplier: 3
 ```
 
 This reduces unnecessary network activity for background tabs.
+
+See [Browser Tabs Sync](./browser-tabs-sync.md) for focus ranking and request deduplication behavior across tabs.
 
 ## Scheduler Phases
 

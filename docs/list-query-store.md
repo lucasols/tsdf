@@ -18,6 +18,9 @@ type Task = {
 type TaskFilter = { status?: 'todo' | 'done'; projectId: string };
 
 const taskStore = createListQueryStore<Task, TaskFilter, string>({
+  id: 'list-query-tasks',
+  getSessionKey: () =>
+    authState.userId ? `tenant:${authState.tenantId}` : false,
   fetchListFn: (filter, size, { signal }) => api.getTasks(filter, size, signal),
   fetchItemFn: (taskId, { signal }) => api.getTask(taskId, signal),
   errorNormalizer: normalizeError,
@@ -40,14 +43,16 @@ The type parameters are:
 
 ### Required Options
 
-| Option                                 | Type                                                                | Description                                                         |
-| -------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `fetchListFn`                          | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes) |
-| `errorNormalizer`                      | `(exception: Error) => StoreError`                                  | Normalizes errors                                                   |
-| `lowPriorityThrottleMs`                | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                       |
-| `baseCoalescingWindowMs`               | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                       |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                       |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                     |
+| Option                                 | Type                                                                | Description                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `id`                                   | `string`                                                            | Stable logical store id shared across tabs                                                |
+| `getSessionKey`                        | `() => string \| false`                                             | Return session key for [Browser Tabs Sync](./browser-tabs-sync.md), or `false` to disable |
+| `fetchListFn`                          | Size mode: `(payload, size, options) => Promise<FetchListFnReturn>` | Fetches a paginated list. See [Pagination modes](#pagination-modes)                       |
+| `errorNormalizer`                      | `(exception: Error) => StoreError`                                  | Normalizes errors                                                                         |
+| `lowPriorityThrottleMs`                | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `baseCoalescingWindowMs`               | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                            | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                   | See [Mutations](./mutations.md)                                                           |
 
 ### Optional Options
 

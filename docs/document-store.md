@@ -12,6 +12,9 @@ import { createDocumentStore } from 'tsdf';
 type User = { id: string; name: string; email: string };
 
 const userStore = createDocumentStore<User>({
+  id: 'document-user',
+  getSessionKey: () =>
+    authState.userId ? `tenant:${authState.tenantId}` : false,
   fetchFn: (signal) => api.getUser(signal),
   errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
@@ -23,21 +26,23 @@ const userStore = createDocumentStore<User>({
 
 ## Options
 
-| Option                                 | Type                                                                             | Required | Description                                                       |
-| -------------------------------------- | -------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------- |
-| `fetchFn`                              | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                         |
-| `errorNormalizer`                      | `(exception: Error) => StoreError`                                               | Yes      | Normalizes errors into [StoreError](./shared-types.md#storeerror) |
-| `lowPriorityThrottleMs`                | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
-| `baseCoalescingWindowMs`               | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                | Yes      | See [Mutations](./mutations.md)                                   |
-| `debugName`                            | `string`                                                                         | No       | Debug name for logging                                            |
-| `dynamicRealtimeThrottleMs`            | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                   |
-| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                           |
-| `mediumPriorityDelayMs`                | `number`                                                                         | No       | Delay for medium-priority fetches                                 |
-| `usesRealTimeUpdates`                  | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode          |
-| `onSchedulerEvent`                     | `(event) => void`                                                                | No       | Scheduler event listener                                          |
-| `onMutationError`                      | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                     |
+| Option                                 | Type                                                                             | Required | Description                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `id`                                   | `string`                                                                         | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                   |
+| `getSessionKey`                        | `() => string \| false`                                                          | Yes      | Return session key for [Browser Tabs Sync](./browser-tabs-sync.md), or `false` to disable |
+| `fetchFn`                              | `(signal: AbortSignal) => Promise<State>`                                        | Yes      | Fetches the document data                                                                 |
+| `errorNormalizer`                      | `(exception: Error) => StoreError`                                               | Yes      | Normalizes errors into [StoreError](./shared-types.md#storeerror)                         |
+| `lowPriorityThrottleMs`                | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `baseCoalescingWindowMs`               | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                                         | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                | Yes      | See [Mutations](./mutations.md)                                                           |
+| `debugName`                            | `string`                                                                         | No       | Debug name for logging                                                                    |
+| `dynamicRealtimeThrottleMs`            | `(params: { lastFetchDuration: number; windowIsNotFocused: boolean }) => number` | No       | See [Real-Time Updates](./real-time-updates.md)                                           |
+| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                                                   |
+| `mediumPriorityDelayMs`                | `number`                                                                         | No       | Delay for medium-priority fetches                                                         |
+| `usesRealTimeUpdates`                  | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode                                  |
+| `onSchedulerEvent`                     | `(event) => void`                                                                | No       | Scheduler event listener                                                                  |
+| `onMutationError`                      | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                                             |
 
 ## State Shape
 

@@ -12,6 +12,9 @@ import { createCollectionStore } from 'tsdf';
 type Product = { id: string; name: string; price: number };
 
 const productStore = createCollectionStore<Product, string>({
+  id: 'collection-products',
+  getSessionKey: () =>
+    authState.userId ? `tenant:${authState.tenantId}` : false,
   fetchFn: (productId, signal) => api.getProduct(productId, signal),
   errorNormalizer: normalizeError,
   lowPriorityThrottleMs: 2000,
@@ -23,24 +26,26 @@ const productStore = createCollectionStore<Product, string>({
 
 ## Options
 
-| Option                                 | Type                                                                                                                | Required | Description                                                       |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------- |
-| `fetchFn`                              | `(params: ItemPayload, signal: AbortSignal) => Promise<ItemState>`                                                  | Yes      | Fetches a single item                                             |
-| `batchFetchFn`                         | `(payloads: ItemPayload[], signal: AbortSignal, batchKey: string) => Promise<Map<ItemPayload, ItemState \| Error>>` | No       | See [Batch Fetching](./batch-fetching.md)                         |
-| `getItemsBatchKey`                     | `(payload: ItemPayload) => string \| false`                                                                         | No       | Groups batch fetches by key. `false` falls back to per-item fetch |
-| `maxBatchSize`                         | `number`                                                                                                            | No       | Triggers immediate fetch when batch reaches this size             |
-| `getCollectionItemKey`                 | `(params: ItemPayload) => ValidPayload \| unknown[]`                                                                | No       | Custom key derivation from payload                                |
-| `errorNormalizer`                      | `(exception: Error) => StoreError`                                                                                  | Yes      | Normalizes errors                                                 |
-| `lowPriorityThrottleMs`                | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
-| `baseCoalescingWindowMs`               | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
-| `backgroundCoalescingWindowMultiplier` | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                     |
-| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                                                   | Yes      | See [Mutations](./mutations.md)                                   |
-| `mediumPriorityDelayMs`                | `number`                                                                                                            | No       | Delay for medium-priority fetches                                 |
-| `dynamicRealtimeThrottleMs`            | `(params) => number`                                                                                                | No       | See [Real-Time Updates](./real-time-updates.md)                   |
-| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                                                        | No       | Refetch on window focus                                           |
-| `usesRealTimeUpdates`                  | `boolean`                                                                                                           | No       | See [Real-Time Updates](./real-time-updates.md)                   |
-| `onInvalidate`                         | `(props: { itemState, payload, priority }) => void`                                                                 | No       | Called when an item is invalidated                                |
-| `onMutationError`                      | `(error, options: { silentErrors? }) => void`                                                                       | No       | Global mutation error handler                                     |
+| Option                                 | Type                                                                                                                | Required | Description                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `id`                                   | `string`                                                                                                            | Yes      | Stable logical store id for [Browser Tabs Sync](./browser-tabs-sync.md)                   |
+| `getSessionKey`                        | `() => string \| false`                                                                                             | Yes      | Return session key for [Browser Tabs Sync](./browser-tabs-sync.md), or `false` to disable |
+| `fetchFn`                              | `(params: ItemPayload, signal: AbortSignal) => Promise<ItemState>`                                                  | Yes      | Fetches a single item                                                                     |
+| `batchFetchFn`                         | `(payloads: ItemPayload[], signal: AbortSignal, batchKey: string) => Promise<Map<ItemPayload, ItemState \| Error>>` | No       | See [Batch Fetching](./batch-fetching.md)                                                 |
+| `getItemsBatchKey`                     | `(payload: ItemPayload) => string \| false`                                                                         | No       | Groups batch fetches by key. `false` falls back to per-item fetch                         |
+| `maxBatchSize`                         | `number`                                                                                                            | No       | Triggers immediate fetch when batch reaches this size                                     |
+| `getCollectionItemKey`                 | `(params: ItemPayload) => ValidPayload \| unknown[]`                                                                | No       | Custom key derivation from payload                                                        |
+| `errorNormalizer`                      | `(exception: Error) => StoreError`                                                                                  | Yes      | Normalizes errors                                                                         |
+| `lowPriorityThrottleMs`                | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `baseCoalescingWindowMs`               | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `backgroundCoalescingWindowMultiplier` | `number`                                                                                                            | Yes      | See [Fetch Scheduling](./fetch-scheduling.md)                                             |
+| `blockWindowClose`                     | `BlockWindowCloseHandler \| null`                                                                                   | Yes      | See [Mutations](./mutations.md)                                                           |
+| `mediumPriorityDelayMs`                | `number`                                                                                                            | No       | Delay for medium-priority fetches                                                         |
+| `dynamicRealtimeThrottleMs`            | `(params) => number`                                                                                                | No       | See [Real-Time Updates](./real-time-updates.md)                                           |
+| `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                                                        | No       | Refetch on window focus                                                                   |
+| `usesRealTimeUpdates`                  | `boolean`                                                                                                           | No       | See [Real-Time Updates](./real-time-updates.md)                                           |
+| `onInvalidate`                         | `(props: { itemState, payload, priority }) => void`                                                                 | No       | Called when an item is invalidated                                                        |
+| `onMutationError`                      | `(error, options: { silentErrors? }) => void`                                                                       | No       | Global mutation error handler                                                             |
 
 ## Item State Shape
 
