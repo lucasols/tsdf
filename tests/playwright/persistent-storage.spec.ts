@@ -8,11 +8,7 @@ async function openScenario(
   context: BrowserContext,
   scenario: 'persist-document' | 'persist-collection' | 'persist-list',
   pageId: string,
-  options: {
-    storeId: string;
-    backend: StorageBackend;
-    sessionKey?: string;
-  },
+  options: { storeId: string; backend: StorageBackend; sessionKey?: string },
 ) {
   const page = await context.newPage();
   const searchParams = new URLSearchParams({
