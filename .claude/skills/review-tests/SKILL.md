@@ -27,7 +27,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 
 - Treat readability as one of the top priorities in the review. If a test is difficult for a human to scan and understand quickly, that is a real defect in the test suite.
 - Ask: can a reviewer understand the scenario, the actions, and the expected outcome at a glance without reverse-engineering the implementation?
-- Flag tests whose narrative is buried across long setup blocks, scattered assertions, raw store poking, or transport/fetch-history details when a clearer structure or timeline snapshot would make the behavior obvious.
+- Flag tests whose narrative is buried across long setup blocks, scattered assertions, raw store poking, or transport/`fetchHistory` details when a clearer structure, timeline snapshot, or `getRequestHistory(...)` assertion would make the behavior obvious.
 - Flag complex tests that do not present the scenario as a clear arrange/act/assert flow.
 - Prefer tests that communicate the regression they guard against immediately through naming, comments, helpers, and snapshots.
 - Do not treat readability findings as optional cleanup. If readability issues are present, report them even when you also found correctness or flakiness issues.
@@ -47,6 +47,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - Verify mocks preserve the behavioral contract of what they replace — response shape, timing characteristics, failure modes.
 - Flag test setup that initializes state inconsistent with the scenario being tested. The initial conditions must be the ones that would naturally lead to the behavior under test in production.
 - Use the project's shared test utilities (`createLoggerStore`, `flushAllTimers`, `advanceTime`, `range`, `pick`, test environment helpers from `tests/mocks/`) instead of rolling custom setup. Inconsistent setup across tests makes it harder to spot when initial conditions are wrong.
+- Treat raw `fetchHistory` assertions as a default review finding when `serverTable.getRequestHistory('item' | 'list' | 'all')` can express the same behavior. Prefer `getRequestHistory(...)` because it snapshots the request contract instead of low-level transport internals; fall back to raw `fetchHistory` only when the higher-level helper cannot express the assertion.
 
 ## 5) Validate Assertion Quality And Failure Signals
 
@@ -58,7 +59,8 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - When a test involves multiple environments/tabs/stores, **all** timelines must be included so the reader can compare them side by side and trace connected actions across environments.
 - Prefer using the existing tracking helpers (`trackUIChanges`, `trackItemUI`, logger/test env helpers) so timeline snapshots show the state transitions a reader actually cares about.
 - Flag `createLoggerStore` timelines with multiple logical phases that don't use `.addMark('label')` to separate them — without markers, the reader must infer where each phase starts and ends.
-- Flag tests that use dense object assertions or raw fetch-history assertions where a focused `timelineString` or `.changesSnapshot` would communicate the behavior more clearly.
+- Flag tests that use dense object assertions or raw `fetchHistory` assertions where a focused `timelineString`, `.changesSnapshot`, or `serverTable.getRequestHistory(...)` assertion would communicate the behavior more clearly.
+- Flag tests that inspect `fetchHistory` directly when `getRequestHistory(...)` would cover the scenario. Ask for the assertion to be replaced with `serverTable.getRequestHistory('item' | 'list' | 'all')` unless the test genuinely needs transport-only details that the shared helper does not expose.
 - Flag tests that force the reader to reconstruct the scenario from many low-level assertions instead of showing the important behavior in one readable artifact.
 - Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.
 
@@ -83,7 +85,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - Flag generic names for test scenarios, fixtures, and variables (`scenarioA`, `scenarioB`, `store1`, `store2`). Names should describe what makes each case distinct (e.g., `storeWithExpiredCache`, `fetchThatFailsOnce`) so a reader can understand the test without tracing through the setup.
 - Prefer inline snapshots for object/array assertions instead of chaining multiple `expect(obj.a.b).toBe(...)` calls — a single snapshot communicates the full expected shape at a glance.
 - Flag tests where related assertions are scattered across many individual `expect` calls when they could be grouped into one snapshot.
-- Flag tests that mix transport assertions, fetch-history checks, and raw state checks without a clear primary assertion showing the user-visible story.
+- Flag tests that mix transport assertions, `fetchHistory` checks, and raw state checks without a clear primary assertion showing the user-visible story. In most cases the `fetchHistory` part should be replaced with `serverTable.getRequestHistory(...)`.
 - Flag redundant or noise assertions that don't add confidence — re-checking already-asserted state, asserting obvious intermediate values, or verifying test setup rather than behavior. Every assertion should justify its existence by catching a distinct regression.
 
 ## 8) Report Findings
