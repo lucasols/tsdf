@@ -152,6 +152,25 @@ function getStoredEntryTimestamp(key: string): number {
   return parsed.value.timestamp;
 }
 
+function getStoredQueryItemKeys(
+  storeName: string,
+  sessionKey: string,
+  params: ListQueryParams,
+): string[] {
+  const raw = localStorage.getItem(
+    queryStorageKey(storeName, sessionKey, params),
+  );
+  if (raw === null) {
+    throw new Error(`Missing localStorage entry for ${storeName}`);
+  }
+
+  const parsed = __LEGIT_CAST__<
+    StorageCacheEntry<PersistedListQueryData>,
+    unknown
+  >(JSON.parse(raw));
+  return parsed.data.items;
+}
+
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
@@ -159,7 +178,8 @@ function createEnv(options: {
   maxItems?: number;
   maxQueries?: number;
   pinnedItems?: string[];
-  pinnedQueries?: string[];
+  pinnedQueries?: ListQueryParams[];
+  ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Tables<Row>;
   onPersistentStorageError?: (error: unknown) => void;
   partialResources?: PartialResourcesConfig<Row>;
@@ -195,6 +215,7 @@ function createEnv(options: {
       maxQueries: options.maxQueries,
       pinnedItems: options.pinnedItems,
       pinnedQueries: options.pinnedQueries,
+      ignoreItems: options.ignoreItems,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
