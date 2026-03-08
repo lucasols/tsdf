@@ -52,6 +52,8 @@ export type TSFDUseListQueryReturn<
   fields: HasPartialResources extends true
     ? FieldsInput
     : FieldsInput | undefined;
+  /** Requested partial-resource fields that are still pending. */
+  loadingFields?: string[];
   error: StoreError | null;
   queryKey: string;
   hasMore: boolean;
@@ -68,6 +70,8 @@ export type TSFDUseListItemReturn<
   data: Selected;
   status: QueryStatus | 'idle' | 'deleted';
   payload: ItemPayload | null;
+  /** Requested partial-resource fields that are still pending. */
+  loadingFields?: string[];
   error: StoreError | null;
   isLoading: boolean;
   itemStateKey: string;

@@ -87,9 +87,7 @@ Passing an empty string `''` as payload returns an immediate error state with `{
 ### With selector
 
 ```tsx
-const itemName = store.useItem('item-1', {
-  selector: (data) => data?.name,
-});
+const itemName = store.useItem('item-1', { selector: (data) => data?.name });
 ```
 
 ### List Query Store specific options
@@ -117,10 +115,7 @@ Fetches and subscribes to a paginated list query.
 
 ```tsx
 const { items, status, hasMore, isLoading, isLoadingMore } = store.useListQuery(
-  {
-    projectId: 'proj-1',
-    status: 'active',
-  },
+  { projectId: 'proj-1', status: 'active' },
 );
 ```
 
@@ -152,6 +147,7 @@ store.useListQuery(filter, { loadSize: 20 }); // override defaultQuerySize
 
 - `items` - Array of items (or selected items)
 - `status` - `'idle'` | `'loading'` | `'success'` | `'error'` | `'refetching'` | `'loadingMore'`
+- `loadingFields` - Requested partial-resource fields still pending while cached data remains visible
 - `hasMore` - Whether more items are available for pagination
 - `isLoading` - Shorthand for `status === 'loading'`
 - `isLoadingMore` - Shorthand for `status === 'loadingMore'`
