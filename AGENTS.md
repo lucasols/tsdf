@@ -91,7 +91,9 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
 
 ## General Guidelines
 
-- Strive for simple solutions, avoid unnecessary complexity
+- Prefer simple, direct solutions — don't over-engineer or add unnecessary layers of abstraction
+- Only introduce abstractions when they make the code simpler, more maintainable, or more readable — duplicating a few lines is preferable to a forced abstraction
+- Avoid unnecessary boilerplate
 
 ## Feature implementation
 

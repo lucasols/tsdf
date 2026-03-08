@@ -304,9 +304,7 @@ export function setupListQueryPersistence<
     ItemState,
     QueryPayload,
     ItemPayload
-  > & {
-    getSessionKey: () => string | false;
-  },
+  > & { getSessionKey: () => string | false },
   options: {
     adapter?: StorageAdapter;
     getItemKey?: (payload: ItemPayload) => string;
@@ -341,19 +339,10 @@ export function setupListQueryPersistence<
 
   const itemNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryItemData<ItemState>
-  >(
-    {
-      ...config,
-      entryPrefix: 'listQuery.item',
-    },
-    { adapter: options.adapter },
-  );
+  >({ ...config, entryPrefix: 'listQuery.item' }, { adapter: options.adapter });
   const queryNamespace =
     createPersistentStorageNamespaceHandle<PersistedListQueryData>(
-      {
-        ...config,
-        entryPrefix: 'listQuery.query',
-      },
+      { ...config, entryPrefix: 'listQuery.query' },
       { adapter: options.adapter },
     );
 

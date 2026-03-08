@@ -182,10 +182,7 @@ export function setupCollectionPersistence<
   const namespace = createPersistentStorageNamespaceHandle<
     PersistedCollectionItemData<ItemState>
   >(
-    {
-      ...config,
-      entryPrefix: 'collection.item',
-    },
+    { ...config, entryPrefix: 'collection.item' },
     { adapter: options.adapter },
   );
 
@@ -364,10 +361,7 @@ export function setupCollectionPersistence<
       }
 
       tasks.push(
-        namespace.save(itemKey, {
-          data: item.data,
-          payload: item.payload,
-        }),
+        namespace.save(itemKey, { data: item.data, payload: item.payload }),
       );
     }
 

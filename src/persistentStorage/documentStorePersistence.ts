@@ -72,9 +72,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   config: DocumentPersistentStorageConfig<State> & {
     getSessionKey: () => string | false;
   },
-  options: {
-    adapter?: StorageAdapter;
-  } = {},
+  options: { adapter?: StorageAdapter } = {},
 ): DocumentPersistenceSetup<State> {
   const version = config.version ?? 1;
   const backend = config.backend ?? 'opfs';
@@ -153,11 +151,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
         }
 
         storeRef.setPartialState(
-          {
-            data: validated,
-            status: 'success',
-            refetchOnMount: 'lowPriority',
-          },
+          { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
           { action: 'persistent-storage-hydrate' },
         );
       })

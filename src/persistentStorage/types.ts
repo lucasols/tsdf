@@ -45,10 +45,7 @@ export type StorageCacheEntry<T> = {
 /** Result entry returned by explicit persistent-storage preload APIs. */
 export type PersistentStoragePreloadResult<
   Payload extends ValidPayload = ValidPayload,
-> = {
-  payload: Payload;
-  preloaded: boolean;
-};
+> = { payload: Payload; preloaded: boolean };
 
 // --- Config Types ---
 
@@ -129,9 +126,7 @@ export type ListQueryPersistentStorageConfig<
 // --- Persisted Data Shapes ---
 
 /** Shape of persisted data for DocumentStore. */
-export type PersistedDocumentData<State> = {
-  data: State;
-};
+export type PersistedDocumentData<State> = { data: State };
 
 /** Shape of a single persisted collection item entry. */
 export type PersistedCollectionItemData<State> = {

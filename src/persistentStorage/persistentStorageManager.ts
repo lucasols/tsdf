@@ -180,11 +180,7 @@ export function createPersistentStorageNamespaceHandle<T>(
   config: Omit<PersistentStorageBaseConfig<never>, 'schema'> & {
     entryPrefix: string;
   },
-  {
-    adapter: adapterOverride,
-  }: {
-    adapter?: StorageAdapter;
-  } = {},
+  { adapter: adapterOverride }: { adapter?: StorageAdapter } = {},
 ): PersistentStorageNamespaceHandle<T> {
   const version = config.version ?? 1;
   const backendKey: StorageBackend = config.backend ?? 'opfs';
@@ -412,10 +408,7 @@ export function refreshLocalStorageTimestamp(key: string): void {
 
   localStorage.setItem(
     key,
-    JSON.stringify({
-      ...result.value,
-      timestamp: Date.now(),
-    }),
+    JSON.stringify({ ...result.value, timestamp: Date.now() }),
   );
 }
 
