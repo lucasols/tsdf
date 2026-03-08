@@ -112,6 +112,8 @@ export type ListQueryPersistentStorageConfig<
   maxItems?: number;
   /** Maximum number of queries to persist. Defaults to 100. */
   maxQueries?: number;
+  /** Maximum number of items per query to persist. Defaults to 100. */
+  maxQuerySize?: number;
   /** Item payloads that should never be evicted from storage. */
   pinnedItems?: ItemPayload[];
   /** Query payloads that should never be evicted from storage. */

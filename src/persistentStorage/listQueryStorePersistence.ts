@@ -26,6 +26,7 @@ import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 500;
 const DEFAULT_MAX_QUERIES = 100;
+const DEFAULT_MAX_QUERY_SIZE = 100;
 const SAVE_DEBOUNCE_MS = 1000;
 
 function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
@@ -93,6 +94,19 @@ function toItemState<
       wasLoaded: true,
     },
     loadedFields,
+  };
+}
+
+function limitPersistedQueryItems(
+  itemKeys: string[],
+  hasMore: boolean,
+  maxQuerySize: number,
+): { itemKeys: string[]; hasMore: boolean } {
+  const limitedItemKeys = itemKeys.slice(0, maxQuerySize);
+
+  return {
+    itemKeys: limitedItemKeys,
+    hasMore: hasMore || limitedItemKeys.length < itemKeys.length,
   };
 }
 
@@ -204,6 +218,7 @@ function defineLazyLocalStorageQuery<
   queryKey: string,
   storageKey: string,
   version: number,
+  maxQuerySize: number,
 ): void {
   Object.defineProperty(state.queries, queryKey, {
     configurable: true,
@@ -234,11 +249,16 @@ function defineLazyLocalStorageQuery<
           state.itemQueries[itemKey] !== undefined
         );
       });
+      const limitedQuery = limitPersistedQueryItems(
+        filteredItemKeys,
+        cacheEntry.data.hasMore,
+        maxQuerySize,
+      );
 
       const queryState: TSFDListQuery<QueryPayload> = {
         error: null,
-        hasMore: cacheEntry.data.hasMore,
-        items: filteredItemKeys,
+        hasMore: limitedQuery.hasMore,
+        items: limitedQuery.itemKeys,
         payload: __LEGIT_CAST__<QueryPayload, unknown>(cacheEntry.data.payload),
         refetchOnMount: 'lowPriority',
         status: 'success',
@@ -299,6 +319,7 @@ export function setupListQueryPersistence<
   const backend = config.backend ?? 'opfs';
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
   const maxQueries = config.maxQueries ?? DEFAULT_MAX_QUERIES;
+  const maxQuerySize = config.maxQuerySize ?? DEFAULT_MAX_QUERY_SIZE;
   const resolveItemKey =
     options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
   const resolveQueryKey =
@@ -398,7 +419,13 @@ export function setupListQueryPersistence<
       const queryKey = storageKey.slice(queryPrefix.length);
       if (queryKey in initialState.queries) continue;
 
-      defineLazyLocalStorageQuery(initialState, queryKey, storageKey, version);
+      defineLazyLocalStorageQuery(
+        initialState,
+        queryKey,
+        storageKey,
+        version,
+        maxQuerySize,
+      );
     }
 
     return initialState;
@@ -501,14 +528,19 @@ export function setupListQueryPersistence<
             activeStore.state.itemQueries[itemKey] !== undefined
           );
         });
+        const limitedQuery = limitPersistedQueryItems(
+          filteredItemKeys,
+          cached.hasMore,
+          maxQuerySize,
+        );
 
         activeStore.produceState(
           (draft) => {
             if (draft.queries[queryKey] === undefined) {
               draft.queries[queryKey] = {
                 error: null,
-                hasMore: cached.hasMore,
-                items: filteredItemKeys,
+                hasMore: limitedQuery.hasMore,
+                items: limitedQuery.itemKeys,
                 payload: __LEGIT_CAST__<QueryPayload, unknown>(cached.payload),
                 refetchOnMount: 'lowPriority',
                 status: 'success',
@@ -650,12 +682,23 @@ export function setupListQueryPersistence<
         const filteredItems = entry.items.filter((itemKey) =>
           keptItemKeys.has(itemKey),
         );
+        const limitedQuery = limitPersistedQueryItems(
+          filteredItems,
+          entry.hasMore,
+          maxQuerySize,
+        );
 
-        if (filteredItems.length === entry.items.length) return;
+        if (
+          limitedQuery.itemKeys.length === entry.items.length &&
+          limitedQuery.hasMore === entry.hasMore
+        ) {
+          return;
+        }
 
         await queryNamespace.save(queryKey, {
           ...entry,
-          items: filteredItems,
+          items: limitedQuery.itemKeys,
+          hasMore: limitedQuery.hasMore,
         });
       }),
     );
@@ -694,14 +737,20 @@ export function setupListQueryPersistence<
 
     for (const [queryKey, query] of Object.entries(state.queries)) {
       if (query.status !== 'success' && !query.wasLoaded) continue;
+      const filteredItems = query.items.filter((itemKey) =>
+        persistedItemKeys.has(itemKey),
+      );
+      const limitedQuery = limitPersistedQueryItems(
+        filteredItems,
+        query.hasMore,
+        maxQuerySize,
+      );
 
       tasks.push(
         queryNamespace.save(queryKey, {
           payload: query.payload,
-          items: query.items.filter((itemKey) =>
-            persistedItemKeys.has(itemKey),
-          ),
-          hasMore: query.hasMore,
+          items: limitedQuery.itemKeys,
+          hasMore: limitedQuery.hasMore,
         }),
       );
     }
