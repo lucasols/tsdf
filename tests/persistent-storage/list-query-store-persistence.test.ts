@@ -1104,6 +1104,67 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
+  test('when maxItems is exceeded, the least recently read item is evicted first', async () => {
+    const storeName = 'lq-item-lru';
+    const sessionKey = 'sess1';
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Oldest cached',
+    });
+    await advanceTime(100);
+    setCachedItem(storeName, sessionKey, 'users', 2, {
+      id: 2,
+      name: 'Newer cached',
+    });
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      maxItems: 2,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem(
+        rawItemPayload('users', 1),
+        {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        },
+      );
+
+      renders.add({
+        status,
+        data: data ?? null,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Oldest cached}
+      "
+    `);
+
+    await advanceTime(2100);
+
+    env.apiStore.addItemToState('users||3', {
+      id: 3,
+      name: 'Fresh',
+    });
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`))
+      .toMatchInlineSnapshot(`
+        ['"users||1', '"users||3']
+      `);
+  });
+
   test('items and queries are saved per entry and pinned entries survive eviction', async () => {
     const pinnedItemPayload = rawItemPayload('second', 1);
     const pinnedQueryPayload = { tableId: 'second' };
