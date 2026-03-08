@@ -829,17 +829,49 @@ describe('localStorage: list query store persistence', () => {
     `);
   });
 
-  test('pinned items and queries are preserved', async () => {
-    const firstIk = storeItemKey('first', 1);
-    const secondIk = storeItemKey('second', 1);
-    const firstQk = queryKey({ tableId: 'first' });
-    const secondQk = queryKey({ tableId: 'second' });
+  test('deleteItemState removes deleted items from persisted storage', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-delete-persisted-item';
+    const sessionKey = 'sess1';
+    const deletedItemStorageKey = itemStorageKey(
+      storeName,
+      sessionKey,
+      'users',
+      1,
+    );
 
-    // Pin the SECOND query/item — without pinning, 'first' (fetched first)
-    // would be kept by insertion order with maxQueries=1/maxItems=1.
-    // With pinning, 'second' survives instead.
     const env = createEnv({
-      storeName: 'lq4',
+      storeName,
+      sessionKey,
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+        ],
+      },
+    });
+
+    env.apiStore.scheduleListQueryFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(deletedItemStorageKey)).not.toBeNull();
+    expect(getStoredQueryItemKeys(storeName, sessionKey, usersQuery))
+      .toMatchInlineSnapshot(`
+        ['"users||1', '"users||2']
+      `);
+
+    env.apiStore.deleteItemState('users||1');
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(deletedItemStorageKey)).toBeNull();
+    expect(getStoredQueryItemKeys(storeName, sessionKey, usersQuery))
+      .toMatchInlineSnapshot(`
+        ['"users||2']
+      `);
+  });
       sessionKey: 'sess1',
       maxQueries: 1,
       maxItems: 1,
