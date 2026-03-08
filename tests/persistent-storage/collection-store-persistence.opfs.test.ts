@@ -51,11 +51,7 @@ function setCachedCollectionItem(
   const key = itemStorageKey(storeName, sessionKey, payload);
   const entry: StorageCacheEntry<
     PersistedCollectionItemData<PersistedItemState>
-  > = {
-    data: { data, payload },
-    timestamp: Date.now(),
-    version,
-  };
+  > = { data: { data, payload }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 
@@ -102,27 +98,21 @@ describe('opfs: collection store persistence', () => {
       'col-opfs-hook',
       'sess1',
       '1',
-      {
-        value: { id: '1', name: 'Cached' },
-      },
+      { value: { id: '1', name: 'Cached' } },
     );
     const coldKey = setCachedCollectionItem(
       mockAdapter,
       'col-opfs-hook',
       'sess1',
       '2',
-      {
-        value: { id: '2', name: 'Cold' },
-      },
+      { value: { id: '2', name: 'Cold' } },
     );
 
     const env = createEnv({
       storeName: 'col-opfs-hook',
       sessionKey: 'sess1',
       storageAdapter: mockAdapter.adapter,
-      serverData: {
-        '1': { id: '1', name: 'Fresh' },
-      },
+      serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
@@ -169,9 +159,7 @@ describe('opfs: collection store persistence', () => {
       storeName: 'col-opfs-preload',
       sessionKey: 'sess1',
       storageAdapter: mockAdapter.adapter,
-      serverData: {
-        '1': { id: '1', name: 'Fresh' },
-      },
+      serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
     const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('1');
@@ -236,9 +224,7 @@ describe('opfs: collection store persistence', () => {
       'col-opfs-ignore',
       'sess1',
       'secret',
-      {
-        value: { id: 'secret', name: 'Cached secret' },
-      },
+      { value: { id: 'secret', name: 'Cached secret' } },
     );
 
     const env = createEnv({

@@ -511,11 +511,7 @@ describe('localStorage: invalid data cleanup', () => {
     const key = 'tsdf.sess1.cleanup-malformed';
     localStorage.setItem(
       key,
-      JSON.stringify({
-        timestamp: Date.now(),
-        version: 1,
-        wrongShape: true,
-      }),
+      JSON.stringify({ timestamp: Date.now(), version: 1, wrongShape: true }),
     );
 
     const env = createDocPersistenceEnv({

@@ -105,10 +105,7 @@ function setCachedItem(
 ): string {
   const key = itemStorageKey(storeName, sessionKey, tableId, id);
   const entry: StorageCacheEntry<PersistedListQueryItemData<Row>> = {
-    data: {
-      data,
-      payload: rawItemPayload(tableId, id),
-    },
+    data: { data, payload: rawItemPayload(tableId, id) },
     timestamp: Date.now(),
     version,
   };
@@ -128,11 +125,7 @@ function setCachedQuery(
 ): string {
   const key = queryStorageKey(storeName, sessionKey, params);
   const entry: StorageCacheEntry<PersistedListQueryData> = {
-    data: {
-      payload: params,
-      items,
-      hasMore,
-    },
+    data: { payload: params, items, hasMore },
     timestamp: Date.now(),
     version,
   };
@@ -269,10 +262,7 @@ describe('localStorage: list query store persistence', () => {
     setCachedQuery('lq-local', 'sess1', usersQuery, [usersItem1, usersItem2]);
     setCachedQuery('lq-local', 'sess1', projectsQuery, [projectsItem1]);
 
-    const env = createEnv({
-      storeName: 'lq-local',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'lq-local', sessionKey: 'sess1' });
 
     expect(env.apiStore.getQueriesState(() => true)).toMatchInlineSnapshot(
       `[]`,
@@ -308,15 +298,9 @@ describe('localStorage: list query store persistence', () => {
       id: 1,
       name: 'Alice',
     });
-    setCachedItem('lq-item-local', 'sess1', 'users', 2, {
-      id: 2,
-      name: 'Bob',
-    });
+    setCachedItem('lq-item-local', 'sess1', 'users', 2, { id: 2, name: 'Bob' });
 
-    const env = createEnv({
-      storeName: 'lq-item-local',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'lq-item-local', sessionKey: 'sess1' });
 
     expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
       .toMatchInlineSnapshot(`
@@ -338,9 +322,7 @@ describe('localStorage: list query store persistence', () => {
     const env = createEnv({
       storeName: 'lq-item-hook',
       sessionKey: 'sess1',
-      serverData: {
-        users: [{ id: 1, name: 'Fresh' }],
-      },
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
     const renders = createLoggerStore();
@@ -348,15 +330,10 @@ describe('localStorage: list query store persistence', () => {
     renderHook(() => {
       const { data, status } = env.apiStore.useItem(
         rawItemPayload('users', 1),
-        {
-          returnRefetchingStatus: true,
-        },
+        { returnRefetchingStatus: true },
       );
 
-      renders.add({
-        status,
-        name: data?.name ?? null,
-      });
+      renders.add({ status, name: data?.name ?? null });
     });
 
     await flushAllTimers();
@@ -374,18 +351,13 @@ describe('localStorage: list query store persistence', () => {
     const usersQuery = { tableId: 'users' };
     const usersItem = storeItemKey('users', 1);
 
-    setCachedItem('lq-hook', 'sess1', 'users', 1, {
-      id: 1,
-      name: 'Cached',
-    });
+    setCachedItem('lq-hook', 'sess1', 'users', 1, { id: 1, name: 'Cached' });
     setCachedQuery('lq-hook', 'sess1', usersQuery, [usersItem]);
 
     const env = createEnv({
       storeName: 'lq-hook',
       sessionKey: 'sess1',
-      serverData: {
-        users: [{ id: 1, name: 'Fresh' }],
-      },
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
     const renders = createLoggerStore();
@@ -395,10 +367,7 @@ describe('localStorage: list query store persistence', () => {
         returnRefetchingStatus: true,
       });
 
-      renders.add({
-        status,
-        names: items.map((item) => item.name),
-      });
+      renders.add({ status, names: items.map((item) => item.name) });
     });
 
     await flushAllTimers();
@@ -430,9 +399,7 @@ describe('localStorage: list query store persistence', () => {
     const env = createEnv({
       storeName: 'lq-hook-no-refetch',
       sessionKey: 'sess1',
-      serverData: {
-        users: [{ id: 1, name: 'Fresh' }],
-      },
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
     const renders = createLoggerStore();
@@ -443,10 +410,7 @@ describe('localStorage: list query store persistence', () => {
         disableRefetchOnMount: true,
       });
 
-      renders.add({
-        status,
-        names: items.map((item) => item.name),
-      });
+      renders.add({ status, names: items.map((item) => item.name) });
     });
 
     await flushAllTimers();
@@ -474,15 +438,11 @@ describe('localStorage: list query store persistence', () => {
       storeName,
       sessionKey,
       partialResources: partialResourcesConfig,
-      serverData: {
-        users: [{ id: 1, name: 'Cached' }],
-      },
+      serverData: { users: [{ id: 1, name: 'Cached' }] },
     });
 
     renderHook(() => {
-      writerEnv.apiStore.useListQuery(usersQuery, {
-        fields: ['id', 'name'],
-      });
+      writerEnv.apiStore.useListQuery(usersQuery, { fields: ['id', 'name'] });
     });
 
     await flushAllTimers();
@@ -493,9 +453,7 @@ describe('localStorage: list query store persistence', () => {
       storeName,
       sessionKey,
       partialResources: partialResourcesConfig,
-      serverData: {
-        users: [{ id: 1, name: 'Fresh' }],
-      },
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
     const renders = createLoggerStore();
@@ -507,10 +465,7 @@ describe('localStorage: list query store persistence', () => {
         disableRefetchOnMount: true,
       });
 
-      renders.add({
-        status,
-        names: items.map((item) => item.name),
-      });
+      renders.add({ status, names: items.map((item) => item.name) });
     });
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
@@ -716,10 +671,7 @@ describe('localStorage: list query store persistence', () => {
     renderHook(() => {
       const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
         productsQuery,
-        {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        },
+        { disableRefetchOnMount: true, returnRefetchingStatus: true },
       );
 
       renders.add({
@@ -806,10 +758,7 @@ describe('localStorage: list query store persistence', () => {
     renderHook(() => {
       const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
         productsQuery,
-        {
-          loadSize: 5,
-          returnRefetchingStatus: true,
-        },
+        { loadSize: 5, returnRefetchingStatus: true },
       );
 
       renders.add({
@@ -887,10 +836,7 @@ describe('localStorage: list query store persistence', () => {
     renderHook(() => {
       const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
         productsQuery,
-        {
-          loadSize: 10,
-          returnRefetchingStatus: true,
-        },
+        { loadSize: 10, returnRefetchingStatus: true },
       );
 
       renders.add({
@@ -956,12 +902,7 @@ describe('localStorage: list query store persistence', () => {
     writerEnv.apiStore.addItemToState(
       'users||20',
       { id: 20, name: 'Local User' },
-      {
-        addItemToQueries: {
-          queries: usersQuery,
-          appendTo: 'end',
-        },
-      },
+      { addItemToQueries: { queries: usersQuery, appendTo: 'end' } },
     );
 
     await advanceTime(1100);
@@ -986,10 +927,7 @@ describe('localStorage: list query store persistence', () => {
         returnRefetchingStatus: true,
       });
 
-      renders.add({
-        status,
-        names: items.map((item) => item.name),
-      });
+      renders.add({ status, names: items.map((item) => item.name) });
     });
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
@@ -1063,9 +1001,7 @@ describe('localStorage: list query store persistence', () => {
       storeName,
       sessionKey,
       maxQueries: 2,
-      serverData: {
-        third: [{ id: 1, name: 'Third' }],
-      },
+      serverData: { third: [{ id: 1, name: 'Third' }] },
     });
 
     const renders = createLoggerStore();
@@ -1076,11 +1012,7 @@ describe('localStorage: list query store persistence', () => {
         returnRefetchingStatus: true,
       });
 
-      renders.add({
-        status,
-        count: items.length,
-        hasMore,
-      });
+      renders.add({ status, count: items.length, hasMore });
     });
 
     await flushAllTimers();
@@ -1118,27 +1050,17 @@ describe('localStorage: list query store persistence', () => {
       name: 'Newer cached',
     });
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      maxItems: 2,
-    });
+    const env = createEnv({ storeName, sessionKey, maxItems: 2 });
 
     const renders = createLoggerStore();
 
     renderHook(() => {
       const { data, status } = env.apiStore.useItem(
         rawItemPayload('users', 1),
-        {
-          disableRefetchOnMount: true,
-          returnRefetchingStatus: true,
-        },
+        { disableRefetchOnMount: true, returnRefetchingStatus: true },
       );
 
-      renders.add({
-        status,
-        data: data ?? null,
-      });
+      renders.add({ status, data: data ?? null });
     });
 
     await flushAllTimers();
@@ -1151,10 +1073,7 @@ describe('localStorage: list query store persistence', () => {
 
     await advanceTime(2100);
 
-    env.apiStore.addItemToState('users||3', {
-      id: 3,
-      name: 'Fresh',
-    });
+    env.apiStore.addItemToState('users||3', { id: 3, name: 'Fresh' });
 
     await advanceTime(1100);
     await flushAllTimers();
@@ -1212,16 +1131,10 @@ describe('localStorage: list query store persistence', () => {
         })),
       ]),
     );
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      serverData,
-    });
+    const env = createEnv({ storeName, sessionKey, serverData });
 
     for (let tableIndex = 0; tableIndex < 25; tableIndex++) {
-      env.scheduleFetch('highPriority', {
-        tableId: `table-${tableIndex + 1}`,
-      });
+      env.scheduleFetch('highPriority', { tableId: `table-${tableIndex + 1}` });
       await flushAllTimers();
     }
 
@@ -1281,10 +1194,7 @@ describe('localStorage: list query store persistence', () => {
         returnRefetchingStatus: true,
       });
 
-      renders.add({
-        status,
-        names: items.map((item) => item.name),
-      });
+      renders.add({ status, names: items.map((item) => item.name) });
     });
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
@@ -1342,10 +1252,7 @@ describe('localStorage: list query store persistence', () => {
         returnRefetchingStatus: true,
       });
 
-      renders.add({
-        status,
-        names: items.map((item) => item.name),
-      });
+      renders.add({ status, names: items.map((item) => item.name) });
     });
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`

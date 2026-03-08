@@ -114,11 +114,7 @@ describe('opfs: document store persistence', () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
     const key = 'tsdf.session1.opfs-cleanup';
     const entry: StorageCacheEntry<PersistedDocumentData<{ badField: true }>> =
-      {
-        data: { data: { badField: true } },
-        timestamp: Date.now(),
-        version: 1,
-      };
+      { data: { data: { badField: true } }, timestamp: Date.now(), version: 1 };
     mockAdapter.setValue(key, entry);
 
     const env = createDocPersistenceEnv({

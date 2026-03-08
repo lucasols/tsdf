@@ -23,10 +23,7 @@ const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
 });
 const cachedCollectionItemEntrySchema = rc_object({
-  data: rc_object({
-    data: wrappedItemSchema,
-    payload: rc_string,
-  }),
+  data: rc_object({ data: wrappedItemSchema, payload: rc_string }),
   timestamp: rc_number,
   version: rc_number,
 });
@@ -57,11 +54,7 @@ function setCachedCollectionItem(
   const key = itemStorageKey(storeName, sessionKey, payload);
   const entry: StorageCacheEntry<
     PersistedCollectionItemData<PersistedItemState>
-  > = {
-    data: { data, payload },
-    timestamp: Date.now(),
-    version,
-  };
+  > = { data: { data, payload }, timestamp: Date.now(), version };
 
   localStorage.setItem(key, JSON.stringify(entry));
 
@@ -166,10 +159,7 @@ describe('localStorage: collection store persistence', () => {
       value: { id: '2', name: 'Bob' },
     });
 
-    const env = createEnv({
-      storeName: 'col-local',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'col-local', sessionKey: 'sess1' });
 
     expect(env.store.isInitialized).toBe(false);
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
@@ -205,10 +195,7 @@ describe('localStorage: collection store persistence', () => {
       value: { id: '1', name: 'Cached' },
     });
 
-    const env = createEnv({
-      storeName: 'col-filter',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'col-filter', sessionKey: 'sess1' });
 
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.store.isInitialized).toBe(true);
@@ -225,9 +212,7 @@ describe('localStorage: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-hook',
       sessionKey: 'sess1',
-      serverData: {
-        '1': { id: '1', name: 'Fresh' },
-      },
+      serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
     const renders = createLoggerStore();
@@ -262,9 +247,7 @@ describe('localStorage: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-hook-no-refetch',
       sessionKey: 'sess1',
-      serverData: {
-        '1': { id: '1', name: 'Fresh' },
-      },
+      serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
     const renders = createLoggerStore();
@@ -293,10 +276,7 @@ describe('localStorage: collection store persistence', () => {
   });
 
   test('items are saved as separate localStorage entries', async () => {
-    const env = createEnv({
-      storeName: 'col-entries',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'col-entries', sessionKey: 'sess1' });
 
     env.apiStore.addItemToState('a', { value: { id: 'a', name: 'A' } });
     env.apiStore.addItemToState('b', { value: { id: 'b', name: 'B' } });
@@ -507,10 +487,7 @@ describe('localStorage: collection store persistence', () => {
     const sessionKey = 'sess1';
     const deletedItemStorageKey = itemStorageKey(storeName, sessionKey, '1');
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-    });
+    const env = createEnv({ storeName, sessionKey });
 
     env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
     env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });
@@ -536,10 +513,7 @@ describe('localStorage: collection store persistence', () => {
   });
 
   test('reset clears all persisted item entries for the store', async () => {
-    const env = createEnv({
-      storeName: 'col-reset',
-      sessionKey: 'sess1',
-    });
+    const env = createEnv({ storeName: 'col-reset', sessionKey: 'sess1' });
 
     env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
     env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });
