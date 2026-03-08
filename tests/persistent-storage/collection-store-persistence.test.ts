@@ -490,6 +490,37 @@ describe('localStorage: collection store persistence', () => {
     expect(localStorage.getItem(key)).toBeNull();
   });
 
+  test('deleteItemState removes deleted items from persisted storage', async () => {
+    const storeName = 'col-delete-persisted-item';
+    const sessionKey = 'sess1';
+    const deletedItemStorageKey = itemStorageKey(storeName, sessionKey, '1');
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+    });
+
+    env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
+    env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(deletedItemStorageKey)).not.toBeNull();
+    expect(listStoredItemPayloads(storeName, sessionKey)).toMatchInlineSnapshot(`
+      ['1', '2']
+    `);
+
+    env.apiStore.deleteItemState('1');
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(deletedItemStorageKey)).toBeNull();
+    expect(listStoredItemPayloads(storeName, sessionKey)).toMatchInlineSnapshot(`
+      ['2']
+    `);
+  });
+
   test('reset clears all persisted item entries for the store', async () => {
     const env = createEnv({
       storeName: 'col-reset',

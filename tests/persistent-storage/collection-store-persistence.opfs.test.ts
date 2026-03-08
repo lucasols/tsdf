@@ -279,4 +279,34 @@ describe('opfs: collection store persistence', () => {
       wasLoaded: '✅'
     `);
   });
+
+  test('deleteItemState removes deleted items from persisted storage', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const storeName = 'col-opfs-delete-persisted-item';
+    const sessionKey = 'sess1';
+    const deletedItemStorageKey = itemStorageKey(storeName, sessionKey, '1');
+    const keptItemStorageKey = itemStorageKey(storeName, sessionKey, '2');
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+    });
+
+    env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
+    env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(mockAdapter.has(deletedItemStorageKey)).toBe(true);
+    expect(mockAdapter.has(keptItemStorageKey)).toBe(true);
+
+    env.apiStore.deleteItemState('1');
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
+    expect(mockAdapter.has(keptItemStorageKey)).toBe(true);
+  });
 });
