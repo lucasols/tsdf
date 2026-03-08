@@ -523,6 +523,80 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
+  test('hydrated partial-resource items keep loading until missing fields are fetched', async () => {
+    const itemPayload = rawItemPayload('users', 1);
+    const storeName = 'lq-item-partial-missing-fields';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached', age: 20, email: 'cached@site.test' }],
+      },
+    });
+
+    renderHook(() => {
+      writerEnv.apiStore.useItem(itemPayload, {
+        fields: ['id', 'name', 'age'],
+      });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 21, email: 'fresh@site.test' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: ['id', 'name', 'age', 'email'],
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        name: data?.name ?? null,
+        age: data?.age ?? null,
+        email: data?.email ?? null,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ name: null ⋅ age: null ⋅ email: null
+      -> status: success ⋅ name: Fresh ⋅ age: 21 ⋅ email: fresh@site.test
+      "
+    `);
+    expect(
+      readerEnv.serverTable.getRequestHistory('item').map((entry) => {
+        const { time: _time, ...request } = entry;
+        return request;
+      }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name', 'age', 'email']
+          itemId: 'users||1'
+    `);
+    expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
+      .toMatchInlineSnapshot(`
+        ['age', 'email', 'id', 'name']
+      `);
+  });
+
   test('hydrated partial-resource queries refetch when hooks request fields missing from storage', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-partial-missing-fields';
