@@ -131,16 +131,16 @@ test('list query size pagination keeps sibling tabs in sync across chained loadM
 
   expect({ envA: getQuerySummary(envA), envB: getQuerySummary(envB) })
     .toMatchInlineSnapshot(`
-    envA:
-      hasMore: '❌'
-      items: ['User 1', 'User 2', 'User 3']
-      status: 'success'
+      envA:
+        hasMore: '❌'
+        items: ['User 1', 'User 2', 'User 3']
+        status: 'success'
 
-    envB:
-      hasMore: '❌'
-      items: ['User 1', 'User 2', 'User 3']
-      status: 'success'
-  `);
+      envB:
+        hasMore: '❌'
+        items: ['User 1', 'User 2', 'User 3']
+        status: 'success'
+    `);
   expect(getListFetchRanges(envA)).toMatchInlineSnapshot(`
     - { limit: 1, offset: 0 }
     - { limit: 2, offset: 0 }
@@ -218,16 +218,16 @@ test('list query offset pagination keeps sibling tabs in sync across chained loa
 
   expect({ envA: getQuerySummary(envA), envB: getQuerySummary(envB) })
     .toMatchInlineSnapshot(`
-    envA:
-      hasMore: '❌'
-      items: ['User 1', 'User 2', 'User 3']
-      status: 'success'
+      envA:
+        hasMore: '❌'
+        items: ['User 1', 'User 2', 'User 3']
+        status: 'success'
 
-    envB:
-      hasMore: '❌'
-      items: ['User 1', 'User 2', 'User 3']
-      status: 'success'
-  `);
+      envB:
+        hasMore: '❌'
+        items: ['User 1', 'User 2', 'User 3']
+        status: 'success'
+    `);
   expect(getListFetchRanges(envA)).toMatchInlineSnapshot(`
     - { limit: 1, offset: 0 }
     - { limit: 1, offset: 1 }
