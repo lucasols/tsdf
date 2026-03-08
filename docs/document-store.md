@@ -2,7 +2,7 @@
 
 A store for managing a single entity/document. It provides one fetch function and maintains a single piece of data with loading states, error handling, and automatic refetching.
 
-See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./invalidation.md) | [Fetch Scheduling](./fetch-scheduling.md)
+See also: [Hooks](./hooks.md) | [Mutations](./mutations.md) | [Invalidation](./invalidation.md) | [Fetch Scheduling](./fetch-scheduling.md) | [Persistent Storage](./persistent-storage.md)
 
 ## Creating a Document Store
 
@@ -41,6 +41,7 @@ const userStore = createDocumentStore<User>({
 | `revalidateOnWindowFocus`              | `boolean \| (() => boolean)`                                                     | No       | Refetch on window focus                                                                   |
 | `mediumPriorityDelayMs`                | `number`                                                                         | No       | Delay for medium-priority fetches                                                         |
 | `usesRealTimeUpdates`                  | `boolean`                                                                        | No       | Enables [Real-Time Updates](./real-time-updates.md) mode                                  |
+| `persistentStorage`                    | `DocumentPersistentStorageConfig<State>`                                         | No       | Configure cache persistence. See [Persistent Storage](./persistent-storage.md)            |
 | `onSchedulerEvent`                     | `(event) => void`                                                                | No       | Scheduler event listener                                                                  |
 | `onMutationError`                      | `(error, options: { dontShowToast?: boolean }) => void`                          | No       | Global mutation error handler                                                             |
 
@@ -72,16 +73,17 @@ type DocumentStoreState<State> = {
 
 ### Methods
 
-| Method                 | Signature                                       | Description                                                     |
-| ---------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| `scheduleFetch`        | `(fetchType, options?) => ScheduleFetchResults` | Schedule a fetch. See [Fetch Scheduling](./fetch-scheduling.md) |
-| `awaitFetch`           | `(options?) => Promise<{ data, error }>`        | Await a fetch with optional `timeoutMs`                         |
-| `invalidateData`       | `(priority?) => void`                           | Invalidate data. See [Invalidation](./invalidation.md)          |
-| `updateState`          | `(produceFn) => boolean`                        | Immer-based state update. Returns `false` if no data exists     |
-| `reset`                | `() => void`                                    | Reset store to idle state                                       |
-| `startMutation`        | `() => () => boolean`                           | Manually start a mutation lock. See [Mutations](./mutations.md) |
-| `performMutation`      | `(options) => Promise<Result<T>>`               | Full mutation lifecycle. See [Mutations](./mutations.md)        |
-| `onTransportReconnect` | `() => void`                                    | See [Real-Time Updates](./real-time-updates.md)                 |
+| Method                     | Signature                                       | Description                                                     |
+| -------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| `scheduleFetch`            | `(fetchType, options?) => ScheduleFetchResults` | Schedule a fetch. See [Fetch Scheduling](./fetch-scheduling.md) |
+| `awaitFetch`               | `(options?) => Promise<{ data, error }>`        | Await a fetch with optional `timeoutMs`                         |
+| `preloadPersistentStorage` | `() => Promise<void>`                           | Preload cached document data from async storage (OPFS)          |
+| `invalidateData`           | `(priority?) => void`                           | Invalidate data. See [Invalidation](./invalidation.md)          |
+| `updateState`              | `(produceFn) => boolean`                        | Immer-based state update. Returns `false` if no data exists     |
+| `reset`                    | `() => void`                                    | Reset store to idle state                                       |
+| `startMutation`            | `() => () => boolean`                           | Manually start a mutation lock. See [Mutations](./mutations.md) |
+| `performMutation`          | `(options) => Promise<Result<T>>`               | Full mutation lifecycle. See [Mutations](./mutations.md)        |
+| `onTransportReconnect`     | `() => void`                                    | See [Real-Time Updates](./real-time-updates.md)                 |
 
 ### Properties
 
