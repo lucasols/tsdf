@@ -418,7 +418,7 @@ describe('localStorage: collection store persistence', () => {
       onPersistentStorageError,
     });
 
-    await expect(env.apiStore.preloadItemFromPersistentStorage('1')).resolves
+    await expect(env.apiStore.preloadItemFromStorage('1')).resolves
       .toMatchInlineSnapshot(`
       - { payload: '1', preloaded: '❌' }
     `);

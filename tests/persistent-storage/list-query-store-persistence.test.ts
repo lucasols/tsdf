@@ -1307,14 +1307,13 @@ describe('localStorage: list query store persistence', () => {
       onPersistentStorageError,
     });
 
-    await expect(
-      env.apiStore.preloadQueryFromPersistentStorage({ tableId: 'users' }),
-    ).resolves.toMatchInlineSnapshot(`
+    await expect(env.apiStore.preloadQueryFromStorage({ tableId: 'users' }))
+      .resolves.toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
         preloaded: '❌'
     `);
-    await expect(env.apiStore.preloadItemFromPersistentStorage('users||1'))
-      .resolves.toMatchInlineSnapshot(`
+    await expect(env.apiStore.preloadItemFromStorage('users||1')).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
 

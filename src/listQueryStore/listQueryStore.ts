@@ -5,6 +5,12 @@ import {
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
+import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
+import type {
+  ListQueryPersistentStorageConfig,
+  PersistentStoragePreloadResult,
+  StorageAdapter,
+} from '../persistentStorage/types';
 import {
   FetchType,
   RequestSchedulerEvents,
@@ -19,12 +25,12 @@ import {
 import {
   createBrowserTabsCoordinator,
   createBrowserTabsCoordinatorWithPriority,
+  isBrowserTabsSyncVersionNewer,
+  toBrowserTabsSyncVersion,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
-  isBrowserTabsSyncVersionNewer,
   type SnapshotConsistency,
-  toBrowserTabsSyncVersion,
 } from '../utils/browserTabsSync';
 import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
@@ -34,12 +40,6 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
-import type {
-  ListQueryPersistentStorageConfig,
-  PersistentStoragePreloadResult,
-  StorageAdapter,
-} from '../persistentStorage/types';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import {
@@ -54,9 +54,9 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type PartialResourcesConfig,
-  type TSFDListQueryState,
   type TSDFItemQuery,
   type TSFDListQuery,
+  type TSFDListQueryState,
   type TSFDUseListItemReturn,
   type TSFDUseListQueryReturn,
 } from './types';
@@ -1599,11 +1599,11 @@ export function createListQueryStore<
     getQueriesState,
     getQueriesRelatedToItem,
     awaitListQueryFetch: awaitListQueryFetchApi,
-    preloadQueryFromPersistentStorage,
+    preloadQueryFromStorage: preloadQueryFromPersistentStorage,
     loadMore: loadMoreApi,
     getItemKey,
     getItemState,
-    preloadItemFromPersistentStorage,
+    preloadItemFromStorage: preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,
     invalidateQueryAndItems,

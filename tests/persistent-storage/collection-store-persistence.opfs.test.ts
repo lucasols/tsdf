@@ -162,7 +162,7 @@ describe('opfs: collection store persistence', () => {
       serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
-    const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('1');
+    const preloadPromise = env.apiStore.preloadItemFromStorage('1');
     await advanceTime(100);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: '1', preloaded: '✅' }
@@ -206,7 +206,7 @@ describe('opfs: collection store persistence', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
-    const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('bad');
+    const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
     await advanceTime(50);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'bad', preloaded: '❌' }
@@ -234,8 +234,7 @@ describe('opfs: collection store persistence', () => {
       ignoreItems: ['secret'],
     });
 
-    const preloadPromise =
-      env.apiStore.preloadItemFromPersistentStorage('secret');
+    const preloadPromise = env.apiStore.preloadItemFromStorage('secret');
     await advanceTime(50);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'secret', preloaded: '❌' }
@@ -259,7 +258,7 @@ describe('opfs: collection store persistence', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
-    const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('1');
+    const preloadPromise = env.apiStore.preloadItemFromStorage('1');
 
     env.apiStore.addItemToState('1', { value: { id: '1', name: 'Live' } });
 

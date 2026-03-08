@@ -206,8 +206,7 @@ describe('opfs: list query store persistence', () => {
       serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
-    const preloadPromise =
-      env.apiStore.preloadQueryFromPersistentStorage(usersQuery);
+    const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
     await advanceTime(200);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
@@ -269,8 +268,7 @@ describe('opfs: list query store persistence', () => {
       ignoreItems: (payload) => payload.endsWith('||2'),
     });
 
-    const preloadPromise =
-      env.apiStore.preloadQueryFromPersistentStorage(usersQuery);
+    const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
     await advanceTime(100);
     await preloadPromise;
     await advanceTime(2100);
@@ -557,7 +555,7 @@ describe('opfs: list query store persistence', () => {
     });
 
     const preloadPromise =
-      readerEnv.apiStore.preloadQueryFromPersistentStorage(productsQuery);
+      readerEnv.apiStore.preloadQueryFromStorage(productsQuery);
     await advanceTime(200);
     await preloadPromise;
 
@@ -786,7 +784,7 @@ describe('opfs: list query store persistence', () => {
     });
 
     const preloadPromise =
-      readerEnv.apiStore.preloadQueryFromPersistentStorage(usersQuery);
+      readerEnv.apiStore.preloadQueryFromStorage(usersQuery);
     await advanceTime(200);
     await preloadPromise;
 
@@ -889,8 +887,7 @@ describe('opfs: list query store persistence', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
-    const preloadPromise =
-      env.apiStore.preloadItemFromPersistentStorage('users||1');
+    const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
     await advanceTime(100);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '✅' }
@@ -929,8 +926,7 @@ describe('opfs: list query store persistence', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
-    const preloadPromise =
-      env.apiStore.preloadItemFromPersistentStorage('users||1');
+    const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
     await advanceTime(50);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
@@ -961,8 +957,7 @@ describe('opfs: list query store persistence', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
-    const preloadPromise =
-      env.apiStore.preloadItemFromPersistentStorage('users||1');
+    const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
 
     env.apiStore.reset();
 

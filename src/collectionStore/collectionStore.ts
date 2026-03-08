@@ -1005,7 +1005,7 @@ export function createCollectionStore<
    * Attempts to hydrate cached items from persistent storage before the first
    * hook read. Returns one result per requested payload.
    */
-  async function preloadItemFromPersistentStorage(
+  async function preloadItemFromStorage(
     params: ItemPayload | ItemPayload[],
   ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
     const payloads = Array.isArray(params) ? params : [params];
@@ -1448,7 +1448,7 @@ export function createCollectionStore<
     useListItemIsDeleted,
     useListItem,
     reset,
-    preloadItemFromPersistentStorage,
+    preloadItemFromStorage,
     getItemKey,
     getItemState,
     startMutation,
