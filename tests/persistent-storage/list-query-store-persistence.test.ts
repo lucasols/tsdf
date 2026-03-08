@@ -872,34 +872,40 @@ describe('localStorage: list query store persistence', () => {
         ['"users||2']
       `);
   });
+
+  test('items and queries are saved per entry and pinned entries survive eviction', async () => {
+    const pinnedItemPayload = rawItemPayload('second', 1);
+    const pinnedQueryPayload = { tableId: 'second' };
+    const env = createEnv({
+      storeName: 'lq-evict',
       sessionKey: 'sess1',
-      maxQueries: 1,
       maxItems: 1,
-      pinnedItems: [secondIk],
-      pinnedQueries: [secondQk],
+      maxQueries: 1,
+      pinnedItems: [pinnedItemPayload],
+      pinnedQueries: [pinnedQueryPayload],
       serverData: {
         first: [{ id: 1, name: 'First' }],
         second: [{ id: 1, name: 'Second' }],
       },
     });
 
-    // Fetch both queries — 'first' is fetched first
     env.scheduleFetch('highPriority', { tableId: 'first' });
     await flushAllTimers();
     env.scheduleFetch('highPriority', { tableId: 'second' });
     await flushAllTimers();
-
     await advanceTime(1100);
+    await flushAllTimers();
 
-    const cached = localStorage.getItem('tsdf.sess1.lq4');
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedListQueryData<Row>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
+    expect(localStorage.getItem('tsdf.sess1.lq-evict')).toBeNull();
 
-    // Pinned 'second' survives; 'first' is evicted despite being fetched first
-    expect(Object.keys(parsed.data.queries)).toEqual([secondQk]);
-    expect(Object.keys(parsed.data.items)).toEqual([secondIk]);
+    expect(listStoredKeys('tsdf.sess1.lq-evict.listQuery.query.'))
+      .toMatchInlineSnapshot(`
+        ['{tableId:"second"}']
+      `);
+    expect(listStoredKeys('tsdf.sess1.lq-evict.listQuery.item.'))
+      .toMatchInlineSnapshot(`
+        ['"second||1']
+      `);
   });
 
   test('version mismatch discards cached data', () => {
