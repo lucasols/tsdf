@@ -1000,6 +1000,15 @@ describe('opfs: list query store persistence', () => {
       .toMatchInlineSnapshot(`
         ['"users||1', '"users||2']
       `);
+    expect(
+      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 1)),
+    ).toBe(true);
+    expect(
+      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 2)),
+    ).toBe(true);
+    expect(
+      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 3)),
+    ).toBe(false);
 
     const readerEnv = createEnv({
       storeName,

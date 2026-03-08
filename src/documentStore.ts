@@ -221,10 +221,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   // Persistent storage setup
   const persistence = persistentStorageConfig
     ? setupDocumentPersistence(
-        {
-          ...persistentStorageConfig,
-          getSessionKey,
-        },
+        { ...persistentStorageConfig, getSessionKey },
         { adapter: testOptions?.storageAdapter },
       )
     : null;
@@ -797,8 +794,8 @@ export function createDocumentStore<State extends ValidStoreState>({
       const effectState = { cancelled: false };
 
       void (async () => {
-        if (persistence?.hasAsyncPreload) {
-          await persistence.preloadPersistentStorage();
+        if (persistence) {
+          await persistence.maybeHydrateFromStorage();
           if (effectState.cancelled) return;
         }
 

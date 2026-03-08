@@ -300,10 +300,7 @@ export function createCollectionStore<
   // Persistent storage setup
   const persistence = persistentStorageConfig
     ? setupCollectionPersistence<ItemState, ItemPayload>(
-        {
-          ...persistentStorageConfig,
-          getSessionKey,
-        },
+        { ...persistentStorageConfig, getSessionKey },
         { adapter: testOptions?.storageAdapter, getItemKey },
       )
     : null;
@@ -1048,9 +1045,9 @@ export function createCollectionStore<
       events,
       getItemKey,
       getItemState,
-      persistence?.hasAsyncPreload
+      persistence
         ? (payloads) =>
-            persistence.preloadItems(
+            persistence.maybeHydrateItems(
               payloads.map((payload) => getItemKey(payload)),
             )
         : undefined,

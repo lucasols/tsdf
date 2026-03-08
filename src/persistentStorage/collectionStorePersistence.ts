@@ -145,6 +145,7 @@ export type CollectionPersistenceSetup<
     baseState: TSFDCollectionState<ItemState, ItemPayload>,
   ): TSFDCollectionState<ItemState, ItemPayload>;
   attach(store: Store<TSFDCollectionState<ItemState, ItemPayload>>): void;
+  maybeHydrateItems(itemKeys: string[]): Promise<boolean[]>;
   preloadItems(itemKeys: string[]): Promise<boolean[]>;
   hasAsyncPreload: boolean;
   dispose(): void;
@@ -234,9 +235,49 @@ export function setupCollectionPersistence<
   }
 
   async function preloadItem(itemKey: string): Promise<boolean> {
-    if (backend !== 'opfs' || !storeRef) return false;
+    if (!storeRef) return false;
     if (storeRef.state[itemKey] !== undefined)
       return storeRef.state[itemKey] !== null;
+
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return false;
+
+      const storageKey = `${getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'collection.item',
+      )}${itemKey}`;
+      const cacheEntry = readStorageEntryFromLocalStorageSync<
+        PersistedCollectionItemData<unknown>
+      >(storageKey, version);
+
+      if (!cacheEntry) return false;
+
+      const validated = toCollectionItemState<ItemState, ItemPayload>(
+        cacheEntry.data,
+        config,
+        shouldIgnorePersistedItem,
+      );
+
+      if (!validated) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        return false;
+      }
+
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+
+      storeRef.produceState(
+        (draft) => {
+          if (draft[itemKey] === undefined) {
+            draft[itemKey] = validated;
+          }
+        },
+        { action: 'persistent-storage-hydrate' },
+      );
+
+      return true;
+    }
 
     const existingPromise = pendingPreloads.get(itemKey);
     if (existingPromise) return existingPromise;
@@ -287,6 +328,10 @@ export function setupCollectionPersistence<
 
   async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
     if (backend !== 'opfs') return itemKeys.map(() => false);
+    return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+  }
+
+  async function maybeHydrateItems(itemKeys: string[]): Promise<boolean[]> {
     return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
   }
 
@@ -404,6 +449,7 @@ export function setupCollectionPersistence<
   return {
     createInitialState,
     attach,
+    maybeHydrateItems,
     preloadItems,
     hasAsyncPreload: backend === 'opfs',
     dispose,

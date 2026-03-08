@@ -288,6 +288,8 @@ export type ListQueryPersistenceSetup<
   attach(
     store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   ): void;
+  maybeHydrateItems(itemKeys: string[]): Promise<boolean[]>;
+  maybeHydrateQueries(queryKeys: string[]): Promise<boolean[]>;
   preloadItems(itemKeys: string[]): Promise<boolean[]>;
   preloadQueries(queryKeys: string[]): Promise<boolean[]>;
   hasAsyncPreload: boolean;
@@ -421,12 +423,53 @@ export function setupListQueryPersistence<
   }
 
   async function preloadItem(itemKey: string): Promise<boolean> {
-    if (backend !== 'opfs' || !storeRef) return false;
+    if (!storeRef) return false;
     if (storeRef.state.itemQueries[itemKey] !== undefined) {
       return (
         storeRef.state.itemQueries[itemKey] !== null &&
         storeRef.state.items[itemKey] !== undefined
       );
+    }
+
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return false;
+
+      const storageKey = `${getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.item',
+      )}${itemKey}`;
+      const cacheEntry = readStorageEntryFromLocalStorageSync<
+        PersistedListQueryItemData<unknown>
+      >(storageKey, version);
+
+      if (!cacheEntry) return false;
+
+      const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+        cacheEntry.data,
+        config,
+        shouldIgnorePersistedItem,
+      );
+      if (!itemState) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        return false;
+      }
+
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+
+      storeRef.produceState(
+        (draft) => {
+          if (draft.itemQueries[itemKey] === undefined) {
+            draft.items[itemKey] = itemState.item;
+            draft.itemQueries[itemKey] = itemState.itemQuery;
+            draft.itemLoadedFields[itemKey] = itemState.loadedFields;
+          }
+        },
+        { action: 'persistent-storage-hydrate' },
+      );
+
+      return true;
     }
 
     const existingPromise = pendingItemPreloads.get(itemKey);
@@ -486,8 +529,67 @@ export function setupListQueryPersistence<
   }
 
   async function preloadQuery(queryKey: string): Promise<boolean> {
-    if (backend !== 'opfs' || !storeRef) return false;
+    if (!storeRef) return false;
     if (storeRef.state.queries[queryKey] !== undefined) {
+      return true;
+    }
+
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return false;
+
+      const storageKey = `${getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.query',
+      )}${queryKey}`;
+      const cacheEntry =
+        readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
+          storageKey,
+          version,
+        );
+
+      if (!cacheEntry) return false;
+
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+
+      const activeStore = storeRef;
+
+      await Promise.all(
+        cacheEntry.data.items.map((itemKey) => preloadItem(itemKey)),
+      );
+
+      const filteredItemKeys = cacheEntry.data.items.filter((itemKey) => {
+        return (
+          activeStore.state.items[itemKey] !== undefined &&
+          activeStore.state.itemQueries[itemKey] !== undefined
+        );
+      });
+      const limitedQuery = limitPersistedQueryItems(
+        filteredItemKeys,
+        cacheEntry.data.hasMore,
+        maxQuerySize,
+      );
+
+      activeStore.produceState(
+        (draft) => {
+          if (draft.queries[queryKey] === undefined) {
+            draft.queries[queryKey] = {
+              error: null,
+              hasMore: limitedQuery.hasMore,
+              items: limitedQuery.itemKeys,
+              payload: __LEGIT_CAST__<QueryPayload, unknown>(
+                cacheEntry.data.payload,
+              ),
+              refetchOnMount: 'lowPriority',
+              status: 'success',
+              wasLoaded: true,
+            };
+          }
+        },
+        { action: 'persistent-storage-hydrate' },
+      );
+
       return true;
     }
 
@@ -554,6 +656,14 @@ export function setupListQueryPersistence<
 
   async function preloadQueries(queryKeys: string[]): Promise<boolean[]> {
     if (backend !== 'opfs') return queryKeys.map(() => false);
+    return Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
+  }
+
+  async function maybeHydrateItems(itemKeys: string[]): Promise<boolean[]> {
+    return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+  }
+
+  async function maybeHydrateQueries(queryKeys: string[]): Promise<boolean[]> {
     return Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
   }
 
@@ -638,17 +748,17 @@ export function setupListQueryPersistence<
     );
 
     persistedItemEntries.sort((a, b) => {
-      const aReferenced = referencedItems.has(a.itemKey);
-      const bReferenced = referencedItems.has(b.itemKey);
-
-      if (aReferenced && !bReferenced) return -1;
-      if (!aReferenced && bReferenced) return 1;
-
       const aPinned = pinnedItemKeys.has(a.itemKey);
       const bPinned = pinnedItemKeys.has(b.itemKey);
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
+
+      const aReferenced = referencedItems.has(a.itemKey);
+      const bReferenced = referencedItems.has(b.itemKey);
+
+      if (aReferenced && !bReferenced) return -1;
+      if (!aReferenced && bReferenced) return 1;
 
       return b.entry.timestamp - a.entry.timestamp;
     });
@@ -698,7 +808,48 @@ export function setupListQueryPersistence<
 
     const state = storeRef.state;
     const tasks: Promise<void>[] = [];
-    const persistedItemKeys = new Set<string>();
+    const queryReferencedItemKeys = new Set<string>();
+    const persistedQueryItemKeys = new Set<string>();
+
+    for (const query of Object.values(state.queries)) {
+      for (const itemKey of query.items) {
+        queryReferencedItemKeys.add(itemKey);
+      }
+    }
+
+    for (const [queryKey, query] of Object.entries(state.queries)) {
+      if (query.status !== 'success' && !query.wasLoaded) continue;
+
+      const filteredItems = query.items.filter((itemKey) => {
+        const item = state.items[itemKey];
+        const itemQuery = state.itemQueries[itemKey];
+
+        return (
+          item !== null &&
+          item !== undefined &&
+          itemQuery !== null &&
+          itemQuery !== undefined &&
+          !shouldIgnoreItem(itemQuery.payload)
+        );
+      });
+      const limitedQuery = limitPersistedQueryItems(
+        filteredItems,
+        query.hasMore,
+        maxQuerySize,
+      );
+
+      for (const itemKey of limitedQuery.itemKeys) {
+        persistedQueryItemKeys.add(itemKey);
+      }
+
+      tasks.push(
+        queryNamespace.save(queryKey, {
+          payload: query.payload,
+          items: limitedQuery.itemKeys,
+          hasMore: limitedQuery.hasMore,
+        }),
+      );
+    }
 
     for (const [itemKey, item] of Object.entries(state.items)) {
       const itemQuery = state.itemQueries[itemKey];
@@ -713,33 +864,17 @@ export function setupListQueryPersistence<
         continue;
       }
 
-      persistedItemKeys.add(itemKey);
+      const isQueryReferenced = queryReferencedItemKeys.has(itemKey);
+      if (isQueryReferenced && !persistedQueryItemKeys.has(itemKey)) {
+        tasks.push(itemNamespace.remove(itemKey));
+        continue;
+      }
 
       tasks.push(
         itemNamespace.save(itemKey, {
           data: item,
           payload: itemQuery.payload,
           loadedFields: state.itemLoadedFields[itemKey],
-        }),
-      );
-    }
-
-    for (const [queryKey, query] of Object.entries(state.queries)) {
-      if (query.status !== 'success' && !query.wasLoaded) continue;
-      const filteredItems = query.items.filter((itemKey) =>
-        persistedItemKeys.has(itemKey),
-      );
-      const limitedQuery = limitPersistedQueryItems(
-        filteredItems,
-        query.hasMore,
-        maxQuerySize,
-      );
-
-      tasks.push(
-        queryNamespace.save(queryKey, {
-          payload: query.payload,
-          items: limitedQuery.itemKeys,
-          hasMore: limitedQuery.hasMore,
         }),
       );
     }
@@ -784,6 +919,8 @@ export function setupListQueryPersistence<
   return {
     createInitialState,
     attach,
+    maybeHydrateItems,
+    maybeHydrateQueries,
     preloadItems,
     preloadQueries,
     hasAsyncPreload: backend === 'opfs',

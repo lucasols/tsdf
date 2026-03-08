@@ -1119,6 +1119,36 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
+  test('pinned items survive eviction even when their query is evicted', async () => {
+    const env = createEnv({
+      storeName: 'lq-pinned-item-only',
+      sessionKey: 'sess1',
+      maxItems: 1,
+      maxQueries: 1,
+      pinnedItems: [rawItemPayload('second', 1)],
+      serverData: {
+        first: [{ id: 1, name: 'First' }],
+        second: [{ id: 1, name: 'Second' }],
+      },
+    });
+
+    // Load the pinned item first, then make a different query the one that survives maxQueries.
+    env.scheduleFetch('highPriority', { tableId: 'second' });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', { tableId: 'first' });
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      listStoredKeys('tsdf.sess1.lq-pinned-item-only.listQuery.query.').length,
+    ).toMatchInlineSnapshot(`1`);
+    expect(listStoredKeys('tsdf.sess1.lq-pinned-item-only.listQuery.item.'))
+      .toMatchInlineSnapshot(`
+        ['"second||1']
+      `);
+  });
+
   test('default persistence limits keep up to 500 items and 100 queries', async () => {
     const storeName = 'lq-default-limits';
     const sessionKey = 'sess1';
@@ -1173,6 +1203,10 @@ describe('localStorage: list query store persistence', () => {
       .toMatchInlineSnapshot(`
         ['"users||1', '"users||2']
       `);
+    expect(listStoredKeys('tsdf.sess1.lq-max-query-size.listQuery.item.'))
+      .toMatchInlineSnapshot(`
+        ['"users||1', '"users||2']
+      `);
 
     const readerEnv = createEnv({
       storeName: 'lq-max-query-size',
@@ -1202,7 +1236,9 @@ describe('localStorage: list query store persistence', () => {
       -> status: success ⋅ names: [Alice, Bob]
       "
     `);
-    expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    expect(
+      readerEnv.serverTable.getRequestHistory('all'),
+    ).toMatchInlineSnapshot(`[]`);
   });
 
   test('ignoreItems excludes matching item payloads from persisted items and queries', async () => {

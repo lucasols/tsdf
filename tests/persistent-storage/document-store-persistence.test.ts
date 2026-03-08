@@ -152,6 +152,43 @@ describe('localStorage: document store persistence', () => {
     `);
   });
 
+  test('hook hydration retries once the localStorage session key becomes available', async () => {
+    let currentSession: string | false = false;
+
+    // Create the store before the authenticated session is ready.
+    setCachedDocumentData('doc-late-session', 'sess1', {
+      name: 'cached',
+      value: 7,
+    });
+
+    const env = createDocPersistenceEnv({
+      storeName: 'doc-late-session',
+      getSessionKey: () => currentSession,
+    });
+    const renders = createLoggerStore();
+
+    // The first hook read happens only after the session key starts resolving.
+    currentSession = 'sess1';
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {name:cached, value:7}
+      -> status: refetching ⋅ data: {name:cached, value:7}
+      -> status: success ⋅ data: {name:test, value:42}
+      "
+    `);
+  });
+
   test('version mismatch causes cached data to be discarded', () => {
     setCachedDocumentData('doc3', 'sess1', { name: 'old', value: 99 }, 1);
 

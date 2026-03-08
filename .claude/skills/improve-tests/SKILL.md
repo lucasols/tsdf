@@ -1,29 +1,55 @@
 ---
-name: review-tests
-description: Review automated tests for correctness, readability, reliability, maintainability, and coverage gaps. Use when asked to review tests, audit flaky tests, evaluate whether tests are meaningful, or identify missing scenarios in Vitest/TypeScript test suites.
+name: improve-tests
+description: Improve automated tests by default: strengthen coverage, readability, determinism, and failure signals in Vitest/TypeScript suites. Only switch to review-only mode when the user explicitly asks for a review or audit.
 ---
 
-# Review Tests
+# Improve Tests
 
-Perform a test-focused code review. Prioritize bugs, false confidence risks, readability/reviewability, flaky behavior, and missing coverage. Treat test readability as a first-class quality bar, not a style nit: tests should be state-of-the-art readable so a human can understand the scenario, timing, and regression being protected at a glance.
+Default mode is to improve tests, not just critique them. Read the relevant tests, identify the highest-value changes, implement them, and verify the result. Only stay in review mode when the user explicitly asks to review, audit, or evaluate tests without changing them.
 
-## Review Workflow
+## Modes
+
+- `Improve` (default): make concrete test changes. Add or rewrite tests, improve structure/readability, replace weak assertions, reduce flakiness, and run the relevant test commands.
+- `Review` (only when explicitly requested): inspect tests and report prioritized findings without changing files unless the user then asks for fixes.
+
+## Improve Workflow
 
 1. Define scope and intent.
-2. Evaluate readability and reviewability.
-3. Evaluate behavioral coverage.
-4. Validate mock fidelity and test setup.
-5. Validate assertion quality and failure signals.
-6. Check determinism and flakiness risk.
-7. Report findings ordered by severity.
+2. Identify the most valuable test improvements.
+3. Implement the test changes.
+4. Validate realism, readability, and determinism.
+5. Run relevant tests and lint/type-check when appropriate.
+6. Summarize what changed, what improved, and any remaining gaps.
 
 ## 1) Define Scope And Intent
 
-- Identify the behavior each test file intends to protect.
+- Identify the behavior each test file is supposed to protect.
 - Map core production paths to explicit tests.
-- Flag tests that assert implementation details without protecting behavior.
+- Distinguish whether the user wants:
+  - better tests by default, or
+  - a review-only pass with findings and no edits.
+- When the request is ambiguous, default to improving the tests.
 
-## 2) Evaluate Readability And Reviewability
+## 2) Identify The Most Valuable Improvements
+
+- Prioritize changes that improve regression protection, readability, and trustworthiness.
+- Focus first on:
+  - missing realistic scenarios,
+  - tests that give false confidence,
+  - flaky/nondeterministic behavior,
+  - assertions that are too weak or too low-level,
+  - tests whose story is hard to follow.
+- Prefer a small number of high-signal improvements over many low-value edits.
+
+## 3) Implement The Test Changes
+
+- Add or rewrite tests to cover realistic production behavior.
+- Prefer the project's shared test environments and utilities instead of hand-rolled setup.
+- Strengthen assertions so failures explain the regression clearly.
+- Prefer readable snapshots, timelines, and helpers over dense low-level expectations.
+- Improve naming, comments, and structure so the scenario is obvious at a glance.
+
+## 4) Validate Readability And Reviewability
 
 - Treat readability as one of the top priorities in the review. If a test is difficult for a human to scan and understand quickly, that is a real defect in the test suite.
 - Ask: can a reviewer understand the scenario, the actions, and the expected outcome at a glance without reverse-engineering the implementation?
@@ -31,9 +57,9 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - Flag tests whose narrative is buried across long setup blocks, scattered assertions, raw store poking, or transport/`fetchHistory` details when a clearer structure, timeline snapshot, or `getRequestHistory(...)` assertion would make the behavior obvious.
 - Flag complex tests that do not present the scenario as a clear arrange/act/assert flow.
 - Prefer tests that communicate the regression they guard against immediately through naming, comments, helpers, and snapshots.
-- Do not treat readability findings as optional cleanup. If readability issues are present, report them even when you also found correctness or flakiness issues.
+- Do not treat readability issues as optional cleanup. In improve mode, fix them. In review mode, report them.
 
-## 3) Evaluate Behavioral Coverage
+## 5) Validate Behavioral Coverage
 
 - Check happy path, edge cases, error paths, and state transitions.
 - Check that contract changes would fail tests in useful ways.
@@ -42,7 +68,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - Flag tests that force artificial conditions (impossible state combinations, unrealistic timing, states that cannot occur in real usage) to make assertions pass. These create false confidence and may mask real bugs.
 - Verify that test setup matches the scenario being tested. Initial state must reflect the real-world context of the behavior under test (for example, a test for "refetch on mount" should start with an already-loaded store, not an idle one — testing refetch from idle is a different scenario). Mismatched initial state makes the test verify the wrong behavior.
 
-## 4) Validate Mock Fidelity And Test Setup
+## 6) Validate Mock Fidelity And Test Setup
 
 - Flag mocks that deviate from real behavior in ways that affect test validity (for example, a mock that resolves instantly when the real API is paginated, or a mock that never returns errors when the test is about error handling).
 - Verify mocks preserve the behavioral contract of what they replace — response shape, timing characteristics, failure modes.
@@ -50,7 +76,7 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - Use the project's shared test utilities (`createLoggerStore`, `flushAllTimers`, `advanceTime`, `range`, `pick`, test environment helpers from `tests/mocks/`) instead of rolling custom setup. Inconsistent setup across tests makes it harder to spot when initial conditions are wrong.
 - Treat raw `fetchHistory` assertions as a default review finding when `serverTable.getRequestHistory('item' | 'list' | 'all')` can express the same behavior. Prefer `getRequestHistory(...)` because it snapshots the request contract instead of low-level transport internals; fall back to raw `fetchHistory` only when the higher-level helper cannot express the assertion.
 
-## 5) Validate Assertion Quality And Failure Signals
+## 7) Validate Assertion Quality And Failure Signals
 
 - Prefer assertions on user-visible or API-visible outcomes.
 - Flag weak assertions (for example, only checking call count without verifying effect).
@@ -66,13 +92,13 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - Flag tests that force the reader to reconstruct the scenario from many low-level assertions instead of showing the important behavior in one readable artifact.
 - Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.
 
-## 6) Check Determinism And Flakiness
+## 8) Check Determinism And Flakiness
 
 - Flag reliance on real time, random values, network race timing, or global mutable state.
 - Ensure async behavior is awaited and timers are controlled.
 - Flag tests that depend on execution order or leaked state between tests.
 
-## 7) Readability Standards
+## 9) Readability Standards
 
 - Prefer focused tests with clear setup and intent.
 - Default stance: unreadable tests are review findings, not polish opportunities.
@@ -91,15 +117,18 @@ Perform a test-focused code review. Prioritize bugs, false confidence risks, rea
 - Flag tests that mix transport assertions, `fetchHistory` checks, and raw state checks without a clear primary assertion showing the user-visible story. In most cases the `fetchHistory` part should be replaced with `serverTable.getRequestHistory(...)`.
 - Flag redundant or noise assertions that don't add confidence — re-checking already-asserted state, asserting obvious intermediate values, or verifying test setup rather than behavior. Every assertion should justify its existence by catching a distinct regression.
 
-## 8) Report Findings
+## 10) Deliver The Result
 
-- Report findings first, ordered by severity.
-- Include file and line references for each issue.
-- Explain risk, expected impact, and the minimum fix.
-- When readability problems exist, report them explicitly as findings. Do not hide them inside a summary or omit them because functional bugs were already found.
-- For test reviews, assume the target quality bar is code a human can review at a glance. Judge unclear narrative, weak structure, and poor visual communication against that bar.
-- Explicitly state when no findings were identified and list remaining testing gaps.
+- In `Improve` mode:
+  - summarize the test changes you made,
+  - report which commands you ran,
+  - call out any remaining gaps or risks.
+- In `Review` mode:
+  - report findings first, ordered by severity,
+  - include file and line references,
+  - explain risk, expected impact, and the minimum fix,
+  - explicitly state when no findings were identified and list remaining testing gaps.
 
 ## Reference
 
-- Use `references/test-review-checklist.md` as a compact scoring checklist during reviews.
+- Use `references/test-review-checklist.md` as a compact checklist during review-only requests.

@@ -485,15 +485,8 @@ export function createListQueryStore<
   // Persistent storage setup
   const persistence = persistentStorageConfig
     ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
-        {
-          ...persistentStorageConfig,
-          getSessionKey,
-        },
-        {
-          adapter: testOptions?.storageAdapter,
-          getItemKey,
-          getQueryKey,
-        },
+        { ...persistentStorageConfig, getSessionKey },
+        { adapter: testOptions?.storageAdapter, getItemKey, getQueryKey },
       )
     : null;
 
@@ -1285,9 +1278,9 @@ export function createListQueryStore<
         events,
         getQueryKey,
         getQueryState,
-        persistence?.hasAsyncPreload
+        persistence
           ? (payloads) =>
-              persistence.preloadQueries(
+              persistence.maybeHydrateQueries(
                 payloads.map((payload) => getQueryKey(payload)),
               )
           : undefined,
@@ -1347,9 +1340,9 @@ export function createListQueryStore<
       events,
       getItemKey,
       scheduleAutomaticItemFetch,
-      persistence?.hasAsyncPreload
+      persistence
         ? (payloads) =>
-            persistence.preloadItems(
+            persistence.maybeHydrateItems(
               payloads.map((payload) => getItemKey(payload)),
             )
         : undefined,

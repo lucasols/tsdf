@@ -62,6 +62,7 @@ export type DocumentPersistenceSetup<State extends ValidStoreState> = {
     baseState: DocumentStoreState<State>,
   ): DocumentStoreState<State>;
   attach(store: Store<DocumentStoreState<State>>): void;
+  maybeHydrateFromStorage(): Promise<void>;
   preloadPersistentStorage(): Promise<void>;
   hasAsyncPreload: boolean;
   dispose(): void;
@@ -85,6 +86,40 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   let unsubscribe: (() => void) | null = null;
   let generation = 0;
   let preloadPromise: Promise<void> | null = null;
+
+  function hydrateFromLocalStorage(): void {
+    if (!storeRef) return;
+
+    const currentState = storeRef.state;
+    if (currentState.status !== 'idle' || currentState.data !== null) return;
+
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return;
+
+    const key = getStorageKeyForStore(sessionKey, config.storeName);
+    const hasEntry = localStorage.getItem(key) !== null;
+    const persisted = readDocumentFromLocalStorageSync(key, version);
+
+    if (!persisted) {
+      if (hasEntry) {
+        scheduleIdleCleanup(() => localStorage.removeItem(key));
+      }
+      return;
+    }
+
+    const validated = validateWithSchema(config.schema, persisted.data);
+    if (validated === null) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return;
+    }
+
+    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+
+    storeRef.setPartialState(
+      { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
+      { action: 'persistent-storage-hydrate' },
+    );
+  }
 
   function createInitialState(
     baseState: DocumentStoreState<State>,
@@ -164,6 +199,15 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
     return preloadPromise;
   }
 
+  async function maybeHydrateFromStorage(): Promise<void> {
+    if (backend === 'localStorage') {
+      hydrateFromLocalStorage();
+      return;
+    }
+
+    await preloadPersistentStorage();
+  }
+
   function attach(store: Store<DocumentStoreState<State>>): void {
     storeRef = store;
 
@@ -195,6 +239,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   return {
     createInitialState,
     attach,
+    maybeHydrateFromStorage,
     preloadPersistentStorage,
     hasAsyncPreload: backend === 'opfs',
     dispose,

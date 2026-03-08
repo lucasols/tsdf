@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Improve Tests'
+  short_description: 'Improve tests by default; review only when requested'
+  default_prompt: 'Use $improve-tests to improve these tests by default: strengthen coverage, readability, determinism, and failure signals. Only switch to review-only mode if I explicitly ask for a review or audit.'
