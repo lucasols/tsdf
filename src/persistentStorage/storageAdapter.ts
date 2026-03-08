@@ -1,4 +1,4 @@
-import { murmur2 } from '@ls-stack/utils/hash';
+import { murmur3 } from '@ls-stack/utils/hash';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_array,
@@ -82,7 +82,7 @@ function createOpfsAdapter(): StorageAdapter {
   }
 
   function getFileName(key: string): string {
-    return `${murmur2(key)}.json`;
+    return `${murmur3(key, 'uint32')}.json`;
   }
 
   function parseBucket(raw: string): OpfsBucketFile | null {

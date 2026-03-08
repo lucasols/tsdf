@@ -7,7 +7,7 @@ import {
   test,
   vi,
 } from 'vitest';
-import { murmur2 } from '@ls-stack/utils/hash';
+import { murmur3 } from '@ls-stack/utils/hash';
 import { createStorageAdapter } from '../../src/persistentStorage/storageAdapter';
 import type { StorageAdapter } from '../../src/persistentStorage/types';
 
@@ -210,7 +210,7 @@ describe('opfs adapter', () => {
         name: 'Alice'
       `);
       expect([...files.keys()]).toMatchInlineSnapshot(`
-        ['torbdc.json']
+        ['1844492593.json']
       `);
     } finally {
       cleanup();
@@ -288,10 +288,10 @@ describe('opfs adapter', () => {
     const { cleanup } = setupMockOpfs();
     try {
       const adapter = createStorageAdapter('opfs');
-      const firstKey = 'collision-key-amy-3y';
-      const secondKey = 'collision-key-fht-5r';
+      const firstKey = 'collision-key-1ndo-m1';
+      const secondKey = 'collision-key-2hwp-xd';
 
-      expect(murmur2(firstKey)).toBe(murmur2(secondKey));
+      expect(murmur3(firstKey, 'uint32')).toBe(murmur3(secondKey, 'uint32'));
 
       await adapter.write(firstKey, { name: 'first' });
       await adapter.write(secondKey, { name: 'second' });
@@ -303,7 +303,7 @@ describe('opfs adapter', () => {
         `name: 'second'`,
       );
       expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(`
-        ['collision-key-amy-3y', 'collision-key-fht-5r']
+        ['collision-key-1ndo-m1', 'collision-key-2hwp-xd']
       `);
 
       await adapter.remove(firstKey);
@@ -313,7 +313,7 @@ describe('opfs adapter', () => {
         `name: 'second'`,
       );
 
-      await adapter.removeByPrefix('collision-key-fht');
+      await adapter.removeByPrefix('collision-key-2hwp');
 
       expect(await adapter.read(secondKey)).toBeNull();
       expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(
@@ -329,7 +329,7 @@ describe('opfs adapter', () => {
     try {
       const adapter = createStorageAdapter('opfs');
       const key = 'broken-key';
-      files.set(`${murmur2(key)}.json`, '{broken');
+      files.set(`${murmur3(key, 'uint32')}.json`, '{broken');
 
       expect(await adapter.read(key)).toBeNull();
       expect(await adapter.listKeys('broken')).toMatchInlineSnapshot(`[]`);
@@ -337,7 +337,7 @@ describe('opfs adapter', () => {
       await adapter.write(key, { restored: true });
 
       expect(await adapter.read(key)).toMatchInlineSnapshot(`restored: '✅'`);
-      expect(files.get(`${murmur2(key)}.json`)).toBe(
+      expect(files.get(`${murmur3(key, 'uint32')}.json`)).toBe(
         '{"entries":[{"key":"broken-key","value":{"restored":true}}]}',
       );
     } finally {
