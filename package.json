@@ -28,7 +28,7 @@
     "test:changed": "vitest --changed --mode development",
     "test:playwright": "playwright test",
     "test:all": "vitest --run && playwright test",
-    "lint": "pnpm tsc && pnpm eslint && pnpm format",
+    "lint": "pnpm tsc && pnpm eslint",
     "eslint": "eslint src/ tests/ --fix",
     "format": "oxfmt src/ tests/",
     "tsc": "tsgo -p tsconfig.prod.json",
