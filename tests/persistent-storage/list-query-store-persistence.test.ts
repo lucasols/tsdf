@@ -944,41 +944,66 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`125`);
   });
 
-  test('schema validation failure discards invalid items', () => {
-    const validIk = storeItemKey('t1', 1);
-    const invalidIk = storeItemKey('t1', 2);
-    const qk = queryKey({ tableId: 't1' });
-
-    const key = 'tsdf.sess1.lq6';
-    const entry: StorageCacheEntry<PersistedListQueryData<unknown>> = {
-      data: {
-        items: {
-          [validIk]: { id: 1, name: 'Valid' },
-          [invalidIk]: { badField: true },
-        },
-        queries: {
-          [qk]: {
-            payload: { tableId: 't1' },
-            items: [validIk, invalidIk],
-            hasMore: false,
-          },
-        },
-        itemPayloads: {
-          [validIk]: rawItemKey('t1', 1),
-          [invalidIk]: rawItemKey('t1', 2),
-        },
+  test('ignoreItems excludes matching item payloads from persisted items and queries', async () => {
+    const usersQuery = { tableId: 'users' };
+    const env = createEnv({
+      storeName: 'lq-ignore',
+      sessionKey: 'sess1',
+      ignoreItems: ['users||2'],
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+        ],
       },
-      timestamp: Date.now(),
-      version: 1,
-    };
-    localStorage.setItem(key, JSON.stringify(entry));
+    });
 
-    const env = createEnv({ storeName: 'lq6', sessionKey: 'sess1' });
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
 
-    // Valid item loaded
-    expect(env.store.state.items[validIk]).toMatchInlineSnapshot(`
-      id: 1
-      name: 'Valid'
+    expect(listStoredKeys('tsdf.sess1.lq-ignore.listQuery.item.'))
+      .toMatchInlineSnapshot(`
+        ['"users||1']
+      `);
+    expect(getStoredQueryItemKeys('lq-ignore', 'sess1', usersQuery))
+      .toMatchInlineSnapshot(`
+        ['"users||1']
+      `);
+
+    const readerEnv = createEnv({
+      storeName: 'lq-ignore',
+      sessionKey: 'sess1',
+      ignoreItems: ['users||2'],
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+        ],
+      },
+    });
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        names: items.map((item) => item.name),
+      });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Alice]
+      "
+    `);
+    expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+  });
     `);
 
     // Invalid item not loaded
