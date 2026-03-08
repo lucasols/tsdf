@@ -298,8 +298,6 @@ export function createDocumentStore<State extends ValidStoreState>({
   }
 
   function hasLocalDocumentState(): boolean {
-    if (!store.isInitialized) return false;
-
     return (
       store.state.status !== 'idle' ||
       store.state.data !== null ||
