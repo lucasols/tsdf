@@ -18,8 +18,8 @@ importers:
         specifier: ^0.9.0
         version: 0.9.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/utils':
-        specifier: ^3.71.1
-        version: 3.71.1
+        specifier: ^3.73.0
+        version: 3.73.0
       evtmitter:
         specifier: ^1.0.2
         version: 1.0.2
@@ -81,6 +81,9 @@ importers:
       react-dom:
         specifier: ^19.2.3
         version: 19.2.3(react@19.2.3)
+      runcheck:
+        specifier: ^1.15.0
+        version: 1.15.0
       simple-git-hooks:
         specifier: ^2.13.1
         version: 2.13.1
@@ -464,8 +467,8 @@ packages:
     resolution: {integrity: sha512-dOMK9LNuPmLRkraaRORBQqTq/JWGXyKHOKva25NhzWJgjOSZwPm/r8Ty8zd/bLCjaIO6aBUNl7zqJ6JTM6YaCQ==}
     engines: {node: '>=20.0.0'}
 
-  '@ls-stack/utils@3.71.1':
-    resolution: {integrity: sha512-jlkVu5A6BULoEuYukNbyBj7c4Xu7QYyWLVYrnNNab77Ie/boqTxruxBcupf9vMJWax4ll3RVRebGDkL5rZIFdQ==}
+  '@ls-stack/utils@3.73.0':
+    resolution: {integrity: sha512-pGLqb+fq1k0NrDGdrgMXx78iDLmVbainVCmusGWzY3t8SM1Lt7SMX+26rLv8IFnKOoEKLvesoha6WkuhYoRNCQ==}
     engines: {node: '>=20.0.0'}
 
   '@nodelib/fs.scandir@2.1.5':
@@ -1704,6 +1707,10 @@ packages:
   run-parallel@1.2.0:
     resolution: {integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==}
 
+  runcheck@1.15.0:
+    resolution: {integrity: sha512-Ysv2X3FWkrD2dLd/53Hl9FIw1+gTfaG7a7mGsEqbm+IU2yFV6gJkmkpI6/MFMEbCEhioL16wdVsq5g8qFP0fhA==}
+    engines: {node: '>=14.6.0'}
+
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
@@ -2360,7 +2367,7 @@ snapshots:
       evtmitter: 1.0.2
       t-result: 0.6.1
 
-  '@ls-stack/utils@3.71.1':
+  '@ls-stack/utils@3.73.0':
     dependencies:
       '@leeoniya/ufuzzy': 1.0.19
       evtmitter: 1.0.2
@@ -3513,6 +3520,8 @@ snapshots:
   run-parallel@1.2.0:
     dependencies:
       queue-microtask: 1.2.3
+
+  runcheck@1.15.0: {}
 
   scheduler@0.27.0: {}
 

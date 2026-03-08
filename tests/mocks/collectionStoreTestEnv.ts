@@ -8,6 +8,10 @@ import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+import type {
+  CollectionPersistentStorageConfig,
+  StorageAdapter,
+} from '../../src/persistentStorage/types';
 import { getNextStoreId } from './browserTabsTestUtils';
 import {
   createServerTableMock,
@@ -35,8 +39,6 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
    * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
    */
   | 'loaded'
-  /** App started with data restored from local cache, pending server revalidation. */
-  | { idleWithLocalCache: 'sameAsServer' | Record<string, D> }
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: Record<string, D> };
 
@@ -69,7 +71,12 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
-  ignoreInitialTimeCheck?: boolean;
+  persistentStorage?: CollectionPersistentStorageConfig<
+    CollectionTestItem<D>,
+    string
+  >;
+  storageAdapter?: StorageAdapter;
+  __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
 export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
@@ -92,13 +99,15 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
-    ignoreInitialTimeCheck,
+    persistentStorage,
+    storageAdapter,
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
   }: CollectionStoreTestEnvOptions<D> = {},
 ) {
-  if (!ignoreInitialTimeCheck) {
+  if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
       throw new Error(
-        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+        'Current time is too far from TEST_INITIAL_TIME. If this test REALLY needs to run with a different time, set it in the test. As last resort, set __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__ to true.',
       );
     }
   }
@@ -183,8 +192,10 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     revalidateOnWindowFocus,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
+    persistentStorage,
     '~test': {
       ...testOptions,
+      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {
@@ -364,20 +375,6 @@ function resolveTestOptions<D extends Record<string, unknown>>(
     return {
       initialData: mapInitialData(serverInitialData),
       initialStatus: 'success',
-      initialLastFetchStartTime: Date.now() - 10_000,
-    };
-  }
-
-  if ('idleWithLocalCache' in scenario) {
-    const cacheData =
-      scenario.idleWithLocalCache === 'sameAsServer'
-        ? serverInitialData
-        : scenario.idleWithLocalCache;
-
-    return {
-      initialData: mapInitialData(cacheData),
-      initialStatus: 'success',
-      initialRefetchOnMount: 'lowPriority',
       initialLastFetchStartTime: Date.now() - 10_000,
     };
   }

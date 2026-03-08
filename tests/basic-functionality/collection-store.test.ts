@@ -50,7 +50,7 @@ describe('test helpers', () => {
 describe('fetch lifecycle', () => {
   const env = createCollectionStoreTestEnv(
     {},
-    { ignoreInitialTimeCheck: true },
+    { __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true },
   );
 
   test('fetch resource', async () => {

@@ -343,7 +343,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
 
 test('useItem: disable then enable isOffScreen', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
-    testScenario: { idleWithLocalCache: { tables: ['products', 'users'] } },
+    testScenario: { loaded: { tables: ['products', 'users'] } },
     usesRealTimeUpdates: true,
     lowPriorityThrottleMs: 10,
   });
@@ -381,8 +381,6 @@ test('useItem: disable then enable isOffScreen', async () => {
   expect(renders.changesSnapshot).toMatchInlineSnapshot(`
     "
     -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
-    -> status: refetching ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
-    -> status: success ⋅ data: {id:1, name:User 1} ⋅ payload: users||1
 
     >>> set disabled
 
@@ -394,7 +392,7 @@ test('useItem: disable then enable isOffScreen', async () => {
     "
   `);
 
-  expect(env.serverTable.numOfFinishedFetches).toBe(1);
+  expect(env.serverTable.numOfFinishedFetches).toBe(0);
 });
 
 test('useListQuery: disable then enable isOffScreen', async () => {
@@ -789,7 +787,7 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
 
 test('Selected value should update when external dep changes (default selectorUsesExternalDeps)', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
-    testScenario: { idleWithLocalCache: { tables: ['users'] } },
+    testScenario: { loaded: { tables: ['users'] } },
   });
 
   const renders = createLoggerStore();

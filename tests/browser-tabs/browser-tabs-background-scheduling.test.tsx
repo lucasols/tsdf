@@ -225,65 +225,6 @@ test('document background scheduling does not retry on sibling tabs after a remo
   `);
 });
 
-test('document low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('document-all-background-refetch');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
-  const sharedServerState = createSharedServerMockState(0);
-
-  const envA = createDocumentStoreTestEnv(0, {
-    id,
-    sharedServerState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('a'),
-    testScenario: { idleWithLocalCache: 'sameAsServer' },
-  });
-  const envB = createDocumentStoreTestEnv(0, {
-    id,
-    sharedServerState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('b'),
-    testScenario: { idleWithLocalCache: 'sameAsServer' },
-  });
-
-  await tabs.focusTab('b');
-  await tabs.focusTab('a');
-  await tabs.blur();
-
-  renderHook(() => {
-    const doc = envA.apiStore.useDocument();
-    envA.trackUIChanges(doc.data?.value);
-  });
-  renderHook(() => {
-    const doc = envB.apiStore.useDocument();
-    envB.trackUIChanges(doc.data?.value);
-  });
-
-  await flushAllTimers();
-
-  expect(envA.serverMock.numOfStartedFetches).toBe(1);
-  expect(envB.serverMock.numOfStartedFetches).toBe(0);
-  expect(envA.timelineString).toMatchInlineSnapshot(`
-    "
-    time  | ui |
-    10ms  | -  | 👁 window-focused
-    15ms  | -  | 🔕 window-blurred
-    20ms  | 0  | ui-initialized
-    1.03s | 0  | 🔴 >fetch-started
-    1.83s | 0  | 🔴 <fetch-finished (value: 0)
-    "
-  `);
-  expect(envB.timelineString).toMatchInlineSnapshot(`
-    "
-    time  | ui |
-    0     | -  | 👁 window-focused
-    5ms   | -  | 🔕 window-blurred
-    20ms  | 0  | ui-initialized
-    1.83s | 0  | <confirmed-snapshot-received (value: 0)
-    "
-  `);
-});
-
 test('document fetch timing sync suppresses redundant low-priority work after a sibling fetch settles', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-timing-sync');
@@ -531,69 +472,6 @@ test('collection background scheduling does not retry on sibling tabs after a re
     30ms  | Item 1  | received-ws-data-change-event
     3.54s | Item 1  | <confirmed-snapshot-received (value: {"name":"Updated"})
     .     | Updated | ui-changed
-    "
-  `);
-});
-
-test('collection low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('collection-refetch-on-mount');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
-  const sharedServerTableState = createSharedServerTableState(
-    createCollectionItems(),
-  );
-
-  const envA = createCollectionStoreTestEnv(createCollectionItems(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('a'),
-    testScenario: { idleWithLocalCache: 'sameAsServer' },
-  });
-  const envB = createCollectionStoreTestEnv(createCollectionItems(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('b'),
-    testScenario: { idleWithLocalCache: 'sameAsServer' },
-  });
-
-  await tabs.focusTab('b');
-  await tabs.focusTab('a');
-  await tabs.blur();
-
-  renderHook(() => {
-    const item = envA.apiStore.useItem('item1');
-    envA.trackItemUI('item1', item.data?.value.name);
-  });
-  renderHook(() => {
-    const item = envB.apiStore.useItem('item1');
-    envB.trackItemUI('item1', item.data?.value.name);
-  });
-
-  await flushAllTimers();
-
-  const totalFetches =
-    countFetchHistoryEntries(envA.serverTable.fetchHistory, 'fetch') +
-    countFetchHistoryEntries(envB.serverTable.fetchHistory, 'fetch');
-  expect(totalFetches).toBe(1);
-  expect(envA.timelineString).toMatchInlineSnapshot(`
-    "
-    time  | item1  |
-    10ms  | -      | 👁 window-focused
-    15ms  | -      | 🔕 window-blurred
-    20ms  | Item 1 | ui-initialized
-    1.03s | Item 1 | 🔴 >fetch-started
-    1.83s | Item 1 | 🔴 <fetch-finished (value: {"name":"Item 1"})
-    "
-  `);
-  expect(envB.timelineString).toMatchInlineSnapshot(`
-    "
-    time  | item1  |
-    0     | -      | 👁 window-focused
-    5ms   | -      | 🔕 window-blurred
-    20ms  | Item 1 | ui-initialized
-    1.83s | Item 1 | <confirmed-snapshot-received (value: {"name":"Item 1"})
     "
   `);
 });
@@ -866,68 +744,6 @@ test('list query background scheduling does not retry on sibling tabs after a re
     30ms  | Alice    | received-ws-data-change-event
     4.34s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | Zoe      | ui-changed
-    "
-  `);
-});
-
-test('list query low-priority refetch-on-mount work is deduplicated when all tabs are backgrounded', async () => {
-  const transportFactory = createInMemoryBrowserTabsTransportFactory();
-  const id = getNextStoreId('list-query-refetch-on-mount');
-  const tabs = createFocusChangeCoordinator(['a', 'b'], null);
-  const sharedServerTableState =
-    createSharedListQueryServerTableState(createUsersTable());
-
-  const envA = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('a'),
-    testScenario: { idleWithLocalCache: { tables: ['users'] } },
-  });
-  const envB = createListQueryStoreTestEnv(createUsersTable(), {
-    id,
-    sharedServerTableState,
-    browserTabsTransportFactory: transportFactory,
-    bindFocusController: tabs.bind('b'),
-    testScenario: { idleWithLocalCache: { tables: ['users'] } },
-  });
-
-  await tabs.focusTab('b');
-  await tabs.focusTab('a');
-  await tabs.blur();
-
-  renderHook(() => {
-    const query = envA.apiStore.useListQuery({ tableId: 'users' });
-    envA.trackItemUI('users||1', query.items[0]?.name);
-  });
-  renderHook(() => {
-    const query = envB.apiStore.useListQuery({ tableId: 'users' });
-    envB.trackItemUI('users||1', query.items[0]?.name);
-  });
-
-  await flushAllTimers();
-
-  const totalFetches =
-    countFetchHistoryEntries(envA.serverTable.fetchHistory, 'list') +
-    countFetchHistoryEntries(envB.serverTable.fetchHistory, 'list');
-  expect(totalFetches).toBe(1);
-  expect(envA.timelineString).toMatchInlineSnapshot(`
-    "
-    time  | users||1 |
-    10ms  | -        | 👁 window-focused
-    15ms  | -        | 🔕 window-blurred
-    20ms  | Alice    | ui-initialized
-    1.03s | Alice    | 🔴 >list-fetch-started
-    1.83s | Alice    | 🔴 <list-fetch-finished (value: {"count":2})
-    "
-  `);
-  expect(envB.timelineString).toMatchInlineSnapshot(`
-    "
-    time  | users||1 |
-    0     | -        | 👁 window-focused
-    5ms   | -        | 🔕 window-blurred
-    20ms  | Alice    | ui-initialized
-    1.83s | Alice    | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     "
   `);
 });

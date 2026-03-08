@@ -92,6 +92,8 @@ export type CreateFetchApiOptions<
   normalizeFieldsOption: (
     fields: FieldsInput | undefined,
   ) => string[] | undefined;
+  preloadQueries?: (queryKeys: string[]) => Promise<boolean[]>;
+  preloadItems?: (itemKeys: string[]) => Promise<boolean[]>;
   testInitialLastFetchStartTime?: number;
   noFetchItemFnError: string;
   onQueryFetchStart?: (
@@ -140,6 +142,8 @@ export function createFetchApi<
   getQueryKey,
   getItemKey,
   normalizeFieldsOption,
+  preloadQueries: preloadQueries_,
+  preloadItems: preloadItems_,
   testInitialLastFetchStartTime,
   noFetchItemFnError,
   onQueryFetchStart,
@@ -584,7 +588,8 @@ export function createFetchApi<
   }
 
   function getQueryState(params: QueryPayload): Query | undefined {
-    return store.state.queries[getQueryKey(params)];
+    const queryKey = getQueryKey(params);
+    return store.state.queries[queryKey];
   }
 
   function getQueriesKeyArray(
@@ -674,7 +679,7 @@ export function createFetchApi<
     | null
     | undefined
     | { payload: ItemPayload; data: ItemState }[] {
-    if (typeof itemPayload === 'function' || Array.isArray(itemPayload)) {
+    if (typeof itemPayload === 'function') {
       const itemsId = getItemsKeyArray(itemPayload);
 
       return filterAndMap(itemsId, ({ itemKey }) => {
@@ -685,7 +690,17 @@ export function createFetchApi<
       });
     }
 
-    return store.state.items[getItemKey(itemPayload)];
+    if (Array.isArray(itemPayload)) {
+      const itemsId = getItemsKeyArray(itemPayload);
+
+      return filterAndMap(itemsId, ({ itemKey, payload }) => {
+        const item = store.state.items[itemKey];
+        return !item ? false : { payload, data: item };
+      });
+    }
+
+    const itemKey = getItemKey(itemPayload);
+    return store.state.items[itemKey];
   }
 
   function scheduleListQueryFetch(

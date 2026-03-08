@@ -74,6 +74,9 @@ export function useMultipleListQueries<
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
+  preloadQueries:
+    | ((payloads: QueryPayload[]) => Promise<boolean[]>)
+    | undefined,
   scheduleAutomaticListQueryFetch: (
     fetchType: FetchType,
     payload: QueryPayload,
@@ -294,7 +297,13 @@ export function useMultipleListQueries<
             const someItemMissingFieldsInState = query.items.some((itemKey) => {
               const item = state.items[itemKey];
               if (!item || typeof item !== 'object') return true;
-              return fields.some((f) => !(f in item));
+              const itemRecord = __LEGIT_CAST__<
+                Record<string, unknown>,
+                ItemState
+              >(item);
+              return fields.some(
+                (f) => !(f in itemRecord) || itemRecord[f] === undefined,
+              );
             });
 
             const hasAffectedFieldInvalidation = query.items.some((itemKey) => {
@@ -516,132 +525,153 @@ export function useMultipleListQueries<
   const ignoreQueriesInRefetchOnMount = useConst(() => new Set<string>());
 
   useEffect(() => {
-    const removedQueries = new Set(ignoreQueriesInRefetchOnMount);
+    const effectState = { cancelled: false };
 
-    for (const {
-      key: queryId,
-      payload,
-      fields,
-      isOffScreen,
-      loadSize,
-      disableRefetches,
-      disableRefetchOnMount,
-    } of queriesWithId) {
-      removedQueries.delete(queryId);
+    void (async () => {
+      if (preloadQueries && queriesWithId.length > 0) {
+        await preloadQueries(queriesWithId.map(({ payload }) => payload));
+        if (effectState.cancelled) return;
+      }
 
-      if (isOffScreen) continue;
+      const removedQueries = new Set(ignoreQueriesInRefetchOnMount);
 
-      const queryState = getQueryState(payload);
-      let fetchType = queryState?.refetchOnMount || 'lowPriority';
-      let fieldsToFetch = fields;
+      for (const {
+        key: queryId,
+        payload,
+        fields,
+        isOffScreen,
+        loadSize,
+        disableRefetches,
+        disableRefetchOnMount,
+      } of queriesWithId) {
+        removedQueries.delete(queryId);
 
-      let shouldFetch =
-        !queryState || !queryState.wasLoaded || queryState.refetchOnMount;
+        if (isOffScreen) continue;
 
-      // For partial resources, refetch when the requested field set changes
-      // or when a full-resource hook is affected by field invalidation.
-      if (partialResources && !shouldFetch && queryState) {
-        const isQueryFetchInFlight =
-          queryState.status === 'loading' ||
-          queryState.status === 'refetching' ||
-          queryState.status === 'loadingMore';
+        const queryState = getQueryState(payload);
+        let fetchType = queryState?.refetchOnMount || 'lowPriority';
+        let fieldsToFetch = fields;
+        let requiredFetch = queryState === undefined || !queryState.wasLoaded;
 
-        if (Array.isArray(fields) && fields.length > 0) {
-          const hasMissingRequestedFields = queryState.items.some((itemKey) => {
-            const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-            return fields.some((field) => !loadedFields.includes(field));
-          });
+        let shouldFetch = requiredFetch || !!queryState?.refetchOnMount;
 
-          if (hasMissingRequestedFields && !isQueryFetchInFlight) {
-            shouldFetch = true;
-            fieldsToFetch = fields;
-            // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
-            // Keep stronger priorities intact; only lift low priority.
-            if (fetchType === 'lowPriority') {
-              fetchType = 'highPriority';
-            }
-          }
+        // For partial resources, refetch when the requested field set changes
+        // or when a full-resource hook is affected by field invalidation.
+        if (partialResources && !shouldFetch && queryState) {
+          const isQueryFetchInFlight =
+            queryState.status === 'loading' ||
+            queryState.status === 'refetching' ||
+            queryState.status === 'loadingMore';
 
-          const hasAffectedFieldInvalidation = queryState.items.some(
-            (itemKey) => {
-              const itemFieldInvalidationFields =
-                getUnresolvedPendingInvalidationFields(itemKey);
-
-              return (
-                itemFieldInvalidationFields.length > 0 &&
-                fields.some((f) => itemFieldInvalidationFields.includes(f))
-              );
-            },
-          );
-
-          if (hasAffectedFieldInvalidation && !isQueryFetchInFlight) {
-            shouldFetch = true;
-            fieldsToFetch = fields;
-
-            const invalidationPriority = getHighestPendingInvalidationPriority(
-              queryState.items,
-              fields,
+          if (Array.isArray(fields) && fields.length > 0) {
+            const hasMissingRequestedFields = queryState.items.some(
+              (itemKey) => {
+                const loadedFields =
+                  store.state.itemLoadedFields[itemKey] ?? [];
+                return fields.some((field) => !loadedFields.includes(field));
+              },
             );
 
-            if (
-              invalidationPriority &&
-              fetchTypePriority[invalidationPriority] >
-                fetchTypePriority[fetchType]
-            ) {
-              fetchType = invalidationPriority;
+            if (hasMissingRequestedFields && !isQueryFetchInFlight) {
+              shouldFetch = true;
+              requiredFetch = true;
+              fieldsToFetch = fields;
+              // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+              // Keep stronger priorities intact; only lift low priority.
+              if (fetchType === 'lowPriority') {
+                fetchType = 'highPriority';
+              }
             }
-          }
-        } else if (fields === '*') {
-          const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
-            return getUnresolvedPendingInvalidationFields(itemKey).length > 0;
-          });
 
-          if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
-            shouldFetch = true;
+            const hasAffectedFieldInvalidation = queryState.items.some(
+              (itemKey) => {
+                const itemFieldInvalidationFields =
+                  getUnresolvedPendingInvalidationFields(itemKey);
 
-            const invalidationPriority = getHighestPendingInvalidationPriority(
-              queryState.items,
-              undefined,
+                return (
+                  itemFieldInvalidationFields.length > 0 &&
+                  fields.some((f) => itemFieldInvalidationFields.includes(f))
+                );
+              },
             );
 
-            if (
-              invalidationPriority &&
-              fetchTypePriority[invalidationPriority] >
-                fetchTypePriority[fetchType]
-            ) {
-              fetchType = invalidationPriority;
+            if (hasAffectedFieldInvalidation && !isQueryFetchInFlight) {
+              shouldFetch = true;
+              requiredFetch = true;
+              fieldsToFetch = fields;
+
+              const invalidationPriority =
+                getHighestPendingInvalidationPriority(queryState.items, fields);
+
+              if (
+                invalidationPriority &&
+                fetchTypePriority[invalidationPriority] >
+                  fetchTypePriority[fetchType]
+              ) {
+                fetchType = invalidationPriority;
+              }
+            }
+          } else if (fields === '*') {
+            const hasAnyFieldInvalidation = queryState.items.some((itemKey) => {
+              return getUnresolvedPendingInvalidationFields(itemKey).length > 0;
+            });
+
+            if (hasAnyFieldInvalidation && !isQueryFetchInFlight) {
+              shouldFetch = true;
+              requiredFetch = true;
+
+              const invalidationPriority =
+                getHighestPendingInvalidationPriority(
+                  queryState.items,
+                  undefined,
+                );
+
+              if (
+                invalidationPriority &&
+                fetchTypePriority[invalidationPriority] >
+                  fetchTypePriority[fetchType]
+              ) {
+                fetchType = invalidationPriority;
+              }
             }
           }
         }
+
+        if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(queryId)) {
+          continue;
+        }
+
+        ignoreQueriesInRefetchOnMount.add(queryId);
+
+        if (
+          shouldScheduleAutomaticFetch({
+            wasLoaded: queryState?.wasLoaded,
+            shouldFetch,
+            requiredFetch,
+            disableRefetches,
+            disableRefetchOnMount,
+            refetchOnMount: queryState?.refetchOnMount ?? false,
+            skipFreshFetch: !!partialResources,
+          })
+        ) {
+          scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
+            fields: fieldsToFetch,
+          });
+        }
       }
 
-      if (!shouldFetch && ignoreQueriesInRefetchOnMount.has(queryId)) {
-        continue;
+      for (const queryId of removedQueries) {
+        ignoreQueriesInRefetchOnMount.delete(queryId);
       }
+    })();
 
-      ignoreQueriesInRefetchOnMount.add(queryId);
-
-      if (
-        shouldScheduleAutomaticFetch({
-          wasLoaded: queryState?.wasLoaded,
-          shouldFetch: !!shouldFetch,
-          disableRefetches,
-          disableRefetchOnMount,
-          skipFreshFetch: !!partialResources,
-        })
-      ) {
-        scheduleAutomaticListQueryFetch(fetchType, payload, loadSize, {
-          fields: fieldsToFetch,
-        });
-      }
-    }
-
-    for (const queryId of removedQueries) {
-      ignoreQueriesInRefetchOnMount.delete(queryId);
-    }
+    return () => {
+      effectState.cancelled = true;
+    };
   }, [
     getQueryState,
     ignoreQueriesInRefetchOnMount,
+    preloadQueries,
     queriesWithId,
     store,
     scheduleAutomaticListQueryFetch,

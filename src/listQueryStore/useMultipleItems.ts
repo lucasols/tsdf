@@ -73,6 +73,7 @@ export function useMultipleItems<
     payload: ItemPayload,
     options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
+  preloadItems: ((payloads: ItemPayload[]) => Promise<boolean[]>) | undefined,
   itemInvalidationWasTriggered: Set<string>,
   itemFieldInvalidationPriorities: Map<string, FetchType>,
   itemPendingInvalidationFields: Map<string, string[]>,
@@ -246,7 +247,15 @@ export function useMultipleItems<
               hasMissingFields &&
               !!rawItemState &&
               typeof rawItemState === 'object' &&
-              missingFields.every((f) => f in rawItemState);
+              (() => {
+                const itemRecord = __LEGIT_CAST__<
+                  Record<string, unknown>,
+                  ItemState
+                >(rawItemState);
+                return missingFields.every(
+                  (f) => f in itemRecord && itemRecord[f] !== undefined,
+                );
+              })();
 
             if (hasMissingFields && !missingFieldsAreAvailableInState) {
               status =
@@ -395,67 +404,75 @@ export function useMultipleItems<
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
   useEffect(() => {
-    if (loadFromStateOnly || !fetchItemFn) return;
+    const effectState = { cancelled: false };
 
-    const removedItems = new Set(ignoreItemsInRefetchOnMount);
-
-    for (const {
-      payload,
-      fields,
-      itemKey,
-      isOffScreen,
-      disableRefetches,
-      disableRefetchOnMount,
-    } of queriesWithId) {
-      removedItems.delete(itemKey);
-
-      if (isOffScreen) continue;
-
-      const itemState = store.state.itemQueries[itemKey];
-      let fetchType = itemState?.refetchOnMount || 'lowPriority';
-      let fieldsToFetch = fields;
-
-      if (itemState === null) {
-        // Deleted items should stay deleted until explicitly fetched/invalidated.
-        continue;
+    void (async () => {
+      if (preloadItems && queriesWithId.length > 0) {
+        await preloadItems(queriesWithId.map(({ payload }) => payload));
+        if (effectState.cancelled) return;
       }
 
-      let shouldFetch =
-        itemState === undefined ||
-        !itemState.wasLoaded ||
-        itemState.refetchOnMount;
-      const itemFetchIsActive =
-        itemState?.status === 'loading' || itemState?.status === 'refetching';
+      if (loadFromStateOnly || !fetchItemFn) return;
 
-      // For partial resources, check if all requested fields are loaded
-      if (
-        partialResources &&
-        !shouldFetch &&
-        Array.isArray(fields) &&
-        fields.length > 0
-      ) {
-        const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
-        const missingFields = fields.filter((f) => !loadedFields.includes(f));
-        const hasMissingFields = missingFields.length > 0;
-        const pendingInvalidationFields =
-          itemPendingInvalidationFields.get(itemKey);
-        const unresolvedPendingInvalidationFields =
-          pendingInvalidationFields?.filter(
-            (field) => !loadedFields.includes(field),
-          ) ?? [];
-        const hasAffectedFieldInvalidation =
-          unresolvedPendingInvalidationFields.length > 0 &&
-          fields.some((field) =>
-            unresolvedPendingInvalidationFields.includes(field),
-          );
+      const removedItems = new Set(ignoreItemsInRefetchOnMount);
 
-        if (hasMissingFields && !itemFetchIsActive) {
-          shouldFetch = true;
-          fieldsToFetch = missingFields;
-          // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
-          // Keep stronger priorities intact; only lift low priority.
-          if (fetchType === 'lowPriority') {
-            fetchType = 'highPriority';
+      for (const {
+        payload,
+        fields,
+        itemKey,
+        isOffScreen,
+        disableRefetches,
+        disableRefetchOnMount,
+      } of queriesWithId) {
+        removedItems.delete(itemKey);
+
+        if (isOffScreen) continue;
+
+        const itemState = store.state.itemQueries[itemKey];
+        let fetchType = itemState?.refetchOnMount || 'lowPriority';
+        let fieldsToFetch = fields;
+        let requiredFetch = itemState === undefined || !itemState?.wasLoaded;
+
+        if (itemState === null) {
+          // Deleted items should stay deleted until explicitly fetched/invalidated.
+          continue;
+        }
+
+        let shouldFetch = requiredFetch || !!itemState?.refetchOnMount;
+        const itemFetchIsActive =
+          itemState?.status === 'loading' || itemState?.status === 'refetching';
+
+        // For partial resources, check if all requested fields are loaded
+        if (
+          partialResources &&
+          !shouldFetch &&
+          Array.isArray(fields) &&
+          fields.length > 0
+        ) {
+          const loadedFields = store.state.itemLoadedFields[itemKey] ?? [];
+          const missingFields = fields.filter((f) => !loadedFields.includes(f));
+          const hasMissingFields = missingFields.length > 0;
+          const pendingInvalidationFields =
+            itemPendingInvalidationFields.get(itemKey);
+          const unresolvedPendingInvalidationFields =
+            pendingInvalidationFields?.filter(
+              (field) => !loadedFields.includes(field),
+            ) ?? [];
+          const hasAffectedFieldInvalidation =
+            unresolvedPendingInvalidationFields.length > 0 &&
+            fields.some((field) =>
+              unresolvedPendingInvalidationFields.includes(field),
+            );
+
+          if (hasMissingFields && !itemFetchIsActive) {
+            shouldFetch = true;
+            requiredFetch = true;
+            fieldsToFetch = missingFields;
+            // Low-priority follow-ups can be skipped while scheduler phase is still fetching.
+            // Keep stronger priorities intact; only lift low priority.
+            if (fetchType === 'lowPriority') {
+              fetchType = 'highPriority';
+            }
           }
 
           const invalidationPriority =
@@ -469,35 +486,42 @@ export function useMultipleItems<
             fetchType = invalidationPriority;
           }
         }
+
+        if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
+          continue;
+        }
+
+        ignoreItemsInRefetchOnMount.add(itemKey);
+
+        if (
+          shouldScheduleAutomaticFetch({
+            wasLoaded: itemState?.wasLoaded,
+            shouldFetch,
+            requiredFetch,
+            disableRefetches,
+            disableRefetchOnMount,
+            refetchOnMount: itemState?.refetchOnMount ?? false,
+            skipFreshFetch: !!partialResources,
+          })
+        ) {
+          scheduleAutomaticItemFetch(fetchType, payload, {
+            fields: fieldsToFetch,
+          });
+        }
       }
 
-      if (!shouldFetch && ignoreItemsInRefetchOnMount.has(itemKey)) {
-        continue;
+      for (const itemKey of removedItems) {
+        ignoreItemsInRefetchOnMount.delete(itemKey);
       }
+    })();
 
-      ignoreItemsInRefetchOnMount.add(itemKey);
-
-      if (
-        shouldScheduleAutomaticFetch({
-          wasLoaded: itemState?.wasLoaded,
-          shouldFetch: !!shouldFetch,
-          disableRefetches,
-          disableRefetchOnMount,
-          skipFreshFetch: !!partialResources,
-        })
-      ) {
-        scheduleAutomaticItemFetch(fetchType, payload, {
-          fields: fieldsToFetch,
-        });
-      }
-    }
-
-    for (const itemKey of removedItems) {
-      ignoreItemsInRefetchOnMount.delete(itemKey);
-    }
+    return () => {
+      effectState.cancelled = true;
+    };
   }, [
     ignoreItemsInRefetchOnMount,
     loadFromStateOnly,
+    preloadItems,
     queriesWithId,
     scheduleAutomaticItemFetch,
     autoFetchSignals,

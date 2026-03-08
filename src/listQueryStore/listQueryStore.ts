@@ -5,6 +5,12 @@ import {
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
+import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
+import type {
+  ListQueryPersistentStorageConfig,
+  PersistentStoragePreloadResult,
+  StorageAdapter,
+} from '../persistentStorage/types';
 import {
   FetchType,
   RequestSchedulerEvents,
@@ -19,12 +25,12 @@ import {
 import {
   createBrowserTabsCoordinator,
   createBrowserTabsCoordinatorWithPriority,
+  isBrowserTabsSyncVersionNewer,
+  toBrowserTabsSyncVersion,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
-  isBrowserTabsSyncVersionNewer,
   type SnapshotConsistency,
-  toBrowserTabsSyncVersion,
 } from '../utils/browserTabsSync';
 import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
@@ -48,9 +54,9 @@ import {
   type OnListQueryItemInvalidate,
   type OptimisticListUpdate,
   type PartialResourcesConfig,
-  type TSFDListQueryState,
   type TSDFItemQuery,
   type TSFDListQuery,
+  type TSFDListQueryState,
   type TSFDUseListItemReturn,
   type TSFDUseListQueryReturn,
 } from './types';
@@ -212,6 +218,7 @@ type ListQueryStoreOptionsBase<
         ItemPayload
       >,
     ) => void;
+    storageAdapter?: StorageAdapter;
   };
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
@@ -236,6 +243,14 @@ type ListQueryStoreOptionsBase<
   blockWindowClose: BlockWindowCloseHandler | null;
   getQueryKey?: (params: QueryPayload) => ValidPayload | unknown[];
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
+  /** Opt-in persistent storage configuration. When provided, cached items and queries
+   * are loaded from storage on first read and saved back on successful fetches.
+   * Session scoping always reuses this store's `getSessionKey`. */
+  persistentStorage?: ListQueryPersistentStorageConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >;
 } & ([TPartialResources] extends [true]
   ? { partialResources: PartialResourcesConfig<ItemState> }
   : { partialResources?: undefined });
@@ -307,6 +322,7 @@ export function createListQueryStore<
     getQueryKey: customGetQueryKey,
     getItemKey: customGetItemKey,
     partialResources,
+    persistentStorage: persistentStorageConfig,
   } = storeOptions;
 
   let remoteApplyDepth = 0;
@@ -466,6 +482,14 @@ export function createListQueryStore<
 
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
 
+  // Persistent storage setup
+  const persistence = persistentStorageConfig
+    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
+        { ...persistentStorageConfig, getSessionKey },
+        { adapter: testOptions?.storageAdapter, getItemKey, getQueryKey },
+      )
+    : null;
+
   const store = new Store<State>({
     debugName,
     state: () => {
@@ -512,7 +536,7 @@ export function createListQueryStore<
         }
       }
 
-      return initialState;
+      return persistence?.createInitialState(initialState) ?? initialState;
     },
   });
 
@@ -673,6 +697,62 @@ export function createListQueryStore<
     recordItemSyncVersion(itemKey, message, consistency);
   }
 
+  /**
+   * Attempts to hydrate cached queries from persistent storage before the first
+   * hook read. Returns one result per requested query.
+   */
+  async function preloadQueryFromPersistentStorage(
+    payload: QueryPayload | QueryPayload[],
+  ): Promise<PersistentStoragePreloadResult<QueryPayload>[]> {
+    const payloads = Array.isArray(payload) ? payload : [payload];
+
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return payloads.map((queryPayload) => ({
+        payload: queryPayload,
+        preloaded: false,
+      }));
+    }
+
+    const results = await persistence.preloadQueries(
+      payloads.map((queryPayload) => getQueryKey(queryPayload)),
+    );
+    return payloads.map((queryPayload, index) => ({
+      payload: queryPayload,
+      preloaded: results[index] ?? false,
+    }));
+  }
+
+  /**
+   * Attempts to hydrate cached items from persistent storage before the first
+   * hook read. Returns one result per requested item.
+   */
+  async function preloadItemFromPersistentStorage(
+    payload: ItemPayload | ItemPayload[],
+  ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
+    const payloads = Array.isArray(payload) ? payload : [payload];
+
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return payloads.map((itemPayload) => ({
+        payload: itemPayload,
+        preloaded: false,
+      }));
+    }
+
+    const results = await persistence.preloadItems(
+      payloads.map((itemPayload) => getItemKey(itemPayload)),
+    );
+    return payloads.map((itemPayload, index) => ({
+      payload: itemPayload,
+      preloaded: results[index] ?? false,
+    }));
+  }
+
   const {
     getQueryState,
     getQueriesKeyArray,
@@ -711,6 +791,12 @@ export function createListQueryStore<
     getQueryKey,
     getItemKey,
     normalizeFieldsOption,
+    preloadQueries: persistence?.hasAsyncPreload
+      ? (queryKeys) => persistence.preloadQueries(queryKeys)
+      : undefined,
+    preloadItems: persistence?.hasAsyncPreload
+      ? (itemKeys) => persistence.preloadItems(itemKeys)
+      : undefined,
     testInitialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
     noFetchItemFnError,
     onQueryFetchStart: (requests, startedAt) => {
@@ -1192,6 +1278,12 @@ export function createListQueryStore<
         events,
         getQueryKey,
         getQueryState,
+        persistence
+          ? (payloads) =>
+              persistence.maybeHydrateQueries(
+                payloads.map((payload) => getQueryKey(payload)),
+              )
+          : undefined,
         scheduleAutomaticListQueryFetch,
         queryInvalidationWasTriggered,
         itemFieldInvalidationPriorities,
@@ -1248,6 +1340,12 @@ export function createListQueryStore<
       events,
       getItemKey,
       scheduleAutomaticItemFetch,
+      persistence
+        ? (payloads) =>
+            persistence.maybeHydrateItems(
+              payloads.map((payload) => getItemKey(payload)),
+            )
+        : undefined,
       itemInvalidationWasTriggered,
       itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,
@@ -1315,6 +1413,9 @@ export function createListQueryStore<
     },
   });
 
+  // Attach persistent storage after store creation
+  persistence?.attach(store);
+
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
    * a disconnection. Events may have been missed during the outage, so all
@@ -1338,14 +1439,26 @@ export function createListQueryStore<
     lastItemSyncVersions.clear();
     browserTabsPriority?.reset();
 
-    store.setState({
-      items: {},
-      queries: {},
-      itemQueries: {},
-      itemLoadedFields: {},
-      itemFieldInvalidationFields: {},
-    });
+    persistence?.dispose();
+    void persistence?.clear();
+
+    store.setState(
+      persistence?.createInitialState({
+        items: {},
+        queries: {},
+        itemQueries: {},
+        itemLoadedFields: {},
+        itemFieldInvalidationFields: {},
+      }) ?? {
+        items: {},
+        queries: {},
+        itemQueries: {},
+        itemLoadedFields: {},
+        itemFieldInvalidationFields: {},
+      },
+    );
     focusLifecycle.reset();
+    persistence?.attach(store);
   }
 
   function scheduleListQueryFetchApiImpl(
@@ -1486,9 +1599,11 @@ export function createListQueryStore<
     getQueriesState,
     getQueriesRelatedToItem,
     awaitListQueryFetch: awaitListQueryFetchApi,
+    preloadQueryFromStorage: preloadQueryFromPersistentStorage,
     loadMore: loadMoreApi,
     getItemKey,
     getItemState,
+    preloadItemFromStorage: preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,
     invalidateQueryAndItems,

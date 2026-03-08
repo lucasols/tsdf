@@ -11,12 +11,17 @@ import {
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useContext, useEffect } from 'react';
-import { IsOffScreenContext } from './isOffScreenContext';
 import { unknownToError, type Result } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
+import { IsOffScreenContext } from './isOffScreenContext';
+import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
+import type {
+  DocumentPersistentStorageConfig,
+  StorageAdapter,
+} from './persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -53,6 +58,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
+import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
@@ -135,6 +141,10 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   ) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
+  /** Opt-in persistent storage configuration. When provided, cached data is loaded
+   * from storage on first read and saved back on successful fetches.
+   * Session scoping always reuses this store's `getSessionKey`. */
+  persistentStorage?: DocumentPersistentStorageConfig<State>;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -149,6 +159,7 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
     onReceiveRemoteMsg?: (message: DocumentBrowserTabsMessage<State>) => void;
+    storageAdapter?: StorageAdapter;
   };
 };
 
@@ -175,6 +186,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   onMutationError,
   blockWindowClose,
   usesRealTimeUpdates = false,
+  persistentStorage: persistentStorageConfig,
   '~test': testOptions,
 }: DocumentStoreOptions<State>) {
   let invalidationWasTriggered = false;
@@ -206,14 +218,28 @@ export function createDocumentStore<State extends ValidStoreState>({
     }
   }
 
+  // Persistent storage setup
+  const persistence = persistentStorageConfig
+    ? setupDocumentPersistence(
+        { ...persistentStorageConfig, getSessionKey },
+        { adapter: testOptions?.storageAdapter },
+      )
+    : null;
+
   const store = new Store<DocumentStoreState<State>>({
     debugName,
-    state: () => ({
-      data: initialData,
-      error: initialError,
-      status: initialStatus,
-      refetchOnMount: initialRefetchOnMount,
-    }),
+    state: () =>
+      persistence?.createInitialState({
+        data: initialData,
+        error: initialError,
+        status: initialStatus,
+        refetchOnMount: initialRefetchOnMount,
+      }) ?? {
+        data: initialData,
+        error: initialError,
+        status: initialStatus,
+        refetchOnMount: initialRefetchOnMount,
+      },
   });
 
   const events = evtmitter<DocumentStoreEvents>();
@@ -480,7 +506,11 @@ export function createDocumentStore<State extends ValidStoreState>({
     usesRealTimeUpdates,
   });
 
-  if (hasLocalDocumentState()) {
+  if (
+    initialStatus !== 'idle' ||
+    initialData !== null ||
+    initialError !== null
+  ) {
     scheduler.setLastFetchStartTimeForRequest(
       DOC_REQUEST_ID,
       testOptions?.initialLastFetchStartTime ?? 0,
@@ -499,6 +529,9 @@ export function createDocumentStore<State extends ValidStoreState>({
       invalidateData('realtimeUpdate');
     },
   });
+
+  // Attach persistent storage after store creation
+  persistence?.attach(store);
 
   function scheduleFetch(
     fetchType: FetchType,
@@ -552,6 +585,17 @@ export function createDocumentStore<State extends ValidStoreState>({
     }
 
     return { data: store.state.data, error: null };
+  }
+
+  async function preloadPersistentStorage(): Promise<void> {
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return;
+    }
+
+    await persistence.preloadPersistentStorage();
   }
 
   function invalidateData(priority: FetchType = 'highPriority'): void {
@@ -610,6 +654,10 @@ export function createDocumentStore<State extends ValidStoreState>({
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
     browserTabsPriority.reset();
+
+    persistence?.dispose();
+    void persistence?.clear();
+
     store.setState({
       data: null,
       error: null,
@@ -617,6 +665,7 @@ export function createDocumentStore<State extends ValidStoreState>({
       refetchOnMount: 'lowPriority',
     });
     focusLifecycle.reset();
+    persistence?.attach(store);
   }
 
   function startMutation(): () => boolean {
@@ -742,24 +791,41 @@ export function createDocumentStore<State extends ValidStoreState>({
     });
 
     useEffect(() => {
-      if (disabled) return;
+      const effectState = { cancelled: false };
 
-      const fetchType = store.state.refetchOnMount || 'lowPriority';
+      void (async () => {
+        if (persistence) {
+          await persistence.maybeHydrateFromStorage();
+          if (effectState.cancelled) return;
+        }
 
-      if (disableRefetches) {
-        if (store.state.status === 'idle' || store.state.status === 'error') {
+        if (disabled) return;
+
+        const fetchType = store.state.refetchOnMount || 'lowPriority';
+        const wasLoaded =
+          store.state.status === 'success' ||
+          store.state.status === 'refetching';
+        const requiredFetch =
+          store.state.status === 'idle' || store.state.status === 'error';
+        const shouldFetch = requiredFetch || !!store.state.refetchOnMount;
+
+        if (
+          shouldScheduleAutomaticFetch({
+            wasLoaded,
+            shouldFetch,
+            requiredFetch,
+            disableRefetches: !!disableRefetches,
+            disableRefetchOnMount: !!disableRefetchOnMount,
+            refetchOnMount: store.state.refetchOnMount,
+          })
+        ) {
           scheduleFetch(fetchType);
         }
-      } else if (disableRefetchOnMount) {
-        const shouldFetch =
-          store.state.refetchOnMount || store.state.status === 'idle';
+      })();
 
-        if (shouldFetch) {
-          scheduleFetch(fetchType);
-        }
-      } else {
-        scheduleFetch(fetchType);
-      }
+      return () => {
+        effectState.cancelled = true;
+      };
     }, [disableRefetchOnMount, disableRefetches, disabled]);
 
     const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
@@ -908,6 +974,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     },
     scheduleFetch,
     awaitFetch,
+    preloadPersistentStorage,
     invalidateData,
     updateState,
     reset,

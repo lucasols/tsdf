@@ -1,4 +1,0 @@
-interface:
-  display_name: 'Review Tests'
-  short_description: 'Review tests for correctness, readability, and gaps'
-  default_prompt: 'Use $review-tests to review these tests for correctness, readability, flakiness, and missing coverage with prioritized findings.'

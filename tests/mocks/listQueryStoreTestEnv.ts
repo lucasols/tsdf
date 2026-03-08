@@ -10,6 +10,10 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import type {
+  ListQueryPersistentStorageConfig,
+  StorageAdapter,
+} from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
@@ -49,9 +53,7 @@ export type ListQueryStoreTestScenario =
    * App already opened before and data was fetched successfully.
    * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
    */
-  | { loaded: ListQuerySnapshotConfig }
-  /** App started with data restored from local cache, pending server revalidation. */
-  | { idleWithLocalCache: ListQuerySnapshotConfig };
+  | { loaded: ListQuerySnapshotConfig };
 
 // Raw item key (used for serverTable and external references)
 function getRawItemKey(tableId: string, id: number): string {
@@ -120,7 +122,9 @@ export function createListQueryStoreTestEnv<
     partialResources,
     offsetPagination,
     blockWindowClose,
-    ignoreInitialTimeCheck,
+    persistentStorage,
+    storageAdapter,
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
   }: {
     id?: string;
     getSessionKey?: () => string | false;
@@ -157,13 +161,19 @@ export function createListQueryStoreTestEnv<
     partialResources?: PartialResourcesConfig<TRow>;
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
-    ignoreInitialTimeCheck?: boolean;
+    persistentStorage?: ListQueryPersistentStorageConfig<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload
+    >;
+    storageAdapter?: StorageAdapter;
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
   } = {},
 ) {
-  if (!ignoreInitialTimeCheck) {
+  if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
       throw new Error(
-        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+        'Current time is too far from TEST_INITIAL_TIME. If this test REALLY needs to run with a different time, set it the test. As last resort, set __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__ to true.',
       );
     }
   }
@@ -275,10 +285,12 @@ export function createListQueryStoreTestEnv<
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     blockWindowClose: blockWindowClose ?? null,
+    persistentStorage,
     optimisticListUpdates,
     partialResources,
     '~test': {
       ...testOptions,
+      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {
@@ -676,17 +688,9 @@ function resolveTestOptions<TRow extends Row>(
     return undefined;
   }
 
-  if ('loaded' in scenario) {
-    return {
-      initialData: buildSnapshotData(scenario.loaded, serverTable),
-      initialRefetchOnMount: false,
-      initialLastFetchStartTime: Date.now() - 10_000,
-    };
-  }
-
   return {
-    initialData: buildSnapshotData(scenario.idleWithLocalCache, serverTable),
-    initialRefetchOnMount: 'lowPriority',
+    initialData: buildSnapshotData(scenario.loaded, serverTable),
+    initialRefetchOnMount: false,
     initialLastFetchStartTime: Date.now() - 10_000,
   };
 }

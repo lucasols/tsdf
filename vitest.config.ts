@@ -10,6 +10,7 @@ export default defineConfig({
     include: ['src/*.test.{ts,tsx}', 'tests/**/*.test.{ts,tsx}'],
     testTimeout: 5_000,
     environment: 'happy-dom',
+    execArgv: ['--no-experimental-webstorage'],
     allowOnly: isDev,
     globals: true,
     setupFiles: ['./vitest.setup.ts'],

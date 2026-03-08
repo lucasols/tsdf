@@ -12,6 +12,12 @@ import { Store } from 't-state';
 import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
+import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
+import type {
+  CollectionPersistentStorageConfig,
+  PersistentStoragePreloadResult,
+  StorageAdapter,
+} from '../persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -28,17 +34,18 @@ import {
 } from '../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinatorWithPriority,
+  isBrowserTabsSyncVersionNewer,
+  toBrowserTabsSyncVersion,
   type BrowserTabsMessageMeta,
   type BrowserTabsSyncVersion,
   type BrowserTabsTransportFactory,
-  isBrowserTabsSyncVersionNewer,
   type SnapshotConsistency,
-  toBrowserTabsSyncVersion,
 } from '../utils/browserTabsSync';
 import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from '../utils/performMutation';
+import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   fetchTypePriority,
   StoreFetchError,
@@ -47,7 +54,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
-import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -199,6 +205,10 @@ export type CollectionStoreOptions<
   ) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
   usesRealTimeUpdates?: boolean;
+  /** Opt-in persistent storage configuration. When provided, cached items are loaded
+   * from storage on first read and saved back on successful fetches.
+   * Session scoping always reuses this store's `getSessionKey`. */
+  persistentStorage?: CollectionPersistentStorageConfig<ItemState, ItemPayload>;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -215,6 +225,7 @@ export type CollectionStoreOptions<
     onReceiveRemoteMsg?: (
       message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
     ) => void;
+    storageAdapter?: StorageAdapter;
   };
 };
 
@@ -250,6 +261,7 @@ export function createCollectionStore<
   onMutationError,
   blockWindowClose,
   usesRealTimeUpdates = false,
+  persistentStorage: persistentStorageConfig,
   '~test': testOptions,
 }: CollectionStoreOptions<ItemState, ItemPayload>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
@@ -285,6 +297,14 @@ export function createCollectionStore<
     }
   }
 
+  // Persistent storage setup
+  const persistence = persistentStorageConfig
+    ? setupCollectionPersistence<ItemState, ItemPayload>(
+        { ...persistentStorageConfig, getSessionKey },
+        { adapter: testOptions?.storageAdapter, getItemKey },
+      )
+    : null;
+
   const store = new Store<CollectionState>({
     debugName,
     state: () => {
@@ -305,7 +325,7 @@ export function createCollectionStore<
         }
       }
 
-      return initialState;
+      return persistence?.createInitialState(initialState) ?? initialState;
     },
   });
 
@@ -958,7 +978,7 @@ export function createCollectionStore<
   function getItemState(
     params: ItemPayload | ItemPayload[] | FilterItemsFn,
   ): CollectionItem | CollectionItem[] | undefined | null {
-    if (typeof params === 'function' || Array.isArray(params)) {
+    if (typeof params === 'function') {
       const itemsId = getItemsKeyArray(params);
 
       return filterAndMap(itemsId, ({ itemKey }) => {
@@ -966,7 +986,44 @@ export function createCollectionStore<
       });
     }
 
-    return store.state[getItemKey(params)];
+    if (Array.isArray(params)) {
+      const itemKeys = params.map((payload) => ({
+        itemKey: getItemKey(payload),
+        payload,
+      }));
+
+      return filterAndMap(itemKeys, ({ itemKey }) => {
+        return store.state[itemKey] || false;
+      });
+    }
+
+    const itemKey = getItemKey(params);
+    return store.state[itemKey];
+  }
+
+  /**
+   * Attempts to hydrate cached items from persistent storage before the first
+   * hook read. Returns one result per requested payload.
+   */
+  async function preloadItemFromStorage(
+    params: ItemPayload | ItemPayload[],
+  ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
+    const payloads = Array.isArray(params) ? params : [params];
+
+    if (!persistence?.hasAsyncPreload) {
+      persistentStorageConfig?.onPersistentStorageError?.(
+        new Error('Async preload is not available'),
+      );
+      return payloads.map((payload) => ({ payload, preloaded: false }));
+    }
+
+    const results = await persistence.preloadItems(
+      payloads.map((payload) => getItemKey(payload)),
+    );
+    return payloads.map((payload, index) => ({
+      payload,
+      preloaded: results[index] ?? false,
+    }));
   }
 
   function useMultipleItems<
@@ -988,6 +1045,12 @@ export function createCollectionStore<
       events,
       getItemKey,
       getItemState,
+      persistence
+        ? (payloads) =>
+            persistence.maybeHydrateItems(
+              payloads.map((payload) => getItemKey(payload)),
+            )
+        : undefined,
       scheduleAutomaticFetch,
       invalidationWasTriggered,
       globalDisableRefetchOnMount,
@@ -1205,6 +1268,9 @@ export function createCollectionStore<
     },
   });
 
+  // Attach persistent storage after store creation
+  persistence?.attach(store);
+
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
    * a disconnection. Events may have been missed during the outage, so all
@@ -1236,8 +1302,12 @@ export function createCollectionStore<
     lastCollectionSyncVersions.clear();
     browserTabsPriority.reset();
 
-    store.setState({});
+    persistence?.dispose();
+    void persistence?.clear();
+
+    store.setState(persistence?.createInitialState({}) ?? {});
     focusLifecycle.reset();
+    persistence?.attach(store);
   }
 
   /** Detects whether a specific item inside a collection item's data is still loading.
@@ -1378,6 +1448,7 @@ export function createCollectionStore<
     useListItemIsDeleted,
     useListItem,
     reset,
+    preloadItemFromStorage,
     getItemKey,
     getItemState,
     startMutation,

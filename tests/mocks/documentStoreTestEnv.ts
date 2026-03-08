@@ -3,6 +3,10 @@ import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
+import type {
+  DocumentPersistentStorageConfig,
+  StorageAdapter,
+} from '../../src/persistentStorage/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
@@ -32,8 +36,6 @@ export type DocumentStoreTestScenario<D> =
    * Using the default lowPriorityThrottleMs (200ms) it will still trigger a refetch on mount as initial system time is set to 10 seconds in the past.
    */
   | 'loaded'
-  /** App started with data restored from local cache, pending server revalidation. */
-  | { idleWithLocalCache: 'sameAsServer' | D }
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: D };
 
@@ -60,7 +62,9 @@ export type DocumentStoreTestEnvOptions<D> = {
   testScenario?: DocumentStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
-  ignoreInitialTimeCheck?: boolean;
+  persistentStorage?: DocumentPersistentStorageConfig<{ value: D }>;
+  storageAdapter?: StorageAdapter;
+  __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
 export function createDocumentStoreTestEnv<D>(
@@ -80,13 +84,15 @@ export function createDocumentStoreTestEnv<D>(
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
-    ignoreInitialTimeCheck,
+    persistentStorage,
+    storageAdapter,
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
-  if (!ignoreInitialTimeCheck) {
+  if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
       throw new Error(
-        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+        'Current time is too far from TEST_INITIAL_TIME. If this test REALLY needs to run with a different time, set it the test. As last resort, set __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__ to true.',
       );
     }
   }
@@ -128,8 +134,10 @@ export function createDocumentStoreTestEnv<D>(
     revalidateOnWindowFocus,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
+    persistentStorage,
     '~test': {
       ...testOptions,
+      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {
@@ -308,20 +316,6 @@ function resolveTestOptions<D>(
     return {
       initialData: { value: serverInitialData },
       initialStatus: 'success',
-      initialLastFetchStartTime: Date.now() - 10_000,
-    };
-  }
-
-  if ('idleWithLocalCache' in scenario) {
-    const cacheData =
-      scenario.idleWithLocalCache === 'sameAsServer'
-        ? serverInitialData
-        : scenario.idleWithLocalCache;
-
-    return {
-      initialData: { value: cacheData },
-      initialStatus: 'success',
-      initialRefetchOnMount: 'lowPriority',
       initialLastFetchStartTime: Date.now() - 10_000,
     };
   }

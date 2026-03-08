@@ -1,11 +1,12 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { expect, test } from 'vitest';
+import { afterEach, beforeAll, expect, test, vi } from 'vitest';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { range } from '../utils/genericTestUtils';
 
 type UserRow = Row & { age: number; type: 'admin' | 'user' };
@@ -18,6 +19,15 @@ const initialServerData: Tables<UserRow> = {
     type: index % 2 === 0 ? ('admin' as const) : ('user' as const),
   })),
 };
+
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
+
+afterEach(() => {
+  vi.runOnlyPendingTimers();
+});
 
 function byTypeFilter(
   type: 'admin' | 'user',
@@ -57,9 +67,8 @@ function getQueryItems(
   );
 }
 
-test.concurrent('filter items optimistically to queries', () => {
+test('filter items optimistically to queries', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
-    ignoreInitialTimeCheck: true,
     testScenario: {
       loaded: {
         queries: [
@@ -133,9 +142,8 @@ test.concurrent('filter items optimistically to queries', () => {
   `);
 });
 
-test.concurrent('optimistically create a query if it does not exist', () => {
+test('optimistically create a query if it does not exist', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
-    ignoreInitialTimeCheck: true,
     testScenario: {
       loaded: {
         queries: [{ tableId: 'users', filters: byTypeFilter('user') }],
@@ -176,9 +184,8 @@ test.concurrent('optimistically create a query if it does not exist', () => {
   `);
 });
 
-test.concurrent('optimistically sort items', () => {
+test('optimistically sort items', () => {
   const env = createListQueryStoreTestEnv<UserRow>(initialServerData, {
-    ignoreInitialTimeCheck: true,
     testScenario: {
       loaded: {
         queries: [{ tableId: 'users', filters: byTypeFilter('user') }],

@@ -871,11 +871,15 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       return numOfFinishedFetches;
     },
     fetchHistory,
-    getRequestHistory(fetchType: 'item' | 'list' | 'all' = 'all') {
+    getRequestHistory(
+      fetchType: 'item' | 'list' | 'all' = 'all',
+      options?: { includeTime?: boolean },
+    ) {
+      const includeTime = options?.includeTime ?? true;
       const history: Array<{
         _type: 'list' | 'item' | undefined;
         payload: unknown;
-        time: string;
+        time?: string;
         returned_items?: number;
       }> = [];
       for (const entry of fetchHistory) {
@@ -883,13 +887,21 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
         if (fetchType === 'all' || fetchType === normalizedFetchType) {
           if (entry.type === 'fetch') {
             history.push({
-              time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
+              ...(includeTime
+                ? {
+                    time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
+                  }
+                : {}),
               _type: 'item',
               payload: { itemId: entry.itemId, fields: entry.fields },
             });
           } else {
             history.push({
-              time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
+              ...(includeTime
+                ? {
+                    time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
+                  }
+                : {}),
               _type: 'list',
               payload: {
                 itemIds: entry.itemIds,

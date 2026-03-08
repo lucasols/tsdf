@@ -68,7 +68,6 @@ Test scenarios can be configured via the `testScenario` option to start tests in
 
 - `'idle'` — fresh app, no data (default)
 - `'loaded'` — data already fetched successfully
-- `{ idleWithLocalCache: ... }` — data restored from persistent storage, pending revalidation
 - `{ loadedWithStaleData: ... }` — loaded but server has newer data
 
 Do not manually wire up fetch functions, error normalizers, or event handlers — the test envs handle all of this. See existing tests in `tests/` for usage examples.
@@ -82,6 +81,7 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
 - When value changes over time are relevant, use `createLoggerStore` or `timelineString` to create human-readable timeline snapshots instead of multiple `expect` statements at different points in time.
   - `createLoggerStore`: log values with `.add(value)`, assert with `.changesSnapshot`, and use `.addMark('label')` to annotate the timeline with markers separating phases of the test.
   - `timelineString`: provided by test envs, captures the full timeline of fetches, mutations, and UI changes automatically.
+- When asserting server mock requests, prefer `serverTable.getRequestHistory('item' | 'list' | 'all')` over reading `serverTable.fetchHistory` directly. Use raw `fetchHistory` only when `getRequestHistory(...)` cannot express the assertion you need.
 - Use realistic times to match real usage, use as reference the default fetch durations used in the server mocks
 - Use utility functions from `tests/utils/genericTestUtils.ts` when possible:
   - `flushAllTimers()`: wraps `vi.runAllTimersAsync()` in `act()` — use instead of calling `vi.runAllTimersAsync()` directly
@@ -91,7 +91,9 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
 
 ## General Guidelines
 
-- Strive for simple solutions, avoid unnecessary complexity
+- Prefer simple, direct solutions — don't over-engineer or add unnecessary layers of abstraction
+- Only introduce abstractions when they make the code simpler, more maintainable, or more readable — duplicating a few lines is preferable to a forced abstraction
+- Avoid unnecessary boilerplate
 
 ## Feature implementation
 
