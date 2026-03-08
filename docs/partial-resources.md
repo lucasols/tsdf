@@ -32,10 +32,7 @@ const userStore = createListQueryStore<User, UserFilter, string, true>({
 
   partialResources: {
     // Merge newly fetched fields with previously loaded ones
-    mergeItems: (prev, fetched) => ({
-      ...(prev ?? {}),
-      ...fetched,
-    }),
+    mergeItems: (prev, fetched) => ({ ...(prev ?? {}), ...fetched }),
 
     // Select only the requested fields from a full item
     selectFields: (fields, item) => {
@@ -66,9 +63,7 @@ When partial resources is enabled, the `fields` option becomes **required** in h
 ```tsx
 // Fetch only name and email
 function UserCard({ userId }: { userId: string }) {
-  const { data } = userStore.useItem(userId, {
-    fields: ['name', 'email'],
-  });
+  const { data } = userStore.useItem(userId, { fields: ['name', 'email'] });
 
   return (
     <div>
@@ -127,6 +122,8 @@ When a hook requests fields that are partially loaded:
 - During the field fetch, the hook returns `null` data to prevent displaying stale partial data
 - Once the missing fields are loaded and merged, the complete data is returned
 
+If you enable `showPartialAsRefetching`, the hook exposes `loadingFields` with the requested fields that are still pending. When cached partial data already exists, TSDF keeps it visible during the follow-up fetch.
+
 ## Fields in Scheduling and Fetching
 
 Fields propagate through the scheduling and fetching APIs:
@@ -138,9 +135,7 @@ store.scheduleItemFetch('highPriority', 'user-1', {
 });
 
 // Await a fetch for specific fields
-const result = await store.awaitItemFetch('user-1', {
-  fields: ['name'],
-});
+const result = await store.awaitItemFetch('user-1', { fields: ['name'] });
 
 // Schedule a list query fetch
 store.scheduleListQueryFetch('highPriority', filter, undefined, {

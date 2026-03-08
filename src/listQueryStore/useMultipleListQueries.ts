@@ -242,8 +242,18 @@ export function useMultipleListQueries<
           QueryMetadata
         > => {
           const query = state.queries[queryKey];
+          let loadingFields: string[] | undefined;
 
           if (!query) {
+            const pendingLoadingFields =
+              partialResources &&
+              showPartialAsRefetching &&
+              Array.isArray(fields) &&
+              fields.length > 0 &&
+              !returnIdleStatus
+                ? fields
+                : undefined;
+
             return {
               queryKey,
               status: returnIdleStatus ? 'idle' : 'loading',
@@ -252,6 +262,9 @@ export function useMultipleListQueries<
               hasMore: false,
               payload: omitPayload ? undefined : payload,
               fields,
+              ...(pendingLoadingFields
+                ? { loadingFields: pendingLoadingFields }
+                : {}),
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
               queryMetadata: __LEGIT_CAST__<
@@ -330,6 +343,37 @@ export function useMultipleListQueries<
             }
           }
 
+          if (partialResources && showPartialAsRefetching) {
+            if (Array.isArray(fields) && fields.length > 0) {
+              const pendingRequestedFields = fields.filter((field) =>
+                status === 'loading' && query.items.length === 0
+                  ? true
+                  : query.items.some((itemKey) => {
+                      const loadedFields =
+                        state.itemLoadedFields[itemKey] ?? [];
+                      return !loadedFields.includes(field);
+                    }),
+              );
+
+              if (pendingRequestedFields.length > 0) {
+                loadingFields = pendingRequestedFields;
+              }
+            } else if (fields === '*') {
+              const pendingInvalidationFields = Array.from(
+                new Set(
+                  query.items.flatMap(
+                    (itemKey) =>
+                      state.itemFieldInvalidationFields[itemKey] ?? [],
+                  ),
+                ),
+              ).sort();
+
+              if (pendingInvalidationFields.length > 0) {
+                loadingFields = pendingInvalidationFields;
+              }
+            }
+          }
+
           if (!returnRefetchingStatus && status === 'refetching') {
             status = 'success';
           }
@@ -345,6 +389,7 @@ export function useMultipleListQueries<
               : getQueryItems(state, query, fields),
             error: query.error,
             hasMore: query.hasMore,
+            ...(loadingFields ? { loadingFields } : {}),
             isLoading: status === 'loading',
             payload: omitPayload ? undefined : query.payload,
             fields,
