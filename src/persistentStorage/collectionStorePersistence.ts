@@ -25,20 +25,52 @@ import { validateWithSchema } from './validateWithSchema';
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
 
+function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
+  ignoreItems:
+    | CollectionPersistentStorageConfig<never, ItemPayload>['ignoreItems']
+    | undefined,
+  resolveItemKey: (payload: ItemPayload) => string,
+): (payload: ItemPayload) => boolean {
+  if (!ignoreItems) return () => false;
+  if (typeof ignoreItems === 'function') return ignoreItems;
+
+  const ignoredItemKeys = new Set(ignoreItems.map(resolveItemKey));
+  return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
+}
+
+function createShouldIgnorePersistedItemPredicate<
+  ItemPayload extends ValidPayload,
+>(
+  shouldIgnoreItem: (payload: ItemPayload) => boolean,
+): (payload: unknown) => boolean {
+  return (payload) => {
+    try {
+      return shouldIgnoreItem(__LEGIT_CAST__<ItemPayload, unknown>(payload));
+    } catch {
+      return false;
+    }
+  };
+}
+
 function toCollectionItemState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 >(
   persisted: PersistedCollectionItemData<unknown>,
   config: CollectionPersistentStorageConfig<ItemState, ItemPayload>,
+  shouldIgnorePersistedItem: (payload: unknown) => boolean,
 ): TSFDCollectionItem<ItemState, ItemPayload> | null {
   const validated = validateWithSchema(config.schema, persisted.data);
   if (validated === null) return null;
 
+  if (shouldIgnorePersistedItem(persisted.payload)) return null;
+
+  const payload = __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload);
+
   return {
     data: validated,
     error: null,
-    payload: __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload),
+    payload,
     refetchOnMount: 'lowPriority',
     status: 'success',
     wasLoaded: true,
@@ -54,6 +86,7 @@ function defineLazyLocalStorageItem<
   storageKey: string,
   version: number,
   config: CollectionPersistentStorageConfig<ItemState, ItemPayload>,
+  shouldIgnorePersistedItem: (payload: unknown) => boolean,
 ): void {
   Object.defineProperty(state, itemKey, {
     configurable: true,
@@ -76,6 +109,7 @@ function defineLazyLocalStorageItem<
       const item = toCollectionItemState<ItemState, ItemPayload>(
         cacheEntry.data,
         config,
+        shouldIgnorePersistedItem,
       );
 
       if (!item) {
@@ -137,6 +171,13 @@ export function setupCollectionPersistence<
   const pinnedItemKeys = new Set(
     (config.pinnedItems ?? []).map((payload) => resolveItemKey(payload)),
   );
+  const shouldIgnoreItem = createShouldIgnoreItemPredicate(
+    config.ignoreItems,
+    resolveItemKey,
+  );
+  const shouldIgnorePersistedItem =
+    createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
+  const hasIgnoreItemFilter = config.ignoreItems !== undefined;
 
   const namespace = createPersistentStorageNamespaceHandle<
     PersistedCollectionItemData<ItemState>
@@ -188,6 +229,7 @@ export function setupCollectionPersistence<
         storageKey,
         version,
         config,
+        shouldIgnorePersistedItem,
       );
     }
 
@@ -210,6 +252,7 @@ export function setupCollectionPersistence<
         const validated = toCollectionItemState<ItemState, ItemPayload>(
           cached,
           config,
+          shouldIgnorePersistedItem,
         );
 
         if (!validated) {
@@ -245,7 +288,8 @@ export function setupCollectionPersistence<
 
   async function evictStoredItems(): Promise<void> {
     const keys = await namespace.listKeys();
-    if (keys.length <= maxItems) return;
+    if (keys.length === 0) return;
+    if (!hasIgnoreItemFilter && keys.length <= maxItems) return;
 
     const entries = await Promise.all(
       keys.map(async (itemKey) => ({
@@ -258,9 +302,23 @@ export function setupCollectionPersistence<
       return entry ? { itemKey, entry } : false;
     });
 
-    if (validEntries.length <= maxItems) return;
+    const ignoredEntries = validEntries.filter(({ entry }) =>
+      shouldIgnorePersistedItem(entry.data.payload),
+    );
 
-    validEntries.sort((a, b) => {
+    if (ignoredEntries.length > 0) {
+      await Promise.all(
+        ignoredEntries.map(({ itemKey }) => namespace.remove(itemKey)),
+      );
+    }
+
+    const filteredEntries = validEntries.filter(
+      ({ entry }) => !shouldIgnorePersistedItem(entry.data.payload),
+    );
+
+    if (filteredEntries.length <= maxItems) return;
+
+    filteredEntries.sort((a, b) => {
       const aPinned = pinnedItemKeys.has(a.itemKey);
       const bPinned = pinnedItemKeys.has(b.itemKey);
 
@@ -271,11 +329,11 @@ export function setupCollectionPersistence<
     });
 
     const keptKeys = new Set(
-      validEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+      filteredEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
     );
 
     await Promise.all(
-      validEntries
+      filteredEntries
         .filter(({ itemKey }) => !keptKeys.has(itemKey))
         .map(({ itemKey }) => namespace.remove(itemKey)),
     );
@@ -289,6 +347,11 @@ export function setupCollectionPersistence<
 
     for (const [itemKey, item] of Object.entries(state)) {
       if (!item?.data) {
+        tasks.push(namespace.remove(itemKey));
+        continue;
+      }
+
+      if (shouldIgnoreItem(item.payload)) {
         tasks.push(namespace.remove(itemKey));
         continue;
       }

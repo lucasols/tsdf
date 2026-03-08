@@ -1,4 +1,5 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
@@ -27,12 +28,45 @@ const DEFAULT_MAX_ITEMS = 100;
 const DEFAULT_MAX_QUERIES = 20;
 const SAVE_DEBOUNCE_MS = 1000;
 
+function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
+  ignoreItems:
+    | ListQueryPersistentStorageConfig<never, never, ItemPayload>['ignoreItems']
+    | undefined,
+  resolveItemKey: (payload: ItemPayload) => string,
+): (payload: ItemPayload) => boolean {
+  if (!ignoreItems) return () => false;
+  if (typeof ignoreItems === 'function') return ignoreItems;
+
+  const ignoredItemKeys = new Set(ignoreItems.map(resolveItemKey));
+  return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
+}
+
+function createShouldIgnorePersistedItemPredicate<
+  ItemPayload extends ValidPayload,
+>(
+  shouldIgnoreItem: (payload: ItemPayload) => boolean,
+): (payload: unknown) => boolean {
+  return (payload) => {
+    try {
+      return shouldIgnoreItem(__LEGIT_CAST__<ItemPayload, unknown>(payload));
+    } catch {
+      return false;
+    }
+  };
+}
+
 function toItemState<
   ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 >(
   persisted: PersistedListQueryItemData<unknown>,
-  config: ListQueryPersistentStorageConfig<ItemState>,
+  config: ListQueryPersistentStorageConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >,
+  shouldIgnorePersistedItem: (payload: unknown) => boolean,
 ): {
   item: ItemState;
   itemQuery: TSDFItemQuery<ItemPayload>;
@@ -40,6 +74,10 @@ function toItemState<
 } | null {
   const validated = validateWithSchema(config.schema, persisted.data);
   if (validated === null) return null;
+
+  if (shouldIgnorePersistedItem(persisted.payload)) return null;
+
+  const payload = __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload);
 
   const loadedFields = Array.isArray(persisted.loadedFields)
     ? Array.from(new Set(persisted.loadedFields)).sort()
@@ -49,7 +87,7 @@ function toItemState<
     item: validated,
     itemQuery: {
       error: null,
-      payload: __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload),
+      payload,
       refetchOnMount: 'lowPriority',
       status: 'success',
       wasLoaded: true,
@@ -67,7 +105,12 @@ function defineLazyLocalStorageItem<
   itemKey: string,
   storageKey: string,
   version: number,
-  config: ListQueryPersistentStorageConfig<ItemState>,
+  config: ListQueryPersistentStorageConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >,
+  shouldIgnorePersistedItem: (payload: unknown) => boolean,
 ): void {
   function readItemFromLocalStorage():
     | ItemState
@@ -94,9 +137,10 @@ function defineLazyLocalStorageItem<
       return undefined;
     }
 
-    const itemState = toItemState<ItemState, ItemPayload>(
+    const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
       cacheEntry.data,
       config,
+      shouldIgnorePersistedItem,
     );
 
     if (!itemState) {
@@ -236,11 +280,17 @@ export function setupListQueryPersistence<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 >(
-  config: ListQueryPersistentStorageConfig<ItemState> & {
+  config: ListQueryPersistentStorageConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > & {
     getSessionKey: () => string | false;
   },
   options: {
     adapter?: StorageAdapter;
+    getItemKey?: (payload: ItemPayload) => string;
+    getQueryKey?: (payload: QueryPayload) => string;
   } = {},
 ): ListQueryPersistenceSetup<ItemState, QueryPayload, ItemPayload> {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
@@ -249,8 +299,24 @@ export function setupListQueryPersistence<
   const backend = config.backend ?? 'opfs';
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
   const maxQueries = config.maxQueries ?? DEFAULT_MAX_QUERIES;
-  const pinnedItems = new Set(config.pinnedItems ?? []);
-  const pinnedQueries = new Set(config.pinnedQueries ?? []);
+  const resolveItemKey =
+    options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));
+  const resolveQueryKey =
+    options.getQueryKey ??
+    ((payload: QueryPayload) => getCompositeKey(payload));
+  const pinnedItemKeys = new Set(
+    (config.pinnedItems ?? []).map((payload) => resolveItemKey(payload)),
+  );
+  const pinnedQueryKeys = new Set(
+    (config.pinnedQueries ?? []).map((payload) => resolveQueryKey(payload)),
+  );
+  const shouldIgnoreItem = createShouldIgnoreItemPredicate(
+    config.ignoreItems,
+    resolveItemKey,
+  );
+  const shouldIgnorePersistedItem =
+    createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
+  const hasIgnoreItemFilter = config.ignoreItems !== undefined;
 
   const itemNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryItemData<ItemState>
@@ -324,6 +390,7 @@ export function setupListQueryPersistence<
         storageKey,
         version,
         config,
+        shouldIgnorePersistedItem,
       );
     }
 
@@ -350,7 +417,11 @@ export function setupListQueryPersistence<
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 
-        const itemState = toItemState<ItemState, ItemPayload>(cached, config);
+        const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+          cached,
+          config,
+          shouldIgnorePersistedItem,
+        );
         if (!itemState) {
           scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
           return;
@@ -456,8 +527,8 @@ export function setupListQueryPersistence<
     });
 
     validEntries.sort((a, b) => {
-      const aPinned = pinnedQueries.has(a.queryKey);
-      const bPinned = pinnedQueries.has(b.queryKey);
+      const aPinned = pinnedQueryKeys.has(a.queryKey);
+      const bPinned = pinnedQueryKeys.has(b.queryKey);
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
@@ -496,6 +567,7 @@ export function setupListQueryPersistence<
     }
 
     const itemKeys = await itemNamespace.listKeys();
+    if (!hasIgnoreItemFilter && itemKeys.length <= maxItems) return;
     const itemEntries = await Promise.all(
       itemKeys.map(async (itemKey) => ({
         itemKey,
@@ -507,15 +579,29 @@ export function setupListQueryPersistence<
       return entry ? { itemKey, entry } : false;
     });
 
-    validItemEntries.sort((a, b) => {
+    const ignoredItemEntries = validItemEntries.filter(({ entry }) =>
+      shouldIgnorePersistedItem(entry.data.payload),
+    );
+
+    if (ignoredItemEntries.length > 0) {
+      await Promise.all(
+        ignoredItemEntries.map(({ itemKey }) => itemNamespace.remove(itemKey)),
+      );
+    }
+
+    const persistedItemEntries = validItemEntries.filter(
+      ({ entry }) => !shouldIgnorePersistedItem(entry.data.payload),
+    );
+
+    persistedItemEntries.sort((a, b) => {
       const aReferenced = referencedItems.has(a.itemKey);
       const bReferenced = referencedItems.has(b.itemKey);
 
       if (aReferenced && !bReferenced) return -1;
       if (!aReferenced && bReferenced) return 1;
 
-      const aPinned = pinnedItems.has(a.itemKey);
-      const bPinned = pinnedItems.has(b.itemKey);
+      const aPinned = pinnedItemKeys.has(a.itemKey);
+      const bPinned = pinnedItemKeys.has(b.itemKey);
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
@@ -524,11 +610,11 @@ export function setupListQueryPersistence<
     });
 
     const keptItemKeys = new Set(
-      validItemEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+      persistedItemEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
     );
 
     await Promise.all(
-      validItemEntries
+      persistedItemEntries
         .filter(({ itemKey }) => !keptItemKeys.has(itemKey))
         .map(({ itemKey }) => itemNamespace.remove(itemKey)),
     );
@@ -557,6 +643,7 @@ export function setupListQueryPersistence<
 
     const state = storeRef.state;
     const tasks: Promise<void>[] = [];
+    const persistedItemKeys = new Set<string>();
 
     for (const [itemKey, item] of Object.entries(state.items)) {
       const itemQuery = state.itemQueries[itemKey];
@@ -565,6 +652,13 @@ export function setupListQueryPersistence<
         tasks.push(itemNamespace.remove(itemKey));
         continue;
       }
+
+      if (shouldIgnoreItem(itemQuery.payload)) {
+        tasks.push(itemNamespace.remove(itemKey));
+        continue;
+      }
+
+      persistedItemKeys.add(itemKey);
 
       tasks.push(
         itemNamespace.save(itemKey, {
@@ -581,7 +675,9 @@ export function setupListQueryPersistence<
       tasks.push(
         queryNamespace.save(queryKey, {
           payload: query.payload,
-          items: query.items,
+          items: query.items.filter((itemKey) =>
+            persistedItemKeys.has(itemKey),
+          ),
           hasMore: query.hasMore,
         }),
       );

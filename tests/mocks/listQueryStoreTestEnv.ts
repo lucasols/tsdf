@@ -164,7 +164,11 @@ export function createListQueryStoreTestEnv<
     partialResources?: PartialResourcesConfig<TRow>;
     offsetPagination?: OffsetPaginationConfig;
     blockWindowClose?: BlockWindowCloseHandler;
-    persistentStorage?: ListQueryPersistentStorageConfig<TRow>;
+    persistentStorage?: ListQueryPersistentStorageConfig<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload
+    >;
     storageAdapter?: StorageAdapter;
     ignoreInitialTimeCheck?: boolean;
   } = {},

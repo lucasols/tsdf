@@ -86,20 +86,34 @@ export type CollectionPersistentStorageConfig<
   maxItems?: number;
   /** Item payloads that should never be evicted from storage. */
   pinnedItems?: ItemPayload[];
+  /**
+   * Item payloads that should never be persisted or restored.
+   * Accepts either an explicit payload list or a predicate function.
+   * Takes precedence over `pinnedItems`.
+   */
+  ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
 };
 
 /** Persistent storage config for ListQueryStore. */
 export type ListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload = ValidPayload,
+  ItemPayload extends ValidPayload = ValidPayload,
 > = StorePersistentStorageBaseConfig<ItemState> & {
   /** Maximum number of items to persist. Defaults to 100. */
   maxItems?: number;
   /** Maximum number of queries to persist. Defaults to 20. */
   maxQueries?: number;
-  /** Item keys that should never be evicted from storage. */
-  pinnedItems?: string[];
-  /** Query keys that should never be evicted from storage. */
-  pinnedQueries?: string[];
+  /** Item payloads that should never be evicted from storage. */
+  pinnedItems?: ItemPayload[];
+  /** Query payloads that should never be evicted from storage. */
+  pinnedQueries?: QueryPayload[];
+  /**
+   * Item payloads that should never be persisted or restored.
+   * Accepts either an explicit payload list or a predicate function.
+   * Takes precedence over `pinnedItems`.
+   */
+  ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
 };
 
 // --- Persisted Data Shapes ---

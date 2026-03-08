@@ -245,7 +245,11 @@ type ListQueryStoreOptionsBase<
   /** Opt-in persistent storage configuration. When provided, cached items and queries
    * are loaded from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
-  persistentStorage?: ListQueryPersistentStorageConfig<ItemState>;
+  persistentStorage?: ListQueryPersistentStorageConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >;
 } & ([TPartialResources] extends [true]
   ? { partialResources: PartialResourcesConfig<ItemState> }
   : { partialResources?: undefined });
@@ -486,7 +490,11 @@ export function createListQueryStore<
           ...persistentStorageConfig,
           getSessionKey,
         },
-        { adapter: testOptions?.storageAdapter },
+        {
+          adapter: testOptions?.storageAdapter,
+          getItemKey,
+          getQueryKey,
+        },
       )
     : null;
 
