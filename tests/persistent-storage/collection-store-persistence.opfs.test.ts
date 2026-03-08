@@ -2,13 +2,22 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { rc_object, rc_string } from 'runcheck';
-import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 const wrappedItemSchema = rc_object({
@@ -61,7 +70,6 @@ function createEnv(options: {
   serverData?: Record<string, ItemState>;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
-    ignoreInitialTimeCheck: true,
     getSessionKey: () => options.sessionKey ?? 'session1',
     storageAdapter: options.storageAdapter,
     persistentStorage: {
@@ -75,6 +83,10 @@ function createEnv(options: {
 
 beforeAll(() => {
   vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {

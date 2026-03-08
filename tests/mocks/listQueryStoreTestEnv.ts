@@ -127,7 +127,7 @@ export function createListQueryStoreTestEnv<
     blockWindowClose,
     persistentStorage,
     storageAdapter,
-    ignoreInitialTimeCheck,
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
   }: {
     id?: string;
     getSessionKey?: () => string | false;
@@ -170,13 +170,13 @@ export function createListQueryStoreTestEnv<
       ListQueryItemPayload
     >;
     storageAdapter?: StorageAdapter;
-    ignoreInitialTimeCheck?: boolean;
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
   } = {},
 ) {
-  if (!ignoreInitialTimeCheck) {
+  if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
       throw new Error(
-        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+        'Current time is too far from TEST_INITIAL_TIME. If this test REALLY needs to run with a different time, set it the test. As last resort, set __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__ to true.',
       );
     }
   }

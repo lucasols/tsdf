@@ -9,14 +9,22 @@ import {
   rc_to_standard,
   rc_unknown,
 } from 'runcheck';
-import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import { createDocumentStore } from '../../src/documentStore';
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { normalizeError } from '../mocks/testEnvUtils';
+import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 const cacheEntryTimestampSchema = rc_object({
@@ -72,7 +80,6 @@ function createDocPersistenceEnv(options: {
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
 
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
-    ignoreInitialTimeCheck: true,
     getSessionKey,
     persistentStorage: {
       storeName: options.storeName,
@@ -86,6 +93,10 @@ function createDocPersistenceEnv(options: {
 
 beforeAll(() => {
   vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {

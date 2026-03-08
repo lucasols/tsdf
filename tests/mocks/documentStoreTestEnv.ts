@@ -3,11 +3,11 @@ import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
-import type { FetchType } from '../../src/requestScheduler';
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
+import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
@@ -64,7 +64,7 @@ export type DocumentStoreTestEnvOptions<D> = {
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: DocumentPersistentStorageConfig<{ value: D }>;
   storageAdapter?: StorageAdapter;
-  ignoreInitialTimeCheck?: boolean;
+  __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
 export function createDocumentStoreTestEnv<D>(
@@ -86,13 +86,13 @@ export function createDocumentStoreTestEnv<D>(
     blockWindowClose,
     persistentStorage,
     storageAdapter,
-    ignoreInitialTimeCheck,
+    __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
   }: DocumentStoreTestEnvOptions<D> = {},
 ) {
-  if (!ignoreInitialTimeCheck) {
+  if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
       throw new Error(
-        'Current time is too far from TEST_INITIAL_TIME. Please reset the system time or set ignoreInitialTimeCheck to true.',
+        'Current time is too far from TEST_INITIAL_TIME. If this test REALLY needs to run with a different time, set it the test. As last resort, set __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__ to true.',
       );
     }
   }

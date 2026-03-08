@@ -1,13 +1,22 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
-import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
 const wrappedSchema = rc_object({
@@ -29,7 +38,6 @@ function createDocPersistenceEnv(options: {
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
 
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
-    ignoreInitialTimeCheck: true,
     getSessionKey,
     storageAdapter: options.storageAdapter,
     persistentStorage: {
@@ -62,6 +70,10 @@ function populateStorage(
 
 beforeAll(() => {
   vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
