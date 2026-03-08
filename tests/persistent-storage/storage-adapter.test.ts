@@ -159,9 +159,7 @@ describe('opfs adapter', () => {
     const originalStorage = navigator.storage;
 
     Object.defineProperty(navigator, 'storage', {
-      value: {
-        getDirectory: () => Promise.resolve(mockRootDir),
-      },
+      value: { getDirectory: () => Promise.resolve(mockRootDir) },
       writable: true,
       configurable: true,
     });
@@ -242,7 +240,7 @@ describe('opfs adapter', () => {
     }
   });
 
-  test('listKeys correctly matches keys sharing a prefix', async () => {
+  test('listKeys returns decoded keys matching a prefix', async () => {
     const { cleanup } = setupMockOpfs();
     try {
       const adapter = createStorageAdapter('opfs');
@@ -253,9 +251,7 @@ describe('opfs adapter', () => {
 
       const keys = await adapter.listKeys('tsdf.s1.');
 
-      // OPFS listKeys returns encoded filenames, so we only check count
-      // (the prefix filtering is the behavior under test)
-      expect(keys).toHaveLength(2);
+      expect(keys.sort()).toMatchInlineSnapshot(`['tsdf.s1.a', 'tsdf.s1.b']`);
     } finally {
       cleanup();
     }
