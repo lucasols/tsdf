@@ -442,6 +442,66 @@ describe('localStorage: list query store persistence', () => {
       originalQueryTimestamp,
     );
   });
+
+  test('round-trip persistence preserves partial-resource metadata for cached list queries', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-partial-roundtrip';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached' }],
+      },
+    });
+
+    renderHook(() => {
+      writerEnv.apiStore.useListQuery(usersQuery, {
+        fields: ['id', 'name'],
+      });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        fields: ['id', 'name'],
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
+
+      renders.add({
+        status,
+        names: items.map((item) => item.name),
+      });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached]
+      "
+    `);
+    expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
+    expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
+      .toMatchInlineSnapshot(`
+        ['id', 'name']
+      `);
+  });
       serverData: {
         t1: [
           { id: 1, name: 'Referenced 1' },
