@@ -908,28 +908,40 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
-  test('version mismatch discards cached data', () => {
-    const ik = storeItemKey('t1', 1);
-
-    setCachedData(
-      'lq5',
-      'sess1',
-      {
-        items: { [ik]: { id: 1, name: 'Old' } },
-        queries: {},
-        itemPayloads: {},
-      },
-      1,
+  test('default persistence limits keep up to 500 items and 100 queries', async () => {
+    const storeName = 'lq-default-limits';
+    const sessionKey = 'sess1';
+    const serverData = Object.fromEntries(
+      Array.from({ length: 25 }, (_, tableIndex) => [
+        `table-${tableIndex + 1}`,
+        Array.from({ length: 5 }, (_, itemIndex) => ({
+          id: itemIndex + 1,
+          name: `Item ${tableIndex + 1}-${itemIndex + 1}`,
+        })),
+      ]),
     );
-
     const env = createEnv({
-      storeName: 'lq5',
-      sessionKey: 'sess1',
-      version: 2,
+      storeName,
+      sessionKey,
+      serverData,
     });
 
-    expect(Object.keys(env.store.state.items).length).toBe(0);
-    expect(Object.keys(env.store.state.queries).length).toBe(0);
+    for (let tableIndex = 0; tableIndex < 25; tableIndex++) {
+      env.scheduleFetch('highPriority', {
+        tableId: `table-${tableIndex + 1}`,
+      });
+      await flushAllTimers();
+    }
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`).length,
+    ).toMatchInlineSnapshot(`25`);
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`).length,
+    ).toMatchInlineSnapshot(`125`);
   });
 
   test('schema validation failure discards invalid items', () => {
