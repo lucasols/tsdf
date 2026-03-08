@@ -1,5 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
@@ -101,22 +102,53 @@ describe('persistence + browser tabs sync integration', () => {
       persistentStorage: persistenceConfig,
     });
 
-    renderHook(() => tabB.apiStore.useListQuery({ tableId: 'users' }));
+    const tabBRenders = createLoggerStore({ arrays: 'all' });
+
+    // Hydrate tab B from the stale persisted query before tab A revalidates.
+    renderHook(() => {
+      const { items, status } = tabB.apiStore.useListQuery({
+        tableId: 'users',
+      });
+
+      tabBRenders.add({ status, names: items.map((item) => item.name) });
+    });
 
     expect(
       tabB.store.state.items[persisted.listQuery.itemKey('users', 1)]?.name,
     ).toBe('StaleAlice');
 
+    // Tab B has already consumed the stale cache, so the next visible update
+    // must come from tab A's confirmed cross-tab snapshot, not a local refetch.
     tabA.scheduleFetch('highPriority', { tableId: 'users' });
     await flushAllTimers();
     await advanceTime(1100);
 
+    expect(tabBRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [StaleAlice]
+      -> status: success ⋅ names: [FreshAlice, Bob]
+      "
+    `);
     expect(
       tabB.store.state.items[persisted.listQuery.itemKey('users', 1)]?.name,
     ).toBe('FreshAlice');
     expect(persisted.listQuery.readItemData<Row>('users', 1)?.name).toBe(
       'FreshAlice',
     );
+    expect(tabA.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | scheduled-fetch-triggered
+      10ms  | 🔴 >list-fetch-started
+      810ms | 🔴 <list-fetch-finished (value: {"count":2})
+      "
+    `);
+    expect(tabB.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
+      "
+    `);
   });
 
   test('list-query partial-resource tabs sync updates a persisted stale tab without a local refetch', async () => {
@@ -166,22 +198,29 @@ describe('persistence + browser tabs sync integration', () => {
       partialResources: partialResourcesConfig,
     });
 
-    const nameQuery = renderHook(() =>
-      tabB.apiStore.useListQuery(
+    const nameQueryRenders = createLoggerStore({ arrays: 'all' });
+    const nameQuery = renderHook(() => {
+      const result = tabB.apiStore.useListQuery(
         { tableId: 'users' },
         {
           fields: ['id', 'name'],
           disableRefetchOnMount: true,
           returnRefetchingStatus: true,
         },
-      ),
-    );
+      );
+
+      nameQueryRenders.add({ status: result.status, items: result.items });
+
+      return result;
+    });
 
     expect(nameQuery.result.current).toMatchObject({
       status: 'success',
       items: [{ id: 1, name: 'StaleAlice' }],
     });
-    expect(tabB.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    expect(tabB.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(
+      `[]`,
+    );
 
     // Tab A fetches a broader field set; tab B should learn those fields via snapshot.
     tabA.apiStore.scheduleListQueryFetch(
@@ -193,6 +232,12 @@ describe('persistence + browser tabs sync integration', () => {
     await flushAllTimers();
     await advanceTime(1100);
 
+    expect(nameQueryRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ items: [{id:1, name:StaleAlice}]
+      -> status: success ⋅ items: [{id:1, name:FreshAlice}]
+      "
+    `);
     expect(
       [
         ...(tabB.store.state.itemLoadedFields[
@@ -203,22 +248,49 @@ describe('persistence + browser tabs sync integration', () => {
       ['age', 'id', 'name']
     `);
 
-    const ageQuery = renderHook(() =>
-      tabB.apiStore.useListQuery(
+    const ageQueryRenders = createLoggerStore({ arrays: 'all' });
+
+    // After the snapshot, tab B should already have the extra fields and avoid a local refetch.
+    const ageQuery = renderHook(() => {
+      const result = tabB.apiStore.useListQuery(
         { tableId: 'users' },
         {
           fields: ['age'],
           disableRefetchOnMount: true,
           returnRefetchingStatus: true,
         },
-      ),
-    );
+      );
+
+      ageQueryRenders.add({ status: result.status, items: result.items });
+
+      return result;
+    });
 
     expect(ageQuery.result.current).toMatchObject({
       status: 'success',
       items: [{ age: 30 }],
     });
-    expect(tabB.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    expect(ageQueryRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ items: [{age:30}]
+      "
+    `);
+    expect(tabB.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(tabA.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      10ms  | 🔴 >list-fetch-started
+      810ms | 🔴 <list-fetch-finished (value: {"count":1})
+      "
+    `);
+    expect(tabB.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
+      "
+    `);
   });
 
   test('list-query realtime reconnect revalidates persisted stale data', async () => {
@@ -246,25 +318,40 @@ describe('persistence + browser tabs sync integration', () => {
       },
     });
 
-    const query = renderHook(() =>
-      env.apiStore.useListQuery(
+    const queryRenders = createLoggerStore({ arrays: 'all' });
+    const query = renderHook(() => {
+      const result = env.apiStore.useListQuery(
         { tableId: 'users' },
         { returnRefetchingStatus: true },
-      ),
-    );
+      );
+
+      queryRenders.add({ status: result.status, items: result.items });
+
+      return result;
+    });
 
     expect(query.result.current).toMatchObject({
       status: 'success',
       items: [{ id: 1, name: 'StaleAlice' }],
     });
-    expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    expect(env.serverTable.getRequestHistory('all')).toMatchInlineSnapshot(
+      `[]`,
+    );
 
+    // A reconnect should revalidate the persisted snapshot instead of trusting it indefinitely.
     act(() => {
       env.apiStore.onTransportReconnect();
     });
     await flushAllTimers();
     await advanceTime(1100);
 
+    expect(queryRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ items: [{id:1, name:StaleAlice}]
+      -> status: refetching ⋅ items: [{id:1, name:StaleAlice}]
+      -> status: success ⋅ items: [{id:1, name:FreshAlice}]
+      "
+    `);
     expect(query.result.current).toMatchObject({
       status: 'success',
       items: [{ id: 1, name: 'FreshAlice' }],
@@ -272,6 +359,13 @@ describe('persistence + browser tabs sync integration', () => {
     expect(persisted.listQuery.readItemData<Row>('users', 1)?.name).toBe(
       'FreshAlice',
     );
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      10ms  | 🔴 >list-fetch-started
+      810ms | 🔴 <list-fetch-finished (value: {"count":1})
+      "
+    `);
   });
 
   test('document tabs sync works after the stale tab performs a read', async () => {
@@ -307,16 +401,47 @@ describe('persistence + browser tabs sync integration', () => {
       persistentStorage: persistenceConfig,
     });
 
-    renderHook(() => tabB.apiStore.useDocument());
+    const tabBRenders = createLoggerStore();
+
+    // Tab B must read the stale persisted document once so the later sync has an active subscriber.
+    renderHook(() => {
+      const { data, status } = tabB.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      tabBRenders.add({ status, value: data?.value ?? null });
+    });
 
     expect(tabB.store.state.data?.value).toBe(0);
 
+    // Revalidate in tab A and confirm tab B updates from the broadcast snapshot.
     tabA.scheduleFetch('highPriority');
     await flushAllTimers();
     await advanceTime(1100);
 
+    expect(tabBRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ value: 0
+      -> status: success ⋅ value: 2
+      "
+    `);
     expect(tabB.store.state.data?.value).toBe(2);
     expect(persisted.document.readData<{ value: number }>()?.value).toBe(2);
+    expect(tabA.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | scheduled-fetch-triggered
+      10ms  | 🔴 >fetch-started
+      810ms | 🔴 <fetch-finished (value: 2)
+      "
+    `);
+    expect(tabB.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | <confirmed-snapshot-received (value: 2)
+      "
+    `);
   });
 
   test('collection tabs sync works after the stale tab performs a read', async () => {
@@ -360,16 +485,30 @@ describe('persistence + browser tabs sync integration', () => {
       },
     );
 
-    renderHook(() => tabB.apiStore.useItem('item1'));
+    const tabBRenders = createLoggerStore();
+
+    // Tab B must read the stale persisted item once so the later sync has an active subscriber.
+    renderHook(() => {
+      const { data, status } = tabB.apiStore.useItem('item1');
+
+      tabBRenders.add({ status, value: data?.value.name ?? null });
+    });
 
     expect(tabB.store.state[getCompositeKey('item1')]?.data?.value.name).toBe(
       'Stale',
     );
 
+    // Revalidate in tab A and confirm tab B updates from the broadcast snapshot.
     tabA.scheduleFetch('highPriority', 'item1');
     await flushAllTimers();
     await advanceTime(1100);
 
+    expect(tabBRenders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ value: Stale
+      -> status: success ⋅ value: Fresh
+      "
+    `);
     expect(tabB.store.state[getCompositeKey('item1')]?.data?.value.name).toBe(
       'Fresh',
     );
@@ -377,5 +516,19 @@ describe('persistence + browser tabs sync integration', () => {
       persisted.collection.readItemData<{ value: { name: string } }>('item1')
         ?.value.name,
     ).toBe('Fresh');
+    expect(tabA.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | scheduled-fetch-triggered
+      10ms  | 🔴 >fetch-started
+      810ms | 🔴 <fetch-finished (value: {"name":"Fresh"})
+      "
+    `);
+    expect(tabB.timelineString).toMatchInlineSnapshot(`
+      "
+      time  |
+      810ms | <confirmed-snapshot-received (value: {"name":"Fresh"})
+      "
+    `);
   });
 });
