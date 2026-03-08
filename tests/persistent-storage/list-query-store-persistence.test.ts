@@ -674,35 +674,159 @@ describe('localStorage: list query store persistence', () => {
         type: 'list'
     `);
   });
+
+  test('hook loadSize larger than hydrated query expands the persisted list on refetch', async () => {
+    const productsQuery = { tableId: 'products' };
+    const cachedProducts = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      name: `Cached Product ${index + 1}`,
+    }));
+    const freshProducts = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      name: `Fresh Product ${index + 1}`,
+    }));
+    const storeName = 'lq-hook-loadsize-larger';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products: cachedProducts },
+      defaultQuerySize: 5,
+    });
+
+    writerEnv.apiStore.scheduleListQueryFetch('highPriority', productsQuery, 5);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products: freshProducts },
+      defaultQuerySize: 5,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
+        productsQuery,
+        {
+          loadSize: 10,
+          returnRefetchingStatus: true,
+        },
+      );
+
+      renders.add({
+        status,
+        count: items.length,
+        lastName: items.at(-1)?.name ?? null,
+        hasMore,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ count: 5 ⋅ lastName: Cached Product 5 ⋅ hasMore: ✅
+      -> status: refetching ⋅ count: 5 ⋅ lastName: Cached Product 5 ⋅ hasMore: ✅
+      -> status: success ⋅ count: 10 ⋅ lastName: Fresh Product 10 ⋅ hasMore: ✅
+      "
+    `);
+    expect(
+      readerEnv.serverTable.fetchHistory.map((entry) => {
+        if (entry.type !== 'list') return entry.type;
+        return {
+          type: entry.type,
+          offset: entry.offset,
+          limit: entry.limit,
+          itemIds:
+            entry.results === 'aborted'
+              ? 'aborted'
+              : entry.results.map((result) => result.itemId).join(','),
+        };
+      }),
+    ).toMatchInlineSnapshot(`
+      - itemIds: 'products||1,products||2,products||3,products||4,products||5,products||6,products||7,products||8,products||9,products||10'
+        limit: 10
+        offset: 0
+        type: 'list'
+    `);
+  });
+
+  test('round-trip persistence keeps state-manipulated query membership and item updates', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-state-roundtrip';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
       serverData: {
-        t1: [
-          { id: 1, name: 'Referenced 1' },
-          { id: 2, name: 'Referenced 2' },
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
         ],
       },
     });
 
-    // Fetch query — items 1 and 2 become query-referenced
-    env.scheduleFetch('highPriority', { tableId: 't1' });
+    writerEnv.apiStore.scheduleListQueryFetch('highPriority', usersQuery);
     await flushAllTimers();
 
-    // Add orphan item directly (not part of any query)
-    env.apiStore.addItemToState(rawItemKey('t1', 3), { id: 3, name: 'Orphan' });
+    writerEnv.apiStore.updateItemState('users||1', (draft) => {
+      draft.name = 'Edited Alice';
+    });
+    writerEnv.apiStore.addItemToState(
+      'users||20',
+      { id: 20, name: 'Local User' },
+      {
+        addItemToQueries: {
+          queries: usersQuery,
+          appendTo: 'end',
+        },
+      },
+    );
 
-    // Wait for save debounce
     await advanceTime(1100);
+    await flushAllTimers();
 
-    const cached = localStorage.getItem('tsdf.sess1.lq3');
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedListQueryData<Row>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    const savedItemKeys = Object.keys(parsed.data.items);
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+        ],
+      },
+    });
 
-    // Only 2 items saved; query-referenced items prioritized
-    expect(savedItemKeys.length).toBe(2);
-    expect(savedItemKeys).toContain(ik1);
-    expect(savedItemKeys).toContain(ik2);
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        names: items.map((item) => item.name),
+      });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Edited Alice, …(2 more)]
+      "
+    `);
+    expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+    expect(readerEnv.apiStore.getItemState('users||20')).toMatchInlineSnapshot(`
+      id: 20
+      name: 'Local User'
+    `);
   });
 
   test('pinned items and queries are preserved', async () => {
