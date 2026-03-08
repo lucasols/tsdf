@@ -24,8 +24,8 @@ import type {
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
-const DEFAULT_MAX_ITEMS = 100;
-const DEFAULT_MAX_QUERIES = 20;
+const DEFAULT_MAX_ITEMS = 500;
+const DEFAULT_MAX_QUERIES = 100;
 const SAVE_DEBOUNCE_MS = 1000;
 
 function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(

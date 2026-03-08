@@ -502,6 +502,93 @@ describe('localStorage: list query store persistence', () => {
         ['id', 'name']
       `);
   });
+
+  test('round-trip persistence preserves offset-pagination progress for loadMore', async () => {
+    const productsQuery = { tableId: 'products' };
+    const products = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      name: `Product ${index + 1}`,
+    }));
+    const storeName = 'lq-offset-roundtrip';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products },
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+
+    writerEnv.apiStore.scheduleListQueryFetch('highPriority', productsQuery, 5);
+    await flushAllTimers();
+
+    writerEnv.apiStore.loadMore(productsQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products },
+      defaultQuerySize: 5,
+      offsetPagination: { maxInvalidationLimit: 100 },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
+        productsQuery,
+        {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        },
+      );
+
+      renders.add({
+        status,
+        count: items.length,
+        lastName: items.at(-1)?.name ?? null,
+        hasMore,
+      });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ count: 10 ⋅ lastName: Product 10 ⋅ hasMore: ✅
+      "
+    `);
+    expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+
+    // Hydrated query should continue paging from the restored size.
+    readerEnv.apiStore.loadMore(productsQuery);
+    await flushAllTimers();
+
+    expect(
+      readerEnv.apiStore.getQueryState(productsQuery)?.items.length,
+    ).toMatchInlineSnapshot(`15`);
+    expect(
+      readerEnv.serverTable.fetchHistory.map((entry) => {
+        if (entry.type !== 'list') return entry.type;
+        return {
+          type: entry.type,
+          offset: entry.offset,
+          limit: entry.limit,
+          itemIds:
+            entry.results === 'aborted'
+              ? 'aborted'
+              : entry.results.map((result) => result.itemId),
+        };
+      }),
+    ).toMatchInlineSnapshot(`
+      - itemIds: ['products||11', 'products||12', 'products||13', 'products||14', 'products||15']
+        limit: 5
+        offset: 10
+        type: 'list'
+    `);
+  });
       serverData: {
         t1: [
           { id: 1, name: 'Referenced 1' },

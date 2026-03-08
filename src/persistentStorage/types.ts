@@ -108,9 +108,9 @@ export type ListQueryPersistentStorageConfig<
   QueryPayload extends ValidPayload = ValidPayload,
   ItemPayload extends ValidPayload = ValidPayload,
 > = StorePersistentStorageBaseConfig<ItemState> & {
-  /** Maximum number of items to persist. Defaults to 100. */
+  /** Maximum number of items to persist. Defaults to 500. */
   maxItems?: number;
-  /** Maximum number of queries to persist. Defaults to 20. */
+  /** Maximum number of queries to persist. Defaults to 100. */
   maxQueries?: number;
   /** Item payloads that should never be evicted from storage. */
   pinnedItems?: ItemPayload[];
