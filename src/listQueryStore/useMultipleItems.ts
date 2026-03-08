@@ -234,7 +234,15 @@ export function useMultipleItems<
               hasMissingFields &&
               !!rawItemState &&
               typeof rawItemState === 'object' &&
-              missingFields.every((f) => f in rawItemState);
+              (() => {
+                const itemRecord = __LEGIT_CAST__<
+                  Record<string, unknown>,
+                  ItemState
+                >(rawItemState);
+                return missingFields.every(
+                  (f) => f in itemRecord && itemRecord[f] !== undefined,
+                );
+              })();
 
             if (hasMissingFields && !missingFieldsAreAvailableInState) {
               status =

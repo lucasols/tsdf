@@ -284,7 +284,13 @@ export function useMultipleListQueries<
             const someItemMissingFieldsInState = query.items.some((itemKey) => {
               const item = state.items[itemKey];
               if (!item || typeof item !== 'object') return true;
-              return fields.some((f) => !(f in item));
+              const itemRecord = __LEGIT_CAST__<
+                Record<string, unknown>,
+                ItemState
+              >(item);
+              return fields.some(
+                (f) => !(f in itemRecord) || itemRecord[f] === undefined,
+              );
             });
 
             const hasAffectedFieldInvalidation = query.items.some((itemKey) => {

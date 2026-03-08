@@ -9,7 +9,15 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
-import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest';
 import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
@@ -17,6 +25,7 @@ import type {
 import type {
   PersistedListQueryData,
   PersistedListQueryItemData,
+  PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import {
@@ -25,9 +34,17 @@ import {
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
-const rowSchema = rc_object({ id: rc_number, name: rc_string });
+const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
+  rc_object({
+    id: rc_number,
+    name: rc_string,
+    age: rc_number.optional(),
+    email: rc_string.optional(),
+  }),
+);
 const cacheEntryTimestampSchema = rc_object({
   data: rc_unknown,
   timestamp: rc_number,
@@ -199,7 +216,6 @@ function createEnv(options: {
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
-    ignoreInitialTimeCheck: true,
     partialResources: options.partialResources,
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
@@ -223,6 +239,10 @@ function createEnv(options: {
 
 beforeAll(() => {
   vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
 });
 
 afterEach(() => {
@@ -500,6 +520,85 @@ describe('localStorage: list query store persistence', () => {
     expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
       .toMatchInlineSnapshot(`
         ['id', 'name']
+      `);
+  });
+
+  test('hydrated partial-resource queries refetch when hooks request fields missing from storage', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-partial-missing-fields';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached', age: 20, email: 'cached@site.test' }],
+      },
+    });
+
+    renderHook(() => {
+      writerEnv.apiStore.useListQuery(usersQuery, {
+        fields: ['id', 'name', 'age'],
+      });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 21, email: 'fresh@site.test' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        fields: ['id', 'name', 'age', 'email'],
+        returnRefetchingStatus: true,
+      });
+
+      const firstItem = items[0];
+
+      renders.add({
+        status,
+        item:
+          firstItem === undefined
+            ? null
+            : {
+                name: firstItem.name,
+                age: firstItem.age ?? null,
+                email: firstItem.email ?? null,
+              },
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ item: null
+      -> status: success ⋅ item: {name:Fresh, age:21, email:fresh@site.test}
+      "
+    `);
+    expect(readerEnv.serverTable.getRequestHistory('list'))
+      .toMatchInlineSnapshot(`
+        - _type: 'list'
+          payload:
+            fields: ['id', 'name', 'age', 'email']
+            pos: { limit: 50, offset: 0 }
+          returned_items: 1
+          time: '2.92s -> 3.72s | duration: 800ms'
+      `);
+    expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
+      .toMatchInlineSnapshot(`
+        ['age', 'email', 'id', 'name']
       `);
   });
 
@@ -912,11 +1011,11 @@ describe('localStorage: list query store persistence', () => {
     const storeName = 'lq-default-limits';
     const sessionKey = 'sess1';
     const serverData = Object.fromEntries(
-      Array.from({ length: 25 }, (_, tableIndex) => [
-        `table-${tableIndex + 1}`,
-        Array.from({ length: 5 }, (_, itemIndex) => ({
-          id: itemIndex + 1,
-          name: `Item ${tableIndex + 1}-${itemIndex + 1}`,
+      Array.from({ length: 25 }, (tableEntry_, tableIdx) => [
+        `table-${tableIdx + 1}`,
+        Array.from({ length: 5 }, (itemEntry_, itemIdx) => ({
+          id: itemIdx + 1,
+          name: `Item ${tableIdx + 1}-${itemIdx + 1}`,
         })),
       ]),
     );
