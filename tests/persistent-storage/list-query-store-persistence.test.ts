@@ -194,6 +194,7 @@ function createEnv(options: {
   version?: number;
   maxItems?: number;
   maxQueries?: number;
+  maxQuerySize?: number;
   pinnedItems?: string[];
   pinnedQueries?: ListQueryParams[];
   ignoreItems?: string[] | ((payload: string) => boolean);
@@ -229,6 +230,7 @@ function createEnv(options: {
       version: options.version,
       maxItems: options.maxItems,
       maxQueries: options.maxQueries,
+      maxQuerySize: options.maxQuerySize,
       pinnedItems: options.pinnedItems,
       pinnedQueries: options.pinnedQueries,
       ignoreItems: options.ignoreItems,
@@ -1043,6 +1045,62 @@ describe('localStorage: list query store persistence', () => {
     expect(getStoredQueryItemKeys(storeName, sessionKey, usersQuery))
       .toMatchInlineSnapshot(`
         ['"users||2']
+      `);
+  });
+
+  test('when maxQueries is exceeded, the least recently read query is evicted first', async () => {
+    const firstQuery = { tableId: 'first' };
+    const secondQuery = { tableId: 'second' };
+    const thirdQuery = { tableId: 'third' };
+    const storeName = 'lq-query-lru';
+    const sessionKey = 'sess1';
+
+    setCachedQuery(storeName, sessionKey, firstQuery, []);
+    await advanceTime(100);
+    setCachedQuery(storeName, sessionKey, secondQuery, []);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      maxQueries: 2,
+      serverData: {
+        third: [{ id: 1, name: 'Third' }],
+      },
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status, hasMore } = env.apiStore.useListQuery(firstQuery, {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        count: items.length,
+        hasMore,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ count: 0 ⋅ hasMore: ❌
+      "
+    `);
+
+    await advanceTime(2100);
+
+    env.scheduleFetch('highPriority', thirdQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`))
+      .toMatchInlineSnapshot(`
+        ['{tableId:"first"}', '{tableId:"third"}']
       `);
   });
 
