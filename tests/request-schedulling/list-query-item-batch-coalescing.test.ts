@@ -359,10 +359,7 @@ describe('mutation handling', () => {
       void env.performClientItemUpdateAction(
         'table1||1',
         { id: 1, name: 'Updated' },
-        {
-          withOptimisticUpdate: true,
-          withRevalidation: true,
-        },
+        { withOptimisticUpdate: true, withRevalidation: true },
       );
     });
 
@@ -465,10 +462,7 @@ describe('awaitItemFetch with batch', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: { id: 3, name: 'Item 3' },
-      error: null,
-    });
+    expect(result).toEqual({ data: { id: 3, name: 'Item 3' }, error: null });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'

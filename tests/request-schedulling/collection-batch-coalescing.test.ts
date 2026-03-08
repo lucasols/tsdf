@@ -29,10 +29,7 @@ describe('batch coalescing basic behavior', () => {
   test('multiple items scheduled during coalescing window are batched together', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     // Schedule multiple items within the coalescing window
@@ -76,10 +73,7 @@ describe('batch coalescing basic behavior', () => {
   test('single item uses fetchFn instead of batchFetchFn', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     env.scheduleFetch('highPriority', 'item1');
@@ -110,10 +104,7 @@ describe('batch coalescing basic behavior', () => {
   test('items arriving at different times within window are all batched', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
-      {
-        baseCoalescingWindowMs: 100,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 100, useBatchFetch: true },
     );
 
     env.scheduleFetch('highPriority', 'item1');
@@ -157,11 +148,7 @@ describe('maxBatchSize behavior', () => {
   test('reaching maxBatchSize triggers immediate batch fetch', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 }, item4: { v: 4 } },
-      {
-        baseCoalescingWindowMs: 100,
-        useBatchFetch: true,
-        maxBatchSize: 2,
-      },
+      { baseCoalescingWindowMs: 100, useBatchFetch: true, maxBatchSize: 2 },
     );
 
     // Schedule 2 items (reaches maxBatchSize)
@@ -197,11 +184,7 @@ describe('maxBatchSize behavior', () => {
   test('items exceeding maxBatchSize go into next batch', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 }, item4: { v: 4 } },
-      {
-        baseCoalescingWindowMs: 100,
-        useBatchFetch: true,
-        maxBatchSize: 2,
-      },
+      { baseCoalescingWindowMs: 100, useBatchFetch: true, maxBatchSize: 2 },
     );
 
     // Schedule 4 items with maxBatchSize: 2
@@ -261,10 +244,7 @@ describe('requests during ongoing fetch', () => {
   test('requests during fetch are scheduled for after fetch completes', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     env.serverTable.setFetchDurations('item1', 500);
@@ -341,10 +321,7 @@ describe('mutation handling', () => {
     void env.performClientUpdateAction(
       'item1',
       { v: 100 },
-      {
-        withOptimisticUpdate: true,
-        withRevalidation: true,
-      },
+      { withOptimisticUpdate: true, withRevalidation: true },
     );
 
     // Try to batch fetch both items
@@ -389,10 +366,7 @@ describe('error handling in batch', () => {
   test('batch fetch network error: all items fail with same error', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     // Make the batch request fail entirely (network error)
@@ -429,10 +403,7 @@ describe('awaitFetch with batch', () => {
   test('awaitFetch for specific item resolves after batch completes', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     // Schedule multiple items
@@ -446,10 +417,7 @@ describe('awaitFetch with batch', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: { value: { v: 3 } },
-      error: null,
-    });
+    expect(result).toEqual({ data: { value: { v: 3 } }, error: null });
 
     expect(env.serverTable.fetchHistory).toMatchInlineSnapshot(`
       - batchKey: '__default__'
@@ -480,10 +448,7 @@ describe('awaitFetch with batch', () => {
   test('awaitFetch returns error when batch fails', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     // Make the batch request fail entirely
@@ -519,10 +484,7 @@ describe('awaitFetch with batch', () => {
   test('multiple awaitFetch calls for same item coalesce', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     const promise1 = env.apiStore.awaitFetch('item1');
@@ -562,10 +524,7 @@ describe('awaitFetch with batch', () => {
   test('awaitFetch for different items resolves when batch completes', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     const promise1 = env.apiStore.awaitFetch('item1');
@@ -606,10 +565,7 @@ describe('priority handling in batch', () => {
   test('items scheduled consecutively are batched together', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 }, item3: { v: 3 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     // Use high priority to avoid low priority throttling
@@ -746,10 +702,7 @@ describe('duplicate item requests in batch', () => {
   test('same item scheduled multiple times appears once in batch', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     env.scheduleFetch('highPriority', 'item1');
@@ -782,10 +735,7 @@ describe('duplicate item requests in batch', () => {
   test('multiple items with duplicates are deduplicated in batch', async () => {
     const env = createCollectionStoreTestEnv(
       { item1: { v: 1 }, item2: { v: 2 } },
-      {
-        baseCoalescingWindowMs: 50,
-        useBatchFetch: true,
-      },
+      { baseCoalescingWindowMs: 50, useBatchFetch: true },
     );
 
     env.scheduleFetch('highPriority', 'item1');

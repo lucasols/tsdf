@@ -344,10 +344,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
 
     if (addAction) {
       const filterInfo = filterItemIds ? { itemIds: filterItemIds } : undefined;
-      addAction('>list-fetch-started', {
-        id: listId,
-        actionValue: filterInfo,
-      });
+      addAction('>list-fetch-started', { id: listId, actionValue: filterInfo });
       numOfStartedFetches++;
     }
 
@@ -416,10 +413,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       });
       if (addAction) {
         numOfFinishedFetches++;
-        addAction('<list-fetch-error', {
-          id: listId,
-          actionValue: 'error',
-        });
+        addAction('<list-fetch-error', { id: listId, actionValue: 'error' });
       }
       throw new Error(errorConfig.message);
     }
@@ -440,10 +434,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
 
       if (addAction) {
         numOfFinishedFetches++;
-        addAction('<list-fetch-error', {
-          id: listId,
-          actionValue: 'error',
-        });
+        addAction('<list-fetch-error', { id: listId, actionValue: 'error' });
       }
 
       throw new Error(`Table not found: ${tableId}`);
@@ -486,20 +477,14 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
       data: fields && fields.length > 0 ? selectFields(data, fields) : data,
     }));
 
-    const result: ListQueryResult<ItemData> = {
-      items: resultItems,
-      hasMore,
-    };
+    const result: ListQueryResult<ItemData> = { items: resultItems, hasMore };
 
     fetchHistory.push({
       type: 'list',
       itemIds: filterItemIds,
       offset,
       limit,
-      results: resultItems.map(({ itemId, data }) => ({
-        itemId,
-        data,
-      })),
+      results: resultItems.map(({ itemId, data }) => ({ itemId, data })),
       fields,
       filters,
       batchKey,
@@ -900,10 +885,7 @@ export function createServerTableMock<ItemData extends Record<string, unknown>>(
             history.push({
               time: `${formatTimeMs(entry.startedAt)} -> ${formatTimeMs(entry.startedAt + entry.duration)} | duration: ${formatTimeMs(entry.duration)}`,
               _type: 'item',
-              payload: {
-                itemId: entry.itemId,
-                fields: entry.fields,
-              },
+              payload: { itemId: entry.itemId, fields: entry.fields },
             });
           } else {
             history.push({

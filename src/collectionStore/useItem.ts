@@ -18,9 +18,7 @@ import { UseMultipleItemsOptions } from './useMultipleItems';
 export type UseItemOptions<
   ItemState extends ValidStoreState,
   Selected,
-> = UseMultipleItemsOptions<ItemState, Selected> & {
-  ensureIsLoaded?: boolean;
-};
+> = UseMultipleItemsOptions<ItemState, Selected> & { ensureIsLoaded?: boolean };
 
 export function useItem<
   ItemState extends ValidStoreState,
@@ -76,9 +74,7 @@ export function useItem<
     ],
   );
 
-  const item = useMultipleItems(query, {
-    selector,
-  });
+  const item = useMultipleItems(query, { selector });
 
   const result = useMemo(
     (): TSFDUseCollectionItemReturn<Selected, ItemPayload> =>

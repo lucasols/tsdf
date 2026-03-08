@@ -29,11 +29,7 @@ export type ListQueryStoreStoreEvents<ItemPayload extends ValidPayload> = {
   /** Emitted when a mutation begins executing */
   mutationStart: { mutationId: number; items: ItemPayload[] };
   /** Emitted when a mutation completes or fails */
-  mutationEnd: {
-    mutationId: number;
-    items: ItemPayload[];
-    success: boolean;
-  };
+  mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
 };
 
 type InvalidateQueryEvent = { priority: FetchType; queryKey: string };
@@ -43,9 +39,7 @@ type InvalidateItemEvent = {
   invalidateFields?: string[];
 };
 
-type SchedulerWithMutation = {
-  startMutation: (key: string) => () => boolean;
-};
+type SchedulerWithMutation = { startMutation: (key: string) => () => boolean };
 
 export type CreateMutationApiOptions<
   ItemState extends ValidStoreState,

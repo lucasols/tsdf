@@ -719,13 +719,7 @@ export function createFetchApi<
       return getOrCreateQueryScheduler(queryKey).scheduleFetch(
         queryKey,
         fetchType,
-        {
-          type: 'load',
-          payload: param,
-          offset: 0,
-          limit: querySize,
-          fields,
-        },
+        { type: 'load', payload: param, offset: 0, limit: querySize, fields },
         options,
       );
     });

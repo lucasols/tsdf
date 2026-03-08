@@ -48,13 +48,8 @@ describe('document store', () => {
     const renders = createLoggerStore();
 
     renderHook(() => {
-      const result = env.apiStore.useDocument({
-        disableRefetches: true,
-      });
-      renders.add({
-        data: result.data?.value ?? null,
-        status: result.status,
-      });
+      const result = env.apiStore.useDocument({ disableRefetches: true });
+      renders.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();
@@ -81,10 +76,7 @@ describe('document store', () => {
         disableRefetches: true,
         returnRefetchingStatus: true,
       });
-      renders.add({
-        data: result.data?.value ?? null,
-        status: result.status,
-      });
+      renders.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();
@@ -106,13 +98,8 @@ describe('document store', () => {
     const renders = createLoggerStore();
 
     renderHook(() => {
-      const result = env.apiStore.useDocument({
-        disableRefetches: true,
-      });
-      renders.add({
-        data: result.data?.value ?? null,
-        status: result.status,
-      });
+      const result = env.apiStore.useDocument({ disableRefetches: true });
+      renders.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();
@@ -146,10 +133,7 @@ describe('document store', () => {
         disableRefetches: true,
         ensureIsLoaded: true,
       });
-      renders.add({
-        data: result.data?.value ?? null,
-        status: result.status,
-      });
+      renders.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();
@@ -172,13 +156,8 @@ describe('document store', () => {
     const renders = createLoggerStore();
 
     const { unmount } = renderHook(() => {
-      const result = env.apiStore.useDocument({
-        disableRefetches: true,
-      });
-      renders.add({
-        data: result.data?.value ?? null,
-        status: result.status,
-      });
+      const result = env.apiStore.useDocument({ disableRefetches: true });
+      renders.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();
@@ -200,13 +179,8 @@ describe('document store', () => {
     const renders2 = createLoggerStore();
 
     renderHook(() => {
-      const result = env.apiStore.useDocument({
-        disableRefetches: true,
-      });
-      renders2.add({
-        data: result.data?.value ?? null,
-        status: result.status,
-      });
+      const result = env.apiStore.useDocument({ disableRefetches: true });
+      renders2.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();
@@ -225,20 +199,13 @@ describe('document store', () => {
 
 describe('collection store', () => {
   test('fetches when item not loaded', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
     const renders = createLoggerStore();
 
     renderHook(() => {
-      const item = env.apiStore.useItem('1', {
-        disableRefetches: true,
-      });
-      renders.add({
-        status: item.status,
-        data: item.data?.value ?? null,
-      });
+      const item = env.apiStore.useItem('1', { disableRefetches: true });
+      renders.add({ status: item.status, data: item.data?.value ?? null });
     });
 
     await flushAllTimers();
@@ -265,10 +232,7 @@ describe('collection store', () => {
         disableRefetches: true,
         returnRefetchingStatus: true,
       });
-      renders.add({
-        status: item.status,
-        data: item.data?.value ?? null,
-      });
+      renders.add({ status: item.status, data: item.data?.value ?? null });
     });
 
     await flushAllTimers();
@@ -294,10 +258,7 @@ describe('collection store', () => {
         disableRefetches: true,
         returnRefetchingStatus: true,
       });
-      renders.add({
-        status: item.status,
-        data: item.data?.value ?? null,
-      });
+      renders.add({ status: item.status, data: item.data?.value ?? null });
     });
 
     await flushAllTimers();
@@ -319,22 +280,15 @@ describe('collection store', () => {
   });
 
   test('retries fetch on remount after error', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
     env.serverTable.setNextFetchError('1', 'Fetch error');
 
     const renders = createLoggerStore();
 
     const { unmount } = renderHook(() => {
-      const item = env.apiStore.useItem('1', {
-        disableRefetches: true,
-      });
-      renders.add({
-        status: item.status,
-        data: item.data?.value ?? null,
-      });
+      const item = env.apiStore.useItem('1', { disableRefetches: true });
+      renders.add({ status: item.status, data: item.data?.value ?? null });
     });
 
     await flushAllTimers();
@@ -357,13 +311,8 @@ describe('collection store', () => {
     const renders2 = createLoggerStore();
 
     renderHook(() => {
-      const item = env.apiStore.useItem('1', {
-        disableRefetches: true,
-      });
-      renders2.add({
-        status: item.status,
-        data: item.data?.value ?? null,
-      });
+      const item = env.apiStore.useItem('1', { disableRefetches: true });
+      renders2.add({ status: item.status, data: item.data?.value ?? null });
     });
 
     await flushAllTimers();
@@ -426,10 +375,7 @@ describe('collection store - useMultipleItems', () => {
 
   test('skips refetch on mount when already loaded', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      {
-        '1': defaultTodo,
-        '2': { title: 'todo 2', completed: true },
-      },
+      { '1': defaultTodo, '2': { title: 'todo 2', completed: true } },
       { testScenario: 'loaded' },
     );
 
@@ -465,10 +411,7 @@ describe('collection store - useMultipleItems', () => {
 
   test('skips invalidation when already loaded', async () => {
     const env = createCollectionStoreTestEnv<Todo>(
-      {
-        '1': defaultTodo,
-        '2': { title: 'todo 2', completed: true },
-      },
+      { '1': defaultTodo, '2': { title: 'todo 2', completed: true } },
       { testScenario: 'loaded' },
     );
 
@@ -520,14 +463,9 @@ describe('list query store - queries', () => {
     renderHook(() => {
       const query = env.apiStore.useListQuery(
         { tableId: 'users' },
-        {
-          disableRefetches: true,
-        },
+        { disableRefetches: true },
       );
-      renders.add({
-        status: query.status,
-        itemCount: query.items.length,
-      });
+      renders.add({ status: query.status, itemCount: query.items.length });
     });
 
     await flushAllTimers();
@@ -551,15 +489,9 @@ describe('list query store - queries', () => {
     renderHook(() => {
       const query = env.apiStore.useListQuery(
         { tableId: 'users' },
-        {
-          disableRefetches: true,
-          returnRefetchingStatus: true,
-        },
+        { disableRefetches: true, returnRefetchingStatus: true },
       );
-      renders.add({
-        status: query.status,
-        itemCount: query.items.length,
-      });
+      renders.add({ status: query.status, itemCount: query.items.length });
     });
 
     await flushAllTimers();
@@ -582,15 +514,9 @@ describe('list query store - queries', () => {
     renderHook(() => {
       const query = env.apiStore.useListQuery(
         { tableId: 'users' },
-        {
-          disableRefetches: true,
-          returnRefetchingStatus: true,
-        },
+        { disableRefetches: true, returnRefetchingStatus: true },
       );
-      renders.add({
-        status: query.status,
-        itemCount: query.items.length,
-      });
+      renders.add({ status: query.status, itemCount: query.items.length });
     });
 
     await flushAllTimers();
@@ -759,13 +685,8 @@ describe('list query store - items', () => {
     const renders = createLoggerStore();
 
     renderHook(() => {
-      const item = env.apiStore.useItem(itemKey, {
-        disableRefetches: true,
-      });
-      renders.add({
-        status: item.status,
-        data: item.data,
-      });
+      const item = env.apiStore.useItem(itemKey, { disableRefetches: true });
+      renders.add({ status: item.status, data: item.data });
     });
 
     await flushAllTimers();
@@ -793,10 +714,7 @@ describe('list query store - items', () => {
         disableRefetches: true,
         returnRefetchingStatus: true,
       });
-      renders.add({
-        status: item.status,
-        data: item.data,
-      });
+      renders.add({ status: item.status, data: item.data });
     });
 
     await flushAllTimers();
@@ -823,10 +741,7 @@ describe('list query store - items', () => {
         disableRefetches: true,
         returnRefetchingStatus: true,
       });
-      renders.add({
-        status: item.status,
-        data: item.data,
-      });
+      renders.add({ status: item.status, data: item.data });
     });
 
     await flushAllTimers();

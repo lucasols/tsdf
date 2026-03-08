@@ -340,9 +340,7 @@ export function createListQueryStore<
     size?: number;
     timeoutMs?: number;
   } & FetchFieldsOption;
-  type AwaitItemFetchOptions = {
-    timeoutMs?: number;
-  } & FetchFieldsOption;
+  type AwaitItemFetchOptions = { timeoutMs?: number } & FetchFieldsOption;
   type LoadMoreWithFieldsOptions = { size?: number } & FetchFieldsOption;
 
   function normalizeFieldsOption(
@@ -769,9 +767,7 @@ export function createListQueryStore<
       pruneItemInvalidationTracking();
       const successfulItems = requests
         .filter(({ requestId }) => results.get(requestId) === true)
-        .map((request) => ({
-          itemKey: request.requestId,
-        }));
+        .map((request) => ({ itemKey: request.requestId }));
       const firstSuccessfulItem = successfulItems[0];
 
       if (firstSuccessfulItem) {
@@ -1214,9 +1210,7 @@ export function createListQueryStore<
               ItemState,
               ItemPayload,
               SelectedItem
-            > & {
-              fields: FieldsInput;
-            },
+            > & { fields: FieldsInput },
           ]
         : [options?: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>]
     ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined>;

@@ -902,9 +902,7 @@ describe('fetch item', () => {
 
 describe('an item invalidation with lower priority should not override one with higher priority', () => {
   const rawItemId = 'users||1';
-  const testEnvOptions = {
-    testScenario: { loaded: { tables: ['users'] } },
-  };
+  const testEnvOptions = { testScenario: { loaded: { tables: ['users'] } } };
 
   test('not override high priority update', () => {
     const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);
@@ -972,9 +970,7 @@ describe('an item invalidation with lower priority should not override one with 
 
 describe('a query invalidation with lower priority should not override one with higher priority', () => {
   const queryPayload: ListQueryParams = { tableId: 'users' };
-  const testEnvOptions = {
-    testScenario: { loaded: { tables: ['users'] } },
-  };
+  const testEnvOptions = { testScenario: { loaded: { tables: ['users'] } } };
 
   test('not override high priority update', () => {
     const env = createListQueryStoreTestEnv(initialServerData, testEnvOptions);

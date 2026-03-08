@@ -6,10 +6,7 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
 
-type Todo = {
-  title: string;
-  completed: boolean;
-};
+type Todo = { title: string; completed: boolean };
 
 const defaultTodo: Todo = { title: 'todo', completed: false };
 
@@ -29,15 +26,10 @@ afterEach(() => {
 test('isOffScreen should keep the selected data and not be affected by invalidation', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    {
-      testScenario: 'loaded',
-      usesRealTimeUpdates: true,
-    },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
-  const renders = createLoggerStore({
-    rejectKeys: ['queryMetadata'],
-  });
+  const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
   const { rerender } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
@@ -169,9 +161,7 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
 test('disable then enable isOffScreen', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    {
-      testScenario: 'loaded',
-    },
+    { testScenario: 'loaded' },
   );
 
   const renders = createLoggerStore({
@@ -233,9 +223,7 @@ test('disable then enable isOffScreen', async () => {
 test('useMultipleItems should not trigger a mount refetch when some option changes', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    {
-      testScenario: 'loaded',
-    },
+    { testScenario: 'loaded' },
   );
 
   const filterKeys = ['status', 'data', 'payload', 'rrfs'];
@@ -245,10 +233,7 @@ test('useMultipleItems should not trigger a mount refetch when some option chang
   const { rerender } = renderHook(
     ({ returnRefetchingStatus }: { returnRefetchingStatus: boolean }) => {
       const result = env.apiStore.useMultipleItems(
-        ['1', '2'].map((payload) => ({
-          payload,
-          returnRefetchingStatus,
-        })),
+        ['1', '2'].map((payload) => ({ payload, returnRefetchingStatus })),
       );
 
       const [item1, item2] = result;
@@ -305,9 +290,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
       '4': defaultTodo,
       '5': defaultTodo,
     },
-    {
-      testScenario: 'loaded',
-    },
+    { testScenario: 'loaded' },
   );
 
   const renders = createLoggerStore({
@@ -397,9 +380,7 @@ test('useMultipleItems should not trigger a mount refetch for unchanged items', 
 test('Selected value should update when selectorUsesExternalDeps is true', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    {
-      testScenario: 'loaded',
-    },
+    { testScenario: 'loaded' },
   );
 
   const renders = createLoggerStore({
@@ -572,10 +553,7 @@ test('medium priority on loaded collection item applies delay', async () => {
 test('useItem with selector should not trigger a rerender', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
-    {
-      testScenario: 'loaded',
-      usesRealTimeUpdates: true,
-    },
+    { testScenario: 'loaded', usesRealTimeUpdates: true },
   );
 
   const renders = createLoggerStore();

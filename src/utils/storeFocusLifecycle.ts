@@ -61,8 +61,5 @@ export function createStoreFocusLifecycle({
 
   reset();
 
-  return {
-    onTransportReconnect,
-    reset,
-  };
+  return { onTransportReconnect, reset };
 }

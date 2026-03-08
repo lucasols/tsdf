@@ -30,10 +30,7 @@ test('simple mutation with revalidation and optimistic update', async () => {
   void env.performClientUpdateAction(
     'item1',
     { v: 1 },
-    {
-      withRevalidation: true,
-      withOptimisticUpdate: true,
-    },
+    { withRevalidation: true, withOptimisticUpdate: true },
   );
 
   await flushAllTimers();
@@ -69,9 +66,7 @@ test('simple mutation with optimistic update', async () => {
   void env.performClientUpdateAction(
     'item1',
     { v: 1 },
-    {
-      withOptimisticUpdate: true,
-    },
+    { withOptimisticUpdate: true },
   );
 
   await flushAllTimers();
@@ -187,10 +182,7 @@ test('mutation on one item does not affect fetch state of another item', async (
   void env.performClientUpdateAction(
     'item1',
     { v: 1 },
-    {
-      withOptimisticUpdate: true,
-      withRevalidation: true,
-    },
+    { withOptimisticUpdate: true, withRevalidation: true },
   );
 
   await vi.advanceTimersByTimeAsync(100);

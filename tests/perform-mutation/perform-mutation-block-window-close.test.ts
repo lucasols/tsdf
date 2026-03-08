@@ -26,18 +26,13 @@ function createBlockWindowCloseSpy() {
   const unblock = vi.fn();
   const blockWindowClose = vi.fn(() => ({ unblock }));
 
-  return {
-    blockWindowClose,
-    unblock,
-  };
+  return { blockWindowClose, unblock };
 }
 
 describe('performMutation blockWindowClose', () => {
   test('document store supports custom blockWindowClose option', async () => {
     const { blockWindowClose, unblock } = createBlockWindowCloseSpy();
-    const env = createDocumentStoreTestEnv(1, {
-      blockWindowClose,
-    });
+    const env = createDocumentStoreTestEnv(1, { blockWindowClose });
 
     const mutationPromise = env.apiStore.performMutation({
       debounce: {
@@ -60,12 +55,8 @@ describe('performMutation blockWindowClose', () => {
   test('collection store supports custom blockWindowClose option', async () => {
     const { blockWindowClose, unblock } = createBlockWindowCloseSpy();
     const env = createCollectionStoreTestEnv(
-      {
-        'item-1': { name: 'Item 1' },
-      },
-      {
-        blockWindowClose,
-      },
+      { 'item-1': { name: 'Item 1' } },
+      { blockWindowClose },
     );
 
     const mutationPromise = env.apiStore.performMutation('item-1', {
@@ -89,12 +80,8 @@ describe('performMutation blockWindowClose', () => {
   test('list query store supports custom blockWindowClose option', async () => {
     const { blockWindowClose, unblock } = createBlockWindowCloseSpy();
     const env = createListQueryStoreTestEnv(
-      {
-        users: [{ id: 1, name: 'User 1' }],
-      },
-      {
-        blockWindowClose,
-      },
+      { users: [{ id: 1, name: 'User 1' }] },
+      { blockWindowClose },
     );
 
     const mutationPromise = env.apiStore.performMutation('users||1', {

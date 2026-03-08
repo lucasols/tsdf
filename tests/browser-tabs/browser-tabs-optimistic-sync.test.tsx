@@ -201,10 +201,7 @@ test('collection optimistic updates propagate across tabs', async () => {
   void envA.performClientUpdateAction(
     'item1',
     { name: 'Updated' },
-    {
-      withOptimisticUpdate: true,
-      duration: 1_000,
-    },
+    { withOptimisticUpdate: true, duration: 1_000 },
   );
 
   await advanceTime(0);
@@ -272,10 +269,7 @@ test('collection failed optimistic mutations revert the synced background state'
   const mutationPromise = envA.performClientUpdateAction(
     'item1',
     { name: 'Updated' },
-    {
-      withOptimisticUpdate: true,
-      error: 'Mutation failed',
-    },
+    { withOptimisticUpdate: true, error: 'Mutation failed' },
   );
 
   await advanceTime(0);
@@ -353,10 +347,7 @@ test('list query optimistic sorting propagates to other tabs', async () => {
   void envA.performClientItemUpdateAction(
     'users||1',
     { name: 'Zoe' },
-    {
-      withOptimisticUpdate: true,
-      duration: 1_000,
-    },
+    { withOptimisticUpdate: true, duration: 1_000 },
   );
 
   await advanceTime(0);
@@ -429,10 +420,7 @@ test('list query failed optimistic mutations revert the synced background state'
   const mutationPromise = envA.performClientItemUpdateAction(
     'users||1',
     { name: 'Zoe' },
-    {
-      withOptimisticUpdate: true,
-      error: 'Mutation failed',
-    },
+    { withOptimisticUpdate: true, error: 'Mutation failed' },
   );
 
   await advanceTime(0);

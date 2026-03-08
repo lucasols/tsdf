@@ -26,15 +26,10 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
 });
 
-type StoreValue = {
-  items: Record<string, { name: string }>;
-};
+type StoreValue = { items: Record<string, { name: string }> };
 
 const defaultValue: StoreValue = {
-  items: {
-    a: { name: 'item-a' },
-    b: { name: 'item-b' },
-  },
+  items: { a: { name: 'item-a' }, b: { name: 'item-b' } },
 };
 
 describe('document store useListItemIsDeleted', () => {
@@ -49,9 +44,7 @@ describe('document store useListItemIsDeleted', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isDeleted,
-      });
+      renders.add({ isDeleted });
     });
 
     await flushAllTimers();
@@ -78,9 +71,7 @@ describe('document store useListItemIsDeleted', () => {
         onDelete,
       });
 
-      renders.add({
-        isDeleted,
-      });
+      renders.add({ isDeleted });
     });
 
     await flushAllTimers();
@@ -106,9 +97,7 @@ describe('document store useListItemIsDeleted', () => {
   });
 
   test('not found during initial load: does NOT return true', async () => {
-    const valueWithoutA: StoreValue = {
-      items: { b: { name: 'item-b' } },
-    };
+    const valueWithoutA: StoreValue = { items: { b: { name: 'item-b' } } };
 
     const env = createDocumentStoreTestEnv<StoreValue>(valueWithoutA);
 
@@ -122,9 +111,7 @@ describe('document store useListItemIsDeleted', () => {
         onDelete,
       });
 
-      renders.add({
-        isDeleted,
-      });
+      renders.add({ isDeleted });
     });
 
     await flushAllTimers();
@@ -154,23 +141,14 @@ describe('document store useListItemIsDeleted', () => {
           onDelete,
         });
 
-        renders.add({
-          itemId,
-          isDeleted,
-        });
+        renders.add({ itemId, isDeleted });
       },
-      {
-        initialProps: {
-          itemId: 'a',
-        },
-      },
+      { initialProps: { itemId: 'a' } },
     );
 
     await flushAllTimers();
 
-    rerender({
-      itemId: 'missing-item',
-    });
+    rerender({ itemId: 'missing-item' });
 
     await flushAllTimers();
 
@@ -199,9 +177,7 @@ describe('document store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();
@@ -224,9 +200,7 @@ describe('document store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();
@@ -257,9 +231,7 @@ describe('document store useListItemIsLoading', () => {
         ensureIsLoaded: true,
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();
@@ -275,9 +247,7 @@ describe('document store useListItemIsLoading', () => {
   });
 
   test('item not found triggers fallback after timeout', async () => {
-    const valueWithoutA: StoreValue = {
-      items: { b: { name: 'item-b' } },
-    };
+    const valueWithoutA: StoreValue = { items: { b: { name: 'item-b' } } };
 
     // Use usesRealTimeUpdates to prevent automatic refetch-on-mount,
     // so we can test the fallback behavior independently
@@ -296,9 +266,7 @@ describe('document store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     // Initially shows loading because item 'a' not found
@@ -337,9 +305,7 @@ describe('document store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();

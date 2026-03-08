@@ -78,11 +78,7 @@ test('useItem: default behavior keeps loading when cache exists but requested fi
         fields,
       });
 
-      renders.add({
-        status: result.status,
-        data: result.data,
-        fields,
-      });
+      renders.add({ status: result.status, data: result.data, fields });
     },
     { initialProps: { fields: ['id'] } },
   );
@@ -123,11 +119,7 @@ test('useItem: option can expose refetching while cache exists but requested fie
         fields,
       });
 
-      renders.add({
-        status: result.status,
-        data: result.data,
-        fields,
-      });
+      renders.add({ status: result.status, data: result.data, fields });
     },
     { initialProps: { fields: ['id'] } },
   );
@@ -168,10 +160,7 @@ test('useItem: cache miss still reports loading with showPartialAsRefetching ena
   );
   await advanceTime(0);
 
-  expect(hook.result.current).toMatchObject({
-    status: 'loading',
-    data: null,
-  });
+  expect(hook.result.current).toMatchObject({ status: 'loading', data: null });
 
   hook.unmount();
   await flushAllTimers();
@@ -235,11 +224,7 @@ test('useListQuery: raw and masked hooks expose refetching vs success with showP
     ({ fields }: { fields: string[] }) => {
       const rawResult = env.apiStore.useListQuery(
         { tableId: 'users' },
-        {
-          returnRefetchingStatus: true,
-          showPartialAsRefetching: true,
-          fields,
-        },
+        { returnRefetchingStatus: true, showPartialAsRefetching: true, fields },
       );
       const maskedResult = env.apiStore.useListQuery(
         { tableId: 'users' },
@@ -324,11 +309,7 @@ test('useMultipleItems: per-query option overrides global showPartialAsRefetchin
             returnRefetchingStatus: true,
             showPartialAsRefetching: false,
           },
-          {
-            payload: 'users||1',
-            fields,
-            returnRefetchingStatus: true,
-          },
+          { payload: 'users||1', fields, returnRefetchingStatus: true },
         ],
         { showPartialAsRefetching: true },
       );

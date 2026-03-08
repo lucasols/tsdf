@@ -1356,12 +1356,8 @@ describe('await* preload with partial resources', () => {
     });
 
     const preloadPromise = env.apiStore.awaitListQueryFetch(
-      {
-        tableId: 'users',
-      },
-      {
-        fields: '*',
-      },
+      { tableId: 'users' },
+      { fields: '*' },
     );
 
     await flushAllTimers();
@@ -1429,9 +1425,7 @@ describe('await* preload with partial resources', () => {
     });
     const awaitListPromise = env.apiStore.awaitListQueryFetch(
       { tableId: 'users' },
-      {
-        fields: '*',
-      },
+      { fields: '*' },
     );
 
     await flushAllTimers();
@@ -1505,9 +1499,7 @@ describe('await* preload with partial resources', () => {
     );
 
     expect(() =>
-      apiStore.scheduleListQueryFetch('highPriority', {
-        tableId: 'users',
-      }),
+      apiStore.scheduleListQueryFetch('highPriority', { tableId: 'users' }),
     ).toThrowError(
       'fields option is required when partialResources is enabled',
     );
@@ -1572,12 +1564,8 @@ describe('type safety: fields requirement with partialResources', () => {
       // @ts-expect-error - scheduleItemFetch requires fields when partialResources is enabled
       store.scheduleItemFetch('highPriority', 'id');
 
-      store.scheduleItemFetch('highPriority', 'id', {
-        fields: ['name'],
-      });
-      store.scheduleItemFetch('highPriority', 'id', {
-        fields: '*',
-      });
+      store.scheduleItemFetch('highPriority', 'id', { fields: ['name'] });
+      store.scheduleItemFetch('highPriority', 'id', { fields: '*' });
 
       // @ts-expect-error - scheduleListQueryFetch requires fields when partialResources is enabled
       store.scheduleListQueryFetch('highPriority', 'payload');

@@ -35,17 +35,12 @@ type Todo = {
 const defaultTodo: Todo = {
   title: 'todo',
   completed: false,
-  items: {
-    a: { name: 'item-a' },
-    b: { name: 'item-b' },
-  },
+  items: { a: { name: 'item-a' }, b: { name: 'item-b' } },
 };
 
 describe('collection store useListItemIsDeleted', () => {
   test('item exists after load: returns false', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
     const renders = createLoggerStore();
 
@@ -55,9 +50,7 @@ describe('collection store useListItemIsDeleted', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isDeleted,
-      });
+      renders.add({ isDeleted });
     });
 
     await flushAllTimers();
@@ -85,9 +78,7 @@ describe('collection store useListItemIsDeleted', () => {
         onDelete,
       });
 
-      renders.add({
-        isDeleted,
-      });
+      renders.add({ isDeleted });
     });
 
     await flushAllTimers();
@@ -118,9 +109,7 @@ describe('collection store useListItemIsDeleted', () => {
       items: { b: { name: 'item-b' } },
     };
 
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': todoWithoutA,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': todoWithoutA });
 
     const onDelete = vi.fn();
     const renders = createLoggerStore();
@@ -132,9 +121,7 @@ describe('collection store useListItemIsDeleted', () => {
         onDelete,
       });
 
-      renders.add({
-        isDeleted,
-      });
+      renders.add({ isDeleted });
     });
 
     await flushAllTimers();
@@ -165,23 +152,14 @@ describe('collection store useListItemIsDeleted', () => {
           onDelete,
         });
 
-        renders.add({
-          itemId,
-          isDeleted,
-        });
+        renders.add({ itemId, isDeleted });
       },
-      {
-        initialProps: {
-          itemId: 'a',
-        },
-      },
+      { initialProps: { itemId: 'a' } },
     );
 
     await flushAllTimers();
 
-    rerender({
-      itemId: 'missing-item',
-    });
+    rerender({ itemId: 'missing-item' });
 
     await flushAllTimers();
 
@@ -211,9 +189,7 @@ describe('collection store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();
@@ -226,9 +202,7 @@ describe('collection store useListItemIsLoading', () => {
   });
 
   test('collection item loading: returns true then false', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
     const renders = createLoggerStore();
 
@@ -238,9 +212,7 @@ describe('collection store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();
@@ -268,9 +240,7 @@ describe('collection store useListItemIsLoading', () => {
         ensureIsLoaded: true,
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();
@@ -308,9 +278,7 @@ describe('collection store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     // Initially shows loading because item 'a' not found
@@ -350,9 +318,7 @@ describe('collection store useListItemIsLoading', () => {
         selector: (data) => data?.value.items['a'],
       });
 
-      renders.add({
-        isLoading,
-      });
+      renders.add({ isLoading });
     });
 
     await flushAllTimers();
@@ -372,9 +338,7 @@ describe('collection store useListItemIsLoading', () => {
 
 describe('collection store useListItem (combined)', () => {
   test('returns isLoading, isDeleted, and data correctly after load', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
     const renders = createLoggerStore();
 

@@ -70,9 +70,7 @@ test('simple mutation with optimistic update', async () => {
   // Wait for initial fetch
   await flushAllTimers();
 
-  void env.performClientUpdateAction(1, {
-    withOptimisticUpdate: true,
-  });
+  void env.performClientUpdateAction(1, { withOptimisticUpdate: true });
 
   await flushAllTimers();
 
@@ -102,9 +100,7 @@ test('simple mutation without optimistic update', async () => {
   // Wait for initial fetch
   await flushAllTimers();
 
-  void env.performClientUpdateAction(1, {
-    withRevalidation: true,
-  });
+  void env.performClientUpdateAction(1, { withRevalidation: true });
 
   await flushAllTimers();
 
@@ -481,9 +477,7 @@ test('high priority fetch during mutation', async () => {
   await flushAllTimers();
 
   // Start a mutation (without revalidation to isolate the high priority fetch behavior)
-  void env.performClientUpdateAction(1, {
-    withOptimisticUpdate: true,
-  });
+  void env.performClientUpdateAction(1, { withOptimisticUpdate: true });
 
   // Trigger high priority fetch while mutation is in progress
   await advanceTime(100);
@@ -888,9 +882,7 @@ test('low priority fetch during mutation outside throttle window', async () => {
   await flushAllTimers();
 
   // Start a mutation (without revalidation to isolate the low priority fetch behavior)
-  void env.performClientUpdateAction(1, {
-    withOptimisticUpdate: true,
-  });
+  void env.performClientUpdateAction(1, { withOptimisticUpdate: true });
 
   // Trigger low priority fetch while mutation is in progress (no previous fetch, so outside throttle window)
   await advanceTime(100);
@@ -939,9 +931,7 @@ test('low priority fetch during mutation inside throttle window', async () => {
   await flushAllTimers();
 
   // Start a mutation immediately (we're at ~60ms, still inside 200ms throttle window)
-  void env.performClientUpdateAction(1, {
-    withOptimisticUpdate: true,
-  });
+  void env.performClientUpdateAction(1, { withOptimisticUpdate: true });
 
   // Trigger low priority fetch while mutation is in progress (within throttle window from fetch start at 10ms)
   await advanceTime(50);

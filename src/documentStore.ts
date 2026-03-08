@@ -71,9 +71,7 @@ export type DocumentStoreState<State extends ValidStoreState> = {
   refetchOnMount: false | FetchType;
 };
 
-type DocumentStoreEvents = {
-  invalidateData: FetchType;
-};
+type DocumentStoreEvents = { invalidateData: FetchType };
 
 export type OnDocumentInvalidate = (priority: FetchType) => void;
 
@@ -403,10 +401,7 @@ export function createDocumentStore<State extends ValidStoreState>({
 
       store.setPartialState(
         {
-          data: reusePrevIfEqual({
-            prev: store.state.data,
-            current: data,
-          }),
+          data: reusePrevIfEqual({ prev: store.state.data, current: data }),
           status: 'success',
         },
         { action: 'fetch-success' },
@@ -568,9 +563,7 @@ export function createDocumentStore<State extends ValidStoreState>({
 
     if (currentInvalidationPriority >= newInvalidationPriority) return;
 
-    store.setKey('refetchOnMount', priority, {
-      action: 'invalidate-data',
-    });
+    store.setKey('refetchOnMount', priority, { action: 'invalidate-data' });
     invalidationWasTriggered = false;
     events.emit('invalidateData', priority);
   }
@@ -658,11 +651,7 @@ export function createDocumentStore<State extends ValidStoreState>({
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () =>
-        mutation({
-          updateState,
-          currentState: store.state.data,
-        }),
+      mutation: () => mutation({ updateState, currentState: store.state.data }),
       onSuccess: () => {
         if (revalidateOnSuccess) {
           invalidateData();
@@ -725,12 +714,7 @@ export function createDocumentStore<State extends ValidStoreState>({
           status = 'success';
         }
 
-        return {
-          data,
-          error,
-          status,
-          isLoading: status === 'loading',
-        };
+        return { data, error, status, isLoading: status === 'loading' };
       },
       [selector, returnIdleStatus, returnRefetchingStatus],
     );
