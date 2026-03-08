@@ -1236,6 +1236,65 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`125`);
   });
 
+  test('maxQuerySize persists only the first items from each query', async () => {
+    const usersQuery = { tableId: 'users' };
+    const env = createEnv({
+      storeName: 'lq-max-query-size',
+      sessionKey: 'sess1',
+      maxQuerySize: 2,
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+          { id: 3, name: 'Carol' },
+        ],
+      },
+    });
+
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(getStoredQueryItemKeys('lq-max-query-size', 'sess1', usersQuery))
+      .toMatchInlineSnapshot(`
+        ['"users||1', '"users||2']
+      `);
+
+    const readerEnv = createEnv({
+      storeName: 'lq-max-query-size',
+      sessionKey: 'sess1',
+      maxQuerySize: 2,
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+          { id: 3, name: 'Carol' },
+        ],
+      },
+    });
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({
+        status,
+        names: items.map((item) => item.name),
+      });
+    });
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Alice, Bob]
+      "
+    `);
+    expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
+  });
+
   test('ignoreItems excludes matching item payloads from persisted items and queries', async () => {
     const usersQuery = { tableId: 'users' };
     const env = createEnv({
