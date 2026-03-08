@@ -152,7 +152,9 @@ export function useMultipleItems<
           const rawItemState = state.items[itemKey];
           const hasCachedDataInState =
             rawItemState !== null && rawItemState !== undefined;
+          const loadedFields = state.itemLoadedFields[itemKey] ?? [];
           let itemState = rawItemState;
+          let loadingFields: string[] | undefined;
 
           // Apply field selection for partial resources
           if (
@@ -199,11 +201,23 @@ export function useMultipleItems<
               };
             }
 
+            const pendingLoadingFields =
+              partialResources &&
+              showPartialAsRefetching &&
+              Array.isArray(fields) &&
+              fields.length > 0 &&
+              !returnIdleStatus
+                ? fields
+                : undefined;
+
             return {
               itemStateKey: itemKey,
               status: returnIdleStatus ? 'idle' : 'loading',
               error: null,
               isLoading: !returnIdleStatus,
+              ...(pendingLoadingFields
+                ? { loadingFields: pendingLoadingFields }
+                : {}),
               payload,
               data,
               queryMetadata: __LEGIT_CAST__<
@@ -224,7 +238,6 @@ export function useMultipleItems<
             fields.length > 0 &&
             (status === 'success' || status === 'refetching')
           ) {
-            const loadedFields = state.itemLoadedFields[itemKey] ?? [];
             const missingFields = fields.filter(
               (f) => !loadedFields.includes(f),
             );
@@ -240,6 +253,24 @@ export function useMultipleItems<
                 hasCachedDataInState && showPartialAsRefetching
                   ? 'refetching'
                   : 'loading';
+            }
+          }
+
+          if (partialResources && showPartialAsRefetching) {
+            if (Array.isArray(fields) && fields.length > 0) {
+              const pendingRequestedFields = fields.filter(
+                (field) => !loadedFields.includes(field),
+              );
+
+              if (pendingRequestedFields.length > 0) {
+                loadingFields = pendingRequestedFields;
+              }
+            } else if (
+              fields === '*' &&
+              itemFieldInvalidationFields &&
+              itemFieldInvalidationFields.length > 0
+            ) {
+              loadingFields = itemFieldInvalidationFields;
             }
           }
 
@@ -267,6 +298,7 @@ export function useMultipleItems<
             status,
             error: itemQuery.error,
             isLoading: status === 'loading',
+            ...(loadingFields ? { loadingFields } : {}),
             data: shouldHideDataWhileLoading
               ? selector
                 ? selector(null, itemQuery.payload)

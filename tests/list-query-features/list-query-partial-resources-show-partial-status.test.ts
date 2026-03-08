@@ -146,6 +146,57 @@ test('useItem: option can expose refetching while cache exists but requested fie
   `);
 });
 
+test('useItem: loadingFields exposes which requested fields are still pending', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    partialResources: partialResourcesConfig,
+  });
+  const renders = createLoggerStore();
+
+  const { rerender } = renderHook(
+    ({ fields }: { fields: string[] }) => {
+      const result = env.apiStore.useItem('users||1', {
+        returnRefetchingStatus: true,
+        showPartialAsRefetching: true,
+        fields,
+      });
+
+      renders.add({
+        status: result.status,
+        data: result.data,
+        loadingFields: result.loadingFields ?? null,
+        fields,
+      });
+    },
+    { initialProps: { fields: ['id'] } },
+  );
+
+  await flushAllTimers();
+
+  renders.addMark('Expand fields');
+  act(() => {
+    rerender({ fields: ['id', 'name'] });
+  });
+
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    -> status: loading ⋅ data: null ⋅ loadingFields: [id] ⋅ fields: [id]
+    -> status: success ⋅ data: {id:1} ⋅ loadingFields: null ⋅ fields: [id]
+
+    >>> Expand fields
+
+    -> status: refetching ⋅ data: {id:1} ⋅ loadingFields: [name] ⋅ fields: [id, name]
+    ┌─
+    ⋅ status: success
+    ⋅ data: {id:1, name:User 1}
+    ⋅ loadingFields: null
+    ⋅ fields: [id, name]
+    └─
+    "
+  `);
+});
+
 test('useItem: cache miss still reports loading with showPartialAsRefetching enabled', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
     partialResources: partialResourcesConfig,
@@ -160,7 +211,11 @@ test('useItem: cache miss still reports loading with showPartialAsRefetching ena
   );
   await advanceTime(0);
 
-  expect(hook.result.current).toMatchObject({ status: 'loading', data: null });
+  expect(hook.result.current).toMatchObject({
+    status: 'loading',
+    data: null,
+    loadingFields: ['id', 'name'],
+  });
 
   hook.unmount();
   await flushAllTimers();
@@ -284,6 +339,94 @@ test('useListQuery: raw and masked hooks expose refetching vs success with showP
     ┌─
     ⋅ rawStatus: success
     ⋅ maskedStatus: success
+    ⋅ rawFirstItem: {id:1, name:User 1}
+    ⋅ maskedFirstItem: {id:1, name:User 1}
+    ⋅ fields: [id, name]
+    └─
+    "
+  `);
+});
+
+test('useListQuery: loadingFields exposes pending fields even when refetching is masked', async () => {
+  const env = createListQueryStoreTestEnv(initialServerData, {
+    partialResources: partialResourcesConfig,
+  });
+  const renders = createLoggerStore();
+
+  const { rerender } = renderHook(
+    ({ fields }: { fields: string[] }) => {
+      const rawResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { returnRefetchingStatus: true, showPartialAsRefetching: true, fields },
+      );
+      const maskedResult = env.apiStore.useListQuery(
+        { tableId: 'users' },
+        {
+          returnRefetchingStatus: false,
+          showPartialAsRefetching: true,
+          fields,
+        },
+      );
+
+      renders.add({
+        rawStatus: rawResult.status,
+        maskedStatus: maskedResult.status,
+        rawLoadingFields: rawResult.loadingFields ?? null,
+        maskedLoadingFields: maskedResult.loadingFields ?? null,
+        rawFirstItem: rawResult.items[0] ?? null,
+        maskedFirstItem: maskedResult.items[0] ?? null,
+        fields,
+      });
+    },
+    { initialProps: { fields: ['id'] } },
+  );
+
+  await flushAllTimers();
+
+  renders.addMark('Expand fields');
+  act(() => {
+    rerender({ fields: ['id', 'name'] });
+  });
+
+  await flushAllTimers();
+
+  expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+    "
+    ┌─
+    ⋅ rawStatus: loading
+    ⋅ maskedStatus: loading
+    ⋅ rawLoadingFields: [id]
+    ⋅ maskedLoadingFields: [id]
+    ⋅ rawFirstItem: null
+    ⋅ maskedFirstItem: null
+    ⋅ fields: [id]
+    └─
+    ┌─
+    ⋅ rawStatus: success
+    ⋅ maskedStatus: success
+    ⋅ rawLoadingFields: null
+    ⋅ maskedLoadingFields: null
+    ⋅ rawFirstItem: {id:1}
+    ⋅ maskedFirstItem: {id:1}
+    ⋅ fields: [id]
+    └─
+
+    >>> Expand fields
+
+    ┌─
+    ⋅ rawStatus: refetching
+    ⋅ maskedStatus: success
+    ⋅ rawLoadingFields: [name]
+    ⋅ maskedLoadingFields: [name]
+    ⋅ rawFirstItem: {id:1}
+    ⋅ maskedFirstItem: {id:1}
+    ⋅ fields: [id, name]
+    └─
+    ┌─
+    ⋅ rawStatus: success
+    ⋅ maskedStatus: success
+    ⋅ rawLoadingFields: null
+    ⋅ maskedLoadingFields: null
     ⋅ rawFirstItem: {id:1, name:User 1}
     ⋅ maskedFirstItem: {id:1, name:User 1}
     ⋅ fields: [id, name]
