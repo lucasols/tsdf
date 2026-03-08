@@ -589,6 +589,91 @@ describe('localStorage: list query store persistence', () => {
         type: 'list'
     `);
   });
+
+  test('hook loadSize smaller than hydrated query keeps the persisted larger size during refetch', async () => {
+    const productsQuery = { tableId: 'products' };
+    const cachedProducts = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      name: `Cached Product ${index + 1}`,
+    }));
+    const freshProducts = Array.from({ length: 20 }, (_, index) => ({
+      id: index + 1,
+      name: `Fresh Product ${index + 1}`,
+    }));
+    const storeName = 'lq-hook-loadsize-smaller';
+    const sessionKey = 'sess1';
+
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products: cachedProducts },
+      defaultQuerySize: 5,
+    });
+
+    writerEnv.apiStore.scheduleListQueryFetch(
+      'highPriority',
+      productsQuery,
+      10,
+    );
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { products: freshProducts },
+      defaultQuerySize: 5,
+    });
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { items, status, hasMore } = readerEnv.apiStore.useListQuery(
+        productsQuery,
+        {
+          loadSize: 5,
+          returnRefetchingStatus: true,
+        },
+      );
+
+      renders.add({
+        status,
+        count: items.length,
+        lastName: items.at(-1)?.name ?? null,
+        hasMore,
+      });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ count: 10 ⋅ lastName: Cached Product 10 ⋅ hasMore: ✅
+      -> status: refetching ⋅ count: 10 ⋅ lastName: Cached Product 10 ⋅ hasMore: ✅
+      -> status: success ⋅ count: 10 ⋅ lastName: Fresh Product 10 ⋅ hasMore: ✅
+      "
+    `);
+    expect(
+      readerEnv.serverTable.fetchHistory.map((entry) => {
+        if (entry.type !== 'list') return entry.type;
+        return {
+          type: entry.type,
+          offset: entry.offset,
+          limit: entry.limit,
+          itemIds:
+            entry.results === 'aborted'
+              ? 'aborted'
+              : entry.results.map((result) => result.itemId).join(','),
+        };
+      }),
+    ).toMatchInlineSnapshot(`
+      - itemIds: 'products||1,products||2,products||3,products||4,products||5,products||6,products||7,products||8,products||9,products||10'
+        limit: 10
+        offset: 0
+        type: 'list'
+    `);
+  });
       serverData: {
         t1: [
           { id: 1, name: 'Referenced 1' },
