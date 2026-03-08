@@ -7,6 +7,7 @@ import {
   test,
   vi,
 } from 'vitest';
+import { murmur2 } from '@ls-stack/utils/hash';
 import { createStorageAdapter } from '../../src/persistentStorage/storageAdapter';
 import type { StorageAdapter } from '../../src/persistentStorage/types';
 
@@ -104,13 +105,22 @@ describe('localStorage adapter', () => {
 describe('opfs adapter', () => {
   /**
    * Creates an in-memory mock of the OPFS filesystem APIs
-   * so we can test the real OPFS adapter logic (encode/decode, prefix matching).
+   * so we can test the real OPFS adapter logic (hashed buckets, prefix matching).
    */
-  function setupMockOpfs() {
+  function setupMockOpfs(settings?: { maxFileNameLength?: number }) {
     const files = new Map<string, string>();
 
     const mockCacheDir = {
       getFileHandle(name: string, options?: { create?: boolean }) {
+        if (
+          options?.create &&
+          settings?.maxFileNameLength !== undefined &&
+          name.length > settings.maxFileNameLength
+        ) {
+          return Promise.reject(
+            new DOMException('File name too long', 'InvalidModificationError'),
+          );
+        }
         if (!files.has(name) && !options?.create) {
           return Promise.reject(new DOMException('Not found', 'NotFoundError'));
         }
@@ -188,7 +198,7 @@ describe('opfs adapter', () => {
   });
 
   test('write and read roundtrip', async () => {
-    const { cleanup } = setupMockOpfs();
+    const { cleanup, files } = setupMockOpfs();
     try {
       const adapter = createStorageAdapter('opfs');
 
@@ -199,6 +209,23 @@ describe('opfs adapter', () => {
         age: 30
         name: 'Alice'
       `);
+      expect([...files.keys()]).toMatchInlineSnapshot(`
+        ['torbdc.json']
+      `);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('very long keys roundtrip even when the filesystem rejects long filenames', async () => {
+    const { cleanup } = setupMockOpfs({ maxFileNameLength: 40 });
+    try {
+      const adapter = createStorageAdapter('opfs');
+      const longKey = `tsdf.session.store.${'query-segment.'.repeat(40)}`;
+
+      await adapter.write(longKey, { value: 42 });
+
+      expect(await adapter.read(longKey)).toMatchInlineSnapshot(`value: 42`);
     } finally {
       cleanup();
     }
@@ -252,6 +279,67 @@ describe('opfs adapter', () => {
       const keys = await adapter.listKeys('tsdf.s1.');
 
       expect(keys.sort()).toMatchInlineSnapshot(`['tsdf.s1.a', 'tsdf.s1.b']`);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('colliding keys share a bucket without corrupting each other', async () => {
+    const { cleanup } = setupMockOpfs();
+    try {
+      const adapter = createStorageAdapter('opfs');
+      const firstKey = 'collision-key-amy-3y';
+      const secondKey = 'collision-key-fht-5r';
+
+      expect(murmur2(firstKey)).toBe(murmur2(secondKey));
+
+      await adapter.write(firstKey, { name: 'first' });
+      await adapter.write(secondKey, { name: 'second' });
+
+      expect(await adapter.read(firstKey)).toMatchInlineSnapshot(
+        `name: 'first'`,
+      );
+      expect(await adapter.read(secondKey)).toMatchInlineSnapshot(
+        `name: 'second'`,
+      );
+      expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(`
+        ['collision-key-amy-3y', 'collision-key-fht-5r']
+      `);
+
+      await adapter.remove(firstKey);
+
+      expect(await adapter.read(firstKey)).toBeNull();
+      expect(await adapter.read(secondKey)).toMatchInlineSnapshot(
+        `name: 'second'`,
+      );
+
+      await adapter.removeByPrefix('collision-key-fht');
+
+      expect(await adapter.read(secondKey)).toBeNull();
+      expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(
+        `[]`,
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('malformed buckets are ignored on read and replaced on write', async () => {
+    const { cleanup, files } = setupMockOpfs();
+    try {
+      const adapter = createStorageAdapter('opfs');
+      const key = 'broken-key';
+      files.set(`${murmur2(key)}.json`, '{broken');
+
+      expect(await adapter.read(key)).toBeNull();
+      expect(await adapter.listKeys('broken')).toMatchInlineSnapshot(`[]`);
+
+      await adapter.write(key, { restored: true });
+
+      expect(await adapter.read(key)).toMatchInlineSnapshot(`restored: '✅'`);
+      expect(files.get(`${murmur2(key)}.json`)).toBe(
+        '{"entries":[{"key":"broken-key","value":{"restored":true}}]}',
+      );
     } finally {
       cleanup();
     }

@@ -1,4 +1,12 @@
+import { murmur2 } from '@ls-stack/utils/hash';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  rc_array,
+  rc_object,
+  rc_parse_json,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
 import type { StorageAdapter, StorageBackend } from './types';
 
 function createLocalStorageAdapter(): StorageAdapter {
@@ -55,57 +63,17 @@ function createLocalStorageAdapter(): StorageAdapter {
   };
 }
 
-const PERCENT_ENCODED_REGEX = /%([0-9A-F]{2})/g;
-const BASE64_PLUS_REGEX = /\+/g;
-const BASE64_SLASH_REGEX = /\//g;
-const BASE64_PADDING_REGEX = /=+$/;
-const BASE64URL_PLUS_REGEX = /-/g;
-const BASE64URL_SLASH_REGEX = /_/g;
-
-/**
- * Encodes a key to a safe filename for OPFS.
- * Uses Base64url encoding (RFC 4648 Section 5).
- */
-function encodeKeyToFileName(key: string): string {
-  const encoded = btoa(
-    encodeURIComponent(key).replace(PERCENT_ENCODED_REGEX, (_, p1: string) =>
-      String.fromCharCode(parseInt(p1, 16)),
-    ),
-  );
-
-  // Convert to base64url: replace + with -, / with _, remove padding =
-  return encoded
-    .replace(BASE64_PLUS_REGEX, '-')
-    .replace(BASE64_SLASH_REGEX, '_')
-    .replace(BASE64_PADDING_REGEX, '');
-}
-
-/**
- * Decodes a base64url-encoded filename back to the original key.
- * Inverse of encodeKeyToFileName.
- */
-function decodeFileNameToKey(encoded: string): string {
-  // Reverse base64url: replace - with +, _ with /
-  let base64 = encoded
-    .replace(BASE64URL_PLUS_REGEX, '+')
-    .replace(BASE64URL_SLASH_REGEX, '/');
-
-  // Add back padding
-  const remainder = base64.length % 4;
-  if (remainder === 2) base64 += '==';
-  else if (remainder === 3) base64 += '=';
-
-  // Decode base64 to raw bytes, then convert back to percent-encoded string
-  const raw = atob(base64);
-  const percentEncoded = Array.from(raw, (char) => {
-    const code = char.charCodeAt(0);
-    return `%${code.toString(16).padStart(2, '0')}`;
-  }).join('');
-
-  return decodeURIComponent(percentEncoded);
-}
-
 const OPFS_CACHE_DIR = 'tsdf-cache';
+
+const opfsBucketEntrySchema = rc_object({ key: rc_string, value: rc_unknown });
+
+const opfsBucketFileSchema = rc_object({
+  entries: rc_array(opfsBucketEntrySchema),
+});
+
+type OpfsBucketEntry = { key: string; value: unknown };
+
+type OpfsBucketFile = { entries: OpfsBucketEntry[] };
 
 function createOpfsAdapter(): StorageAdapter {
   async function getCacheDir(): Promise<FileSystemDirectoryHandle> {
@@ -114,17 +82,49 @@ function createOpfsAdapter(): StorageAdapter {
   }
 
   function getFileName(key: string): string {
-    return `${encodeKeyToFileName(key)}.json`;
+    return `${murmur2(key)}.json`;
+  }
+
+  function parseBucket(raw: string): OpfsBucketFile | null {
+    const result = rc_parse_json(raw, opfsBucketFileSchema);
+    return result.ok ? result.value : null;
+  }
+
+  async function readBucket(
+    dir: FileSystemDirectoryHandle,
+    key: string,
+  ): Promise<OpfsBucketFile | null> {
+    try {
+      const fileHandle = await dir.getFileHandle(getFileName(key));
+      const file = await fileHandle.getFile();
+      return parseBucket(await file.text());
+    } catch {
+      return null;
+    }
+  }
+
+  async function writeBucket(
+    dir: FileSystemDirectoryHandle,
+    key: string,
+    bucket: OpfsBucketFile,
+  ): Promise<void> {
+    const fileHandle = await dir.getFileHandle(getFileName(key), {
+      create: true,
+    });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(bucket));
+    await writable.close();
   }
 
   return {
     async read<T>(key: string): Promise<T | null> {
       try {
         const dir = await getCacheDir();
-        const fileHandle = await dir.getFileHandle(getFileName(key));
-        const file = await fileHandle.getFile();
-        const text = await file.text();
-        return __LEGIT_CAST__<T, unknown>(JSON.parse(text));
+        const bucket = await readBucket(dir, key);
+        const entry = bucket?.entries.find((item) => item.key === key);
+
+        if (!entry) return null;
+        return __LEGIT_CAST__<T, unknown>(entry.value);
       } catch {
         return null;
       }
@@ -132,18 +132,36 @@ function createOpfsAdapter(): StorageAdapter {
 
     async write<T>(key: string, value: T): Promise<void> {
       const dir = await getCacheDir();
-      const fileHandle = await dir.getFileHandle(getFileName(key), {
-        create: true,
-      });
-      const writable = await fileHandle.createWritable();
-      await writable.write(JSON.stringify(value));
-      await writable.close();
+      const bucket = (await readBucket(dir, key)) ?? { entries: [] };
+      const nextEntry = { key, value };
+      const existingIndex = bucket.entries.findIndex(
+        (item) => item.key === key,
+      );
+
+      if (existingIndex === -1) {
+        bucket.entries.push(nextEntry);
+      } else {
+        bucket.entries[existingIndex] = nextEntry;
+      }
+
+      await writeBucket(dir, key, bucket);
     },
 
     async remove(key: string): Promise<void> {
       try {
         const dir = await getCacheDir();
-        await dir.removeEntry(getFileName(key));
+        const bucket = await readBucket(dir, key);
+        if (!bucket) return;
+
+        const nextEntries = bucket.entries.filter((item) => item.key !== key);
+        if (nextEntries.length === bucket.entries.length) return;
+
+        if (nextEntries.length === 0) {
+          await dir.removeEntry(getFileName(key));
+          return;
+        }
+
+        await writeBucket(dir, key, { entries: nextEntries });
       } catch {
         // Silently handle not-found errors
       }
@@ -156,15 +174,27 @@ function createOpfsAdapter(): StorageAdapter {
         for await (const [name] of dir.entries()) {
           if (!name.endsWith('.json')) continue;
 
-          const nameWithoutExt = name.slice(0, -5);
-
           try {
-            const originalKey = decodeFileNameToKey(nameWithoutExt);
-            if (originalKey.startsWith(prefix)) {
+            const fileHandle = await dir.getFileHandle(name);
+            const file = await fileHandle.getFile();
+            const bucket = parseBucket(await file.text());
+            if (!bucket) continue;
+
+            const nextEntries = bucket.entries.filter(
+              (entry) => !entry.key.startsWith(prefix),
+            );
+
+            if (nextEntries.length === bucket.entries.length) continue;
+
+            if (nextEntries.length === 0) {
               await dir.removeEntry(name);
+            } else {
+              const writable = await fileHandle.createWritable();
+              await writable.write(JSON.stringify({ entries: nextEntries }));
+              await writable.close();
             }
           } catch {
-            // Ignore entries that can't be decoded or removed
+            // Ignore entries that can't be read or removed
           }
         }
       } catch {
@@ -180,12 +210,16 @@ function createOpfsAdapter(): StorageAdapter {
         for await (const [name] of dir.entries()) {
           if (!name.endsWith('.json')) continue;
 
-          const nameWithoutExt = name.slice(0, -5);
-
           try {
-            const originalKey = decodeFileNameToKey(nameWithoutExt);
-            if (originalKey.startsWith(prefix)) {
-              keys.push(originalKey);
+            const fileHandle = await dir.getFileHandle(name);
+            const file = await fileHandle.getFile();
+            const bucket = parseBucket(await file.text());
+            if (!bucket) continue;
+
+            for (const entry of bucket.entries) {
+              if (entry.key.startsWith(prefix)) {
+                keys.push(entry.key);
+              }
             }
           } catch {
             // Ignore entries that can't be decoded
