@@ -71,6 +71,7 @@ type MockOpfsStorageAdapterBase = {
   storage: ReturnType<typeof createInMemoryPersistentTestStore>['storage'];
   scope: ReturnType<typeof createInMemoryPersistentTestStore>['scope'];
   readRequests: string[];
+  scopeReadRequests: () => string[];
   clearReadRequests: () => void;
   getRaw: (key: string) => string | null;
   has: (key: string) => boolean;
@@ -97,6 +98,8 @@ export function createMockOpfsStorageAdapter({
   Partial<PersistentTestStoreScope> {
   const persistentStore = createInMemoryPersistentTestStore();
   const readRequests: string[] = [];
+  const scopePrefix =
+    storeName && sessionKey ? `tsdf.${sessionKey}.${storeName}.` : null;
 
   for (const [key, value] of Object.entries(initialState?.rawEntries ?? {})) {
     if (typeof value === 'string') {
@@ -174,6 +177,15 @@ export function createMockOpfsStorageAdapter({
     scope: persistentStore.scope,
     ...(scopedHelpers ?? {}),
     readRequests,
+    scopeReadRequests() {
+      if (!scopePrefix) {
+        return [...readRequests];
+      }
+
+      return readRequests.map((key) =>
+        key.startsWith(scopePrefix) ? key.slice(scopePrefix.length) : key,
+      );
+    },
     clearReadRequests() {
       readRequests.length = 0;
     },

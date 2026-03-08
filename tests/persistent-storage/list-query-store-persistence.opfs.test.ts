@@ -212,204 +212,204 @@ describe('opfs: list query store persistence', () => {
     `);
   });
 
-//   test('ignored cached items are skipped during query preload and removed from opfs', async () => {
-//     const storeName = 'lq-opfs-ignore';
-//     const sessionKey = 'sess1';
-//     const usersQuery = { tableId: 'users' };
-//     const mockAdapter = createMockOpfsStorageAdapter({
-//       readDelayMs: 50,
-//       storeName,
-//       sessionKey,
-//       initialState: {
-//         listQuery: {
-//           items: [
-//             { tableId: 'users', id: 1, data: { id: 1, name: 'Kept' } },
-//             { tableId: 'users', id: 2, data: { id: 2, name: 'Ignored' } },
-//           ],
-//           queries: [
-//             {
-//               params: usersQuery,
-//               items: [
-//                 { tableId: 'users', id: 1 },
-//                 { tableId: 'users', id: 2 },
-//               ],
-//             },
-//           ],
-//         },
-//       },
-//     });
+  test('ignored cached items are skipped during query preload and removed from opfs', async () => {
+    const storeName = 'lq-opfs-ignore';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const mockAdapter = createMockOpfsStorageAdapter({
+      readDelayMs: 50,
+      storeName,
+      sessionKey,
+      initialState: {
+        listQuery: {
+          items: [
+            { tableId: 'users', id: 1, data: { id: 1, name: 'Kept' } },
+            { tableId: 'users', id: 2, data: { id: 2, name: 'Ignored' } },
+          ],
+          queries: [
+            {
+              params: usersQuery,
+              items: [
+                { tableId: 'users', id: 1 },
+                { tableId: 'users', id: 2 },
+              ],
+            },
+          ],
+        },
+      },
+    });
 
-//     const env = createEnv({
-//       storeName,
-//       sessionKey,
-//       storageAdapter: mockAdapter.adapter,
-//       ignoreItems: (payload) => payload.endsWith('||2'),
-//     });
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+      ignoreItems: (payload) => payload.endsWith('||2'),
+    });
 
-//     const preloadPromise =
-//       env.apiStore.preloadQueryFromPersistentStorage(usersQuery);
-//     await advanceTime(100);
-//     await preloadPromise;
-//     await advanceTime(2100);
-//     await flushAllTimers();
+    const preloadPromise =
+      env.apiStore.preloadQueryFromPersistentStorage(usersQuery);
+    await advanceTime(100);
+    await preloadPromise;
+    await advanceTime(2100);
+    await flushAllTimers();
 
-//     expect(env.apiStore.getQueryState(usersQuery)?.items)
-//       .toMatchInlineSnapshot(`
-//         ['"users||1']
-//       `);
-//     expect(env.apiStore.getItemState('users||2')).toBeUndefined();
-//     expect(
-//       mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 2)),
-//     ).toBe(false);
-//   });
+    expect(env.apiStore.getQueryState(usersQuery)?.items)
+      .toMatchInlineSnapshot(`
+        ['"users||1']
+      `);
+    expect(env.apiStore.getItemState('users||2')).toBeUndefined();
+    expect(
+      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 2)),
+    ).toBe(false);
+  });
 
-//   test('round-trip persistence preserves partial-resource metadata for cached list queries', async () => {
-//     const usersQuery = { tableId: 'users' };
-//     const storeName = 'lq-opfs-partial-roundtrip';
-//     const sessionKey = 'sess1';
-//     const mockAdapter = createMockOpfsStorageAdapter({
-//       readDelayMs: 100,
-//       storeName,
-//       sessionKey,
-//     });
+  test('round-trip persistence preserves partial-resource metadata for cached list queries', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-opfs-partial-roundtrip';
+    const sessionKey = 'sess1';
+    const mockAdapter = createMockOpfsStorageAdapter({
+      readDelayMs: 100,
+      storeName,
+      sessionKey,
+    });
 
-//     const writerEnv = createEnv({
-//       storeName,
-//       sessionKey,
-//       storageAdapter: mockAdapter.adapter,
-//       partialResources: partialResourcesConfig,
-//       serverData: { users: [{ id: 1, name: 'Cached' }] },
-//     });
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Cached' }] },
+    });
 
-//     renderHook(() => {
-//       writerEnv.apiStore.useListQuery(usersQuery, { fields: ['id', 'name'] });
-//     });
+    renderHook(() => {
+      writerEnv.apiStore.useListQuery(usersQuery, { fields: ['id', 'name'] });
+    });
 
-//     await flushAllTimers();
-//     await advanceTime(1100);
-//     await flushAllTimers();
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
 
-//     const readerEnv = createEnv({
-//       storeName,
-//       sessionKey,
-//       storageAdapter: mockAdapter.adapter,
-//       partialResources: partialResourcesConfig,
-//       serverData: { users: [{ id: 1, name: 'Fresh' }] },
-//     });
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+      partialResources: partialResourcesConfig,
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+    });
 
-//     const renders = createLoggerStore();
+    const renders = createLoggerStore();
 
-//     renderHook(() => {
-//       const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
-//         fields: ['id', 'name'],
-//         returnRefetchingStatus: true,
-//         disableRefetchOnMount: true,
-//       });
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        fields: ['id', 'name'],
+        returnRefetchingStatus: true,
+        disableRefetchOnMount: true,
+      });
 
-//       renders.add({ status, names: items.map((item) => item.name) });
-//     });
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
 
-//     await advanceTime(200);
+    await advanceTime(200);
 
-//     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
-//       "
-//       -> status: loading ⋅ names: []
-//       -> status: success ⋅ names: [Cached]
-//       "
-//     `);
-//     expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
-//     expect(
-//       readerEnv.store.state.itemLoadedFields[
-//         mockAdapter.listQuery.itemKey('users', 1)
-//       ],
-//     ).toMatchInlineSnapshot(`
-//       ['id', 'name']
-//     `);
-//   });
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ names: []
+      -> status: success ⋅ names: [Cached]
+      "
+    `);
+    expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
+    expect(
+      readerEnv.store.state.itemLoadedFields[
+        mockAdapter.listQuery.itemKey('users', 1)
+      ],
+    ).toMatchInlineSnapshot(`
+      ['id', 'name']
+    `);
+  });
 
-//   test('hydrated partial-resource items keep loading until missing fields are fetched', async () => {
-//     const storeName = 'lq-opfs-item-partial-missing-fields';
-//     const sessionKey = 'sess1';
-//     const mockAdapter = createMockOpfsStorageAdapter({
-//       readDelayMs: 100,
-//       storeName,
-//       sessionKey,
-//     });
-//     const itemPayload = 'users||1';
+  test('hydrated partial-resource items keep loading until missing fields are fetched', async () => {
+    const storeName = 'lq-opfs-item-partial-missing-fields';
+    const sessionKey = 'sess1';
+    const mockAdapter = createMockOpfsStorageAdapter({
+      readDelayMs: 100,
+      storeName,
+      sessionKey,
+    });
+    const itemPayload = 'users||1';
 
-//     const writerEnv = createEnv({
-//       storeName,
-//       sessionKey,
-//       storageAdapter: mockAdapter.adapter,
-//       partialResources: partialResourcesConfig,
-//       serverData: {
-//         users: [{ id: 1, name: 'Cached', age: 20, email: 'cached@site.test' }],
-//       },
-//     });
+    const writerEnv = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Cached', age: 20, email: 'cached@site.test' }],
+      },
+    });
 
-//     renderHook(() => {
-//       writerEnv.apiStore.useItem(itemPayload, {
-//         fields: ['id', 'name', 'age'],
-//       });
-//     });
+    renderHook(() => {
+      writerEnv.apiStore.useItem(itemPayload, {
+        fields: ['id', 'name', 'age'],
+      });
+    });
 
-//     await flushAllTimers();
-//     await advanceTime(1100);
-//     await flushAllTimers();
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
 
-//     const readerEnv = createEnv({
-//       storeName,
-//       sessionKey,
-//       storageAdapter: mockAdapter.adapter,
-//       partialResources: partialResourcesConfig,
-//       serverData: {
-//         users: [{ id: 1, name: 'Fresh', age: 21, email: 'fresh@site.test' }],
-//       },
-//     });
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+      partialResources: partialResourcesConfig,
+      serverData: {
+        users: [{ id: 1, name: 'Fresh', age: 21, email: 'fresh@site.test' }],
+      },
+    });
 
-//     const renders = createLoggerStore();
+    const renders = createLoggerStore();
 
-//     renderHook(() => {
-//       const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
-//         fields: ['id', 'name', 'age', 'email'],
-//         returnRefetchingStatus: true,
-//       });
+    renderHook(() => {
+      const { data, status } = readerEnv.apiStore.useItem(itemPayload, {
+        fields: ['id', 'name', 'age', 'email'],
+        returnRefetchingStatus: true,
+      });
 
-//       renders.add({
-//         status,
-//         name: data?.name ?? null,
-//         age: data?.age ?? null,
-//         email: data?.email ?? null,
-//       });
-//     });
+      renders.add({
+        status,
+        name: data?.name ?? null,
+        age: data?.age ?? null,
+        email: data?.email ?? null,
+      });
+    });
 
-//     await flushAllTimers();
+    await flushAllTimers();
 
-//     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
-//       "
-//       -> status: loading ⋅ name: null ⋅ age: null ⋅ email: null
-//       -> status: success ⋅ name: Fresh ⋅ age: 21 ⋅ email: fresh@site.test
-//       "
-//     `);
-//     expect(
-//       readerEnv.serverTable.getRequestHistory('item').map((entry) => {
-//         const { time: _time, ...request } = entry;
-//         return request;
-//       }),
-//     ).toMatchInlineSnapshot(`
-//       - _type: 'item'
-//         payload:
-//           fields: ['id', 'name', 'age', 'email']
-//           itemId: 'users||1'
-//     `);
-//     expect(
-//       readerEnv.store.state.itemLoadedFields[
-//         mockAdapter.listQuery.itemKey('users', 1)
-//       ],
-//     ).toMatchInlineSnapshot(`
-//       ['age', 'email', 'id', 'name']
-//     `);
-//   });
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ name: null ⋅ age: null ⋅ email: null
+      -> status: success ⋅ name: Fresh ⋅ age: 21 ⋅ email: fresh@site.test
+      "
+    `);
+    expect(
+      readerEnv.serverTable.getRequestHistory('item').map((entry) => {
+        const { time: _time, ...request } = entry;
+        return request;
+      }),
+    ).toMatchInlineSnapshot(`
+      - _type: 'item'
+        payload:
+          fields: ['id', 'name', 'age', 'email']
+          itemId: 'users||1'
+    `);
+    expect(
+      readerEnv.store.state.itemLoadedFields[
+        mockAdapter.listQuery.itemKey('users', 1)
+      ],
+    ).toMatchInlineSnapshot(`
+      ['age', 'email', 'id', 'name']
+    `);
+  });
 
 //   test('hydrated partial-resource queries refetch when hooks request fields missing from storage', async () => {
 //     const usersQuery = { tableId: 'users' };
