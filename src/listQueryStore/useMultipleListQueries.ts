@@ -74,7 +74,9 @@ export function useMultipleListQueries<
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
-  preloadQueries: ((payloads: QueryPayload[]) => Promise<void>) | undefined,
+  preloadQueries:
+    | ((payloads: QueryPayload[]) => Promise<boolean[]>)
+    | undefined,
   scheduleAutomaticListQueryFetch: (
     fetchType: FetchType,
     payload: QueryPayload,

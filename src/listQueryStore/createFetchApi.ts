@@ -92,8 +92,8 @@ export type CreateFetchApiOptions<
   normalizeFieldsOption: (
     fields: FieldsInput | undefined,
   ) => string[] | undefined;
-  preloadQueries?: (queryKeys: string[]) => Promise<void>;
-  preloadItems?: (itemKeys: string[]) => Promise<void>;
+  preloadQueries?: (queryKeys: string[]) => Promise<boolean[]>;
+  preloadItems?: (itemKeys: string[]) => Promise<boolean[]>;
   testInitialLastFetchStartTime?: number;
   noFetchItemFnError: string;
   onQueryFetchStart?: (

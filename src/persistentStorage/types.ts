@@ -42,6 +42,14 @@ export type StorageCacheEntry<T> = {
   version: number;
 };
 
+/** Result entry returned by explicit persistent-storage preload APIs. */
+export type PersistentStoragePreloadResult<
+  Payload extends ValidPayload = ValidPayload,
+> = {
+  payload: Payload;
+  preloaded: boolean;
+};
+
 // --- Config Types ---
 
 /** Base config shared by all store types. */

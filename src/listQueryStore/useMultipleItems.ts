@@ -73,7 +73,7 @@ export function useMultipleItems<
     payload: ItemPayload,
     options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
-  preloadItems: ((payloads: ItemPayload[]) => Promise<void>) | undefined,
+  preloadItems: ((payloads: ItemPayload[]) => Promise<boolean[]>) | undefined,
   itemInvalidationWasTriggered: Set<string>,
   itemFieldInvalidationPriorities: Map<string, FetchType>,
   itemPendingInvalidationFields: Map<string, string[]>,

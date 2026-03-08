@@ -268,8 +268,8 @@ export type ListQueryPersistenceSetup<
   attach(
     store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   ): void;
-  preloadItems(itemKeys: string[]): Promise<void>;
-  preloadQueries(queryKeys: string[]): Promise<void>;
+  preloadItems(itemKeys: string[]): Promise<boolean[]>;
+  preloadQueries(queryKeys: string[]): Promise<boolean[]>;
   hasAsyncPreload: boolean;
   dispose(): void;
   clear(): Promise<void>;
@@ -340,8 +340,8 @@ export function setupListQueryPersistence<
   let unsubscribe: (() => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
-  const pendingItemPreloads = new Map<string, Promise<void>>();
-  const pendingQueryPreloads = new Map<string, Promise<void>>();
+  const pendingItemPreloads = new Map<string, Promise<boolean>>();
+  const pendingQueryPreloads = new Map<string, Promise<boolean>>();
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -404,9 +404,14 @@ export function setupListQueryPersistence<
     return initialState;
   }
 
-  async function preloadItem(itemKey: string): Promise<void> {
-    if (backend !== 'opfs' || !storeRef) return;
-    if (storeRef.state.itemQueries[itemKey] !== undefined) return;
+  async function preloadItem(itemKey: string): Promise<boolean> {
+    if (backend !== 'opfs' || !storeRef) return false;
+    if (storeRef.state.itemQueries[itemKey] !== undefined) {
+      return (
+        storeRef.state.itemQueries[itemKey] !== null &&
+        storeRef.state.items[itemKey] !== undefined
+      );
+    }
 
     const existingPromise = pendingItemPreloads.get(itemKey);
     if (existingPromise) return existingPromise;
@@ -415,7 +420,9 @@ export function setupListQueryPersistence<
     const promise = itemNamespace
       .load(itemKey)
       .then((cached) => {
-        if (!cached || currentGeneration !== generation || !storeRef) return;
+        if (!cached || currentGeneration !== generation || !storeRef) {
+          return false;
+        }
 
         const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
           cached,
@@ -424,10 +431,15 @@ export function setupListQueryPersistence<
         );
         if (!itemState) {
           scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
-          return;
+          return false;
         }
 
-        if (storeRef.state.itemQueries[itemKey] !== undefined) return;
+        if (storeRef.state.itemQueries[itemKey] !== undefined) {
+          return (
+            storeRef.state.itemQueries[itemKey] !== null &&
+            storeRef.state.items[itemKey] !== undefined
+          );
+        }
 
         storeRef.produceState(
           (draft) => {
@@ -439,6 +451,8 @@ export function setupListQueryPersistence<
           },
           { action: 'persistent-storage-hydrate' },
         );
+
+        return true;
       })
       .finally(() => {
         if (currentGeneration === generation) {
@@ -450,14 +464,16 @@ export function setupListQueryPersistence<
     return promise;
   }
 
-  async function preloadItems(itemKeys: string[]): Promise<void> {
-    if (backend !== 'opfs') return;
-    await Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+  async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
+    if (backend !== 'opfs') return itemKeys.map(() => false);
+    return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
   }
 
-  async function preloadQuery(queryKey: string): Promise<void> {
-    if (backend !== 'opfs' || !storeRef) return;
-    if (storeRef.state.queries[queryKey] !== undefined) return;
+  async function preloadQuery(queryKey: string): Promise<boolean> {
+    if (backend !== 'opfs' || !storeRef) return false;
+    if (storeRef.state.queries[queryKey] !== undefined) {
+      return true;
+    }
 
     const existingPromise = pendingQueryPreloads.get(queryKey);
     if (existingPromise) return existingPromise;
@@ -466,13 +482,18 @@ export function setupListQueryPersistence<
     const promise = queryNamespace
       .load(queryKey)
       .then(async (cached) => {
-        if (!cached || currentGeneration !== generation || !storeRef) return;
+        if (!cached || currentGeneration !== generation || !storeRef) {
+          return false;
+        }
         const activeStore = storeRef;
 
         await preloadItems(cached.items);
-        if (currentGeneration !== generation || activeStore !== storeRef)
-          return;
-        if (activeStore.state.queries[queryKey] !== undefined) return;
+        if (currentGeneration !== generation || activeStore !== storeRef) {
+          return false;
+        }
+        if (activeStore.state.queries[queryKey] !== undefined) {
+          return true;
+        }
 
         const filteredItemKeys = cached.items.filter((itemKey) => {
           return (
@@ -497,6 +518,8 @@ export function setupListQueryPersistence<
           },
           { action: 'persistent-storage-hydrate' },
         );
+
+        return true;
       })
       .finally(() => {
         if (currentGeneration === generation) {
@@ -508,9 +531,9 @@ export function setupListQueryPersistence<
     return promise;
   }
 
-  async function preloadQueries(queryKeys: string[]): Promise<void> {
-    if (backend !== 'opfs') return;
-    await Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
+  async function preloadQueries(queryKeys: string[]): Promise<boolean[]> {
+    if (backend !== 'opfs') return queryKeys.map(() => false);
+    return Promise.all(queryKeys.map((queryKey) => preloadQuery(queryKey)));
   }
 
   async function evictStoredQueries(): Promise<Set<string>> {

@@ -116,6 +116,7 @@ function createEnv(options: {
   version?: number;
   maxItems?: number;
   pinnedItems?: string[];
+  ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Record<string, ItemState>;
   onPersistentStorageError?: (error: unknown) => void;
 }) {
@@ -129,6 +130,7 @@ function createEnv(options: {
       version: options.version,
       maxItems: options.maxItems,
       pinnedItems: options.pinnedItems,
+      ignoreItems: options.ignoreItems,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -297,6 +299,40 @@ describe('localStorage: collection store persistence', () => {
     ]);
   });
 
+  test('ignoreItems predicate skips matching payloads and removes stale cached entries on flush', async () => {
+    setCachedCollectionItem('col-ignore', 'sess1', 'skip:cached', {
+      value: { id: 'skip:cached', name: 'Skip cached' },
+    });
+    setCachedCollectionItem('col-ignore', 'sess1', 'keep:cached', {
+      value: { id: 'keep:cached', name: 'Keep cached' },
+    });
+
+    const env = createEnv({
+      storeName: 'col-ignore',
+      sessionKey: 'sess1',
+      ignoreItems: (payload) => payload.startsWith('skip:'),
+    });
+
+    env.apiStore.addItemToState('skip:live', {
+      value: { id: 'skip:live', name: 'Skip live' },
+    });
+    env.apiStore.addItemToState('keep:live', {
+      value: { id: 'keep:live', name: 'Keep live' },
+    });
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listStoredItemPayloads('col-ignore', 'sess1').sort()).toEqual([
+      'keep:cached',
+      'keep:live',
+    ]);
+    expect(listStoredItemKeys('col-ignore', 'sess1').sort()).toEqual([
+      itemKey('keep:cached'),
+      itemKey('keep:live'),
+    ]);
+  });
+
   test('when maxItems is exceeded, pinnedItems keeps that payload in storage', async () => {
     // Seed distinct timestamps so the kept payloads are easy to understand.
     setCachedCollectionItem('col-max-items', 'sess1', 'a', {
@@ -390,7 +426,10 @@ describe('localStorage: collection store persistence', () => {
       onPersistentStorageError,
     });
 
-    await env.apiStore.preloadItemFromPersistentStorage('1');
+    await expect(env.apiStore.preloadItemFromPersistentStorage('1')).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '❌' }
+    `);
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
     expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({

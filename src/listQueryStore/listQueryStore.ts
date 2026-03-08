@@ -37,6 +37,7 @@ import {
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import type {
   ListQueryPersistentStorageConfig,
+  PersistentStoragePreloadResult,
   StorageAdapter,
 } from '../persistentStorage/types';
 import { createFetchApi } from './createFetchApi';
@@ -705,36 +706,60 @@ export function createListQueryStore<
     recordItemSyncVersion(itemKey, message, consistency);
   }
 
+  /**
+   * Attempts to hydrate cached queries from persistent storage before the first
+   * hook read. Returns one result per requested query.
+   */
   async function preloadQueryFromPersistentStorage(
     payload: QueryPayload | QueryPayload[],
-  ): Promise<void> {
+  ): Promise<PersistentStoragePreloadResult<QueryPayload>[]> {
+    const payloads = Array.isArray(payload) ? payload : [payload];
+
     if (!persistence?.hasAsyncPreload) {
       persistentStorageConfig?.onPersistentStorageError?.(
         new Error('Async preload is not available'),
       );
-      return;
+      return payloads.map((queryPayload) => ({
+        payload: queryPayload,
+        preloaded: false,
+      }));
     }
 
-    const payloads = Array.isArray(payload) ? payload : [payload];
-    await persistence.preloadQueries(
+    const results = await persistence.preloadQueries(
       payloads.map((queryPayload) => getQueryKey(queryPayload)),
     );
+    return payloads.map((queryPayload, index) => ({
+      payload: queryPayload,
+      preloaded: results[index] ?? false,
+    }));
   }
 
+  /**
+   * Attempts to hydrate cached items from persistent storage before the first
+   * hook read. Returns one result per requested item.
+   */
   async function preloadItemFromPersistentStorage(
     payload: ItemPayload | ItemPayload[],
-  ): Promise<void> {
+  ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
+    const payloads = Array.isArray(payload) ? payload : [payload];
+
     if (!persistence?.hasAsyncPreload) {
       persistentStorageConfig?.onPersistentStorageError?.(
         new Error('Async preload is not available'),
       );
-      return;
+      return payloads.map((itemPayload) => ({
+        payload: itemPayload,
+        preloaded: false,
+      }));
     }
 
-    const payloads = Array.isArray(payload) ? payload : [payload];
-    await persistence.preloadItems(
+    const results = await persistence.preloadItems(
       payloads.map((itemPayload) => getItemKey(itemPayload)),
     );
+    return payloads.map((itemPayload, index) => ({
+      payload: itemPayload,
+      preloaded: results[index] ?? false,
+    }));
   }
 
   const {

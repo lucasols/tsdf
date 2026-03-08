@@ -15,6 +15,7 @@ import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useLi
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
 import type {
   CollectionPersistentStorageConfig,
+  PersistentStoragePreloadResult,
   StorageAdapter,
 } from '../persistentStorage/types';
 import {
@@ -1009,20 +1010,29 @@ export function createCollectionStore<
     return store.state[itemKey];
   }
 
+  /**
+   * Attempts to hydrate cached items from persistent storage before the first
+   * hook read. Returns one result per requested payload.
+   */
   async function preloadItemFromPersistentStorage(
     params: ItemPayload | ItemPayload[],
-  ): Promise<void> {
+  ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
+    const payloads = Array.isArray(params) ? params : [params];
+
     if (!persistence?.hasAsyncPreload) {
       persistentStorageConfig?.onPersistentStorageError?.(
         new Error('Async preload is not available'),
       );
-      return;
+      return payloads.map((payload) => ({ payload, preloaded: false }));
     }
 
-    const payloads = Array.isArray(params) ? params : [params];
-    await persistence.preloadItems(
+    const results = await persistence.preloadItems(
       payloads.map((payload) => getItemKey(payload)),
     );
+    return payloads.map((payload, index) => ({
+      payload,
+      preloaded: results[index] ?? false,
+    }));
   }
 
   function useMultipleItems<

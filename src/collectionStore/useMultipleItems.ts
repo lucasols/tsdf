@@ -56,7 +56,7 @@ export function useMultipleItems<
   getItemState: (
     payload: ItemPayload,
   ) => TSFDCollectionItem<ItemState, ItemPayload> | null | undefined,
-  preloadItems: ((payloads: ItemPayload[]) => Promise<void>) | undefined,
+  preloadItems: ((payloads: ItemPayload[]) => Promise<boolean[]>) | undefined,
   scheduleAutomaticFetch: (fetchType: FetchType, payload: ItemPayload) => void,
   invalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,

@@ -145,7 +145,7 @@ export type CollectionPersistenceSetup<
     baseState: TSFDCollectionState<ItemState, ItemPayload>,
   ): TSFDCollectionState<ItemState, ItemPayload>;
   attach(store: Store<TSFDCollectionState<ItemState, ItemPayload>>): void;
-  preloadItems(itemKeys: string[]): Promise<void>;
+  preloadItems(itemKeys: string[]): Promise<boolean[]>;
   hasAsyncPreload: boolean;
   dispose(): void;
   clear(): Promise<void>;
@@ -194,7 +194,7 @@ export function setupCollectionPersistence<
   let unsubscribe: (() => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
-  const pendingPreloads = new Map<string, Promise<void>>();
+  const pendingPreloads = new Map<string, Promise<boolean>>();
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -236,9 +236,10 @@ export function setupCollectionPersistence<
     return initialState;
   }
 
-  async function preloadItem(itemKey: string): Promise<void> {
-    if (backend !== 'opfs' || !storeRef) return;
-    if (storeRef.state[itemKey] !== undefined) return;
+  async function preloadItem(itemKey: string): Promise<boolean> {
+    if (backend !== 'opfs' || !storeRef) return false;
+    if (storeRef.state[itemKey] !== undefined)
+      return storeRef.state[itemKey] !== null;
 
     const existingPromise = pendingPreloads.get(itemKey);
     if (existingPromise) return existingPromise;
@@ -247,7 +248,9 @@ export function setupCollectionPersistence<
     const promise = namespace
       .load(itemKey)
       .then((cached) => {
-        if (!cached || currentGeneration !== generation || !storeRef) return;
+        if (!cached || currentGeneration !== generation || !storeRef) {
+          return false;
+        }
 
         const validated = toCollectionItemState<ItemState, ItemPayload>(
           cached,
@@ -257,10 +260,12 @@ export function setupCollectionPersistence<
 
         if (!validated) {
           scheduleIdleCleanup(() => void namespace.remove(itemKey));
-          return;
+          return false;
         }
 
-        if (storeRef.state[itemKey] !== undefined) return;
+        if (storeRef.state[itemKey] !== undefined) {
+          return storeRef.state[itemKey] !== null;
+        }
 
         storeRef.produceState(
           (draft) => {
@@ -270,6 +275,8 @@ export function setupCollectionPersistence<
           },
           { action: 'persistent-storage-hydrate' },
         );
+
+        return true;
       })
       .finally(() => {
         if (currentGeneration === generation) {
@@ -281,9 +288,9 @@ export function setupCollectionPersistence<
     return promise;
   }
 
-  async function preloadItems(itemKeys: string[]): Promise<void> {
-    if (backend !== 'opfs') return;
-    await Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+  async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
+    if (backend !== 'opfs') return itemKeys.map(() => false);
+    return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
   }
 
   async function evictStoredItems(): Promise<void> {

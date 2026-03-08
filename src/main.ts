@@ -61,6 +61,7 @@ export type {
   PersistentStorageSchema,
   StorageBackend,
   PersistentStorageBaseConfig,
+  PersistentStoragePreloadResult,
   DocumentPersistentStorageConfig,
   CollectionPersistentStorageConfig,
   ListQueryPersistentStorageConfig,

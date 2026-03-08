@@ -57,6 +57,7 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
+  ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Record<string, ItemState>;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
@@ -67,6 +68,7 @@ function createEnv(options: {
       storeName: options.storeName,
       backend: 'opfs',
       schema: wrappedItemSchema,
+      ignoreItems: options.ignoreItems,
     },
   });
 }
@@ -162,7 +164,9 @@ describe('opfs: collection store persistence', () => {
 
     const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('1');
     await advanceTime(100);
-    await preloadPromise;
+    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '✅' }
+    `);
 
     const renders = createLoggerStore();
 
@@ -204,10 +208,44 @@ describe('opfs: collection store persistence', () => {
 
     const preloadPromise = env.apiStore.preloadItemFromPersistentStorage('bad');
     await advanceTime(50);
-    await preloadPromise;
+    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+      - { payload: 'bad', preloaded: '❌' }
+    `);
     await advanceTime(2100);
     await flushAllTimers();
 
+    expect(mockAdapter.has(key)).toBe(false);
+  });
+
+  test('ignored cached items are skipped during preload and removed from opfs', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const key = setCachedCollectionItem(
+      mockAdapter,
+      'col-opfs-ignore',
+      'sess1',
+      'secret',
+      {
+        value: { id: 'secret', name: 'Cached secret' },
+      },
+    );
+
+    const env = createEnv({
+      storeName: 'col-opfs-ignore',
+      sessionKey: 'sess1',
+      storageAdapter: mockAdapter.adapter,
+      ignoreItems: ['secret'],
+    });
+
+    const preloadPromise =
+      env.apiStore.preloadItemFromPersistentStorage('secret');
+    await advanceTime(50);
+    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+      - { payload: 'secret', preloaded: '❌' }
+    `);
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(env.apiStore.getItemState('secret')).toBeUndefined();
     expect(mockAdapter.has(key)).toBe(false);
   });
 
