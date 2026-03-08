@@ -28,10 +28,7 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
 });
 
-type Todo = {
-  title: string;
-  completed: boolean;
-};
+type Todo = { title: string; completed: boolean };
 
 const defaultTodo: Todo = { title: 'todo', completed: false };
 
@@ -48,12 +45,8 @@ describe('useMultipleItems', () => {
     renderHook(
       ({ items }) => {
         const selectionResult = env.apiStore.useMultipleItems(
-          items.map((item) => ({
-            payload: item,
-          })),
-          {
-            returnRefetchingStatus: true,
-          },
+          items.map((item) => ({ payload: item })),
+          { returnRefetchingStatus: true },
         );
 
         const [item1, item2] = selectionResult;
@@ -104,12 +97,8 @@ describe('useMultipleItems', () => {
 
     renderHook(() => {
       const selectionResult = env.apiStore.useMultipleItems(
-        ['1', '2'].map((item) => ({
-          payload: item,
-        })),
-        {
-          returnRefetchingStatus: true,
-        },
+        ['1', '2'].map((item) => ({ payload: item })),
+        { returnRefetchingStatus: true },
       );
 
       const [item1, item2] = selectionResult;
@@ -177,10 +166,7 @@ describe('useMultipleItems', () => {
 
     renderHook(() => {
       const [item] = env.apiStore.useMultipleItems([{ payload: '1' }]);
-      renders.add({
-        status: item?.status,
-        data: item?.data?.value ?? null,
-      });
+      renders.add({ status: item?.status, data: item?.data?.value ?? null });
     });
 
     act(() => {
@@ -233,12 +219,8 @@ describe('useMultipleItems', () => {
     const { rerender } = renderHook(
       ({ items }) => {
         const selectionResult = env.apiStore.useMultipleItems(
-          items.map((item) => ({
-            payload: item,
-          })),
-          {
-            returnRefetchingStatus: true,
-          },
+          items.map((item) => ({ payload: item })),
+          { returnRefetchingStatus: true },
         );
 
         const [item1, item2] = selectionResult;
@@ -293,13 +275,8 @@ describe('useMultipleItems isolated tests', () => {
 
     renderHook(() => {
       const [item1, item2] = env.apiStore.useMultipleItems(
-        ['1', '2'].map((item) => ({
-          payload: item,
-        })),
-        {
-          returnRefetchingStatus: true,
-          disableRefetchOnMount: true,
-        },
+        ['1', '2'].map((item) => ({ payload: item })),
+        { returnRefetchingStatus: true, disableRefetchOnMount: true },
       );
 
       renders1.add({
@@ -483,9 +460,7 @@ describe('useItem', () => {
   });
 
   test('return error state for empty string payload', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
     const renders = createLoggerStore();
 
@@ -653,10 +628,7 @@ describe('useItem', () => {
       void env.performClientUpdateAction(
         '1',
         { title: 'was updated', completed: false },
-        {
-          withOptimisticUpdate: true,
-          withRevalidation: true,
-        },
+        { withOptimisticUpdate: true, withRevalidation: true },
       );
     });
 
@@ -1006,9 +978,7 @@ test('fetch error then mount component without error', async () => {
 
   expect(env.apiStore.getItemState('1')).toMatchObject({
     data: null,
-    error: {
-      message: 'error',
-    },
+    error: { message: 'error' },
     payload: '1',
     refetchOnMount: false,
     status: 'error',
@@ -1062,11 +1032,7 @@ test('emulate load resource during its mutation', async () => {
   function Page() {
     const { data, status, error } = env.apiStore.useItem('3');
 
-    renders.add({
-      status,
-      data: data?.value ?? null,
-      error,
-    });
+    renders.add({ status, data: data?.value ?? null, error });
 
     return null;
   }

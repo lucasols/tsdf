@@ -40,10 +40,7 @@ export type PendingRequest<T> = {
 };
 
 /** Request with ID for batch fetching */
-export type BatchRequest<T> = {
-  requestId: string;
-  payload: T;
-};
+export type BatchRequest<T> = { requestId: string; payload: T };
 
 /** Primary scheduler phase - exactly one is active at a time */
 type SchedulerPhase<T> =
@@ -130,9 +127,7 @@ export type RequestSchedulerOptions<T> = {
   usesRealTimeUpdates: boolean;
 };
 
-export type ScheduleFetchOptions = {
-  mediumPriorityDelayMs?: number;
-};
+export type ScheduleFetchOptions = { mediumPriorityDelayMs?: number };
 
 let autoIncrementId = 0;
 export function getAutoIncrementId(): number {
@@ -193,11 +188,7 @@ export class RequestScheduler<T> {
         lastFetchDuration: 0,
         lastFetchStartTimePerRequest: new Map(),
       },
-      abort: {
-        lastFetchId: 0,
-        abortBoundary: 0,
-        controller: null,
-      },
+      abort: { lastFetchId: 0, abortBoundary: 0, controller: null },
       lastFetchWasAborted: false,
       lastAbortedRequests: new Set(),
     };
@@ -543,11 +534,7 @@ export class RequestScheduler<T> {
       this.onCoalescingTimeout();
     }, this.getCoalescingWindowMs());
 
-    this.state.phase = {
-      type: 'coalescing',
-      timeoutId,
-      pendingRequests,
-    };
+    this.state.phase = { type: 'coalescing', timeoutId, pendingRequests };
   }
 
   private addToCoalescingBatch(
@@ -714,10 +701,7 @@ export class RequestScheduler<T> {
     }.bind(this);
 
     const batchRequests: BatchRequest<T>[] = Array.from(requests.entries()).map(
-      ([requestId, request]) => ({
-        requestId,
-        payload: request.payload,
-      }),
+      ([requestId, request]) => ({ requestId, payload: request.payload }),
     );
 
     let results: Map<string, boolean>;

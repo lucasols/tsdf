@@ -121,10 +121,7 @@ export type OnCollectionItemInvalidate<
 export type CollectionInitialStateItem<
   ItemPayload extends ValidPayload,
   ItemState extends ValidStoreState,
-> = {
-  payload: ItemPayload;
-  data: ItemState;
-};
+> = { payload: ItemPayload; data: ItemState };
 
 export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   /** Emitted when a mutation begins executing */
@@ -898,10 +895,7 @@ export function createCollectionStore<
     const item = store.state[itemId];
 
     if (item?.error) {
-      return {
-        data: null,
-        error: new StoreFetchError(item.error, 'fetch'),
-      };
+      return { data: null, error: new StoreFetchError(item.error, 'fetch') };
     }
 
     if (!item?.data) {
@@ -1150,11 +1144,7 @@ export function createCollectionStore<
       draftData: ItemState,
       collectionItem: CollectionItem,
     ) => void | ItemState,
-    {
-      ifNothingWasUpdated,
-    }: {
-      ifNothingWasUpdated?: () => void;
-    } = {},
+    { ifNothingWasUpdated }: { ifNothingWasUpdated?: () => void } = {},
   ): boolean {
     const itemKeys = getItemsKeyArray(fetchParams);
 

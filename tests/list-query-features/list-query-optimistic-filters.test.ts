@@ -9,10 +9,7 @@ import {
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { range } from '../utils/genericTestUtils';
 
-type UserRow = Row & {
-  age: number;
-  type: 'admin' | 'user';
-};
+type UserRow = Row & { age: number; type: 'admin' | 'user' };
 
 const initialServerData: Tables<UserRow> = {
   users: range(1, 10).map((id, index) => ({
@@ -208,10 +205,7 @@ test('optimistically sort items', () => {
       },
       {
         queries: () => true,
-        sort: {
-          sortBy: (item) => item.age,
-          order: 'desc',
-        },
+        sort: { sortBy: (item) => item.age, order: 'desc' },
       },
     ],
   });

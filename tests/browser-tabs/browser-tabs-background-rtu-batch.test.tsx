@@ -418,16 +418,10 @@ test('list query background item RTU invalidations dedupe to one item batch fetc
   expect(totalBatchFetches).toBe(1);
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Zoe',
-  });
+  ).toEqual({ id: 1, name: 'Zoe' });
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||2')],
-  ).toEqual({
-    id: 2,
-    name: 'Yara',
-  });
+  ).toEqual({ id: 2, name: 'Yara' });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |

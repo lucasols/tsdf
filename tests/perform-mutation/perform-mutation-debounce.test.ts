@@ -28,11 +28,7 @@ describe('documentStore performMutation debounce', () => {
     const mutationCalls: string[] = [];
 
     const firstPromise = env.apiStore.performMutation({
-      debounce: {
-        context: 'document:set-value',
-        payload: 'doc-1',
-        ms: 300,
-      },
+      debounce: { context: 'document:set-value', payload: 'doc-1', ms: 300 },
       mutation: () => {
         mutationCalls.push('first');
         return Promise.resolve('first');
@@ -42,11 +38,7 @@ describe('documentStore performMutation debounce', () => {
     await advanceTime(100);
 
     const secondPromise = env.apiStore.performMutation({
-      debounce: {
-        context: 'document:set-value',
-        payload: 'doc-1',
-        ms: 300,
-      },
+      debounce: { context: 'document:set-value', payload: 'doc-1', ms: 300 },
       mutation: () => {
         mutationCalls.push('second');
         return Promise.resolve('second');
@@ -75,11 +67,7 @@ describe('documentStore performMutation debounce', () => {
     const mutationCalls: string[] = [];
 
     const firstPromise = env.apiStore.performMutation({
-      debounce: {
-        context: 'document:set-value',
-        payload: 'doc-1',
-        ms: 300,
-      },
+      debounce: { context: 'document:set-value', payload: 'doc-1', ms: 300 },
       mutation: () => {
         mutationCalls.push('first');
         return Promise.resolve('first');
@@ -87,11 +75,7 @@ describe('documentStore performMutation debounce', () => {
     });
 
     const secondPromise = env.apiStore.performMutation({
-      debounce: {
-        context: 'document:set-value',
-        payload: 'doc-2',
-        ms: 300,
-      },
+      debounce: { context: 'document:set-value', payload: 'doc-2', ms: 300 },
       mutation: () => {
         mutationCalls.push('second');
         return Promise.resolve('second');
@@ -118,17 +102,11 @@ describe('documentStore performMutation debounce', () => {
 
 describe('collectionStore performMutation debounce', () => {
   test('skips previous mutation when debounce key matches', async () => {
-    const env = createCollectionStoreTestEnv({
-      'item-1': { name: 'Item 1' },
-    });
+    const env = createCollectionStoreTestEnv({ 'item-1': { name: 'Item 1' } });
     const mutationCalls: string[] = [];
 
     const firstPromise = env.apiStore.performMutation('item-1', {
-      debounce: {
-        context: 'collection:update',
-        payload: 'item-1',
-        ms: 300,
-      },
+      debounce: { context: 'collection:update', payload: 'item-1', ms: 300 },
       mutation: () => {
         mutationCalls.push('first');
         return Promise.resolve('first');
@@ -138,11 +116,7 @@ describe('collectionStore performMutation debounce', () => {
     await advanceTime(100);
 
     const secondPromise = env.apiStore.performMutation('item-1', {
-      debounce: {
-        context: 'collection:update',
-        payload: 'item-1',
-        ms: 300,
-      },
+      debounce: { context: 'collection:update', payload: 'item-1', ms: 300 },
       mutation: () => {
         mutationCalls.push('second');
         return Promise.resolve('second');
@@ -174,11 +148,7 @@ describe('collectionStore performMutation debounce', () => {
     const mutationCalls: string[] = [];
 
     const firstPromise = env.apiStore.performMutation('item-1', {
-      debounce: {
-        context: 'collection:update',
-        payload: 'item-1',
-        ms: 300,
-      },
+      debounce: { context: 'collection:update', payload: 'item-1', ms: 300 },
       mutation: () => {
         mutationCalls.push('first');
         return Promise.resolve('first');
@@ -186,11 +156,7 @@ describe('collectionStore performMutation debounce', () => {
     });
 
     const secondPromise = env.apiStore.performMutation('item-2', {
-      debounce: {
-        context: 'collection:update',
-        payload: 'item-2',
-        ms: 300,
-      },
+      debounce: { context: 'collection:update', payload: 'item-2', ms: 300 },
       mutation: () => {
         mutationCalls.push('second');
         return Promise.resolve('second');
@@ -223,11 +189,7 @@ describe('listQueryStore performMutation debounce', () => {
     const mutationCalls: string[] = [];
 
     const firstPromise = env.apiStore.performMutation('users||1', {
-      debounce: {
-        context: 'list-query:update',
-        payload: 'users||1',
-        ms: 300,
-      },
+      debounce: { context: 'list-query:update', payload: 'users||1', ms: 300 },
       mutation: () => {
         mutationCalls.push('first');
         return Promise.resolve('first');
@@ -237,11 +199,7 @@ describe('listQueryStore performMutation debounce', () => {
     await advanceTime(100);
 
     const secondPromise = env.apiStore.performMutation('users||1', {
-      debounce: {
-        context: 'list-query:update',
-        payload: 'users||1',
-        ms: 300,
-      },
+      debounce: { context: 'list-query:update', payload: 'users||1', ms: 300 },
       mutation: () => {
         mutationCalls.push('second');
         return Promise.resolve('second');
@@ -275,11 +233,7 @@ describe('listQueryStore performMutation debounce', () => {
     const mutationCalls: string[] = [];
 
     const firstPromise = env.apiStore.performMutation('users||1', {
-      debounce: {
-        context: 'list-query:update',
-        payload: 'users||1',
-        ms: 300,
-      },
+      debounce: { context: 'list-query:update', payload: 'users||1', ms: 300 },
       mutation: () => {
         mutationCalls.push('first');
         return Promise.resolve('first');
@@ -287,11 +241,7 @@ describe('listQueryStore performMutation debounce', () => {
     });
 
     const secondPromise = env.apiStore.performMutation('users||2', {
-      debounce: {
-        context: 'list-query:update',
-        payload: 'users||2',
-        ms: 300,
-      },
+      debounce: { context: 'list-query:update', payload: 'users||2', ms: 300 },
       mutation: () => {
         mutationCalls.push('second');
         return Promise.resolve('second');

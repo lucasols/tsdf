@@ -99,9 +99,7 @@ describe('documentStore storeEvents', () => {
 
 describe('collectionStore storeEvents', () => {
   test('emits mutationStart and mutationEnd with correct payload on success', async () => {
-    const env = createCollectionStoreTestEnv({
-      'item-1': { name: 'Item 1' },
-    });
+    const env = createCollectionStoreTestEnv({ 'item-1': { name: 'Item 1' } });
     const events: unknown[] = [];
 
     env.apiStore.storeEvents.on('*', (event) => {
@@ -122,9 +120,7 @@ describe('collectionStore storeEvents', () => {
   });
 
   test('emits mutationEnd with success: false on failure', async () => {
-    const env = createCollectionStoreTestEnv({
-      'item-1': { name: 'Item 1' },
-    });
+    const env = createCollectionStoreTestEnv({ 'item-1': { name: 'Item 1' } });
     const events: unknown[] = [];
 
     env.apiStore.storeEvents.on('*', (event) => {
@@ -220,9 +216,7 @@ describe('listQueryStore storeEvents', () => {
 
     const result = await env.apiStore.performMutation(
       ['users||1', 'users||2'],
-      {
-        mutation: () => Promise.resolve('ok'),
-      },
+      { mutation: () => Promise.resolve('ok') },
     );
 
     assert(result.ok);

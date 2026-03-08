@@ -30,10 +30,7 @@ function createInMemoryBrowserTabsTransportFactoryBase() {
 
     return {
       postMessage(message) {
-        auditLog.push({
-          channelName,
-          message: klona(message),
-        });
+        auditLog.push({ channelName, message: klona(message) });
 
         const listenersForChannel = listenersByChannel.get(channelName);
         if (!listenersForChannel) return;

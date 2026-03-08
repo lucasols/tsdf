@@ -56,10 +56,7 @@ async function openScenario(
   options?: { storeId?: string; sessionKey?: string },
 ) {
   const page = await context.newPage();
-  const searchParams = new URLSearchParams({
-    scenario,
-    pageId,
-  });
+  const searchParams = new URLSearchParams({ scenario, pageId });
 
   if (options?.storeId) {
     searchParams.set('storeId', options.storeId);
@@ -84,10 +81,7 @@ async function waitForPageSettle(page: Page): Promise<void> {
 }
 
 async function setAllPagesBackgroundInOrder(
-  pages: Array<{
-    page: Page;
-    prefix: 'document' | 'collection' | 'list';
-  }>,
+  pages: Array<{ page: Page; prefix: 'document' | 'collection' | 'list' }>,
 ): Promise<void> {
   for (const { page, prefix } of pages) {
     await page.getByTestId(`${prefix}-focus-background`).click();
@@ -242,10 +236,7 @@ test('document browser-tabs sync stays isolated across different session keys', 
 
   const history = await getHistory(request);
   expect(
-    countRequests(history, {
-      pageId: 'page-a',
-      path: '/api/document/mutate',
-    }),
+    countRequests(history, { pageId: 'page-a', path: '/api/document/mutate' }),
   ).toBe(1);
   expect(
     countRequests(history, {

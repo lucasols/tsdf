@@ -18,9 +18,7 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
 });
 
-type StoreValue = {
-  hello: string;
-};
+type StoreValue = { hello: string };
 
 test('disable should keep the selected data and not be affected by invalidation', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>(
@@ -201,9 +199,7 @@ test('useDocument selector result should remain stable across rerenders', async 
   let prevData: unknown;
 
   const { rerender } = renderHook(() => {
-    const { data, status } = env.apiStore.useDocument({
-      selector: () => ({}),
-    });
+    const { data, status } = env.apiStore.useDocument({ selector: () => ({}) });
 
     renders.add({ status, changed: prevData !== data });
     prevData = data;

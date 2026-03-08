@@ -129,10 +129,8 @@ test('list query size pagination keeps sibling tabs in sync across chained loadM
   envB.apiStore.loadMore({ tableId: 'users' }, 1);
   await flushAllTimers();
 
-  expect({
-    envA: getQuerySummary(envA),
-    envB: getQuerySummary(envB),
-  }).toMatchInlineSnapshot(`
+  expect({ envA: getQuerySummary(envA), envB: getQuerySummary(envB) })
+    .toMatchInlineSnapshot(`
     envA:
       hasMore: '❌'
       items: ['User 1', 'User 2', 'User 3']
@@ -218,10 +216,8 @@ test('list query offset pagination keeps sibling tabs in sync across chained loa
   envB.apiStore.loadMore({ tableId: 'users' }, 1);
   await flushAllTimers();
 
-  expect({
-    envA: getQuerySummary(envA),
-    envB: getQuerySummary(envB),
-  }).toMatchInlineSnapshot(`
+  expect({ envA: getQuerySummary(envA), envB: getQuerySummary(envB) })
+    .toMatchInlineSnapshot(`
     envA:
       hasMore: '❌'
       items: ['User 1', 'User 2', 'User 3']

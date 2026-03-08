@@ -152,10 +152,7 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>({
         sentAt: Date.now(),
         messageId: `${tabId}:${seq}`,
       };
-      const fullMessage = {
-        ...message,
-        ...meta,
-      };
+      const fullMessage = { ...message, ...meta };
       type PublishedMessage = Message & BrowserTabsMessageMeta;
       type FullMessageShape = MessageWithoutMeta<Message> &
         BrowserTabsMessageMeta;
@@ -197,9 +194,7 @@ export function createBrowserTabsCoordinatorWithPriority<
 }: BrowserTabsCoordinatorWithPriorityOptions<Message>) {
   const priorityRef: {
     current: ReturnType<typeof createBrowserTabsPriority> | null;
-  } = {
-    current: null,
-  };
+  } = { current: null };
   const coordinator = createBrowserTabsCoordinator({
     storeType,
     storeKey,
@@ -233,10 +228,7 @@ export function createBrowserTabsCoordinatorWithPriority<
   });
   priorityRef.current = priority;
 
-  return {
-    coordinator,
-    priority,
-  };
+  return { coordinator, priority };
 }
 
 export type SnapshotConsistency = 'optimistic' | 'confirmed';
@@ -252,12 +244,7 @@ export function toBrowserTabsSyncVersion(
   meta: Pick<BrowserTabsMessageMeta, 'tabId' | 'seq' | 'sentAt'>,
   consistency: SnapshotConsistency,
 ): BrowserTabsSyncVersion {
-  return {
-    tabId: meta.tabId,
-    seq: meta.seq,
-    sentAt: meta.sentAt,
-    consistency,
-  };
+  return { tabId: meta.tabId, seq: meta.seq, sentAt: meta.sentAt, consistency };
 }
 
 export function isBrowserTabsSyncVersionNewer(

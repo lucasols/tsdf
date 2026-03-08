@@ -169,11 +169,10 @@ export function createFocusChangeCoordinator<T extends string>(
   };
 }
 
-export function countFetchHistoryEntries<
-  TEntry extends {
-    type: string;
-  },
->(history: TEntry[], type: TEntry['type']): number {
+export function countFetchHistoryEntries<TEntry extends { type: string }>(
+  history: TEntry[],
+  type: TEntry['type'],
+): number {
   return history.filter((entry) => entry.type === type).length;
 }
 
@@ -221,10 +220,7 @@ export function getNonStatusMessages(messages: Array<{ message: unknown }>) {
 }
 
 export function createCollectionItems() {
-  return {
-    item1: { name: 'Item 1' },
-    item2: { name: 'Item 2' },
-  };
+  return { item1: { name: 'Item 1' }, item2: { name: 'Item 2' } };
 }
 
 export function createUsersTable() {

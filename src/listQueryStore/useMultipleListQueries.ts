@@ -444,9 +444,7 @@ export function useMultipleListQueries<
         queriesWithId,
       ],
     ),
-    {
-      equalityFn: deepEqual,
-    },
+    { equalityFn: deepEqual },
   );
 
   useOnEvtmitterEvent(events, 'invalidateQuery', ({ payload: event }) => {

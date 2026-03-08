@@ -61,9 +61,7 @@ describe('document store', () => {
 
     renderHook(
       () => {
-        const result = env.apiStore.useDocument({
-          returnIdleStatus: true,
-        });
+        const result = env.apiStore.useDocument({ returnIdleStatus: true });
         renders.add({
           data: result.data?.value ?? null,
           status: result.status,
@@ -89,9 +87,7 @@ describe('document store', () => {
 
     renderHook(
       () => {
-        const result = env.apiStore.useDocument({
-          isOffScreen: false,
-        });
+        const result = env.apiStore.useDocument({ isOffScreen: false });
         renders.add({
           data: result.data?.value ?? null,
           status: result.status,
@@ -156,19 +152,13 @@ describe('document store', () => {
 
 describe('collection store', () => {
   test('context isOffScreen=true prevents fetching', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+    const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
     renderHook(
       () => {
-        const result = env.apiStore.useItem('1', {
-          returnIdleStatus: true,
-        });
+        const result = env.apiStore.useItem('1', { returnIdleStatus: true });
         renders.add({
           data: result.data?.value ?? null,
           status: result.status,
@@ -188,19 +178,13 @@ describe('collection store', () => {
   });
 
   test('explicit isOffScreen: false overrides context isOffScreen=true', async () => {
-    const env = createCollectionStoreTestEnv<Todo>({
-      '1': defaultTodo,
-    });
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+    const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
     renderHook(
       () => {
-        const result = env.apiStore.useItem('1', {
-          isOffScreen: false,
-        });
+        const result = env.apiStore.useItem('1', { isOffScreen: false });
         renders.add({
           data: result.data?.value ?? null,
           status: result.status,
@@ -226,9 +210,7 @@ describe('collection store', () => {
       { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+    const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
     renderHook(
       () => {
@@ -273,9 +255,7 @@ describe('list query store', () => {
   test('context isOffScreen=true prevents useListQuery fetching', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+    const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
     renderHook(
       () => {
@@ -283,10 +263,7 @@ describe('list query store', () => {
           { tableId: 'users' },
           { returnIdleStatus: true },
         );
-        renders.add({
-          items: result.items.length,
-          status: result.status,
-        });
+        renders.add({ items: result.items.length, status: result.status });
       },
       { wrapper: createWrapper(true) },
     );
@@ -304,9 +281,7 @@ describe('list query store', () => {
   test('explicit isOffScreen: false overrides context for useListQuery', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+    const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
     renderHook(
       () => {
@@ -314,10 +289,7 @@ describe('list query store', () => {
           { tableId: 'users' },
           { isOffScreen: false },
         );
-        renders.add({
-          items: result.items.length,
-          status: result.status,
-        });
+        renders.add({ items: result.items.length, status: result.status });
       },
       { wrapper: createWrapper(true) },
     );
@@ -336,9 +308,7 @@ describe('list query store', () => {
   test('context isOffScreen=true prevents useItem fetching', async () => {
     const env = createListQueryStoreTestEnv(initialServerData);
 
-    const renders = createLoggerStore({
-      rejectKeys: ['queryMetadata'],
-    });
+    const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
     renderHook(
       () => {
@@ -372,9 +342,7 @@ describe('dynamic toggle', () => {
 
     renderHook(
       () => {
-        const result = env.apiStore.useDocument({
-          returnIdleStatus: true,
-        });
+        const result = env.apiStore.useDocument({ returnIdleStatus: true });
         renders.add({
           data: result.data?.value ?? null,
           status: result.status,
@@ -430,10 +398,7 @@ describe('no provider', () => {
 
     renderHook(() => {
       const result = env.apiStore.useDocument();
-      renders.add({
-        data: result.data?.value ?? null,
-        status: result.status,
-      });
+      renders.add({ data: result.data?.value ?? null, status: result.status });
     });
 
     await flushAllTimers();

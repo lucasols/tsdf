@@ -99,9 +99,7 @@ export function useListQuery<
     ],
   );
 
-  const queryResult = useMultipleListQueries(query, {
-    itemSelector,
-  });
+  const queryResult = useMultipleListQueries(query, { itemSelector });
 
   const result = useMemo(
     (): TSFDUseListQueryReturn<SelectedItem, QueryPayload> =>

@@ -77,10 +77,7 @@ export type TSFDUseListItemReturn<
 export type FetchListFnReturnItem<
   ItemPayload extends ValidPayload,
   ItemState extends ValidStoreState,
-> = {
-  itemPayload: ItemPayload;
-  data: ItemState;
-};
+> = { itemPayload: ItemPayload; data: ItemState };
 
 export type FetchListFnReturn<
   ItemState extends ValidStoreState,
@@ -96,11 +93,7 @@ export type ListQueryStoreInitialData<
   ItemPayload extends ValidPayload,
 > = {
   items: { payload: ItemPayload; data: ItemState }[];
-  queries: {
-    payload: QueryPayload;
-    items: string[];
-    hasMore: boolean;
-  }[];
+  queries: { payload: QueryPayload; items: string[]; hasMore: boolean }[];
 };
 
 export type ListQueryUseMultipleItemsQuery<

@@ -49,10 +49,7 @@ describe('update state functions', () => {
     });
 
     env.apiStore.updateItemState(['users||1', 'users||2'], () => {
-      return {
-        name: 'new name',
-        id: 1,
-      };
+      return { name: 'new name', id: 1 };
     });
 
     expect(env.apiStore.getItemState(['users||1', 'users||2', 'users||3']))
@@ -109,10 +106,7 @@ describe('update state functions', () => {
       },
       {
         ifNothingWasUpdated: () => {
-          env.apiStore.addItemToState('users||20', {
-            name: 'item 20',
-            id: 20,
-          });
+          env.apiStore.addItemToState('users||20', { name: 'item 20', id: 20 });
         },
       },
     );
@@ -171,15 +165,9 @@ describe('update state functions', () => {
 
     env.apiStore.addItemToState(
       'users||20',
+      { name: 'item users||20', id: 20 },
       {
-        name: 'item users||20',
-        id: 20,
-      },
-      {
-        addItemToQueries: {
-          queries: { tableId: 'users' },
-          appendTo: 'start',
-        },
+        addItemToQueries: { queries: { tableId: 'users' }, appendTo: 'start' },
       },
     );
 
@@ -269,15 +257,9 @@ describe('update state functions', () => {
 
     env.apiStore.addItemToState(
       'users||1',
+      { name: 'item users||20', id: 20 },
       {
-        name: 'item users||20',
-        id: 20,
-      },
-      {
-        addItemToQueries: {
-          queries: { tableId: 'users' },
-          appendTo: 'start',
-        },
+        addItemToQueries: { queries: { tableId: 'users' }, appendTo: 'start' },
       },
     );
 

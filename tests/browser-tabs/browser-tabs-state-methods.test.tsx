@@ -111,9 +111,7 @@ test('collection state methods are applied to background tabs', async () => {
   envA.apiStore.updateItemState('item1', (draft) => {
     draft.value = { name: 'Updated' };
   });
-  envA.apiStore.addItemToState('item3', {
-    value: { name: 'Item 3' },
-  });
+  envA.apiStore.addItemToState('item3', { value: { name: 'Item 3' } });
   envA.apiStore.deleteItemState('item2');
   await advanceTime(0);
 
@@ -194,16 +192,8 @@ test('list query state methods are applied to background tabs', async () => {
   });
   envA.apiStore.addItemToState(
     'users||3',
-    {
-      id: 3,
-      name: 'Cara',
-    },
-    {
-      addItemToQueries: {
-        queries: { tableId: 'users' },
-        appendTo: 'end',
-      },
-    },
+    { id: 3, name: 'Cara' },
+    { addItemToQueries: { queries: { tableId: 'users' }, appendTo: 'end' } },
   );
   envA.apiStore.deleteItemState('users||2');
   await advanceTime(0);
@@ -211,16 +201,10 @@ test('list query state methods are applied to background tabs', async () => {
   const queryKey = envB.getQueryKey({ tableId: 'users' });
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Zoe',
-  });
+  ).toEqual({ id: 1, name: 'Zoe' });
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||3')],
-  ).toEqual({
-    id: 3,
-    name: 'Cara',
-  });
+  ).toEqual({ id: 3, name: 'Cara' });
   expect(envB.store.state.items[envB.getStoreItemKeyFromRaw('users||2')]).toBe(
     null,
   );
@@ -268,10 +252,7 @@ test('list query state changes emitted during an in-flight mutation sync immedia
 
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'During mutation',
-  });
+  ).toEqual({ id: 1, name: 'During mutation' });
 
   await flushAllTimers();
   await mutationPromise;
@@ -445,10 +426,7 @@ test('list query state updates do not sync to tabs without an active session key
 
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Alice',
-  });
+  ).toEqual({ id: 1, name: 'Alice' });
 });
 
 test('list query state sync starts only after tabs share the same session key', async () => {
@@ -480,10 +458,7 @@ test('list query state sync starts only after tabs share the same session key', 
 
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Alice',
-  });
+  ).toEqual({ id: 1, name: 'Alice' });
 
   tabBSessionKey = 'account-a';
   envA.apiStore.updateItemState('users||1', (draft) => {
@@ -493,8 +468,5 @@ test('list query state sync starts only after tabs share the same session key', 
 
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Second update',
-  });
+  ).toEqual({ id: 1, name: 'Second update' });
 });

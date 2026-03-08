@@ -66,10 +66,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     renderHook(() => {
       const queryResult = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-            returnRefetchingStatus: true,
-          }),
+          (item) => ({ payload: item, returnRefetchingStatus: true }),
         ),
         {
           itemSelector(data, _, itemKey) {
@@ -120,10 +117,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     renderHook(() => {
       const queryResult = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-            returnRefetchingStatus: true,
-          }),
+          (item) => ({ payload: item, returnRefetchingStatus: true }),
         ),
         {
           itemSelector(data, _, itemKey) {
@@ -189,10 +183,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     renderHook(() => {
       const queryResult = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-            returnRefetchingStatus: true,
-          }),
+          (item) => ({ payload: item, returnRefetchingStatus: true }),
         ),
         {
           itemSelector(data, _, itemKey) {
@@ -214,9 +205,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     const { unmount } = renderHook(() => {
       const selectionResult = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-          }),
+          (item) => ({ payload: item }),
         ),
         {
           itemSelector(data) {
@@ -252,10 +241,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     renderHook(() => {
       const queryResult = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-            returnRefetchingStatus: true,
-          }),
+          (item) => ({ payload: item, returnRefetchingStatus: true }),
         ),
         {
           itemSelector(data, _, itemKey) {
@@ -328,10 +314,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
     renderHook(() => {
       const selectionResult = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-            returnRefetchingStatus: true,
-          }),
+          (item) => ({ payload: item, returnRefetchingStatus: true }),
         ),
         {
           itemSelector(data) {
@@ -385,9 +368,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
     const { rerender } = renderHook(
       ({ payload }: { payload: FetchQueryParams[] }) => {
         const [users, products] = listQueryStore.useMultipleListQueries(
-          payload.map((item) => ({
-            payload: item,
-          })),
+          payload.map((item) => ({ payload: item })),
           { itemSelector: (data) => data.name },
         );
 
@@ -441,10 +422,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-            disableRefetchOnMount: true,
-          }),
+          (item) => ({ payload: item, disableRefetchOnMount: true }),
         ),
         { itemSelector: (data) => data.name },
       );
@@ -479,10 +457,7 @@ describe('useMultipleItemsQuery isolated tests', () => {
     renderHook(() => {
       const [users, products] = listQueryStore.useMultipleListQueries(
         [getFetchQueryForTable('users'), getFetchQueryForTable('products')].map(
-          (item) => ({
-            payload: item,
-            queryMetadata: { test: item },
-          }),
+          (item) => ({ payload: item, queryMetadata: { test: item } }),
         ),
         { itemSelector: (data) => data.name },
       );
@@ -574,9 +549,7 @@ describe('useQuery', () => {
 
     const renders = createLoggerStore();
 
-    type Props = {
-      payload: FetchQueryParams | false | undefined | null;
-    };
+    type Props = { payload: FetchQueryParams | false | undefined | null };
 
     const { rerender } = renderHook(
       ({ payload }: Props) => {

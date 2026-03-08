@@ -258,9 +258,7 @@ export function createDocumentStoreTestEnv<D>(
               });
             }
 
-            return {
-              value: newValue,
-            };
+            return { value: newValue };
           },
           revalidateOnSuccess: withRevalidation,
         });

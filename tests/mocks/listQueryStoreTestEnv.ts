@@ -38,10 +38,7 @@ import {
 
 type ListQueryItemPayload = string;
 
-export type ListQueryParams = {
-  tableId: string;
-  filters?: FilterOperator[];
-};
+export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
 
 type ListQuerySnapshotConfig = {
   tables?: string[];
@@ -412,9 +409,7 @@ export function createListQueryStoreTestEnv<
 
   if (usesRealTimeUpdates) {
     serverTable.wsEvents.on('data_changed', ({ payload }) => {
-      addAction('received-ws-data-change-event', {
-        itemId: payload.itemId,
-      });
+      addAction('received-ws-data-change-event', { itemId: payload.itemId });
 
       const [tableId] = payload.itemId.split('||');
 
@@ -426,9 +421,7 @@ export function createListQueryStoreTestEnv<
     });
 
     serverTable.wsEvents.on('item_added', ({ payload }) => {
-      addAction('received-ws-item-added-event', {
-        itemId: payload.itemId,
-      });
+      addAction('received-ws-item-added-event', { itemId: payload.itemId });
 
       const [tableId] = payload.itemId.split('||');
 
@@ -440,9 +433,7 @@ export function createListQueryStoreTestEnv<
     });
 
     serverTable.wsEvents.on('item_deleted', ({ payload }) => {
-      addAction('received-ws-item-deleted-event', {
-        itemId: payload.itemId,
-      });
+      addAction('received-ws-item-deleted-event', { itemId: payload.itemId });
 
       const [tableId] = payload.itemId.split('||');
 
@@ -649,19 +640,13 @@ function buildSnapshotData<TRow extends Row>(
     });
 
     for (const { itemId, data } of tableItems) {
-      initialData.items.push({
-        payload: itemId,
-        data,
-      });
+      initialData.items.push({ payload: itemId, data });
     }
   }
 
   for (const query of config.queries ?? []) {
     const { tableId, filters } = query;
-    const result = serverTable.listSync({
-      tableId,
-      filters,
-    });
+    const result = serverTable.listSync({ tableId, filters });
 
     initialData.queries.push({
       payload: query,
@@ -670,10 +655,7 @@ function buildSnapshotData<TRow extends Row>(
     });
 
     for (const { itemId, data } of result.items) {
-      initialData.items.push({
-        payload: itemId,
-        data,
-      });
+      initialData.items.push({ payload: itemId, data });
     }
   }
 
@@ -685,10 +667,7 @@ function buildSnapshotData<TRow extends Row>(
         throw new Error(`loadItemsSnapshot: Item '${itemId}' doesn't exist`);
       }
 
-      initialData.items.push({
-        payload: itemId,
-        data: itemData,
-      });
+      initialData.items.push({ payload: itemId, data: itemData });
     }
   }
 

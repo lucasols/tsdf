@@ -22,10 +22,7 @@ describe('test helpers', () => {
   test('start with store initialized state', () => {
     const { store } = createCollectionStoreTestEnv(
       { '1': defaultTodo, '2': defaultTodo },
-      {
-        testScenario: 'loaded',
-        usesRealTimeUpdates: true,
-      },
+      { testScenario: 'loaded', usesRealTimeUpdates: true },
     );
 
     expect(store.state).toMatchInlineSnapshot(`
@@ -329,12 +326,7 @@ describe('update state functions', () => {
       });
 
       apiStore.updateItemState(['1', '2'], () => {
-        return {
-          value: {
-            title: 'new title 2',
-            completed: false,
-          },
-        };
+        return { value: { title: 'new title 2', completed: false } };
       });
 
       expect(
@@ -381,10 +373,7 @@ describe('update state functions', () => {
     test('create if not exist', () => {
       const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
-        {
-          testScenario: 'loaded',
-          usesRealTimeUpdates: true,
-        },
+        { testScenario: 'loaded', usesRealTimeUpdates: true },
       );
 
       let storeUpdates = 0;
@@ -400,10 +389,7 @@ describe('update state functions', () => {
         {
           ifNothingWasUpdated: () => {
             apiStore.addItemToState('6', {
-              value: {
-                title: 'item 6',
-                completed: false,
-              },
+              value: { title: 'item 6', completed: false },
             });
           },
         },
@@ -424,10 +410,7 @@ describe('update state functions', () => {
     test('create multiple if not exist', () => {
       const { apiStore, store } = createCollectionStoreTestEnv(
         initialServerData,
-        {
-          testScenario: 'loaded',
-          usesRealTimeUpdates: true,
-        },
+        { testScenario: 'loaded', usesRealTimeUpdates: true },
       );
 
       let storeUpdates = 0;
@@ -443,16 +426,10 @@ describe('update state functions', () => {
         {
           ifNothingWasUpdated: () => {
             apiStore.addItemToState('6', {
-              value: {
-                title: 'item 6',
-                completed: false,
-              },
+              value: { title: 'item 6', completed: false },
             });
             apiStore.addItemToState('7', {
-              value: {
-                title: 'item 7',
-                completed: false,
-              },
+              value: { title: 'item 7', completed: false },
             });
           },
         },
@@ -498,10 +475,7 @@ describe('update state functions', () => {
     expect(apiStore.getItemState('6')).toBeUndefined();
 
     apiStore.addItemToState('6', {
-      value: {
-        title: 'item 6',
-        completed: false,
-      },
+      value: { title: 'item 6', completed: false },
     });
 
     expect(apiStore.getItemState('6')).toMatchInlineSnapshot(`

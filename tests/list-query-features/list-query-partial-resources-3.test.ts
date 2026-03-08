@@ -84,10 +84,7 @@ describe('list query field accumulation edge cases', () => {
       );
 
       const filteredUsersResult = env.apiStore.useListQuery(
-        {
-          tableId: 'users',
-          filters: [{ op: 'gt', field: 'id', value: 5 }],
-        },
+        { tableId: 'users', filters: [{ op: 'gt', field: 'id', value: 5 }] },
         { returnRefetchingStatus: true, fields: ['id', 'name'] },
       );
 
@@ -191,18 +188,12 @@ describe('list query field accumulation edge cases', () => {
       ({ showAddressList }: { showAddressList: boolean }) => {
         env.apiStore.useListQuery(
           { tableId: 'users' },
-          {
-            returnRefetchingStatus: true,
-            fields: ['id', 'name'],
-          },
+          { returnRefetchingStatus: true, fields: ['id', 'name'] },
         );
 
         env.apiStore.useListQuery(
           showAddressList ? { tableId: 'users' } : false,
-          {
-            returnRefetchingStatus: true,
-            fields: ['id', 'address'],
-          },
+          { returnRefetchingStatus: true, fields: ['id', 'address'] },
         );
       },
       { initialProps: { showAddressList: false } },
@@ -268,11 +259,7 @@ describe('list query field accumulation edge cases', () => {
       ({ fields }: { fields: string[] }) => {
         const query = env.apiStore.useListQuery(
           { tableId: 'users' },
-          {
-            returnRefetchingStatus: true,
-            fields,
-            loadSize: 2,
-          },
+          { returnRefetchingStatus: true, fields, loadSize: 2 },
         );
 
         renders.add(pick(query, ['status', 'items']));

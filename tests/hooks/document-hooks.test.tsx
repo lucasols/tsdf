@@ -29,9 +29,7 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
 });
 
-type StoreValue = {
-  hello: string;
-};
+type StoreValue = { hello: string };
 
 test('load data', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
@@ -75,9 +73,7 @@ test('invalidate data', async () => {
 
   await flushAllTimers();
 
-  expect(result.current.data?.value).toEqual({
-    hello: 'was invalidated',
-  });
+  expect(result.current.data?.value).toEqual({ hello: 'was invalidated' });
 });
 
 test('revalidation with multiple components do not trigger multiple fetches', async () => {
@@ -99,9 +95,7 @@ test('revalidation with multiple components do not trigger multiple fetches', as
 
   await flushAllTimers();
 
-  expect(result.current.data?.value).toEqual({
-    hello: 'was invalidated',
-  });
+  expect(result.current.data?.value).toEqual({ hello: 'was invalidated' });
   expect(env.serverMock.numOfFinishedFetches).toBe(1);
 });
 
@@ -112,9 +106,7 @@ test('data selector', () => {
   );
 
   const { result } = renderHook(() =>
-    env.apiStore.useDocument({
-      selector: (data) => data?.value.hello,
-    }),
+    env.apiStore.useDocument({ selector: (data) => data?.value.hello }),
   );
 
   expect(result.current.data).toBe('world');
@@ -125,9 +117,7 @@ describe('disable', () => {
     const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
     const { result } = renderHook(() =>
-      env.apiStore.useDocument({
-        disabled: true,
-      }),
+      env.apiStore.useDocument({ disabled: true }),
     );
 
     await act(async () => {
@@ -151,9 +141,7 @@ describe('disable', () => {
 
     const { rerender } = renderHook(
       ({ disabled }: { disabled: boolean }) => {
-        const data = env.apiStore.useDocument({
-          disabled,
-        });
+        const data = env.apiStore.useDocument({ disabled });
 
         renders.push({
           data: data.data?.value ?? null,
@@ -195,19 +183,15 @@ describe('disable', () => {
 test('disableRefetchOnMount', async () => {
   const env = createDocumentStoreTestEnv<StoreValue>({ hello: 'world' });
 
-  const renders: Array<{
-    data: StoreValue | null;
-    status: DocumentStatus;
-  }> = [];
+  const renders: Array<{ data: StoreValue | null; status: DocumentStatus }> =
+    [];
   const comp2Renders: Array<{
     data: StoreValue | null;
     status: DocumentStatus;
   }> = [];
 
   function Comp2() {
-    const data = env.apiStore.useDocument({
-      disableRefetchOnMount: true,
-    });
+    const data = env.apiStore.useDocument({ disableRefetchOnMount: true });
 
     comp2Renders.push({ data: data.data?.value ?? null, status: data.status });
 
@@ -217,9 +201,7 @@ test('disableRefetchOnMount', async () => {
   function Comp() {
     const [mountComp2, setMountComp2] = useState(false);
 
-    const data = env.apiStore.useDocument({
-      disableRefetchOnMount: true,
-    });
+    const data = env.apiStore.useDocument({ disableRefetchOnMount: true });
 
     renders.push({ data: data.data?.value ?? null, status: data.status });
 
@@ -301,10 +283,7 @@ describe('action types', () => {
     act(() => {
       void env.performClientUpdateAction(
         { hello: 'was updated' },
-        {
-          withOptimisticUpdate: true,
-          withRevalidation: false,
-        },
+        { withOptimisticUpdate: true, withRevalidation: false },
       );
     });
 
@@ -337,10 +316,7 @@ describe('action types', () => {
     act(() => {
       void env.performClientUpdateAction(
         { hello: 'was updated' },
-        {
-          withOptimisticUpdate: true,
-          withRevalidation: true,
-        },
+        { withOptimisticUpdate: true, withRevalidation: true },
       );
     });
 
@@ -410,10 +386,7 @@ describe('action types', () => {
     act(() => {
       void env.performClientUpdateAction(
         { hello: 'was updated' },
-        {
-          withOptimisticUpdate: false,
-          withRevalidation: true,
-        },
+        { withOptimisticUpdate: false, withRevalidation: true },
       );
     });
 
@@ -448,11 +421,7 @@ test('rollback on error', async () => {
   act(() => {
     void env.performClientUpdateAction(
       { hello: 'was updated' },
-      {
-        withOptimisticUpdate: true,
-        withRevalidation: false,
-        error: 'error',
-      },
+      { withOptimisticUpdate: true, withRevalidation: false, error: 'error' },
     );
   });
 

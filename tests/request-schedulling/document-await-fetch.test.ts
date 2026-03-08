@@ -26,10 +26,7 @@ describe('awaitFetch basic behavior', () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({
-      data: { value: 42 },
-      error: null,
-    });
+    expect(result).toEqual({ data: { value: 42 }, error: null });
 
     expect(env.serverMock.numOfFinishedFetches).toBe(1);
   });
@@ -81,10 +78,7 @@ describe('awaitFetch basic behavior', () => {
     const result = await resultPromise;
 
     // Should have fetched new data from server
-    expect(result).toEqual({
-      data: { value: 999 },
-      error: null,
-    });
+    expect(result).toEqual({ data: { value: 999 }, error: null });
   });
 });
 
@@ -241,10 +235,7 @@ describe('awaitFetch edge cases', () => {
     const result = await fetchPromise;
 
     // Should have the data that was present when fetch completed
-    expect(result).toEqual({
-      data: { value: 999 },
-      error: null,
-    });
+    expect(result).toEqual({ data: { value: 999 }, error: null });
   });
 
   test('awaitFetch with immediate error', async () => {
@@ -523,10 +514,7 @@ describe('awaitFetch timeout', () => {
     const result = await resultPromise;
 
     // Should succeed since fetch completed before timeout
-    expect(result).toEqual({
-      data: { value: 42 },
-      error: null,
-    });
+    expect(result).toEqual({ data: { value: 42 }, error: null });
   });
 
   test('awaitFetch with zero timeout times out immediately', async () => {

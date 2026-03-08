@@ -29,9 +29,7 @@ const initialServerData: Tables = {
 
 beforeAll(() => {
   vi.useFakeTimers();
-  setDefaultLoggerStoreOptions({
-    changesOnly: true,
-  });
+  setDefaultLoggerStoreOptions({ changesOnly: true });
 });
 
 beforeEach(() => {
@@ -52,9 +50,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     usesRealTimeUpdates: true,
   });
 
-  const renders = createLoggerStore({
-    rejectKeys: ['queryMetadata'],
-  });
+  const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
   const { rerender } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
@@ -199,9 +195,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     usesRealTimeUpdates: true,
   });
 
-  const renders = createLoggerStore({
-    rejectKeys: ['queryMetadata'],
-  });
+  const renders = createLoggerStore({ rejectKeys: ['queryMetadata'] });
 
   const { rerender } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
@@ -415,13 +409,8 @@ test('useListQuery: disable then enable isOffScreen', async () => {
   const { rerender } = renderHook(
     ({ isOffScreen }: { isOffScreen: boolean }) => {
       const result = env.apiStore.useListQuery(
-        {
-          tableId: 'users',
-        },
-        {
-          isOffScreen,
-          returnRefetchingStatus: true,
-        },
+        { tableId: 'users' },
+        { isOffScreen, returnRefetchingStatus: true },
       );
 
       renders.add(result);
@@ -667,9 +656,7 @@ test('useMultipleListQueries should not trigger a mount refetch when some option
 
 test('useMultipleListQueries should not trigger a mount refetch for unchanged items', async () => {
   const env = createListQueryStoreTestEnv(initialServerData, {
-    testScenario: {
-      loaded: { tables: ['products', 'users', 'orders'] },
-    },
+    testScenario: { loaded: { tables: ['products', 'users', 'orders'] } },
     lowPriorityThrottleMs: 10,
   });
 
@@ -681,9 +668,7 @@ test('useMultipleListQueries should not trigger a mount refetch for unchanged it
   const { rerender } = renderHook(
     ({ items }: { items: string[] }) => {
       const result = env.apiStore.useMultipleListQueries(
-        items.map((payload) => ({
-          payload: { tableId: payload },
-        })),
+        items.map((payload) => ({ payload: { tableId: payload } })),
       );
 
       renders.add(result);
@@ -816,15 +801,11 @@ test('Selected value should update when external dep changes (default selectorUs
         [externalDep],
       );
 
-      const result = env.apiStore.useItem('users||1', {
-        selector,
-      });
+      const result = env.apiStore.useItem('users||1', { selector });
 
       const queryResult = env.apiStore.useListQuery(
         { tableId: 'users' },
-        {
-          itemSelector: selector,
-        },
+        { itemSelector: selector },
       );
 
       renders.add({
@@ -928,9 +909,7 @@ test('useListQuery with selector should not trigger a rerender', async () => {
   const { rerender } = renderHook(() => {
     const { items, status } = env.apiStore.useListQuery(
       { tableId: 'users' },
-      {
-        itemSelector: () => ({}),
-      },
+      { itemSelector: () => ({}) },
     );
 
     renders.add({ status, changed: prevData !== items });

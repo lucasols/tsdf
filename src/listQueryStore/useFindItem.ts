@@ -13,9 +13,7 @@ export function useFindItem<
   findItemFn: (item: ItemState, itemPayload: ItemPayload) => boolean,
   {
     selector,
-  }: {
-    selector?: (data: ItemState, id: ItemPayload) => SelectedItem;
-  },
+  }: { selector?: (data: ItemState, id: ItemPayload) => SelectedItem },
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
 ): SelectedItem | null {
   return store.useSelector((state) => {

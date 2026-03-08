@@ -29,11 +29,7 @@ export class FetchError extends Error {
       path,
       method = 'GET',
       code = 500,
-    }: {
-      path: string;
-      method?: StoreError['method'];
-      code?: number;
-    },
+    }: { path: string; method?: StoreError['method']; code?: number },
   ) {
     super(message);
     this.name = 'FetchError';
@@ -57,11 +53,7 @@ export function normalizeError(exception: Error): StoreError {
     };
   }
 
-  return {
-    code: 500,
-    id: 'fetch-error',
-    message: exception.message,
-  };
+  return { code: 500, id: 'fetch-error', message: exception.message };
 }
 
 // Emojis for visual identification in timelines
@@ -169,14 +161,7 @@ export function createActionTracker() {
 
     flushPendingComments(time);
 
-    actionsHistory.push({
-      action,
-      time,
-      uiValue,
-      actionValue,
-      id,
-      itemId,
-    });
+    actionsHistory.push({ action, time, uiValue, actionValue, id, itemId });
   }
 
   function addTimelineComments(
@@ -344,10 +329,7 @@ export function createUITracker<T>(
     }
   }
 
-  return {
-    uiChanges,
-    trackUIChanges,
-  };
+  return { uiChanges, trackUIChanges };
 }
 
 export function createPerItemUITracker(
@@ -391,10 +373,7 @@ export function createPerItemUITracker(
     return valueToUse;
   }
 
-  return {
-    uiChanges,
-    trackItemUI,
-  };
+  return { uiChanges, trackItemUI };
 }
 
 /**

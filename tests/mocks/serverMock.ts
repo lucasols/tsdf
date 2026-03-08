@@ -32,9 +32,7 @@ export type AddActionFn = (
   options?: { id?: string | number; actionValue?: unknown },
 ) => void;
 
-type ServerMockEvents = {
-  data_changed: undefined;
-};
+type ServerMockEvents = { data_changed: undefined };
 
 export type SharedServerMockState<Data> = {
   serverDataHistory: Data[];

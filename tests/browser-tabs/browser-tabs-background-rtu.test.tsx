@@ -713,10 +713,7 @@ test('list query RTU fetch in the active tab updates the background tab without 
 
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Zoe',
-  });
+  ).toEqual({ id: 1, name: 'Zoe' });
   expect(
     envB.serverTable.fetchHistory.filter((entry) => entry.type === 'list'),
   ).toHaveLength(0);
@@ -788,10 +785,7 @@ test('list query RTU failures stay local to the fetching tab', async () => {
 
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Alice',
-  });
+  ).toEqual({ id: 1, name: 'Alice' });
   expect(envB.serverTable.fetchHistory).toHaveLength(0);
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
@@ -866,10 +860,7 @@ test('list query realtime invalidations stay isolated across different store ids
   );
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Alice',
-  });
+  ).toEqual({ id: 1, name: 'Alice' });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
@@ -947,10 +938,7 @@ test('list query background RTU invalidations dedupe to one query fetch when all
   ).toHaveLength(0);
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Zoe',
-  });
+  ).toEqual({ id: 1, name: 'Zoe' });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |
@@ -998,9 +986,7 @@ test('list query RTU fetch in the active tab updates the background tab that use
     sharedServerTableState,
     browserTabsTransportFactory: transportFactory,
     bindFocusController: tabs.bind('b'),
-    testScenario: {
-      loaded: { queries: [{ tableId: 'users', filters }] },
-    },
+    testScenario: { loaded: { queries: [{ tableId: 'users', filters }] } },
     usesRealTimeUpdates: true,
   });
 
@@ -1011,10 +997,7 @@ test('list query RTU fetch in the active tab updates the background tab that use
     }
   });
   renderHook(() => {
-    const query = envB.apiStore.useListQuery({
-      tableId: 'users',
-      filters,
-    });
+    const query = envB.apiStore.useListQuery({ tableId: 'users', filters });
     for (const item of query.items) {
       envB.trackItemUI(`users||${item.id}`, item.name);
     }
@@ -1035,10 +1018,7 @@ test('list query RTU fetch in the active tab updates the background tab that use
   ).toHaveLength(1);
   expect(
     envB.store.state.items[envB.getStoreItemKeyFromRaw('users||1')],
-  ).toEqual({
-    id: 1,
-    name: 'Zoe',
-  });
+  ).toEqual({ id: 1, name: 'Zoe' });
   expect(envA.timelineString).toMatchInlineSnapshot(`
     "
     time  | users||1 | users||2 |

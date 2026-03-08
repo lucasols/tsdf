@@ -113,9 +113,7 @@ describe('query size coalescing', () => {
     env.scheduleFetch('highPriority', { tableId: 'table1' }, 3);
     await flushAllTimers();
 
-    const queryAfterInitial = env.apiStore.getQueryState({
-      tableId: 'table1',
-    });
+    const queryAfterInitial = env.apiStore.getQueryState({ tableId: 'table1' });
     expect(queryAfterInitial?.items.length).toBe(3);
     expect(queryAfterInitial?.hasMore).toBe(true);
 

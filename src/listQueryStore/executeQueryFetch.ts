@@ -52,10 +52,7 @@ function applyFetchedItems<
     if (partialResources) {
       const prev = draft.items[itemKey] ?? undefined;
       const merged = partialResources.mergeItems(prev, data);
-      draft.items[itemKey] = reusePrevIfEqual({
-        current: merged,
-        prev,
-      });
+      draft.items[itemKey] = reusePrevIfEqual({ current: merged, prev });
 
       if (fields && fields.length > 0) {
         const existingFields = draft.itemLoadedFields[itemKey] ?? [];

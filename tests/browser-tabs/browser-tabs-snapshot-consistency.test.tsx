@@ -66,10 +66,7 @@ test('collection snapshots do not re-broadcast after remote application', async 
   void envA.performClientUpdateAction(
     'item1',
     { name: 'Updated' },
-    {
-      withOptimisticUpdate: true,
-      duration: 1_000,
-    },
+    { withOptimisticUpdate: true, duration: 1_000 },
   );
 
   await flushAllTimers();
@@ -197,10 +194,7 @@ test('confirmed collection snapshots do not overwrite a local in-flight mutation
   void envB.performClientUpdateAction(
     'item1',
     { name: 'Local' },
-    {
-      withOptimisticUpdate: true,
-      duration: 1_000,
-    },
+    { withOptimisticUpdate: true, duration: 1_000 },
   );
   await advanceTime(0);
   await advanceTime(1);
@@ -443,10 +437,7 @@ test('list query snapshots do not re-broadcast after remote application', async 
   void envA.performClientItemUpdateAction(
     'users||1',
     { name: 'Zoe' },
-    {
-      withOptimisticUpdate: true,
-      duration: 1_000,
-    },
+    { withOptimisticUpdate: true, duration: 1_000 },
   );
 
   await flushAllTimers();
@@ -586,10 +577,7 @@ test('confirmed list query snapshots do not overwrite a local in-flight mutation
   void envB.performClientItemUpdateAction(
     'users||1',
     { name: 'Zoe' },
-    {
-      withOptimisticUpdate: true,
-      duration: 1_000,
-    },
+    { withOptimisticUpdate: true, duration: 1_000 },
   );
   await advanceTime(0);
   await advanceTime(1);
@@ -682,10 +670,7 @@ test('confirmed sibling item fetches do not overwrite a local optimistic list it
   void envB.performClientItemUpdateAction(
     'users||1',
     { name: 'Jane' },
-    {
-      withOptimisticUpdate: true,
-      duration: 1_000,
-    },
+    { withOptimisticUpdate: true, duration: 1_000 },
   );
   await advanceTime(0);
 
@@ -696,10 +681,7 @@ test('confirmed sibling item fetches do not overwrite a local optimistic list it
   await advanceTime(900);
 
   expect(envA.serverTable.fetchHistory).toMatchObject([
-    {
-      type: 'fetch',
-      itemId: 'users||1',
-    },
+    { type: 'fetch', itemId: 'users||1' },
   ]);
   expect(envB.store.state.items[itemKey]?.name).toBe('Jane');
 
