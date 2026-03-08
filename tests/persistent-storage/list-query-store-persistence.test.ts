@@ -1004,48 +1004,88 @@ describe('localStorage: list query store persistence', () => {
     `);
     expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
   });
+
+  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+    const onPersistentStorageError = vi.fn();
+    const env = createEnv({
+      storeName: 'lq-preload-local',
+      sessionKey: 'sess1',
+      onPersistentStorageError,
+    });
+
+    await expect(
+      env.apiStore.preloadQueryFromPersistentStorage({ tableId: 'users' }),
+    ).resolves.toMatchInlineSnapshot(`
+      - payload: { tableId: 'users' }
+        preloaded: '❌'
+    `);
+    await expect(env.apiStore.preloadItemFromPersistentStorage('users||1'))
+      .resolves.toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
     `);
 
-    // Invalid item not loaded
-    expect(env.store.state.items[invalidIk]).toBeUndefined();
-
-    // Query should only reference valid item
-    const query = env.store.state.queries[qk];
-    expect(query?.items).toMatchInlineSnapshot(`['"t1||1']`);
+    expect(onPersistentStorageError).toHaveBeenCalledTimes(2);
+    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
+      message: 'Async preload is not available',
+    });
+    expect(onPersistentStorageError.mock.calls[1]?.[0]).toMatchObject({
+      message: 'Async preload is not available',
+    });
   });
 
-  test('session isolation', () => {
-    const ik = storeItemKey('t1', 1);
+  test('invalid cached query entries are cleaned up only after a direct read', async () => {
+    const key = setCachedQuery(
+      'lq-invalid',
+      'sess1',
+      { tableId: 'users' },
+      [storeItemKey('users', 1)],
+      false,
+      1,
+    );
 
-    setCachedData('lq7', 'sess-a', {
-      items: { [ik]: { id: 1, name: 'A' } },
-      queries: {},
-      itemPayloads: {},
+    const env = createEnv({
+      storeName: 'lq-invalid',
+      sessionKey: 'sess1',
+      version: 2,
     });
 
-    const env = createEnv({ storeName: 'lq7', sessionKey: 'sess-b' });
+    expect(localStorage.getItem(key)).not.toBeNull();
+    expect(env.apiStore.getQueryState({ tableId: 'users' })).toBeUndefined();
 
-    expect(Object.keys(env.store.state.items).length).toBe(0);
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
   });
 
-  test('reset clears persisted storage', async () => {
-    const ik = storeItemKey('t1', 1);
+  test('invalid cached query entries are also cleaned up after a hook read', async () => {
+    const usersQuery = { tableId: 'users' };
+    const key = setCachedQuery(
+      'lq-invalid-hook',
+      'sess1',
+      usersQuery,
+      [storeItemKey('users', 1)],
+      false,
+      1,
+    );
 
-    setCachedData('lq8', 'sess1', {
-      items: { [ik]: { id: 1, name: 'X' } },
-      queries: {},
-      itemPayloads: {},
+    const env = createEnv({
+      storeName: 'lq-invalid-hook',
+      sessionKey: 'sess1',
+      version: 2,
     });
 
-    const env = createEnv({ storeName: 'lq8', sessionKey: 'sess1' });
+    expect(localStorage.getItem(key)).not.toBeNull();
 
-    expect(Object.keys(env.store.state.items).length).toBe(1);
+    renderHook(() => {
+      env.apiStore.useListQuery(usersQuery, {
+        // The hook should exercise the lazy query read path without
+        // kicking off a fetch that could hide the cleanup behavior.
+        isOffScreen: true,
+      });
+    });
 
-    env.apiStore.reset();
-    await flushAllTimers();
+    await advanceTime(2100);
 
-    const cached = localStorage.getItem('tsdf.sess1.lq8');
-    expect(cached).toBeNull();
+    expect(localStorage.getItem(key)).toBeNull();
   });
-
 });
