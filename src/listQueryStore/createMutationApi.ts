@@ -1,10 +1,15 @@
 import { filterAndMap, sortBy } from '@ls-stack/utils/arrayUtils';
-import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { unknownToError, type Result } from 't-result';
 import { Store } from 't-state';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
+import type {
+  ListQueryOfflineOperationsRegistry,
+  OfflineMutationDescriptor,
+  OperationInput,
+} from '../persistentStorage/offline/types';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
 import {
   performMutationWithLifecycle,
@@ -45,6 +50,11 @@ export type CreateMutationApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 > = {
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
   fetchItemFn?: (
@@ -88,6 +98,13 @@ export type CreateMutationApiOptions<
   emitInvalidateQuery: (event: InvalidateQueryEvent) => void;
   emitInvalidateItem: (event: InvalidateItemEvent) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
+  offlineController?: {
+    queueMutation: <TName extends keyof TOfflineOperations>(args: {
+      operationName: TName;
+      input: OperationInput<TOfflineOperations, TName>;
+      mutationPayload?: ItemPayload | ItemPayload[] | undefined;
+    }) => Promise<void>;
+  } | null;
   runWithBroadcastConsistency: <T>(
     consistency: SnapshotConsistency,
     callback: () => T,
@@ -106,6 +123,11 @@ export function createMutationApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 >({
   store,
   fetchItemFn,
@@ -125,10 +147,16 @@ export function createMutationApi<
   emitInvalidateQuery,
   emitInvalidateItem,
   blockWindowClose,
+  offlineController,
   runWithBroadcastConsistency,
   publishQuerySnapshot,
   publishItemSnapshot,
-}: CreateMutationApiOptions<ItemState, QueryPayload, ItemPayload>) {
+}: CreateMutationApiOptions<
+  ItemState,
+  QueryPayload,
+  ItemPayload,
+  TOfflineOperations
+>) {
   type FilterQuery = FilterQueryFn<QueryPayload>;
   type FilterItem = FilterItemFn<ItemState, ItemPayload>;
   type MutationPayload =
@@ -678,6 +706,7 @@ export function createMutationApi<
       onSuccess,
       onError,
       debounce,
+      offline,
     }: {
       optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
       mutation: (payload: MutationPayloadToUse) => Promise<T>;
@@ -689,6 +718,12 @@ export function createMutationApi<
       onError?: (error: StoreError | true) => void;
       silentErrors?: boolean;
       debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+      /**
+       * When provided, the mutation is durably queued and replayed by the
+       * offline sync controller. The immediate result only reflects queue
+       * persistence.
+       */
+      offline?: OfflineMutationDescriptor<TOfflineOperations>;
     },
   ): Promise<Result<Awaited<T>, StoreError | true>> {
     const matchAllItems: FilterItem = () => true;
@@ -709,9 +744,23 @@ export function createMutationApi<
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () => mutation(payloadToUse),
+      mutation: async () => {
+        if (offline && offlineController) {
+          await offlineController.queueMutation({
+            operationName: offline.operation,
+            input: offline.input,
+            mutationPayload:
+              Array.isArray(payloadToUse) || typeof payloadToUse !== 'function'
+                ? payloadToUse
+                : undefined,
+          });
+          return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
+        }
+
+        return mutation(payloadToUse);
+      },
       onSuccess: (result) => {
-        if (revalidateOnSuccess) {
+        if (revalidateOnSuccess && !offline) {
           invalidateQueryAndItems({
             itemPayload:
               revalidateOnSuccess === 'queries' ? false : payloadToUse,
@@ -719,7 +768,7 @@ export function createMutationApi<
           });
         }
 
-        if (onSuccess) {
+        if (onSuccess && !offline) {
           onSuccess(result, payloadToUse);
         }
       },

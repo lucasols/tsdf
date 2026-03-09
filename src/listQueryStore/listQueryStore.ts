@@ -3,14 +3,26 @@ import {
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
+import {
+  createOfflineStoreController,
+  initializeOfflineStoreController,
+  type OfflineStoreController,
+} from '../persistentStorage/offline/storeController';
+import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
+import type {
+  ListQueryOfflineOperationsRegistry,
+  OperationInput,
+} from '../persistentStorage/offline/types';
 import type {
   ListQueryPersistentStorageConfig,
   PersistentStoragePreloadResult,
   StorageAdapter,
 } from '../persistentStorage/types';
+import { getStoragePrefixForStoreNamespace } from '../persistentStorage/persistentStorageManager';
 import {
   FetchType,
   RequestSchedulerEvents,
@@ -90,13 +102,19 @@ export type ListQueryStore<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 > = ReturnType<
   typeof createListQueryStore<
     ItemState,
     QueryPayload,
     ItemPayload,
     TPartialResources,
-    TOffsetPagination
+    TOffsetPagination,
+    TOfflineOperations
   >
 >;
 
@@ -174,6 +192,11 @@ type ListQueryStoreOptionsBase<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 > = {
   debugName?: string;
   /** Stable id shared by the same logical list-query store across browser tabs. */
@@ -249,7 +272,8 @@ type ListQueryStoreOptionsBase<
   persistentStorage?: ListQueryPersistentStorageConfig<
     ItemState,
     QueryPayload,
-    ItemPayload
+    ItemPayload,
+    TOfflineOperations
   >;
 } & ([TPartialResources] extends [true]
   ? { partialResources: PartialResourcesConfig<ItemState> }
@@ -261,11 +285,17 @@ export type ListQueryStoreOptions<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 > = ListQueryStoreOptionsBase<
   ItemState,
   QueryPayload,
   ItemPayload,
-  TPartialResources
+  TPartialResources,
+  TOfflineOperations
 > &
   ([TOffsetPagination] extends [true]
     ? {
@@ -287,13 +317,19 @@ export function createListQueryStore<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 >(
   storeOptions: ListQueryStoreOptions<
     ItemState,
     QueryPayload,
     ItemPayload,
     TPartialResources,
-    TOffsetPagination
+    TOffsetPagination,
+    TOfflineOperations
   >,
 ) {
   const {
@@ -552,6 +588,30 @@ export function createListQueryStore<
     );
   }
 
+  let offlineController: OfflineStoreController<
+    TOfflineOperations,
+    ItemPayload | ItemPayload[] | undefined
+  > | null = null;
+  const offlineFetchController = {
+    prepareForFetch: () =>
+      offlineController?.prepareForFetch() ?? Promise.resolve(),
+    getSessionStatus: () => offlineController?.getSessionStatus() ?? null,
+    evaluateOfflineFetchError: (error: unknown, operationName?: string) =>
+      offlineController
+        ? offlineController.evaluateOfflineFetchError(error, operationName)
+        : Promise.resolve(),
+  };
+  const offlineMutationController = {
+    queueMutation: <TName extends keyof TOfflineOperations>(args: {
+      operationName: TName;
+      input: OperationInput<TOfflineOperations, TName>;
+      mutationPayload?: ItemPayload | ItemPayload[] | undefined;
+    }) =>
+      offlineController
+        ? offlineController.queueMutation(args)
+        : Promise.resolve(),
+  };
+
   const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
 
   function runWithoutBroadcast<T>(callback: () => T): T {
@@ -799,6 +859,7 @@ export function createListQueryStore<
       : undefined,
     testInitialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
     noFetchItemFnError,
+    offlineController: offlineFetchController,
     onQueryFetchStart: (requests, startedAt) => {
       const queryKey = requests[0]?.requestId;
       if (!queryKey) return;
@@ -893,7 +954,12 @@ export function createListQueryStore<
     deleteItemState,
     resetInvalidationTracking,
     performMutation: performMutationBase,
-  } = createMutationApi<ItemState, QueryPayload, ItemPayload>({
+  } = createMutationApi<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    TOfflineOperations
+  >({
     store,
     fetchItemFn,
     partialResources,
@@ -916,10 +982,113 @@ export function createListQueryStore<
       events.emit('invalidateItem', event);
     },
     blockWindowClose,
+    offlineController: offlineMutationController,
     runWithBroadcastConsistency,
     publishQuerySnapshot,
     publishItemSnapshot,
   });
+
+  if (persistentStorageConfig?.offlineMode) {
+    offlineController = createOfflineStoreController({
+      storeName: persistentStorageConfig.storeName,
+      storeType: 'listQuery',
+      backend: persistentStorageConfig.backend,
+      getSessionKey,
+      onPersistentStorageError:
+        persistentStorageConfig.onPersistentStorageError,
+      adapter: testOptions?.storageAdapter,
+      offlineMode: persistentStorageConfig.offlineMode,
+      storeAdapter: {
+        getHelpers: () => ({
+          getItemState: (payload: ItemPayload) => getItemState(payload) ?? null,
+          updateItemState: (
+            payload: ItemPayload | ItemPayload[],
+            updater: (item: ItemState) => ItemState | undefined,
+          ) => updateItemState(payload, (draft) => updater(draft)),
+          addItemToState,
+          deleteItemState,
+          invalidateItem: (payload: ItemPayload) => invalidateItem(payload),
+          invalidateQueryAndItems: (args: {
+            itemPayload:
+              | ItemPayload
+              | ItemPayload[]
+              | ((item: ItemPayload) => boolean)
+              | false;
+            queryPayload:
+              | QueryPayload
+              | QueryPayload[]
+              | ((query: QueryPayload) => boolean)
+              | false;
+          }) =>
+            invalidateQueryAndItems({
+              itemPayload: __LEGIT_CAST__<
+                Parameters<typeof invalidateQueryAndItems>[0]['itemPayload'],
+                unknown
+              >(args.itemPayload),
+              queryPayload: __LEGIT_CAST__<
+                Parameters<typeof invalidateQueryAndItems>[0]['queryPayload'],
+                unknown
+              >(args.queryPayload),
+            }),
+          getItemKey,
+          getQueryKey,
+        }),
+        getEntityRefs: ({ mutationPayload, tempId }) => {
+          if (tempId) {
+            return [{ entityKey: tempId, entityKind: 'item' }];
+          }
+
+          if (Array.isArray(mutationPayload)) {
+            return mutationPayload.map((payload) => ({
+              entityKey: getItemKey(payload),
+              entityKind: 'item' as const,
+            }));
+          }
+
+          if (mutationPayload === undefined) return [];
+
+          return [
+            { entityKey: getItemKey(mutationPayload), entityKind: 'item' },
+          ];
+        },
+        getProtectedCacheKeys: (entityRefs) => {
+          const sessionKey = getSessionKey();
+          if (sessionKey === false) return [];
+
+          const prefix = getStoragePrefixForStoreNamespace(
+            sessionKey,
+            persistentStorageConfig.storeName,
+            'listQuery.item',
+          );
+          return entityRefs.map((ref) => `${prefix}${ref.entityKey}`);
+        },
+        applyPendingEntity: ({ tempId, pendingEntity }) => {
+          if (!pendingEntity || typeof pendingEntity !== 'object') return;
+          addItemToState(
+            __LEGIT_CAST__<ItemPayload, string>(tempId),
+            __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
+          );
+        },
+        reconcileTempEntity: ({ tempId, reconciliation }) => {
+          const currentItem = getItemState(
+            __LEGIT_CAST__<ItemPayload, string>(tempId),
+          );
+          const finalData =
+            reconciliation.finalData !== undefined
+              ? __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
+              : (currentItem ?? undefined);
+          if (finalData === undefined) return;
+          deleteItemState(__LEGIT_CAST__<ItemPayload, string>(tempId));
+          addItemToState(
+            __LEGIT_CAST__<ItemPayload, ValidPayload>(
+              reconciliation.finalPayload,
+            ),
+            finalData,
+          );
+        },
+      },
+    });
+  }
 
   function applyLoadedFieldsFromSnapshot(
     draft: State,
@@ -1310,7 +1479,12 @@ export function createListQueryStore<
     payload: QueryPayload | false | null | undefined,
     options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> = {},
   ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined> {
-    return useListQueryHook<ItemState, QueryPayload, ItemPayload, SelectedItem>(
+    const result = useListQueryHook<
+      ItemState,
+      QueryPayload,
+      ItemPayload,
+      SelectedItem
+    >(
       payload,
       options,
       store,
@@ -1318,6 +1492,34 @@ export function createListQueryStore<
       scheduleListQueryFetch,
       useMultipleListQueries,
     );
+
+    const itemKeys = store.useSelectorRC((state) =>
+      result.queryKey ? (state.queries[result.queryKey]?.items ?? []) : [],
+    );
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
+    const pendingEntities = offlineEntities.filter(
+      (entity) =>
+        itemKeys.includes(entity.entityKey) && entity.syncState !== 'conflict',
+    );
+    const conflictedEntities = offlineEntities.filter(
+      (entity) => itemKeys.includes(entity.entityKey) && entity.hasConflict,
+    );
+
+    return {
+      ...result,
+      isPendingOfflineSync: pendingEntities.length > 0,
+      pendingOfflineMutations: pendingEntities.reduce(
+        (total, entity) => total + entity.pendingMutations,
+        0,
+      ),
+      hasOfflineConflict: conflictedEntities.length > 0,
+      pendingItemKeys: pendingEntities.map((entity) => entity.entityKey),
+      conflictedItemKeys: conflictedEntities.map((entity) => entity.entityKey),
+    };
   };
 
   const useMultipleItems: UseMultipleItemsApi = function useMultipleItems<
@@ -1370,13 +1572,29 @@ export function createListQueryStore<
     itemPayload: ItemPayload | false | null | undefined,
     options: UseItemOptions<ItemState, Selected> = {},
   ): TSFDUseListItemReturn<Selected, ItemPayload> {
-    return useItemHook<ItemState, QueryPayload, ItemPayload, Selected>(
+    const result = useItemHook<ItemState, QueryPayload, ItemPayload, Selected>(
       itemPayload,
       options,
       store,
       scheduleItemFetch,
       useMultipleItems,
     );
+
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
+    const offlineEntity = offlineEntities.find(
+      (entity) => entity.entityKey === result.itemStateKey,
+    );
+
+    return {
+      ...result,
+      isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
+      pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
+      hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+    };
   };
 
   function useFindItem<SelectedItem = ItemState | null>(
@@ -1415,6 +1633,7 @@ export function createListQueryStore<
 
   // Attach persistent storage after store creation
   persistence?.attach(store);
+  initializeOfflineStoreController(offlineController);
 
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
@@ -1603,6 +1822,17 @@ export function createListQueryStore<
     loadMore: loadMoreApi,
     getItemKey,
     getItemState,
+    getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
+    useOfflineEntities: () => {
+      return useOfflineStoreEntities({
+        sessionKey: getSessionKey(),
+        inactiveScope: id,
+        storeName: persistentStorageConfig?.storeName,
+      });
+    },
+    getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],
+    resolveOfflineConflict: (conflictId: string, resolution: unknown) =>
+      offlineController?.resolveOfflineConflict(conflictId, resolution),
     preloadItemFromStorage: preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,

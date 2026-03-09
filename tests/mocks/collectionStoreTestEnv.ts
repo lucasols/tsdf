@@ -4,6 +4,7 @@ import {
   type CollectionBrowserTabsMessage,
   type CollectionInitialStateItem,
 } from '../../src/collectionStore/collectionStore';
+import type { CollectionOfflineOperationsRegistry } from '../../src/persistentStorage/offline/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
@@ -42,7 +43,13 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: Record<string, D> };
 
-export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
+export type CollectionStoreTestEnvOptions<
+  D extends Record<string, unknown>,
+  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+    CollectionTestItem<D>,
+    string
+  > = CollectionOfflineOperationsRegistry<CollectionTestItem<D>, string>,
+> = {
   id?: string;
   getSessionKey?: () => string | false;
   sharedServerTableState?: ServerTableSharedState<D>;
@@ -73,13 +80,20 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: CollectionPersistentStorageConfig<
     CollectionTestItem<D>,
-    string
+    string,
+    TOfflineOperations
   >;
   storageAdapter?: StorageAdapter;
   __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
-export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
+export function createCollectionStoreTestEnv<
+  D extends Record<string, unknown>,
+  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+    CollectionTestItem<D>,
+    string
+  > = CollectionOfflineOperationsRegistry<CollectionTestItem<D>, string>,
+>(
   serverInitialData: Record<string, D>,
   {
     id = getNextStoreId('collection'),
@@ -102,7 +116,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: CollectionStoreTestEnvOptions<D> = {},
+  }: CollectionStoreTestEnvOptions<D, TOfflineOperations> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -174,7 +188,11 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
-  const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
+  const collectionStore = createCollectionStore<
+    CollectionTestItem<D>,
+    string,
+    TOfflineOperations
+  >({
     id,
     getSessionKey,
     errorNormalizer: normalizeError,

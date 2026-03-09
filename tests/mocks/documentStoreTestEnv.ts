@@ -3,6 +3,7 @@ import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
+import type { DocumentOfflineOperationsRegistry } from '../../src/persistentStorage/offline/types';
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
@@ -39,7 +40,11 @@ export type DocumentStoreTestScenario<D> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: D };
 
-export type DocumentStoreTestEnvOptions<D> = {
+export type DocumentStoreTestEnvOptions<
+  D,
+  TOfflineOperations extends DocumentOfflineOperationsRegistry<{ value: D }> =
+    DocumentOfflineOperationsRegistry<{ value: D }>,
+> = {
   id?: string;
   getSessionKey?: () => string | false;
   sharedServerState?: SharedServerMockState<D>;
@@ -62,12 +67,19 @@ export type DocumentStoreTestEnvOptions<D> = {
   testScenario?: DocumentStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
-  persistentStorage?: DocumentPersistentStorageConfig<{ value: D }>;
+  persistentStorage?: DocumentPersistentStorageConfig<
+    { value: D },
+    TOfflineOperations
+  >;
   storageAdapter?: StorageAdapter;
   __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
-export function createDocumentStoreTestEnv<D>(
+export function createDocumentStoreTestEnv<
+  D,
+  TOfflineOperations extends DocumentOfflineOperationsRegistry<{ value: D }> =
+    DocumentOfflineOperationsRegistry<{ value: D }>,
+>(
   serverInitialData: D,
   {
     id = getNextStoreId('document'),
@@ -87,7 +99,7 @@ export function createDocumentStoreTestEnv<D>(
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: DocumentStoreTestEnvOptions<D> = {},
+  }: DocumentStoreTestEnvOptions<D, TOfflineOperations> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -119,7 +131,7 @@ export function createDocumentStoreTestEnv<D>(
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
-  const documentStore = createDocumentStore<{ value: D }>({
+  const documentStore = createDocumentStore<{ value: D }, TOfflineOperations>({
     id,
     getSessionKey,
     errorNormalizer: normalizeError,

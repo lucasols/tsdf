@@ -5,7 +5,11 @@ import {
   type BrowserTabsPriorityTimings,
 } from './browserTabsPriority';
 
-export type BrowserTabsStoreType = 'document' | 'collection' | 'listQuery';
+export type BrowserTabsStoreType =
+  | 'document'
+  | 'collection'
+  | 'listQuery'
+  | 'offline';
 export type BrowserTabsSessionKey = string | false;
 
 export type BrowserTabsTransport = {

@@ -419,8 +419,22 @@ async function runExpirationScan(
   const prefix = 'tsdf.';
   const keys = await adapter.listKeys(prefix);
   const now = Date.now();
+  const protectedKeysBySession = new Map<string, Set<string>>();
 
   for (const key of keys) {
+    if (key.includes('.__offline__.')) continue;
+
+    const sessionKey = getSessionKeyFromStorageKey(key);
+    if (sessionKey) {
+      let protectedKeys = protectedKeysBySession.get(sessionKey);
+      if (!protectedKeys) {
+        protectedKeys = await readProtectedStorageKeys(adapter, sessionKey);
+        protectedKeysBySession.set(sessionKey, protectedKeys);
+      }
+
+      if (protectedKeys.has(key)) continue;
+    }
+
     const raw = await adapter.read<unknown>(key);
     if (!raw) {
       await adapter.remove(key);
@@ -437,4 +451,25 @@ async function runExpirationScan(
 /** Resets expiration scan tracking. Exported for test cleanup. */
 export function resetExpirationScanTracking(): void {
   scannedBackends.clear();
+}
+
+function getSessionKeyFromStorageKey(key: string): string | null {
+  if (!key.startsWith('tsdf.')) return null;
+
+  const remainder = key.slice('tsdf.'.length);
+  const separatorIndex = remainder.indexOf('.');
+  if (separatorIndex === -1) return null;
+
+  return remainder.slice(0, separatorIndex);
+}
+
+export async function readProtectedStorageKeys(
+  adapter: StorageAdapter,
+  sessionKey: string,
+): Promise<Set<string>> {
+  const entry = await adapter.read<StorageCacheEntry<{ keys: string[] }>>(
+    `tsdf.${sessionKey}.__offline__.protected`,
+  );
+
+  return new Set(entry?.data.keys ?? []);
 }

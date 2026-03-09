@@ -15,6 +15,7 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
 import {
@@ -116,6 +117,7 @@ export type CreateFetchApiOptions<
     startedAt: number;
     duration: number;
   }) => void;
+  offlineController?: OfflineAwareFetchController | null;
 };
 
 export function createFetchApi<
@@ -150,6 +152,7 @@ export function createFetchApi<
   onQueryFetchSettled,
   onItemFetchStart,
   onItemFetchSettled,
+  offlineController,
 }: CreateFetchApiOptions<ItemState, QueryPayload, ItemPayload>) {
   type Query = TSFDListQuery<QueryPayload>;
 
@@ -287,6 +290,7 @@ export function createFetchApi<
             updateItemSchedulerTiming,
             partialResources,
             offsetPagination,
+            offlineController,
           );
           onQueryFetchSettled?.({
             requests,
@@ -391,6 +395,7 @@ export function createFetchApi<
             errorNormalizer,
             partialResources,
             batchKey,
+            offlineController,
           );
           onItemFetchSettled?.({
             requests,

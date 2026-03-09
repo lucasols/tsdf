@@ -4,7 +4,7 @@ import {
 } from '@ls-stack/browser-utils/window';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { unknownToError, type Result } from 't-result';
@@ -13,6 +13,16 @@ import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
+import {
+  createOfflineStoreController,
+  initializeOfflineStoreController,
+} from '../persistentStorage/offline/storeController';
+import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
+import type {
+  CollectionOfflineOperationsRegistry,
+  OfflineMutationDescriptor,
+} from '../persistentStorage/offline/types';
+import { getStoragePrefixForStoreNamespace } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionPersistentStorageConfig,
   PersistentStoragePreloadResult,
@@ -91,6 +101,9 @@ export type TSFDUseCollectionItemReturn<
   error: StoreError | null;
   itemStateKey: string;
   isLoading: boolean;
+  isPendingOfflineSync: boolean;
+  pendingOfflineMutations: number;
+  hasOfflineConflict: boolean;
   queryMetadata: QueryMetadata;
 };
 
@@ -166,6 +179,10 @@ type CollectionItemSnapshotMessage<
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+    ItemState,
+    ItemPayload
+  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
 > = {
   debugName?: string;
   /** Stable id shared by the same logical collection store across browser tabs. */
@@ -208,7 +225,11 @@ export type CollectionStoreOptions<
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
-  persistentStorage?: CollectionPersistentStorageConfig<ItemState, ItemPayload>;
+  persistentStorage?: CollectionPersistentStorageConfig<
+    ItemState,
+    ItemPayload,
+    TOfflineOperations
+  >;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -232,7 +253,13 @@ export type CollectionStoreOptions<
 export type CollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-> = ReturnType<typeof createCollectionStore<ItemState, ItemPayload>>;
+  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+    ItemState,
+    ItemPayload
+  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
+> = ReturnType<
+  typeof createCollectionStore<ItemState, ItemPayload, TOfflineOperations>
+>;
 
 type CollectionStoreEvents = {
   invalidateData: { priority: FetchType; itemKey: string };
@@ -241,6 +268,10 @@ type CollectionStoreEvents = {
 export function createCollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+    ItemState,
+    ItemPayload
+  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
 >({
   debugName,
   id,
@@ -263,7 +294,7 @@ export function createCollectionStore<
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
-}: CollectionStoreOptions<ItemState, ItemPayload>) {
+}: CollectionStoreOptions<ItemState, ItemPayload, TOfflineOperations>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
 
@@ -334,6 +365,86 @@ export function createCollectionStore<
       filterCollectionItemObjKey ? filterCollectionItemObjKey(params) : params,
     );
   }
+
+  const offlineController = persistentStorageConfig?.offlineMode
+    ? createOfflineStoreController({
+        storeName: persistentStorageConfig.storeName,
+        storeType: 'collection',
+        backend: persistentStorageConfig.backend,
+        getSessionKey,
+        onPersistentStorageError:
+          persistentStorageConfig.onPersistentStorageError,
+        adapter: testOptions?.storageAdapter,
+        offlineMode: persistentStorageConfig.offlineMode,
+        storeAdapter: {
+          getHelpers: () => ({
+            getItemState: (payload: ItemPayload) =>
+              getItemState(payload)?.data ?? null,
+            updateItemState: (
+              payload: ItemPayload | ItemPayload[],
+              updater: (item: ItemState) => ItemState | undefined,
+            ) => updateItemState(payload, (draft) => updater(draft)),
+            addItemToState,
+            deleteItemState,
+            invalidateItem: (payload: ItemPayload) => invalidateItem(payload),
+            getItemKey,
+          }),
+          getEntityRefs: ({ mutationPayload, tempId }) => {
+            if (tempId) {
+              return [{ entityKey: tempId, entityKind: 'item' }];
+            }
+
+            if (mutationPayload === undefined || mutationPayload === null) {
+              return [];
+            }
+
+            return [
+              {
+                entityKey: getItemKey(
+                  __LEGIT_CAST__<ItemPayload, unknown>(mutationPayload),
+                ),
+                entityKind: 'item',
+              },
+            ];
+          },
+          getProtectedCacheKeys: (entityRefs) => {
+            const sessionKey = getSessionKey();
+            if (sessionKey === false) return [];
+
+            const prefix = getStoragePrefixForStoreNamespace(
+              sessionKey,
+              persistentStorageConfig.storeName,
+              'collection.item',
+            );
+            return entityRefs.map((ref) => `${prefix}${ref.entityKey}`);
+          },
+          applyPendingEntity: ({ tempId, pendingEntity }) => {
+            if (!pendingEntity || typeof pendingEntity !== 'object') return;
+            addItemToState(
+              __LEGIT_CAST__<ItemPayload, string>(tempId),
+              __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
+            );
+          },
+          reconcileTempEntity: ({ tempId, reconciliation }) => {
+            const currentItem = getItemState(
+              __LEGIT_CAST__<ItemPayload, string>(tempId),
+            );
+            const finalData =
+              reconciliation.finalData !== undefined
+                ? __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
+                : (currentItem?.data ?? undefined);
+            if (finalData === undefined) return;
+            deleteItemState(__LEGIT_CAST__<ItemPayload, string>(tempId));
+            addItemToState(
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(
+                reconciliation.finalPayload,
+              ),
+              finalData,
+            );
+          },
+        },
+      })
+    : null;
 
   const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
 
@@ -767,6 +878,7 @@ export function createCollectionStore<
       batchFetchFn,
       errorNormalizer,
       batchKey,
+      offlineController,
     );
 
     const successfulRequests = requests.filter(
@@ -1061,13 +1173,30 @@ export function createCollectionStore<
     payload: ItemPayload | undefined | false | null,
     options: UseItemOptions<ItemState, Selected> = {},
   ) {
-    return useItemBase<ItemState, ItemPayload, Selected>(
+    const result = useItemBase<ItemState, ItemPayload, Selected>(
       payload,
       options,
       store,
       scheduleFetch,
       useMultipleItems,
     );
+
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
+
+    const offlineEntity = offlineEntities.find(
+      (entity) => entity.entityKey === result.itemStateKey,
+    );
+
+    return {
+      ...result,
+      isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
+      pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
+      hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+    };
   }
 
   type EndMutation = () => void;
@@ -1202,6 +1331,7 @@ export function createCollectionStore<
       revalidateOnSuccess,
       onSuccess,
       debounce: _debounce,
+      offline,
     }: {
       optimisticUpdate?: (payload: ItemPayload) => void | boolean;
       mutation: (payload: ItemPayload) => Promise<T>;
@@ -1209,6 +1339,12 @@ export function createCollectionStore<
       revalidateOnSuccess?: boolean;
       silentErrors?: boolean;
       debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+      /**
+       * When provided, the mutation is durably queued and replayed by the
+       * offline sync controller. The immediate result only reflects queue
+       * persistence.
+       */
+      offline?: OfflineMutationDescriptor<TOfflineOperations>;
     },
   ): Promise<Result<Awaited<T>, StoreError | true>> {
     const mutationId = getAutoIncrementId();
@@ -1223,13 +1359,24 @@ export function createCollectionStore<
         : undefined,
       debounce: _debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () => mutation(payload),
+      mutation: async () => {
+        if (offline && offlineController) {
+          await offlineController.queueMutation({
+            operationName: offline.operation,
+            input: offline.input,
+            mutationPayload: payload,
+          });
+          return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
+        }
+
+        return mutation(payload);
+      },
       onSuccess: (result) => {
-        if (revalidateOnSuccess) {
+        if (revalidateOnSuccess && !offline) {
           invalidateItem(payload);
         }
 
-        if (onSuccess) {
+        if (onSuccess && !offline) {
           onSuccess(result, payload);
         }
       },
@@ -1270,6 +1417,7 @@ export function createCollectionStore<
 
   // Attach persistent storage after store creation
   persistence?.attach(store);
+  initializeOfflineStoreController(offlineController);
 
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
@@ -1451,6 +1599,17 @@ export function createCollectionStore<
     preloadItemFromStorage,
     getItemKey,
     getItemState,
+    getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
+    useOfflineEntities: () => {
+      return useOfflineStoreEntities({
+        sessionKey: getSessionKey(),
+        inactiveScope: id,
+        storeName: persistentStorageConfig?.storeName,
+      });
+    },
+    getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],
+    resolveOfflineConflict: (conflictId: string, resolution: unknown) =>
+      offlineController?.resolveOfflineConflict(conflictId, resolution),
     startMutation,
     invalidateItem,
     updateItemState,

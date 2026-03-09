@@ -115,6 +115,11 @@ export function useListQuery<
             queryKey: '',
             items: [],
             isLoadingMore: false,
+            isPendingOfflineSync: false,
+            pendingOfflineMutations: 0,
+            hasOfflineConflict: false,
+            pendingItemKeys: [],
+            conflictedItemKeys: [],
             queryMetadata: undefined,
           }
         : {
@@ -127,6 +132,11 @@ export function useListQuery<
             queryKey: '',
             items: [],
             isLoadingMore: false,
+            isPendingOfflineSync: false,
+            pendingOfflineMutations: 0,
+            hasOfflineConflict: false,
+            pendingItemKeys: [],
+            conflictedItemKeys: [],
             queryMetadata: undefined,
           }),
     [queryResult, fields, isInvalidPayload],

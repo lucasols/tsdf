@@ -10,6 +10,7 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import type { ListQueryOfflineOperationsRegistry } from '../../src/persistentStorage/offline/types';
 import type {
   ListQueryPersistentStorageConfig,
   StorageAdapter,
@@ -97,6 +98,15 @@ export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    TRow,
+    ListQueryParams,
+    ListQueryItemPayload
+  > = ListQueryOfflineOperationsRegistry<
+    TRow,
+    ListQueryParams,
+    ListQueryItemPayload
+  >,
 >(
   serverInitialData: Tables<TRow>,
   {
@@ -164,7 +174,8 @@ export function createListQueryStoreTestEnv<
     persistentStorage?: ListQueryPersistentStorageConfig<
       TRow,
       ListQueryParams,
-      ListQueryItemPayload
+      ListQueryItemPayload,
+      TOfflineOperations
     >;
     storageAdapter?: StorageAdapter;
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
@@ -370,7 +381,8 @@ export function createListQueryStoreTestEnv<
     ListQueryParams,
     ListQueryItemPayload,
     TPartialResources,
-    TOffsetPagination
+    TOffsetPagination,
+    TOfflineOperations
   >(
     __LEGIT_CAST__<
       ListQueryStoreOptions<
@@ -378,7 +390,8 @@ export function createListQueryStoreTestEnv<
         ListQueryParams,
         ListQueryItemPayload,
         TPartialResources,
-        TOffsetPagination
+        TOffsetPagination,
+        TOfflineOperations
       >,
       unknown
     >(storeOptions),

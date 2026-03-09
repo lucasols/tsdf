@@ -1,0 +1,835 @@
+import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import type { ValidPayload } from '../../utils/storeShared';
+import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
+import type { StorageAdapter, StorageBackend } from '../types';
+import { validateWithSchema } from '../validateWithSchema';
+import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
+import type {
+  AnyOfflineOperationDefinition,
+  GlobalOfflineEntity,
+  OfflineConflictRecord,
+  OfflineEntityRef,
+  OfflineModeConfig,
+  OperationInput,
+  OfflineOperationSchemaShape,
+  OfflineQueueEntry,
+  OfflineStoreType,
+} from './types';
+
+type OfflineStoreAdapter<THelpers, TMutationPayload> = {
+  getHelpers: () => THelpers;
+  getEntityRefs: (args: {
+    operationName: string;
+    input: unknown;
+    mutationPayload?: TMutationPayload;
+    tempId?: string;
+  }) => OfflineEntityRef[];
+  getProtectedCacheKeys: (entityRefs: OfflineEntityRef[]) => string[];
+  applyPendingEntity?: (args: {
+    operationName: string;
+    input: unknown;
+    tempId: string;
+    pendingEntity: unknown;
+  }) => void;
+  reconcileTempEntity?: (args: {
+    operationName: string;
+    input: unknown;
+    tempId: string;
+    result: unknown;
+    reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
+  }) => void;
+};
+
+type CreateOfflineStoreControllerOptions<
+  TOperations extends Record<string, AnyOfflineOperationDefinition>,
+  THelpers,
+  TMutationPayload,
+> = {
+  storeName: string;
+  storeType: OfflineStoreType;
+  backend?: StorageBackend;
+  getSessionKey: () => string | false;
+  onPersistentStorageError?: (error: unknown) => void;
+  adapter?: StorageAdapter;
+  offlineMode: OfflineModeConfig<TOperations>;
+  storeAdapter: OfflineStoreAdapter<THelpers, TMutationPayload>;
+};
+
+type ActiveSessionState = {
+  sessionKey: string;
+  session: ReturnType<typeof getOrCreateSessionOfflineCoordinator>;
+  unregister: (() => void) | null;
+  queueNamespace: ReturnType<
+    typeof createPersistentStorageNamespaceHandle<OfflineQueueEntry>
+  >;
+  conflictNamespace: ReturnType<
+    typeof createPersistentStorageNamespaceHandle<OfflineConflictRecord>
+  >;
+  entityNamespace: ReturnType<
+    typeof createPersistentStorageNamespaceHandle<GlobalOfflineEntity>
+  >;
+};
+
+function buildEntityId(
+  sessionKey: string,
+  storeName: string,
+  entityKey: string,
+): string {
+  return `${sessionKey}:${storeName}:${entityKey}`;
+}
+
+function toMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'Unknown error';
+}
+
+function normalizeEntityRefs(entityRefs: OfflineEntityRef[]): string {
+  return JSON.stringify(
+    entityRefs
+      .map((ref) => `${ref.entityKind}:${ref.entityKey}`)
+      .sort((left, right) => left.localeCompare(right)),
+  );
+}
+
+function compareQueueEntries(
+  left: OfflineQueueEntry,
+  right: OfflineQueueEntry,
+): number {
+  if (left.createdAt !== right.createdAt) {
+    return left.createdAt - right.createdAt;
+  }
+  return left.id.localeCompare(right.id);
+}
+
+export type OfflineStoreController<
+  TOperations extends Record<string, OfflineOperationSchemaShape>,
+  TMutationPayload = unknown,
+> = {
+  hydrateIfNeeded: () => Promise<void>;
+  queueMutation: <TName extends keyof TOperations>(args: {
+    operationName: TName;
+    input: OperationInput<TOperations, TName>;
+    mutationPayload?: TMutationPayload;
+  }) => Promise<void>;
+  getOfflineEntities: () => GlobalOfflineEntity[];
+  getOfflineConflicts: () => OfflineConflictRecord[];
+  resolveOfflineConflict: (
+    conflictId: string,
+    resolution: unknown,
+  ) => Promise<void>;
+  prepareForFetch: () => Promise<void>;
+  getSessionStatus: () => { effectiveOffline: boolean } | null;
+  evaluateOfflineFetchError: (
+    error: unknown,
+    operationName?: string,
+  ) => Promise<void>;
+  ensureReplayScheduled: () => Promise<void>;
+};
+
+type OfflineStoreControllerBootstrap = Pick<
+  OfflineStoreController<Record<string, OfflineOperationSchemaShape>>,
+  'hydrateIfNeeded' | 'ensureReplayScheduled'
+>;
+
+export function initializeOfflineStoreController(
+  controller: OfflineStoreControllerBootstrap | null | undefined,
+): void {
+  void controller?.hydrateIfNeeded().then(() => {
+    void controller.ensureReplayScheduled();
+  });
+}
+
+export function createOfflineStoreController<
+  TOperations extends Record<string, AnyOfflineOperationDefinition>,
+  THelpers,
+  TMutationPayload,
+>({
+  storeName,
+  storeType,
+  backend = 'opfs',
+  getSessionKey,
+  onPersistentStorageError,
+  adapter,
+  offlineMode,
+  storeAdapter,
+}: CreateOfflineStoreControllerOptions<
+  TOperations,
+  THelpers,
+  TMutationPayload
+>): OfflineStoreController<TOperations, TMutationPayload> {
+  const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
+  let activeSession: ActiveSessionState | null = null;
+  let replayScheduled = false;
+  let hydratedSessionKey: string | null = null;
+  let hydratedPromise: Promise<void> | null = null;
+  const queueEntries = new Map<string, OfflineQueueEntry>();
+  const conflicts = new Map<string, OfflineConflictRecord>();
+
+  function ensureActiveSession(): ActiveSessionState | null {
+    const sessionKey = getSessionKey();
+    if (sessionKey === false) return null;
+
+    if (activeSession?.sessionKey === sessionKey) return activeSession;
+
+    activeSession?.unregister?.();
+    activeSession = null;
+    queueEntries.clear();
+    conflicts.clear();
+    hydratedSessionKey = null;
+    hydratedPromise = null;
+
+    const session = getOrCreateSessionOfflineCoordinator(sessionKey, {
+      backend,
+      adapter,
+      onPersistentStorageError,
+      config: __LEGIT_CAST__<
+        OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>,
+        OfflineModeConfig<TOperations>
+      >(offlineMode),
+    });
+
+    const queueNamespace =
+      createPersistentStorageNamespaceHandle<OfflineQueueEntry>(
+        {
+          storeName,
+          backend,
+          getSessionKey,
+          onPersistentStorageError,
+          entryPrefix: 'offline.queue',
+        },
+        { adapter },
+      );
+    const conflictNamespace =
+      createPersistentStorageNamespaceHandle<OfflineConflictRecord>(
+        {
+          storeName,
+          backend,
+          getSessionKey,
+          onPersistentStorageError,
+          entryPrefix: 'offline.conflict',
+        },
+        { adapter },
+      );
+    const entityNamespace =
+      createPersistentStorageNamespaceHandle<GlobalOfflineEntity>(
+        {
+          storeName,
+          backend,
+          getSessionKey,
+          onPersistentStorageError,
+          entryPrefix: 'offline.entity',
+        },
+        { adapter },
+      );
+
+    const unregister = session.registerStore({
+      storeName,
+      onGreenCycle: () => {
+        void ensureReplayScheduled();
+      },
+    });
+
+    activeSession = {
+      sessionKey,
+      session,
+      unregister,
+      queueNamespace,
+      conflictNamespace,
+      entityNamespace,
+    };
+
+    return activeSession;
+  }
+
+  async function hydrateIfNeeded(): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current) return;
+    if (hydratedSessionKey === current.sessionKey) return;
+    if (hydratedPromise) return hydratedPromise;
+
+    hydratedPromise = (async () => {
+      queueEntries.clear();
+      conflicts.clear();
+      const [queueKeys, conflictKeys] = await Promise.all([
+        current.queueNamespace.listKeys(),
+        current.conflictNamespace.listKeys(),
+      ]);
+
+      const loadedEntries = await Promise.all(
+        queueKeys.map((key) => current.queueNamespace.load(key)),
+      );
+      for (const entry of loadedEntries) {
+        if (!entry) continue;
+        queueEntries.set(entry.id, entry);
+      }
+
+      const loadedConflicts = await Promise.all(
+        conflictKeys.map((key) => current.conflictNamespace.load(key)),
+      );
+      for (const conflict of loadedConflicts) {
+        if (!conflict) continue;
+        conflicts.set(conflict.id, conflict);
+      }
+
+      hydratedSessionKey = current.sessionKey;
+      refreshDerivedState();
+    })().finally(() => {
+      hydratedPromise = null;
+    });
+
+    return hydratedPromise;
+  }
+
+  function refreshDerivedState(): void {
+    const current = ensureActiveSession();
+    if (!current) return;
+
+    const entitiesByKey = new Map<string, GlobalOfflineEntity>();
+
+    for (const entry of queueEntries.values()) {
+      for (const ref of entry.entityRefs) {
+        const id = buildEntityId(current.sessionKey, storeName, ref.entityKey);
+        const existing = entitiesByKey.get(ref.entityKey);
+        entitiesByKey.set(ref.entityKey, {
+          id,
+          sessionKey: current.sessionKey,
+          storeName,
+          storeType,
+          entityKey: ref.entityKey,
+          entityKind: ref.entityKind,
+          pendingMutations: (existing?.pendingMutations ?? 0) + 1,
+          syncState:
+            existing?.syncState === 'needs-confirmation'
+              ? existing.syncState
+              : entry.syncState,
+          hasConflict: existing?.hasConflict ?? false,
+          createdAt: existing?.createdAt ?? entry.createdAt,
+          updatedAt: entry.updatedAt,
+          tempId: entry.tempId ?? existing?.tempId,
+        });
+      }
+    }
+
+    for (const conflict of conflicts.values()) {
+      for (const ref of conflict.entityRefs) {
+        const id = buildEntityId(current.sessionKey, storeName, ref.entityKey);
+        const existing = entitiesByKey.get(ref.entityKey);
+        entitiesByKey.set(ref.entityKey, {
+          id,
+          sessionKey: current.sessionKey,
+          storeName,
+          storeType,
+          entityKey: ref.entityKey,
+          entityKind: ref.entityKind,
+          pendingMutations: existing?.pendingMutations ?? 0,
+          syncState: 'conflict',
+          hasConflict: true,
+          createdAt: existing?.createdAt ?? conflict.createdAt,
+          updatedAt: conflict.updatedAt,
+          tempId: conflict.tempId ?? existing?.tempId,
+        });
+      }
+    }
+
+    const entities = [...entitiesByKey.values()].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    const protectedKeys = storeAdapter.getProtectedCacheKeys(
+      entities.flatMap((entity) => ({
+        entityKey: entity.entityKey,
+        entityKind: entity.entityKind,
+      })),
+    );
+
+    current.session.syncStoreData(storeName, {
+      entities,
+      conflicts: [...conflicts.values()],
+      protectedKeys,
+    });
+
+    void syncEntityNamespace(current, entities);
+  }
+
+  async function syncEntityNamespace(
+    current: ActiveSessionState,
+    entities: GlobalOfflineEntity[],
+  ): Promise<void> {
+    const existingKeys = await current.entityNamespace.listKeys();
+    const nextKeys = new Set(entities.map((entity) => entity.entityKey));
+
+    await Promise.all([
+      ...entities.map((entity) =>
+        current.entityNamespace.save(entity.entityKey, entity),
+      ),
+      ...existingKeys
+        .filter((key) => !nextKeys.has(key))
+        .map((key) => current.entityNamespace.remove(key)),
+    ]);
+  }
+
+  function getSortedEntries(): OfflineQueueEntry[] {
+    return [...queueEntries.values()].sort(compareQueueEntries);
+  }
+
+  function findAccumulationCandidate(args: {
+    operationName: string;
+    entityRefs: OfflineEntityRef[];
+  }): OfflineQueueEntry | null {
+    const normalizedEntityRefs = normalizeEntityRefs(args.entityRefs);
+    let candidate: OfflineQueueEntry | null = null;
+
+    for (const entry of queueEntries.values()) {
+      if (entry.operation !== args.operationName) continue;
+      if (entry.syncState !== 'pending') continue;
+      if (entry.attempts > 0) continue;
+      if (entry.tempId) continue;
+      if (normalizeEntityRefs(entry.entityRefs) !== normalizedEntityRefs) {
+        continue;
+      }
+
+      if (!candidate || compareQueueEntries(entry, candidate) < 0) {
+        candidate = entry;
+      }
+    }
+
+    return candidate;
+  }
+
+  function buildConflictRecord(
+    current: ActiveSessionState,
+    entry: OfflineQueueEntry,
+    conflict: unknown,
+  ): OfflineConflictRecord {
+    const now = Date.now();
+
+    return {
+      id: `conflict:${entry.id}`,
+      entryId: entry.id,
+      sessionKey: current.sessionKey,
+      storeName,
+      storeType,
+      operation: entry.operation,
+      input: entry.input,
+      conflict,
+      entityRefs: entry.entityRefs,
+      createdAt: now,
+      updatedAt: now,
+      tempId: entry.tempId,
+    };
+  }
+
+  async function persistEntry(entry: OfflineQueueEntry): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current) return;
+    queueEntries.set(entry.id, entry);
+    await current.queueNamespace.save(entry.id, entry);
+    refreshDerivedState();
+  }
+
+  async function removeEntry(entryId: string): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current) return;
+    queueEntries.delete(entryId);
+    await current.queueNamespace.remove(entryId);
+    refreshDerivedState();
+  }
+
+  async function persistConflict(
+    conflict: OfflineConflictRecord,
+  ): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current) return;
+    conflicts.set(conflict.id, conflict);
+    await current.conflictNamespace.save(conflict.id, conflict);
+    refreshDerivedState();
+  }
+
+  async function removeConflict(conflictId: string): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current) return;
+    conflicts.delete(conflictId);
+    await current.conflictNamespace.remove(conflictId);
+    refreshDerivedState();
+  }
+
+  async function ensureReplayScheduled(): Promise<void> {
+    let current = ensureActiveSession();
+    if (!current) return;
+    if (hydratedSessionKey !== current.sessionKey || hydratedPromise !== null) {
+      await hydrateIfNeeded();
+      current = ensureActiveSession();
+      if (!current) return;
+    }
+    if (
+      replayScheduled ||
+      current.session.getStatus().effectiveOffline ||
+      !current.session.isLeader() ||
+      queueEntries.size === 0
+    ) {
+      return;
+    }
+
+    replayScheduled = true;
+    void replayQueue.resultifyAdd(async () => {
+      try {
+        await drainReplay();
+      } finally {
+        replayScheduled = false;
+      }
+    });
+  }
+
+  async function drainReplay(): Promise<void> {
+    while (true) {
+      const current = ensureActiveSession();
+      if (!current) return;
+      if (
+        current.session.getStatus().effectiveOffline ||
+        !current.session.isLeader()
+      ) {
+        return;
+      }
+
+      const nextEntry = getSortedEntries()[0];
+      if (!nextEntry) return;
+
+      const operation = offlineMode.operations[nextEntry.operation];
+      if (!operation) {
+        await removeEntry(nextEntry.id);
+        continue;
+      }
+
+      const shouldConfirmBeforeRetry =
+        nextEntry.syncState === 'needs-confirmation';
+      const helpers = storeAdapter.getHelpers();
+      const conflictHandling = operation.conflictHandling;
+      const tempEntity = operation.tempEntity;
+      let entryToUse: OfflineQueueEntry = {
+        ...nextEntry,
+        syncState: 'syncing',
+        updatedAt: Date.now(),
+        lastAttemptAt: Date.now(),
+      };
+      await persistEntry(entryToUse);
+
+      try {
+        if (shouldConfirmBeforeRetry && operation.confirmRemoteOutcome) {
+          const confirmed = await operation.confirmRemoteOutcome({
+            sessionKey: current.sessionKey,
+            helpers,
+            input: entryToUse.input,
+          });
+
+          if (confirmed.type === 'applied') {
+            await removeEntry(entryToUse.id);
+            continue;
+          }
+
+          if (confirmed.type === 'conflict') {
+            if (!conflictHandling) {
+              throw new Error(
+                `Operation "${entryToUse.operation}" returned a conflict without conflictHandling configured`,
+              );
+            }
+
+            if (
+              conflictHandling.schema &&
+              validateWithSchema(
+                conflictHandling.schema,
+                confirmed.conflict,
+              ) === null
+            ) {
+              throw new Error(
+                `Invalid offline conflict payload for operation "${entryToUse.operation}"`,
+              );
+            }
+
+            await persistConflict(
+              buildConflictRecord(current, entryToUse, confirmed.conflict),
+            );
+            await removeEntry(entryToUse.id);
+            continue;
+          }
+
+          if (confirmed.type === 'unknown') {
+            entryToUse = {
+              ...entryToUse,
+              syncState: 'needs-confirmation',
+              updatedAt: Date.now(),
+            };
+            await persistEntry(entryToUse);
+            return;
+          }
+        }
+
+        const result = await operation.execute({
+          sessionKey: current.sessionKey,
+          helpers,
+          input: entryToUse.input,
+        });
+        const conflict = conflictHandling
+          ? await conflictHandling.detectConflict({
+              sessionKey: current.sessionKey,
+              helpers,
+              input: entryToUse.input,
+              result,
+            })
+          : false;
+
+        if (conflict) {
+          if (
+            conflictHandling?.schema &&
+            validateWithSchema(conflictHandling.schema, conflict) === null
+          ) {
+            throw new Error(
+              `Invalid offline conflict payload for operation "${entryToUse.operation}"`,
+            );
+          }
+
+          await persistConflict(
+            buildConflictRecord(current, entryToUse, conflict),
+          );
+          await removeEntry(entryToUse.id);
+          continue;
+        }
+
+        if (
+          entryToUse.tempId &&
+          tempEntity &&
+          storeAdapter.reconcileTempEntity
+        ) {
+          const reconciliation = tempEntity.reconcileServerEntity(
+            result,
+            entryToUse.tempId,
+          );
+          storeAdapter.reconcileTempEntity({
+            operationName: entryToUse.operation,
+            input: entryToUse.input,
+            tempId: entryToUse.tempId,
+            result,
+            reconciliation,
+          });
+        }
+
+        await removeEntry(entryToUse.id);
+      } catch (error) {
+        entryToUse = {
+          ...entryToUse,
+          attempts: entryToUse.attempts + 1,
+          updatedAt: Date.now(),
+          lastAttemptAt: Date.now(),
+          syncState: operation.confirmRemoteOutcome
+            ? 'needs-confirmation'
+            : 'pending',
+          lastError: { message: toMessage(error) },
+        };
+        await persistEntry(entryToUse);
+        await current.session.classifyFailure(error, {
+          phase: 'sync',
+          storeType,
+          operationName: entryToUse.operation,
+          sessionKey: current.sessionKey,
+        });
+        return;
+      }
+    }
+  }
+
+  async function queueMutation<TName extends keyof TOperations>(args: {
+    operationName: TName;
+    input: unknown;
+    mutationPayload?: TMutationPayload;
+  }): Promise<void> {
+    await hydrateIfNeeded();
+    const current = ensureActiveSession();
+    if (!current) return;
+
+    const operationName = String(args.operationName);
+    const helpers = storeAdapter.getHelpers();
+    const operation = offlineMode.operations[operationName];
+    if (!operation) {
+      throw new Error(
+        `Unknown offline operation "${operationName}" for store "${storeName}"`,
+      );
+    }
+
+    const validatedInput = validateWithSchema(
+      operation.inputSchema,
+      args.input,
+    );
+    if (validatedInput === null) {
+      throw new Error(`Invalid offline operation input for "${operationName}"`);
+    }
+
+    const tempEntity = operation.tempEntity;
+    const tempId = tempEntity?.createTempId(validatedInput);
+    if (tempId && tempEntity && storeAdapter.applyPendingEntity) {
+      const pendingEntity = tempEntity.buildPendingEntity(
+        validatedInput,
+        tempId,
+      );
+      storeAdapter.applyPendingEntity({
+        operationName,
+        input: validatedInput,
+        tempId,
+        pendingEntity,
+      });
+    }
+
+    const entityRefs = storeAdapter.getEntityRefs({
+      operationName,
+      input: validatedInput,
+      mutationPayload: args.mutationPayload,
+      tempId,
+    });
+    const now = Date.now();
+
+    if (operation.accumulation && !tempId) {
+      const existingEntry = findAccumulationCandidate({
+        operationName,
+        entityRefs,
+      });
+
+      if (existingEntry) {
+        const mergedInput = await operation.accumulation.mergeInput({
+          sessionKey: current.sessionKey,
+          helpers,
+          existingInput: existingEntry.input,
+          incomingInput: validatedInput,
+        });
+        const validatedMergedInput = validateWithSchema(
+          operation.inputSchema,
+          mergedInput,
+        );
+
+        if (validatedMergedInput === null) {
+          throw new Error(
+            `Invalid accumulated offline operation input for "${operationName}"`,
+          );
+        }
+
+        await persistEntry({
+          ...existingEntry,
+          input: validatedMergedInput,
+          updatedAt: now,
+        });
+        await ensureReplayScheduled();
+        return;
+      }
+    }
+
+    await persistEntry({
+      id: `${storeName}:${now}:${Math.random().toString(36).slice(2, 10)}`,
+      sessionKey: current.sessionKey,
+      storeName,
+      storeType,
+      operation: operationName,
+      input: validatedInput,
+      entityRefs,
+      attempts: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastAttemptAt: null,
+      syncState: 'pending',
+      tempId,
+    });
+
+    await ensureReplayScheduled();
+  }
+
+  function getOfflineEntities(): GlobalOfflineEntity[] {
+    const current = ensureActiveSession();
+    if (!current) return [];
+    return current.session
+      .getEntities()
+      .filter((entity) => entity.storeName === storeName);
+  }
+
+  function getOfflineConflicts(): OfflineConflictRecord[] {
+    return [...conflicts.values()].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+  }
+
+  async function resolveOfflineConflict(
+    conflictId: string,
+    resolution: unknown,
+  ): Promise<void> {
+    await hydrateIfNeeded();
+    const current = ensureActiveSession();
+    if (!current) return;
+
+    const conflict = conflicts.get(conflictId);
+    if (!conflict) return;
+
+    const operation = offlineMode.operations[conflict.operation];
+    if (!operation) {
+      await removeConflict(conflictId);
+      return;
+    }
+    if (!operation.conflictHandling) {
+      await removeConflict(conflictId);
+      return;
+    }
+
+    const result = await operation.conflictHandling.resolveConflict({
+      sessionKey: current.sessionKey,
+      helpers: storeAdapter.getHelpers(),
+      input: conflict.input,
+      conflict: conflict.conflict,
+      resolution,
+    });
+
+    await removeConflict(conflictId);
+
+    if (result?.requeue) {
+      await queueMutation({
+        operationName: __LEGIT_CAST__<keyof TOperations, string>(
+          conflict.operation,
+        ),
+        input: result.requeue.input,
+      });
+    }
+  }
+
+  async function evaluateOfflineFetchError(
+    error: unknown,
+    operationName?: string,
+  ): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current) return;
+
+    await current.session.classifyFailure(error, {
+      phase: 'fetch',
+      storeType,
+      operationName,
+      sessionKey: current.sessionKey,
+    });
+  }
+
+  function getSessionStatus() {
+    const current = ensureActiveSession();
+    return current?.session.getStatus() ?? null;
+  }
+
+  async function prepareForFetch(): Promise<void> {
+    await hydrateIfNeeded();
+    const current = ensureActiveSession();
+    if (!current) return;
+    await current.session.refreshNetworkState();
+  }
+
+  return {
+    hydrateIfNeeded,
+    queueMutation,
+    getOfflineEntities,
+    getOfflineConflicts,
+    resolveOfflineConflict,
+    prepareForFetch,
+    getSessionStatus,
+    evaluateOfflineFetchError,
+    ensureReplayScheduled,
+  };
+}

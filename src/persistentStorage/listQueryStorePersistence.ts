@@ -12,6 +12,7 @@ import {
   createPersistentStorageNamespaceHandle,
   getStoragePrefixForStoreNamespace,
   listLocalStorageKeysSync,
+  readProtectedStorageKeys,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
@@ -22,6 +23,7 @@ import type {
   PersistedListQueryItemData,
   StorageAdapter,
 } from './types';
+import { createStorageAdapter } from './storageAdapter';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 500;
@@ -338,14 +340,15 @@ export function setupListQueryPersistence<
   const shouldIgnorePersistedItem =
     createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
+  const storageAdapter = options.adapter ?? createStorageAdapter(backend);
 
   const itemNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryItemData<ItemState>
-  >({ ...config, entryPrefix: 'listQuery.item' }, { adapter: options.adapter });
+  >({ ...config, entryPrefix: 'listQuery.item' }, { adapter: storageAdapter });
   const queryNamespace =
     createPersistentStorageNamespaceHandle<PersistedListQueryData>(
       { ...config, entryPrefix: 'listQuery.query' },
-      { adapter: options.adapter },
+      { adapter: storageAdapter },
     );
 
   let storeRef: Store<State> | null = null;
@@ -669,6 +672,27 @@ export function setupListQueryPersistence<
 
   async function evictStoredQueries(): Promise<Set<string>> {
     const queryKeys = await queryNamespace.listKeys();
+    const sessionKey = config.getSessionKey();
+    const protectedStorageKeys =
+      sessionKey !== false
+        ? await readProtectedStorageKeys(storageAdapter, sessionKey)
+        : new Set<string>();
+    const queryPrefix =
+      sessionKey === false
+        ? null
+        : getStoragePrefixForStoreNamespace(
+            sessionKey,
+            config.storeName,
+            'listQuery.query',
+          );
+    const protectedQueryKeys =
+      queryPrefix === null
+        ? new Set<string>()
+        : new Set(
+            [...protectedStorageKeys]
+              .filter((key) => key.startsWith(queryPrefix))
+              .map((key) => key.slice(queryPrefix.length)),
+          );
     const entries = await Promise.all(
       queryKeys.map(async (queryKey) => ({
         queryKey,
@@ -681,6 +705,12 @@ export function setupListQueryPersistence<
     });
 
     validEntries.sort((a, b) => {
+      const aProtected = protectedQueryKeys.has(a.queryKey);
+      const bProtected = protectedQueryKeys.has(b.queryKey);
+
+      if (aProtected && !bProtected) return -1;
+      if (!aProtected && bProtected) return 1;
+
       const aPinned = pinnedQueryKeys.has(a.queryKey);
       const bPinned = pinnedQueryKeys.has(b.queryKey);
 
@@ -704,6 +734,27 @@ export function setupListQueryPersistence<
   }
 
   async function evictStoredItems(keptQueryKeys: Set<string>): Promise<void> {
+    const sessionKey = config.getSessionKey();
+    const protectedStorageKeys =
+      sessionKey !== false
+        ? await readProtectedStorageKeys(storageAdapter, sessionKey)
+        : new Set<string>();
+    const itemPrefix =
+      sessionKey === false
+        ? null
+        : getStoragePrefixForStoreNamespace(
+            sessionKey,
+            config.storeName,
+            'listQuery.item',
+          );
+    const protectedItemKeys =
+      itemPrefix === null
+        ? new Set<string>()
+        : new Set(
+            [...protectedStorageKeys]
+              .filter((key) => key.startsWith(itemPrefix))
+              .map((key) => key.slice(itemPrefix.length)),
+          );
     const queryEntries = await Promise.all(
       [...keptQueryKeys].map(async (queryKey) => ({
         queryKey,
@@ -748,6 +799,12 @@ export function setupListQueryPersistence<
     );
 
     persistedItemEntries.sort((a, b) => {
+      const aProtected = protectedItemKeys.has(a.itemKey);
+      const bProtected = protectedItemKeys.has(b.itemKey);
+
+      if (aProtected && !bProtected) return -1;
+      if (!aProtected && bProtected) return 1;
+
       const aPinned = pinnedItemKeys.has(a.itemKey);
       const bPinned = pinnedItemKeys.has(b.itemKey);
 

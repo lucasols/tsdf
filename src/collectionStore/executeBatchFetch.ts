@@ -3,6 +3,11 @@ import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
 import { BatchRequest, FetchContext } from '../requestScheduler';
+import {
+  offlineConnectivityError,
+  runOfflineAwareFetch,
+  type OfflineAwareFetchController,
+} from '../persistentStorage/offline/fetchRuntime';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
   StoreError,
@@ -28,6 +33,7 @@ export async function executeBatchFetch<
     | undefined,
   errorNormalizer: (exception: Error) => StoreError,
   batchKey?: string,
+  offlineController?: OfflineAwareFetchController | null,
 ): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
 
@@ -69,11 +75,39 @@ export async function executeBatchFetch<
   if (batchFetchFn && requests.length > 1) {
     try {
       const payloads = requests.map((r) => r.payload);
-      const batchResults = await batchFetchFn(
-        payloads,
-        fetchCtx.signal,
-        batchKey ?? '__default__',
-      );
+      const fetchResult = await runOfflineAwareFetch({
+        controller: offlineController,
+        fetcher: () =>
+          batchFetchFn(payloads, fetchCtx.signal, batchKey ?? '__default__'),
+      });
+
+      if (!fetchResult.ok) {
+        const error = fetchResult.offline
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(fetchResult.error));
+
+        store.produceState(
+          (draft) => {
+            for (const { requestId: itemId } of requests) {
+              const item = draft[itemId];
+              if (!item) continue;
+
+              item.error = error;
+              item.status = 'error';
+              results.set(itemId, false);
+            }
+          },
+          {
+            action: fetchResult.offline
+              ? 'batch-fetch-offline'
+              : 'batch-fetch-error',
+          },
+        );
+
+        return results;
+      }
+
+      const batchResults = fetchResult.data;
 
       if (fetchCtx.shouldAbort()) {
         for (const { requestId } of requests) {
@@ -149,7 +183,37 @@ export async function executeBatchFetch<
   // Fall back to individual fetches (either single item or no batchFetchFn)
   const fetchPromises = requests.map(async ({ requestId: itemId, payload }) => {
     try {
-      const data = await fetchFn(klona(payload), fetchCtx.signal);
+      const fetchResult = await runOfflineAwareFetch({
+        controller: offlineController,
+        fetcher: () => fetchFn(klona(payload), fetchCtx.signal),
+      });
+      if (!fetchResult.ok) {
+        if (fetchCtx.shouldAbort()) {
+          results.set(itemId, false);
+          return;
+        }
+
+        const error = fetchResult.offline
+          ? offlineConnectivityError
+          : errorNormalizer(unknownToError(fetchResult.error));
+
+        store.produceState(
+          (draft) => {
+            const item = draft[itemId];
+            if (!item) return;
+
+            item.error = error;
+            item.status = 'error';
+          },
+          {
+            action: fetchResult.offline ? 'fetch-error-offline' : 'fetch-error',
+          },
+        );
+
+        results.set(itemId, false);
+        return;
+      }
+      const data = fetchResult.data;
 
       if (fetchCtx.shouldAbort()) {
         results.set(itemId, false);

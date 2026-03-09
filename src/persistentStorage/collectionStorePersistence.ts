@@ -11,6 +11,7 @@ import {
   createPersistentStorageNamespaceHandle,
   getStoragePrefixForStoreNamespace,
   listLocalStorageKeysSync,
+  readProtectedStorageKeys,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
@@ -20,6 +21,7 @@ import type {
   PersistedCollectionItemData,
   StorageAdapter,
 } from './types';
+import { createStorageAdapter } from './storageAdapter';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 50;
@@ -179,13 +181,11 @@ export function setupCollectionPersistence<
   const shouldIgnorePersistedItem =
     createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
+  const storageAdapter = options.adapter ?? createStorageAdapter(backend);
 
   const namespace = createPersistentStorageNamespaceHandle<
     PersistedCollectionItemData<ItemState>
-  >(
-    { ...config, entryPrefix: 'collection.item' },
-    { adapter: options.adapter },
-  );
+  >({ ...config, entryPrefix: 'collection.item' }, { adapter: storageAdapter });
 
   let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =
     null;
@@ -338,7 +338,41 @@ export function setupCollectionPersistence<
   async function evictStoredItems(): Promise<void> {
     const keys = await namespace.listKeys();
     if (keys.length === 0) return;
-    if (!hasIgnoreItemFilter && keys.length <= maxItems) return;
+    const sessionKey = config.getSessionKey();
+    const protectedStorageKeys =
+      sessionKey !== false
+        ? await readProtectedStorageKeys(storageAdapter, sessionKey)
+        : new Set<string>();
+    const protectedItemKeys =
+      sessionKey === false
+        ? new Set<string>()
+        : new Set(
+            [...protectedStorageKeys]
+              .filter((key) =>
+                key.startsWith(
+                  getStoragePrefixForStoreNamespace(
+                    sessionKey,
+                    config.storeName,
+                    'collection.item',
+                  ),
+                ),
+              )
+              .map((key) =>
+                key.slice(
+                  getStoragePrefixForStoreNamespace(
+                    sessionKey,
+                    config.storeName,
+                    'collection.item',
+                  ).length,
+                ),
+              ),
+          );
+    if (
+      !hasIgnoreItemFilter &&
+      keys.filter((key) => !protectedItemKeys.has(key)).length <= maxItems
+    ) {
+      return;
+    }
 
     const entries = await Promise.all(
       keys.map(async (itemKey) => ({
@@ -368,6 +402,12 @@ export function setupCollectionPersistence<
     if (filteredEntries.length <= maxItems) return;
 
     filteredEntries.sort((a, b) => {
+      const aProtected = protectedItemKeys.has(a.itemKey);
+      const bProtected = protectedItemKeys.has(b.itemKey);
+
+      if (aProtected && !bProtected) return -1;
+      if (!aProtected && bProtected) return 1;
+
       const aPinned = pinnedItemKeys.has(a.itemKey);
       const bPinned = pinnedItemKeys.has(b.itemKey);
 

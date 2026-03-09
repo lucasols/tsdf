@@ -1404,8 +1404,8 @@ test('failed partial-resource list query fetch does not broadcast stale metadata
     2.62s | -        | -             | -            | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":1})
     .     | Alice:30 | ···           | success      | [query, query-status, query-error] ui-initialized
     .     | Alice:30 | ···           | success      | [users||1] server-data-changed (value: {"id":1,"name":"Alice","age":31})
-    2.63s | Alice:30 | ···           | success      | 🟠 >list-fetch-started
-    .     | Alice:30 | ···           | refetching   | [query-status] ui-changed
+    2.63s | Alice:30 | ···           | refetching   | [query-status] ui-changed
+    .     | Alice:30 | ···           | refetching   | 🟠 >list-fetch-started
     3.43s | Alice:30 | ···           | refetching   | 🟠 <list-fetch-error (value: "error")
     .     | Alice:30 | Network error | error        | [query-status, query-error] ui-changed
     "
@@ -1548,9 +1548,10 @@ test('failed partial-resource item fetch does not broadcast stale metadata to si
     810ms | -        | -             | -           | 🔴 [users||1] <fetch-finished (value: {"name":"Alice","age":30})
     2.62s | -        | -             | -           | [users||1] <confirmed-item-snapshot-received (value: {"name":"Alice","age":30})
     .     | Alice:30 | ···           | success     | [item, item-status, item-error] ui-initialized
-    2.63s | Alice:30 | ···           | success     | 🟠 [users||1] >fetch-started
-    .     | Alice:30 | ···           | success     | 🟠 [users||1] <fetch-error (value: "error")
-    .     | Alice:30 | Network error | error       | [item-status, item-status, item-error] ui-changed
+    2.63s | Alice:30 | ···           | refetching  | [item-status] ui-changed
+    .     | Alice:30 | ···           | refetching  | 🟠 [users||1] >fetch-started
+    .     | Alice:30 | ···           | refetching  | 🟠 [users||1] <fetch-error (value: "error")
+    .     | Alice:30 | Network error | error       | [item-status, item-error] ui-changed
     "
   `);
   expect(envB.timelineString).toMatchInlineSnapshot(`

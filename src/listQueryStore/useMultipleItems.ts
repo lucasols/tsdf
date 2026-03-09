@@ -179,6 +179,9 @@ export function useMultipleItems<
               isLoading: false,
               payload,
               data,
+              isPendingOfflineSync: false,
+              pendingOfflineMutations: 0,
+              hasOfflineConflict: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -195,6 +198,9 @@ export function useMultipleItems<
                 isLoading: false,
                 payload,
                 data,
+                isPendingOfflineSync: false,
+                pendingOfflineMutations: 0,
+                hasOfflineConflict: false,
                 queryMetadata: __LEGIT_CAST__<
                   QueryMetadata,
                   QueryMetadata | undefined
@@ -221,6 +227,9 @@ export function useMultipleItems<
                 : {}),
               payload,
               data,
+              isPendingOfflineSync: false,
+              pendingOfflineMutations: 0,
+              hasOfflineConflict: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -314,6 +323,9 @@ export function useMultipleItems<
                 : __LEGIT_CAST__<Selected, null>(null)
               : data,
             payload,
+            isPendingOfflineSync: false,
+            pendingOfflineMutations: 0,
+            hasOfflineConflict: false,
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
               QueryMetadata | undefined

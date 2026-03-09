@@ -19,6 +19,10 @@ import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useLis
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
 import type {
+  DocumentOfflineOperationsRegistry,
+  OfflineMutationDescriptor,
+} from './persistentStorage/offline/types';
+import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
 } from './persistentStorage/types';
@@ -32,6 +36,15 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
+import {
+  runOfflineAwareFetch,
+  offlineConnectivityError,
+} from './persistentStorage/offline/fetchRuntime';
+import {
+  createOfflineStoreController,
+  initializeOfflineStoreController,
+} from './persistentStorage/offline/storeController';
+import { useOfflineStoreEntities } from './persistentStorage/offline/sessionCoordinator';
 import {
   type BrowserTabsPriorityTimings,
   type BrowserTabsTabStatusMessage,
@@ -60,6 +73,7 @@ import {
 } from './utils/storeShared';
 import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
+import { getStorageKeyForStore } from './persistentStorage/persistentStorageManager';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
 
@@ -68,6 +82,9 @@ export type TSDFUseDocumentReturn<Selected> = {
   data: Selected;
   error: StoreError | null;
   isLoading: boolean;
+  isPendingOfflineSync: boolean;
+  pendingOfflineMutations: number;
+  hasOfflineConflict: boolean;
 };
 
 export type DocumentStoreState<State extends ValidStoreState> = {
@@ -114,7 +131,11 @@ type DocumentSnapshotMessage<State extends ValidStoreState> = Extract<
   { kind: 'document-snapshot' }
 >;
 
-export type DocumentStoreOptions<State extends ValidStoreState> = {
+export type DocumentStoreOptions<
+  State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
+    DocumentOfflineOperationsRegistry<State>,
+> = {
   debugName?: string;
   /** Stable id shared by the same logical document store across browser tabs. */
   id: string;
@@ -144,7 +165,10 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
-  persistentStorage?: DocumentPersistentStorageConfig<State>;
+  persistentStorage?: DocumentPersistentStorageConfig<
+    State,
+    TOfflineOperations
+  >;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -163,15 +187,21 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   };
 };
 
-export type DocumentStore<State extends ValidStoreState> = ReturnType<
-  typeof createDocumentStore<State>
->;
+export type DocumentStore<
+  State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
+    DocumentOfflineOperationsRegistry<State>,
+> = ReturnType<typeof createDocumentStore<State, TOfflineOperations>>;
 
 // Constant requestId for document store (single-item mode)
 const DOC_REQUEST_ID = '_doc';
 const DOC_TARGET_KEY = 'document' as const;
 
-export function createDocumentStore<State extends ValidStoreState>({
+export function createDocumentStore<
+  State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
+    DocumentOfflineOperationsRegistry<State>,
+>({
   debugName,
   id,
   getSessionKey,
@@ -188,7 +218,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
-}: DocumentStoreOptions<State>) {
+}: DocumentStoreOptions<State, TOfflineOperations>) {
   let invalidationWasTriggered = false;
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
@@ -224,6 +254,43 @@ export function createDocumentStore<State extends ValidStoreState>({
         { ...persistentStorageConfig, getSessionKey },
         { adapter: testOptions?.storageAdapter },
       )
+    : null;
+
+  const offlineController = persistentStorageConfig?.offlineMode
+    ? createOfflineStoreController({
+        storeName: persistentStorageConfig.storeName,
+        storeType: 'document',
+        backend: persistentStorageConfig.backend,
+        getSessionKey,
+        onPersistentStorageError:
+          persistentStorageConfig.onPersistentStorageError,
+        adapter: testOptions?.storageAdapter,
+        offlineMode: persistentStorageConfig.offlineMode,
+        storeAdapter: {
+          getHelpers: () => ({
+            getState: () => store.state.data,
+            updateState,
+            invalidateData: () => invalidateData(),
+          }),
+          getEntityRefs: () => [
+            { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
+          ],
+          getProtectedCacheKeys: () => {
+            const sessionKey = getSessionKey();
+            if (sessionKey === false) return [];
+            return [
+              getStorageKeyForStore(
+                sessionKey,
+                persistentStorageConfig.storeName,
+              ),
+            ];
+          },
+          applyPendingEntity: ({ pendingEntity }) => {
+            if (!pendingEntity || typeof pendingEntity !== 'object') return;
+            updateState((draft) => Object.assign(draft, pendingEntity));
+          },
+        },
+      })
     : null;
 
   const store = new Store<DocumentStoreState<State>>({
@@ -421,7 +488,23 @@ export function createDocumentStore<State extends ValidStoreState>({
     );
 
     try {
-      const data = await fetchFn(fetchCtx.signal);
+      const result = await runOfflineAwareFetch({
+        controller: offlineController,
+        fetcher: () => fetchFn(fetchCtx.signal),
+      });
+
+      if (!result.ok) {
+        if (result.offline) {
+          store.setPartialState(
+            { error: offlineConnectivityError, status: 'error' },
+            { action: 'fetch-error-offline' },
+          );
+          return false;
+        }
+
+        throw result.error;
+      }
+      const data = result.data;
 
       if (fetchCtx.shouldAbort()) return false;
 
@@ -532,6 +615,7 @@ export function createDocumentStore<State extends ValidStoreState>({
 
   // Attach persistent storage after store creation
   persistence?.attach(store);
+  initializeOfflineStoreController(offlineController);
 
   function scheduleFetch(
     fetchType: FetchType,
@@ -678,6 +762,7 @@ export function createDocumentStore<State extends ValidStoreState>({
     debounce,
     dontShowErrorToast,
     revalidateOnSuccess,
+    offline,
   }: {
     optimisticUpdate?: (currentState: State | null) => void | boolean;
     debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
@@ -687,6 +772,11 @@ export function createDocumentStore<State extends ValidStoreState>({
       currentState: State | null;
     }) => Promise<T>;
     revalidateOnSuccess?: boolean;
+    /**
+     * When provided, the mutation is durably queued and replayed by the offline
+     * sync controller. The immediate result only reflects queue persistence.
+     */
+    offline?: OfflineMutationDescriptor<TOfflineOperations>;
   }): Promise<Result<Awaited<T>, StoreError | true>> {
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
@@ -700,9 +790,19 @@ export function createDocumentStore<State extends ValidStoreState>({
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () => mutation({ updateState, currentState: store.state.data }),
+      mutation: async () => {
+        if (offline && offlineController) {
+          await offlineController.queueMutation({
+            operationName: offline.operation,
+            input: offline.input,
+          });
+          return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
+        }
+
+        return mutation({ updateState, currentState: store.state.data });
+      },
       onSuccess: () => {
-        if (revalidateOnSuccess) {
+        if (revalidateOnSuccess && !offline) {
           invalidateData();
         }
       },
@@ -742,6 +842,11 @@ export function createDocumentStore<State extends ValidStoreState>({
     ensureIsLoaded?: boolean;
     returnRefetchingStatus?: boolean;
   } = {}) {
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
     const isOffScreenFromContext = useContext(IsOffScreenContext);
     const disabled = disabledProp ?? isOffScreenProp ?? isOffScreenFromContext;
     const returnIdleStatus = returnIdleStatusProp ?? !!disabled;
@@ -753,6 +858,9 @@ export function createDocumentStore<State extends ValidStoreState>({
           ? selector(state.data)
           : __LEGIT_CAST__<Selected, State | null>(state.data);
 
+        const offlineEntity = offlineEntities.find(
+          (entity) => entity.entityKey === DOC_TARGET_KEY,
+        );
         let status = state.status;
 
         if (!returnIdleStatus && status === 'idle') {
@@ -763,9 +871,17 @@ export function createDocumentStore<State extends ValidStoreState>({
           status = 'success';
         }
 
-        return { data, error, status, isLoading: status === 'loading' };
+        return {
+          data,
+          error,
+          status,
+          isLoading: status === 'loading',
+          isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
+          pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
+          hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+        };
       },
-      [selector, returnIdleStatus, returnRefetchingStatus],
+      [offlineEntities, selector, returnIdleStatus, returnRefetchingStatus],
     );
 
     const storeState = store.useSelectorRC(storeStateSelector, {
@@ -979,6 +1095,17 @@ export function createDocumentStore<State extends ValidStoreState>({
     updateState,
     reset,
     startMutation,
+    getOfflineEntities: () => offlineController?.getOfflineEntities() ?? [],
+    useOfflineEntities: () => {
+      return useOfflineStoreEntities({
+        sessionKey: getSessionKey(),
+        inactiveScope: id,
+        storeName: persistentStorageConfig?.storeName,
+      });
+    },
+    getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],
+    resolveOfflineConflict: (conflictId: string, resolution: unknown) =>
+      offlineController?.resolveOfflineConflict(conflictId, resolution),
     useDocument,
     useListItemIsLoading,
     useListItemIsDeleted,

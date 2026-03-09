@@ -67,6 +67,33 @@ export type {
   ListQueryPersistentStorageConfig,
 } from './persistentStorage/types';
 
+export type {
+  CollectionOfflineHelpers,
+  OfflineAccumulationConfig,
+  OfflineAccumulationMergeContext,
+  CollectionOfflineOperationDefinition,
+  CollectionOfflineOperationsRegistry,
+  DocumentOfflineHelpers,
+  DocumentOfflineOperationDefinition,
+  DocumentOfflineOperationsRegistry,
+  GlobalOfflineEntity,
+  GlobalOfflineStatus,
+  ListQueryOfflineHelpers,
+  ListQueryOfflineOperationDefinition,
+  ListQueryOfflineOperationsRegistry,
+  OfflineConflictRecord,
+  OfflineMutationDescriptor,
+  OfflineQueueEntry,
+  OfflineSyncState,
+} from './persistentStorage/offline/types';
+
+export {
+  getGlobalOfflineEntities,
+  getGlobalOfflineStatus,
+  useGlobalOfflineEntities,
+  useGlobalOfflineStatus,
+} from './persistentStorage/offline/sessionCoordinator';
+
 // Persistent Storage utilities
 export {
   clearSessionStorage,

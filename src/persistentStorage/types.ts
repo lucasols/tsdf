@@ -1,5 +1,11 @@
 import { type RcType } from 'runcheck';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import type {
+  CollectionOfflineOperationsRegistry,
+  DocumentOfflineOperationsRegistry,
+  ListQueryOfflineOperationsRegistry,
+  OfflineModeConfig,
+} from './offline/types';
 
 // --- Storage Adapter ---
 
@@ -79,14 +85,24 @@ type StorePersistentStorageBaseConfig<T> = Omit<
 >;
 
 /** Persistent storage config for DocumentStore. */
-export type DocumentPersistentStorageConfig<State extends ValidStoreState> =
-  StorePersistentStorageBaseConfig<State>;
+export type DocumentPersistentStorageConfig<
+  State extends ValidStoreState,
+  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
+    DocumentOfflineOperationsRegistry<State>,
+> = StorePersistentStorageBaseConfig<State> & {
+  offlineMode?: OfflineModeConfig<TOfflineOperations>;
+};
 
 /** Persistent storage config for CollectionStore. */
 export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload = ValidPayload,
+  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+    ItemState,
+    ItemPayload
+  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState> & {
+  offlineMode?: OfflineModeConfig<TOfflineOperations>;
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
   maxItems?: number;
   /** Item payloads that should never be evicted from storage. */
@@ -104,7 +120,13 @@ export type ListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload = ValidPayload,
   ItemPayload extends ValidPayload = ValidPayload,
+  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState> & {
+  offlineMode?: OfflineModeConfig<TOfflineOperations>;
   /** Maximum number of items to persist. Defaults to 500. */
   maxItems?: number;
   /** Maximum number of queries to persist. Defaults to 100. */

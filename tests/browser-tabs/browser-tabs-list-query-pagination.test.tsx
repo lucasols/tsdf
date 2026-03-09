@@ -154,8 +154,8 @@ test('list query size pagination keeps sibling tabs in sync across chained loadM
     time  | query-items            | query-status |
     2.62s | User 1                 | success      | -- timeline-cleared
     2.63s | User 1                 | success      | -- tab A loads page 2
-    .     | User 1                 | success      | 🟠 >list-fetch-started
     .     | User 1                 | loadingMore  | [query-status] ui-changed
+    .     | User 1                 | loadingMore  | 🟠 >list-fetch-started
     3.43s | User 1                 | loadingMore  | 🟠 <list-fetch-finished (value: {"count":2})
     .     | User 1, User 2         | success      | [query-items, query-status] ui-changed
     5.24s | User 1, User 2         | success      | -- tab A receives tab B pagination through browser-tab sync
@@ -171,8 +171,8 @@ test('list query size pagination keeps sibling tabs in sync across chained loadM
     .     | User 1                 | success      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | User 1, User 2         | success      | [query-items] ui-changed
     4.44s | User 1, User 2         | success      | -- tab B loads page 3 from the synced query state
-    .     | User 1, User 2         | success      | 🟠 >list-fetch-started
     .     | User 1, User 2         | loadingMore  | [query-status] ui-changed
+    .     | User 1, User 2         | loadingMore  | 🟠 >list-fetch-started
     5.24s | User 1, User 2         | loadingMore  | 🟠 <list-fetch-finished (value: {"count":3})
     .     | User 1, User 2, User 3 | success      | [query-items, query-status] ui-changed
     "
@@ -241,8 +241,8 @@ test('list query offset pagination keeps sibling tabs in sync across chained loa
     time  | query-items            | query-status |
     2.62s | User 1                 | success      | -- timeline-cleared
     2.63s | User 1                 | success      | -- tab A loads page 2
-    .     | User 1                 | success      | 🟠 >list-fetch-started
     .     | User 1                 | loadingMore  | [query-status] ui-changed
+    .     | User 1                 | loadingMore  | 🟠 >list-fetch-started
     3.43s | User 1                 | loadingMore  | 🟠 <list-fetch-finished (value: {"count":1})
     .     | User 1, User 2         | success      | [query-items, query-status] ui-changed
     5.24s | User 1, User 2         | success      | -- tab A receives tab B pagination through browser-tab sync
@@ -258,8 +258,8 @@ test('list query offset pagination keeps sibling tabs in sync across chained loa
     .     | User 1                 | success      | <confirmed-query-snapshot-received (value: {"queryKey":"{tableId:\\"users\\"}","itemCount":2})
     .     | User 1, User 2         | success      | [query-items] ui-changed
     4.44s | User 1, User 2         | success      | -- tab B loads page 3 from the synced query state
-    .     | User 1, User 2         | success      | 🟠 >list-fetch-started
     .     | User 1, User 2         | loadingMore  | [query-status] ui-changed
+    .     | User 1, User 2         | loadingMore  | 🟠 >list-fetch-started
     5.24s | User 1, User 2         | loadingMore  | 🟠 <list-fetch-finished (value: {"count":1})
     .     | User 1, User 2, User 3 | success      | [query-items, query-status] ui-changed
     "

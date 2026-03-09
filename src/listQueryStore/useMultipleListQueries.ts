@@ -270,6 +270,11 @@ export function useMultipleListQueries<
                 : {}),
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
+              isPendingOfflineSync: false,
+              pendingOfflineMutations: 0,
+              hasOfflineConflict: false,
+              pendingItemKeys: [],
+              conflictedItemKeys: [],
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -403,6 +408,11 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
+            isPendingOfflineSync: false,
+            pendingOfflineMutations: 0,
+            hasOfflineConflict: false,
+            pendingItemKeys: [],
+            conflictedItemKeys: [],
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
               QueryMetadata | undefined
