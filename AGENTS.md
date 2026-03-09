@@ -114,3 +114,7 @@ When fixing a bug:
 2. confirm that the test fails before applying the fix, to ensure the test is valid
 3. check the root cause of the issue and apply the fix, don't apply a superficial fix that only makes the test pass without addressing the underlying problem.
 4. apply the fix and confirm that the test passes after the fix is applied
+
+## Useful patterns
+
+- For unsafe data parsing, use `runcheck` lib

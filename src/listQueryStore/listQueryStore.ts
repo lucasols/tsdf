@@ -1104,13 +1104,11 @@ export function createListQueryStore<
     itemPendingInvalidationFields.delete(itemKey);
     itemInvalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
-    lastItemSyncVersions.delete(itemKey);
   }
 
   function cleanupQueryStateMetadata(queryKey: string): void {
     queryInvalidationWasTriggered.delete(queryKey);
     queryCacheRuntime.clear(queryKey);
-    lastQuerySyncVersions.delete(queryKey);
   }
 
   function isQueryProtectedFromEviction(

@@ -1075,6 +1075,41 @@ test('maxItems keeps active standalone useItem entries when their source query i
   expect(env.apiStore.getItemState('users||2')).toBeUndefined();
 });
 
+test('maxItems keeps a mounted list item protected after delete and refetch', async () => {
+  const env = createListQueryStoreTestEnv(
+    { users: range(1, 2).map((id) => ({ id, name: `User ${id}` })) },
+    { maxItems: 1 },
+  );
+
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await flushAllTimers();
+
+  renderHook(() =>
+    env.apiStore.useItem('users||1', {
+      disableRefetchOnMount: true,
+      returnRefetchingStatus: true,
+    }),
+  );
+
+  await flushAllTimers();
+
+  act(() => {
+    env.apiStore.deleteItemState('users||1');
+  });
+  await flushAllTimers();
+
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await flushAllTimers();
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await flushAllTimers();
+
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({
+    id: 1,
+    name: 'User 1',
+  });
+  expect(env.apiStore.getItemState('users||2')).toBeUndefined();
+});
+
 test('maxItems keeps the item matched by useFindItem when inactive queries are evicted', async () => {
   const env = createListQueryStoreTestEnv(
     {

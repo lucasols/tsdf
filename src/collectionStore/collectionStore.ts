@@ -867,7 +867,6 @@ export function createCollectionStore<
   function cleanupItemResources(itemKey: string, payload: ItemPayload): void {
     invalidationWasTriggered.delete(itemKey);
     itemCacheRuntime.clear(itemKey);
-    lastCollectionSyncVersions.delete(itemKey);
 
     const itemScheduler = perItemSchedulers.get(itemKey);
     if (itemScheduler) {

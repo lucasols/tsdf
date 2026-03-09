@@ -65,6 +65,16 @@ function createInMemoryBrowserTabsTransportFactoryBase() {
 
       return auditLog.filter((entry) => entry.channelName === channelName);
     },
+    replayMessage(entry: BrowserTabsTransportAuditEntry): void {
+      const listenersForChannel = listenersByChannel.get(entry.channelName);
+      if (!listenersForChannel) return;
+
+      for (const listener of listenersForChannel) {
+        setTimeout(() => {
+          listener(klona(entry.message));
+        }, 0);
+      }
+    },
   };
 }
 

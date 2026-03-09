@@ -55,12 +55,10 @@ export function createLruCacheRuntime(): LruCacheRuntime {
 
     clear(key) {
       lastUsed.delete(key);
-      activeRefs.delete(key);
     },
 
     clearAll() {
       lastUsed.clear();
-      activeRefs.clear();
     },
   };
 }

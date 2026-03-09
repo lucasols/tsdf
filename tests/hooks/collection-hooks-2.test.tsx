@@ -253,6 +253,41 @@ test('maxItems keeps active hook items and allows protected overflow', async () 
   expect(env.apiStore.getItemState('3')).toBeUndefined();
 });
 
+test('maxItems keeps a mounted item protected after delete and refetch', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    {
+      '1': { title: 'one', completed: false },
+      '2': { title: 'two', completed: false },
+    },
+    { maxItems: 1 },
+  );
+
+  env.scheduleFetch('highPriority', '1');
+  await flushAllTimers();
+
+  renderHook(() =>
+    env.apiStore.useItem('1', {
+      disableRefetchOnMount: true,
+      returnRefetchingStatus: true,
+    }),
+  );
+
+  await flushAllTimers();
+
+  act(() => {
+    env.apiStore.deleteItemState('1');
+  });
+  await flushAllTimers();
+
+  env.scheduleFetch('highPriority', '1');
+  await flushAllTimers();
+  env.scheduleFetch('highPriority', '2');
+  await flushAllTimers();
+
+  expect(env.apiStore.getItemState('1')?.data?.value.title).toBe('one');
+  expect(env.apiStore.getItemState('2')).toBeUndefined();
+});
+
 test('useMultipleItems should not trigger a mount refetch when some option changes', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },
