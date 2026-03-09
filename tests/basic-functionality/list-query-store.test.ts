@@ -1,3 +1,4 @@
+import { renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import {
   createListQueryStoreTestEnv,
@@ -423,6 +424,93 @@ describe('fetch query', () => {
     await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(6);
+  });
+
+  test('maxQueries evicts the least recently used inactive query from memory', async () => {
+    const env = createListQueryStoreTestEnv(
+      {
+        users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+        orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+      },
+      { maxQueries: 1 },
+    );
+
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', { tableId: 'orders' });
+    await flushAllTimers();
+
+    expect(env.apiStore.getQueryState({ tableId: 'users' })).toBeUndefined();
+    expect(env.apiStore.getItemState('users||1')).toBeUndefined();
+
+    const hook = renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { disableRefetchOnMount: true, returnIdleStatus: true },
+      ),
+    );
+
+    expect(hook.result.current.status).toBe('idle');
+    expect(hook.result.current.items).toEqual([]);
+  });
+
+  test('maxItems evicts whole inactive queries instead of leaving partial cached queries', async () => {
+    const env = createListQueryStoreTestEnv(
+      {
+        users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+        orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+      },
+      { maxItems: 3 },
+    );
+
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', { tableId: 'orders' });
+    await flushAllTimers();
+
+    expect(env.apiStore.getQueryState({ tableId: 'users' })).toBeUndefined();
+    expect(env.apiStore.getItemState('users||1')).toBeUndefined();
+
+    const remainingQuery = env.apiStore.getQueryState({ tableId: 'orders' });
+    expect(remainingQuery?.items).toHaveLength(3);
+    expect(
+      remainingQuery?.items.every((itemKey) => env.store.state.items[itemKey]),
+    ).toBe(true);
+  });
+
+  test('onStateCleanup is called when cache-limit eviction removes queries and orphan items', async () => {
+    const cleanupCalls: unknown[] = [];
+    const env = createListQueryStoreTestEnv(
+      {
+        users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+        orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+      },
+      {
+        maxItems: 3,
+        onStateCleanup: (cleanup) => {
+          cleanupCalls.push(cleanup);
+        },
+      },
+    );
+
+    env.scheduleFetch('highPriority', { tableId: 'users' });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', { tableId: 'orders' });
+    await flushAllTimers();
+
+    expect(cleanupCalls).toMatchInlineSnapshot(`
+      - itemKeys: []
+        itemPayloads: []
+        queryKeys: ['{tableId:"users"}']
+        queryPayloads:
+          - tableId: 'users'
+        reason: 'cacheLimitEviction'
+      - itemKeys: ['"users||1', '"users||2', '"users||3']
+        itemPayloads: ['users||1', 'users||2', 'users||3']
+        queryKeys: []
+        queryPayloads: []
+        reason: 'cacheLimitEviction'
+    `);
   });
 });
 

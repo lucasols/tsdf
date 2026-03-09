@@ -258,6 +258,47 @@ test('list query state changes emitted during an in-flight mutation sync immedia
   await mutationPromise;
 });
 
+test('local collection eviction does not broadcast deletion-like snapshots to background tabs', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('collection-local-eviction');
+  const sharedServerTableState = createSharedServerTableState({
+    item1: { name: 'Item 1' },
+    item2: { name: 'Item 2' },
+  });
+
+  const envA = createCollectionStoreTestEnv(
+    { item1: { name: 'Item 1' }, item2: { name: 'Item 2' } },
+    {
+      id,
+      maxItems: 1,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      testScenario: { loadedWithStaleData: { item1: { name: 'Item 1' } } },
+    },
+  );
+  const envB = createCollectionStoreTestEnv(
+    { item1: { name: 'Item 1' }, item2: { name: 'Item 2' } },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      testScenario: { loadedWithStaleData: { item1: { name: 'Item 1' } } },
+    },
+  );
+
+  envA.scheduleFetch('highPriority', 'item2');
+  await flushAllTimers();
+  await advanceTime(0);
+
+  expect(envA.apiStore.getItemState('item1')).toBeUndefined();
+  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
+    value: { name: 'Item 1' },
+  });
+  expect(envB.apiStore.getItemState('item2')?.data).toEqual({
+    value: { name: 'Item 2' },
+  });
+});
+
 test('document state updates do not sync to tabs without an active session key', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
   const id = getNextStoreId('document-state-no-session');

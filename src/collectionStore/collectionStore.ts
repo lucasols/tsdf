@@ -9,6 +9,8 @@ import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { unknownToError, type Result } from 't-result';
 import { Store } from 't-state';
+import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
+import { createIdleThrottledScheduler } from '../cacheLimits/scheduleIdleThrottled';
 import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
@@ -54,6 +56,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
+import { createCollectionCacheLimits } from './collectionCacheLimits';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
 import {
@@ -130,6 +133,12 @@ export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   mutationEnd: { mutationId: number; payload: ItemPayload; success: boolean };
 };
 
+export type CollectionStateCleanup<ItemPayload extends ValidPayload> = {
+  reason: 'cacheLimitEviction';
+  itemKeys: string[];
+  payloads: ItemPayload[];
+};
+
 export type CollectionBrowserTabsMessage<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -187,6 +196,10 @@ export type CollectionStoreOptions<
   getItemsBatchKey?: (payload: ItemPayload) => string | false;
   /** Max items per batch - triggers immediate fetch when reached */
   maxBatchSize?: number;
+  /** Maximum number of cached items kept in memory. Defaults to 5,000. Inactive items are evicted in LRU order, while mounted hook items stay protected. */
+  maxItems?: number;
+  /** Called when cache-limit eviction removes items from in-memory state. */
+  onStateCleanup?: (cleanup: CollectionStateCleanup<ItemPayload>) => void;
   getCollectionItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   errorNormalizer: (exception: Error) => StoreError;
   lowPriorityThrottleMs: number;
@@ -238,6 +251,8 @@ type CollectionStoreEvents = {
   invalidateData: { priority: FetchType; itemKey: string };
 };
 
+const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
+
 export function createCollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -249,6 +264,8 @@ export function createCollectionStore<
   batchFetchFn,
   getItemsBatchKey,
   maxBatchSize,
+  maxItems = 5_000,
+  onStateCleanup,
   lowPriorityThrottleMs,
   baseCoalescingWindowMs,
   errorNormalizer,
@@ -270,6 +287,7 @@ export function createCollectionStore<
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   const lastCollectionSyncVersions = new Map<string, BrowserTabsSyncVersion>();
+  const itemCacheRuntime = createLruCacheRuntime();
 
   let initialData:
     | CollectionInitialStateItem<ItemPayload, ItemState>[]
@@ -333,6 +351,38 @@ export function createCollectionStore<
     return getCompositeKey(
       filterCollectionItemObjKey ? filterCollectionItemObjKey(params) : params,
     );
+  }
+
+  function touchItems(itemKeys: string[]): void {
+    itemCacheRuntime.touch(itemKeys, (itemKey) => {
+      return store.state[itemKey] !== undefined;
+    });
+  }
+
+  function registerActiveItems(itemKeys: string[]): () => void {
+    if (itemKeys.length === 0) return () => {};
+
+    const unregister = itemCacheRuntime.registerActive(itemKeys);
+
+    return () => {
+      unregister();
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
+    };
+  }
+
+  function shouldScheduleCacheLimitEnforcement(): boolean {
+    let cachedItemCount = 0;
+
+    for (const item of Object.values(store.state)) {
+      if (item !== null) {
+        cachedItemCount++;
+        if (cachedItemCount > maxItems) return true;
+      }
+    }
+
+    return false;
   }
 
   const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
@@ -645,6 +695,12 @@ export function createCollectionStore<
       }
 
       lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
+      if (snapshotItem !== null) {
+        touchItems([message.itemKey]);
+        if (shouldScheduleCacheLimitEnforcement()) {
+          scheduleCacheLimitEnforcement();
+        }
+      }
       return;
     }
 
@@ -671,6 +727,11 @@ export function createCollectionStore<
 
     if (message.item === null && schedulerPayload) {
       cleanupItemResources(message.itemKey, schedulerPayload);
+    } else if (message.item !== null) {
+      touchItems([message.itemKey]);
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
     }
 
     lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
@@ -773,6 +834,10 @@ export function createCollectionStore<
       ({ requestId }) => results.get(requestId) === true,
     );
     if (successfulRequests.length > 0) {
+      touchItems(successfulRequests.map(({ requestId }) => requestId));
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
       for (const { requestId } of successfulRequests) {
         publishItemSnapshot(requestId, 'confirmed');
       }
@@ -801,6 +866,8 @@ export function createCollectionStore<
 
   function cleanupItemResources(itemKey: string, payload: ItemPayload): void {
     invalidationWasTriggered.delete(itemKey);
+    itemCacheRuntime.clear(itemKey);
+    lastCollectionSyncVersions.delete(itemKey);
 
     const itemScheduler = perItemSchedulers.get(itemKey);
     if (itemScheduler) {
@@ -809,6 +876,23 @@ export function createCollectionStore<
     }
 
     maybeDisposeBatchScheduler(payload);
+  }
+
+  function isProtectedFromEviction(
+    itemKey: string,
+    item: CollectionItem,
+  ): boolean {
+    if (itemCacheRuntime.isActive(itemKey)) return true;
+    const scheduler = getScheduler(itemKey, item.payload);
+    if (
+      item.status === 'loading' ||
+      item.status === 'refetching' ||
+      scheduler.getFetchIsInProgress()
+    ) {
+      return true;
+    }
+
+    return scheduler.isMutationInProgress(itemKey);
   }
 
   type FilterItemsFn = (params: ItemPayload, data: ItemState | null) => boolean;
@@ -1020,6 +1104,15 @@ export function createCollectionStore<
     const results = await persistence.preloadItems(
       payloads.map((payload) => getItemKey(payload)),
     );
+    const preloadedItemKeys = payloads.flatMap((payload, index) =>
+      results[index] ? [getItemKey(payload)] : [],
+    );
+    if (preloadedItemKeys.length > 0) {
+      touchItems(preloadedItemKeys);
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
+    }
     return payloads.map((payload, index) => ({
       payload,
       preloaded: results[index] ?? false,
@@ -1045,6 +1138,8 @@ export function createCollectionStore<
       events,
       getItemKey,
       getItemState,
+      registerActiveItems,
+      touchItems,
       persistence
         ? (payloads) =>
             persistence.maybeHydrateItems(
@@ -1112,6 +1207,10 @@ export function createCollectionStore<
       itemKey,
       0,
     );
+    touchItems([itemKey]);
+    if (shouldScheduleCacheLimitEnforcement()) {
+      scheduleCacheLimitEnforcement();
+    }
     publishItemSnapshot(itemKey);
   }
 
@@ -1178,6 +1277,10 @@ export function createCollectionStore<
     });
 
     if (updatedItemKeys.size > 0) {
+      touchItems([...updatedItemKeys]);
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
       for (const itemKey of updatedItemKeys) {
         const payload = store.state[itemKey]?.payload;
         if (payload) {
@@ -1269,7 +1372,31 @@ export function createCollectionStore<
   });
 
   // Attach persistent storage after store creation
+  const { enforceCacheLimits } = createCollectionCacheLimits({
+    store,
+    maxItems,
+    itemCacheRuntime,
+    isProtectedFromEviction,
+    cleanupItemResources,
+    onStateCleanup,
+  });
+
+  const cacheLimitEnforcementScheduler = createIdleThrottledScheduler({
+    throttleMs: CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
+    run: enforceCacheLimits,
+  });
+
+  function scheduleCacheLimitEnforcement(): void {
+    cacheLimitEnforcementScheduler.schedule();
+  }
+
   persistence?.attach(store);
+  if (store.isInitialized) {
+    touchItems(Object.keys(store.state));
+    if (shouldScheduleCacheLimitEnforcement()) {
+      scheduleCacheLimitEnforcement();
+    }
+  }
 
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
@@ -1300,6 +1427,8 @@ export function createCollectionStore<
 
     invalidationWasTriggered.clear();
     lastCollectionSyncVersions.clear();
+    itemCacheRuntime.clearAll();
+    cacheLimitEnforcementScheduler.cancel();
     browserTabsPriority.reset();
 
     persistence?.dispose();

@@ -220,6 +220,39 @@ test('disable then enable isOffScreen', async () => {
   expect(env.serverTable.numOfFinishedFetches).toBe(1);
 });
 
+test('maxItems keeps active hook items and allows protected overflow', async () => {
+  const env = createCollectionStoreTestEnv<Todo>(
+    {
+      '1': { title: 'one', completed: false },
+      '2': { title: 'two', completed: false },
+      '3': { title: 'three', completed: false },
+    },
+    { maxItems: 1 },
+  );
+
+  env.scheduleFetch('highPriority', '1');
+  env.scheduleFetch('highPriority', '2');
+  await flushAllTimers();
+
+  const queries = [{ payload: '1' }, { payload: '2' }];
+  renderHook(() =>
+    env.apiStore.useMultipleItems(queries, {
+      disableRefetchOnMount: true,
+      returnRefetchingStatus: true,
+    }),
+  );
+
+  await flushAllTimers();
+
+  env.scheduleFetch('highPriority', '3');
+  await flushAllTimers();
+
+  expect(Object.keys(env.store.state).sort()).toEqual(['"1', '"2']);
+  expect(env.apiStore.getItemState('1')?.data?.value.title).toBe('one');
+  expect(env.apiStore.getItemState('2')?.data?.value.title).toBe('two');
+  expect(env.apiStore.getItemState('3')).toBeUndefined();
+});
+
 test('useMultipleItems should not trigger a mount refetch when some option changes', async () => {
   const env = createCollectionStoreTestEnv<Todo>(
     { '1': defaultTodo, '2': defaultTodo },

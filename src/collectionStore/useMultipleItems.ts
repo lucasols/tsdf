@@ -5,6 +5,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
+import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
@@ -56,6 +57,8 @@ export function useMultipleItems<
   getItemState: (
     payload: ItemPayload,
   ) => TSFDCollectionItem<ItemState, ItemPayload> | null | undefined,
+  registerActiveItems: (itemKeys: string[]) => () => void,
+  touchItems: (itemKeys: string[]) => void,
   preloadItems: ((payloads: ItemPayload[]) => Promise<boolean[]>) | undefined,
   scheduleAutomaticFetch: (fetchType: FetchType, payload: ItemPayload) => void,
   invalidationWasTriggered: Set<string>,
@@ -117,6 +120,12 @@ export function useMultipleItems<
     globalDisableRefetchOnMount,
     isOffScreenFromContext,
   ]);
+
+  const activeItemKeys = useMemo(() => {
+    return queriesWithId.map(({ itemKey }) => itemKey);
+  }, [queriesWithId]);
+
+  useRegisterActiveKeys(activeItemKeys, registerActiveItems, touchItems);
 
   const resultSelector = useCallback(
     (state: CollectionState) => {
