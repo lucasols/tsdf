@@ -1012,3 +1012,135 @@ test('medium priority on loaded list query applies delay', async () => {
     "
   `);
 });
+
+test('maxItems keeps active list-query hooks and their items in memory', async () => {
+  const env = createListQueryStoreTestEnv(
+    {
+      users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+      orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+    },
+    { maxItems: 1 },
+  );
+
+  env.scheduleFetch('highPriority', { tableId: 'users' });
+  await flushAllTimers();
+
+  const usersQuery = { tableId: 'users' } as const;
+  renderHook(() =>
+    env.apiStore.useListQuery(usersQuery, {
+      disableRefetchOnMount: true,
+      returnRefetchingStatus: true,
+    }),
+  );
+
+  await flushAllTimers();
+
+  env.scheduleFetch('highPriority', { tableId: 'orders' });
+  await flushAllTimers();
+
+  expect(env.apiStore.getQueryState({ tableId: 'users' })?.items).toHaveLength(
+    3,
+  );
+  expect(env.apiStore.getQueryState({ tableId: 'orders' })).toBeUndefined();
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({
+    id: 1,
+    name: 'User 1',
+  });
+});
+
+test('maxItems keeps active standalone useItem entries when their source query is evicted', async () => {
+  const env = createListQueryStoreTestEnv(
+    {
+      users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+      orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+    },
+    { maxItems: 1 },
+  );
+
+  env.scheduleFetch('highPriority', { tableId: 'users' });
+  await flushAllTimers();
+
+  const hook = renderHook(() => env.apiStore.useItem('users||1'));
+  await flushAllTimers();
+
+  env.scheduleFetch('highPriority', { tableId: 'orders' });
+  await flushAllTimers();
+
+  expect(hook.result.current.data).toMatchObject({ id: 1, name: 'User 1' });
+  expect(env.apiStore.getQueryState({ tableId: 'users' })).toBeUndefined();
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({
+    id: 1,
+    name: 'User 1',
+  });
+  expect(env.apiStore.getItemState('users||2')).toBeUndefined();
+});
+
+test('maxItems keeps a mounted list item protected after delete and refetch', async () => {
+  const env = createListQueryStoreTestEnv(
+    { users: range(1, 2).map((id) => ({ id, name: `User ${id}` })) },
+    { maxItems: 1 },
+  );
+
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await flushAllTimers();
+
+  renderHook(() =>
+    env.apiStore.useItem('users||1', {
+      disableRefetchOnMount: true,
+      returnRefetchingStatus: true,
+    }),
+  );
+
+  await flushAllTimers();
+
+  act(() => {
+    env.apiStore.deleteItemState('users||1');
+  });
+  await flushAllTimers();
+
+  env.scheduleItemFetch('highPriority', 'users||1');
+  await flushAllTimers();
+  env.scheduleItemFetch('highPriority', 'users||2');
+  await flushAllTimers();
+
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({
+    id: 1,
+    name: 'User 1',
+  });
+  expect(env.apiStore.getItemState('users||2')).toBeUndefined();
+});
+
+test('maxItems keeps the item matched by useFindItem when inactive queries are evicted', async () => {
+  const env = createListQueryStoreTestEnv(
+    {
+      users: range(1, 3).map((id) => ({ id, name: `User ${id}` })),
+      orders: range(1, 3).map((id) => ({ id, name: `Order ${id}` })),
+    },
+    { maxItems: 1 },
+  );
+
+  const hook = renderHook(
+    ({ keepUsersQuery }: { keepUsersQuery: boolean }) => {
+      env.apiStore.useListQuery(keepUsersQuery ? { tableId: 'users' } : false, {
+        returnRefetchingStatus: true,
+      });
+
+      return env.apiStore.useFindItem((item) => item.name === 'User 1');
+    },
+    { initialProps: { keepUsersQuery: true } },
+  );
+  await flushAllTimers();
+
+  hook.rerender({ keepUsersQuery: false });
+  await flushAllTimers();
+
+  env.scheduleFetch('highPriority', { tableId: 'orders' });
+  await flushAllTimers();
+
+  expect(hook.result.current).toMatchObject({ id: 1, name: 'User 1' });
+  expect(env.apiStore.getItemState('users||1')).toMatchObject({
+    id: 1,
+    name: 'User 1',
+  });
+  expect(env.apiStore.getItemState('users||2')).toBeUndefined();
+});

@@ -1,6 +1,9 @@
 import { act } from 'react';
+import { rc_object, rc_parse, rc_string } from 'runcheck';
 import { expect, test } from 'vitest';
 import {
+  type BrowserTabsTransportAuditEntry,
+  createInspectableInMemoryBrowserTabsTransportFactory,
   createInMemoryBrowserTabsTransportFactory,
   getNextStoreId,
 } from '../mocks/browserTabsTestUtils';
@@ -21,6 +24,42 @@ import {
 } from './browser-tabs-test-helpers';
 
 setupBrowserTabsTestLifecycle();
+
+const collectionSnapshotWithNameSchema = rc_object({
+  kind: rc_string,
+  item: rc_object({
+    data: rc_object({ value: rc_object({ name: rc_string }) }),
+  }),
+});
+
+const listItemSnapshotWithNameSchema = rc_object({
+  kind: rc_string,
+  item: rc_object({ name: rc_string }),
+});
+
+function isCollectionSnapshotWithName(
+  entry: BrowserTabsTransportAuditEntry,
+  expectedName: string,
+): boolean {
+  const result = rc_parse(entry.message, collectionSnapshotWithNameSchema);
+  return (
+    result.ok &&
+    result.value.kind === 'collection-item-snapshot' &&
+    result.value.item.data.value.name === expectedName
+  );
+}
+
+function isListItemSnapshotWithName(
+  entry: BrowserTabsTransportAuditEntry,
+  expectedName: string,
+): boolean {
+  const result = rc_parse(entry.message, listItemSnapshotWithNameSchema);
+  return (
+    result.ok &&
+    result.value.kind === 'list-item-snapshot' &&
+    result.value.item.name === expectedName
+  );
+}
 
 test('document updateState changes are applied to background tabs', async () => {
   const transportFactory = createInMemoryBrowserTabsTransportFactory();
@@ -256,6 +295,126 @@ test('list query state changes emitted during an in-flight mutation sync immedia
 
   await flushAllTimers();
   await mutationPromise;
+});
+
+test('local collection eviction does not broadcast deletion-like snapshots to background tabs', async () => {
+  const transportFactory = createInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('collection-local-eviction');
+  const sharedServerTableState = createSharedServerTableState({
+    item1: { name: 'Item 1' },
+    item2: { name: 'Item 2' },
+  });
+
+  const envA = createCollectionStoreTestEnv(
+    { item1: { name: 'Item 1' }, item2: { name: 'Item 2' } },
+    {
+      id,
+      maxItems: 1,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      testScenario: { loadedWithStaleData: { item1: { name: 'Item 1' } } },
+    },
+  );
+  const envB = createCollectionStoreTestEnv(
+    { item1: { name: 'Item 1' }, item2: { name: 'Item 2' } },
+    {
+      id,
+      sharedServerTableState,
+      browserTabsTransportFactory: transportFactory,
+      testScenario: { loadedWithStaleData: { item1: { name: 'Item 1' } } },
+    },
+  );
+
+  envA.scheduleFetch('highPriority', 'item2');
+  await flushAllTimers();
+  await advanceTime(0);
+
+  expect(envA.apiStore.getItemState('item1')).toBeUndefined();
+  expect(envB.apiStore.getItemState('item1')?.data).toEqual({
+    value: { name: 'Item 1' },
+  });
+  expect(envB.apiStore.getItemState('item2')?.data).toEqual({
+    value: { name: 'Item 2' },
+  });
+});
+
+test('collection delete tombstones still reject delayed older snapshots', async () => {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('collection-delete-stale-snapshot');
+  const sharedServerTableState = createSharedServerTableState(
+    createCollectionItems(),
+  );
+
+  const envA = createCollectionStoreTestEnv(createCollectionItems(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transport.transportFactory,
+    testScenario: 'loaded',
+  });
+  const envB = createCollectionStoreTestEnv(createCollectionItems(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transport.transportFactory,
+    testScenario: 'loaded',
+  });
+
+  envB.apiStore.updateItemState('item1', (draft) => {
+    draft.value.name = 'Older remote value';
+  });
+  await advanceTime(0);
+
+  const oldSnapshot = transport
+    .getMessages()
+    .find((entry) => isCollectionSnapshotWithName(entry, 'Older remote value'));
+
+  expect(oldSnapshot).toBeDefined();
+
+  envA.apiStore.deleteItemState('item1');
+  await advanceTime(0);
+
+  transport.replayMessage(oldSnapshot!);
+  await advanceTime(0);
+
+  expect(envA.apiStore.getItemState('item1')).toBeNull();
+});
+
+test('list-item delete tombstones still reject delayed older snapshots', async () => {
+  const transport = createInspectableInMemoryBrowserTabsTransportFactory();
+  const id = getNextStoreId('list-item-delete-stale-snapshot');
+  const sharedServerTableState =
+    createSharedListQueryServerTableState(createUsersTable());
+
+  const envA = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transport.transportFactory,
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+  const envB = createListQueryStoreTestEnv(createUsersTable(), {
+    id,
+    sharedServerTableState,
+    browserTabsTransportFactory: transport.transportFactory,
+    testScenario: { loaded: { tables: ['users'] } },
+  });
+
+  envB.apiStore.updateItemState('users||1', (draft) => {
+    draft.name = 'Older remote value';
+  });
+  await advanceTime(0);
+
+  const oldSnapshot = transport
+    .getMessages()
+    .find((entry) => isListItemSnapshotWithName(entry, 'Older remote value'));
+
+  expect(oldSnapshot).toBeDefined();
+
+  envA.apiStore.deleteItemState('users||1');
+  await advanceTime(0);
+
+  transport.replayMessage(oldSnapshot!);
+  await advanceTime(0);
+
+  expect(envA.apiStore.getItemState('users||1')).toBeNull();
 });
 
 test('document state updates do not sync to tabs without an active session key', async () => {

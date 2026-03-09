@@ -117,6 +117,9 @@ export function createListQueryStoreTestEnv<
     usesRealTimeUpdates,
     useBatchFetch,
     maxItemBatchSize,
+    maxItems,
+    maxQueries,
+    onStateCleanup,
     getItemsBatchKey,
     disableFetchItemFn,
     optimisticListUpdates,
@@ -154,6 +157,15 @@ export function createListQueryStoreTestEnv<
     useBatchFetch?: boolean;
     /** Max items per batch (only used when useBatchFetch is true) */
     maxItemBatchSize?: number;
+    maxItems?: number;
+    maxQueries?: number;
+    onStateCleanup?: ListQueryStoreOptions<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      TPartialResources,
+      TOffsetPagination
+    >['onStateCleanup'];
     /** Optional function to group batch fetches by key */
     getItemsBatchKey?: (payload: string) => string | false;
     disableFetchItemFn?: boolean;
@@ -285,6 +297,9 @@ export function createListQueryStoreTestEnv<
     defaultQuerySize,
     usesRealTimeUpdates,
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
+    maxItems,
+    maxQueries,
+    onStateCleanup,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     blockWindowClose: blockWindowClose ?? null,

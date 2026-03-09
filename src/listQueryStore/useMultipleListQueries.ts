@@ -6,6 +6,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
+import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
@@ -71,6 +72,8 @@ export function useMultipleListQueries<
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   events: Emitter<ListQueryStoreEvents>,
   getQueryKey: (params: QueryPayload) => string,
+  registerActiveQueries: (queryKeys: string[]) => () => void,
+  touchQueries: (queryKeys: string[]) => void,
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
@@ -154,6 +157,10 @@ export function useMultipleListQueries<
     globalDisableRefetchOnMount,
     isOffScreenFromContext,
   ]);
+
+  const activeQueryKeys = useMemo(() => {
+    return queriesWithId.map(({ key }) => key);
+  }, [queriesWithId]);
 
   const getQueryItems = useCallback(
     (
@@ -523,6 +530,8 @@ export function useMultipleListQueries<
   });
 
   const ignoreQueriesInRefetchOnMount = useConst(() => new Set<string>());
+
+  useRegisterActiveKeys(activeQueryKeys, registerActiveQueries, touchQueries);
 
   useEffect(() => {
     const effectState = { cancelled: false };

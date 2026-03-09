@@ -3,6 +3,7 @@ import {
   createCollectionStore,
   type CollectionBrowserTabsMessage,
   type CollectionInitialStateItem,
+  type CollectionStoreOptions,
 } from '../../src/collectionStore/collectionStore';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
@@ -67,8 +68,13 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   useBatchFetch?: boolean;
   /** Max items per batch (only used when useBatchFetch is true) */
   maxBatchSize?: number;
+  maxItems?: number;
   /** Optional function to group batch fetches by key */
   getItemsBatchKey?: (payload: string) => string | false;
+  onStateCleanup?: CollectionStoreOptions<
+    CollectionTestItem<D>,
+    string
+  >['onStateCleanup'];
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
@@ -97,7 +103,9 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
+    maxItems,
     getItemsBatchKey,
+    onStateCleanup,
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
@@ -183,6 +191,8 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
+    maxItems,
+    onStateCleanup,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     fetchFn: async (payload, signal) => {
       const value = await serverTable.fetch(payload, signal);
