@@ -247,7 +247,7 @@ export function createListQueryCacheLimits<
     if (liveItemCount <= maxItems) return;
 
     const currentQueryEntries = Object.entries(store.state.queries);
-    const referencedItemCounts = buildReferencedItemCounts(currentQueryEntries);
+    let referencedItemCounts = buildReferencedItemCounts(currentQueryEntries);
     const standaloneProtectedItemKeys =
       getStandaloneProtectedItemKeys(liveItems);
     const itemPressureQueryEvictions = currentQueryEntries
@@ -265,22 +265,26 @@ export function createListQueryCacheLimits<
         const query = store.state.queries[queryKey];
         if (!query) return [];
 
+        const nextReferencedItemCounts = new Map(referencedItemCounts);
+        let nextLiveItemCount = liveItemCount;
         let wouldFreeItems = false;
         for (const itemKey of query.items) {
-          const nextRefCount = (referencedItemCounts.get(itemKey) ?? 0) - 1;
+          const nextRefCount = (nextReferencedItemCounts.get(itemKey) ?? 0) - 1;
           if (nextRefCount > 0) {
-            referencedItemCounts.set(itemKey, nextRefCount);
+            nextReferencedItemCounts.set(itemKey, nextRefCount);
             continue;
           }
 
-          referencedItemCounts.delete(itemKey);
+          nextReferencedItemCounts.delete(itemKey);
           if (!standaloneProtectedItemKeys.has(itemKey)) {
-            liveItemCount--;
+            nextLiveItemCount--;
             wouldFreeItems = true;
           }
         }
 
         if (!wouldFreeItems) return [];
+        referencedItemCounts = nextReferencedItemCounts;
+        liveItemCount = nextLiveItemCount;
         return [queryKey];
       });
 

@@ -1833,11 +1833,11 @@ export function createListQueryStore<
     produceNewData: Parameters<typeof updateItemStateBase>[1],
     options?: Parameters<typeof updateItemStateBase>[2],
   ): ReturnType<typeof updateItemStateBase> {
+    const itemEntries = getItemsKeyArray(itemIds);
     const wasUpdated = updateItemStateBase(itemIds, produceNewData, options);
 
     if (!wasUpdated) return wasUpdated;
 
-    const itemEntries = getItemsKeyArray(itemIds);
     touchUpdatedItemEntries(itemEntries);
 
     return wasUpdated;

@@ -478,6 +478,64 @@ describe('fetch query', () => {
     ).toBe(true);
   });
 
+  test('maxItems ignores skipped overlapping queries when estimating item pressure', async () => {
+    const env = createListQueryStoreTestEnv(
+      {
+        users: range(1, 3).map((id) => ({
+          id,
+          age: id * 10,
+          name: `User ${id}`,
+        })),
+      },
+      { maxItems: 2 },
+    );
+
+    env.scheduleFetch('highPriority', {
+      tableId: 'users',
+      filters: [{ op: 'gt', field: 'id', value: 1 }],
+    });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', {
+      tableId: 'users',
+      filters: [{ op: 'gt', field: 'age', value: 10 }],
+    });
+    await flushAllTimers();
+    env.scheduleFetch('highPriority', {
+      tableId: 'users',
+      filters: [{ op: 'eq', field: 'id', value: 1 }],
+    });
+    await flushAllTimers();
+
+    expect(
+      env.apiStore.getQueryState({
+        tableId: 'users',
+        filters: [{ op: 'gt', field: 'age', value: 10 }],
+      })?.items,
+    ).toHaveLength(2);
+    expect(
+      env.apiStore.getQueryState({
+        tableId: 'users',
+        filters: [{ op: 'gt', field: 'id', value: 1 }],
+      })?.items,
+    ).toHaveLength(2);
+    expect(
+      env.apiStore.getQueryState({
+        tableId: 'users',
+        filters: [{ op: 'eq', field: 'id', value: 1 }],
+      }),
+    ).toBeUndefined();
+    expect(Object.keys(env.store.state.items)).toHaveLength(2);
+    expect(env.apiStore.getItemState('users||1')).toBeUndefined();
+    expect(env.apiStore.getItemState('users||2')).toMatchObject({
+      id: 2,
+      name: 'User 2',
+    });
+    expect(env.apiStore.getItemState('users||3')).toMatchObject({
+      id: 3,
+      name: 'User 3',
+    });
+  });
+
   test('onStateCleanup is called when cache-limit eviction removes queries and orphan items', async () => {
     const cleanupCalls: unknown[] = [];
     const env = createListQueryStoreTestEnv(
