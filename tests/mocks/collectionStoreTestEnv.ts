@@ -59,6 +59,7 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  transportReconnectCooldownMs?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
@@ -90,6 +91,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
@@ -190,6 +192,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     persistentStorage,

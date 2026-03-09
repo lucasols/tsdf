@@ -56,6 +56,7 @@ export type DocumentStoreTestEnvOptions<D> = {
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  transportReconnectCooldownMs?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
@@ -78,6 +79,7 @@ export function createDocumentStoreTestEnv<D>(
     bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
@@ -132,6 +134,7 @@ export function createDocumentStoreTestEnv<D>(
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     persistentStorage,

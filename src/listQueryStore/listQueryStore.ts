@@ -228,6 +228,10 @@ type ListQueryStoreOptionsBase<
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
+   * additional reconnects within the cooldown are coalesced into one trailing
+   * revalidation. Set to `0` to disable this cooldown. */
+  transportReconnectCooldownMs?: number;
   optimisticListUpdates?: OptimisticListUpdate<
     ItemState,
     QueryPayload,
@@ -313,6 +317,7 @@ export function createListQueryStore<
     mediumPriorityDelayMs,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs = 2_000,
     optimisticListUpdates,
     onInvalidateQuery,
     onInvalidateItem,
@@ -1395,6 +1400,7 @@ export function createListQueryStore<
   const focusLifecycle = createStoreFocusLifecycle({
     revalidateOnWindowFocus,
     usesRealTimeUpdates,
+    transportReconnectCooldownMs,
     getWindowIsFocused,
     onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
     onWindowFocusRevalidate: () => {
@@ -1422,11 +1428,12 @@ export function createListQueryStore<
    * queries and items need to be revalidated.
    *
    * - No-op when `usesRealTimeUpdates` is `false`.
-   * - If the window is focused, invalidates all queries and items immediately
-   *   with `realtimeUpdate` priority.
-   * - If the window is **not** focused, defers invalidation until the next
-   *   window focus event. Multiple calls while unfocused are coalesced (only
-   *   one invalidation fires on focus).
+   * - If the window is focused, the first reconnect invalidates all queries
+   *   and items immediately with `realtimeUpdate` priority.
+   * - Additional reconnects within `transportReconnectCooldownMs` are
+   *   coalesced into one trailing invalidation.
+   * - If the window is **not** focused, reconnect invalidation waits until the
+   *   next window focus event.
    */
   function onTransportReconnect(): void {
     focusLifecycle.onTransportReconnect();

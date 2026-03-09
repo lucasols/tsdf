@@ -133,6 +133,10 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
+   * additional reconnects within the cooldown are coalesced into one trailing
+   * revalidation. Set to `0` to disable this cooldown. */
+  transportReconnectCooldownMs?: number;
   mediumPriorityDelayMs?: number;
   onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
   onMutationError?: (
@@ -181,6 +185,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   baseCoalescingWindowMs,
   dynamicRealtimeThrottleMs,
   revalidateOnWindowFocus,
+  transportReconnectCooldownMs = 2_000,
   mediumPriorityDelayMs,
   onSchedulerEvent,
   onMutationError,
@@ -520,6 +525,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   const focusLifecycle = createStoreFocusLifecycle({
     revalidateOnWindowFocus,
     usesRealTimeUpdates,
+    transportReconnectCooldownMs,
     getWindowIsFocused,
     onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
     onWindowFocusRevalidate: () => {
@@ -641,10 +647,12 @@ export function createDocumentStore<State extends ValidStoreState>({
    * needs to be revalidated.
    *
    * - No-op when `usesRealTimeUpdates` is `false`.
-   * - If the window is focused, invalidates immediately with `realtimeUpdate` priority.
-   * - If the window is **not** focused, defers invalidation until the next window
-   *   focus event. Multiple calls while unfocused are coalesced (only one
-   *   invalidation fires on focus).
+   * - If the window is focused, the first reconnect invalidates immediately
+   *   with `realtimeUpdate` priority.
+   * - Additional reconnects within `transportReconnectCooldownMs` are coalesced
+   *   into one trailing invalidation.
+   * - If the window is **not** focused, reconnect invalidation waits until the
+   *   next window focus event.
    */
   function onTransportReconnect(): void {
     focusLifecycle.onTransportReconnect();

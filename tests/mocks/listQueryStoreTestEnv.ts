@@ -108,6 +108,7 @@ export function createListQueryStoreTestEnv<
     bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
@@ -142,6 +143,7 @@ export function createListQueryStoreTestEnv<
       windowIsNotFocused: boolean;
     }) => number;
     revalidateOnWindowFocus?: boolean | (() => boolean);
+    transportReconnectCooldownMs?: number;
     baseCoalescingWindowMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
@@ -278,6 +280,7 @@ export function createListQueryStoreTestEnv<
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     mediumPriorityDelayMs,
     defaultQuerySize,
     usesRealTimeUpdates,
