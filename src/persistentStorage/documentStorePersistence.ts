@@ -1,7 +1,12 @@
 import type { Store } from 't-state';
 import type { DocumentStoreState } from '../documentStore';
 import type { ValidStoreState } from '../utils/storeShared';
-import { parsePersistedDocumentData } from './parsePersistedData';
+import {
+  convertStoreDataForPersistence,
+  normalizePersistentStorageDataSchema,
+  parsePersistedDocumentData,
+  parsePersistedStoreData,
+} from './parsePersistedData';
 import {
   createPersistentStorageHandle,
   getStorageKeyForStore,
@@ -14,7 +19,6 @@ import type {
   PersistedDocumentData,
   StorageAdapter,
 } from './types';
-import { validateWithSchema } from './validateWithSchema';
 
 /**
  * Synchronously reads a persisted document from localStorage.
@@ -42,18 +46,21 @@ export type DocumentPersistenceSetup<State extends ValidStoreState> = {
   clear(): Promise<void>;
 };
 
-export function setupDocumentPersistence<State extends ValidStoreState>(
-  config: DocumentPersistentStorageConfig<State> & {
+export function setupDocumentPersistence<
+  State extends ValidStoreState,
+  StorageState = unknown,
+>(
+  config: DocumentPersistentStorageConfig<State, StorageState> & {
     getSessionKey: () => string | false;
   },
   options: { adapter?: StorageAdapter } = {},
 ): DocumentPersistenceSetup<State> {
   const version = config.version ?? 1;
   const backend = config.backend ?? 'opfs';
-  const handle = createPersistentStorageHandle<PersistedDocumentData<State>>(
-    config,
-    { adapter: options.adapter },
-  );
+  const dataSchema = normalizePersistentStorageDataSchema(config.schema);
+  const handle = createPersistentStorageHandle<
+    PersistedDocumentData<State | StorageState>
+  >(config, { adapter: options.adapter });
 
   let storeRef: Store<DocumentStoreState<State>> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -80,7 +87,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
       return;
     }
 
-    const validated = validateWithSchema(config.schema, persisted.data);
+    const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
       scheduleIdleCleanup(() => localStorage.removeItem(key));
       return;
@@ -121,7 +128,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
       return baseState;
     }
 
-    const validated = validateWithSchema(config.schema, persisted.data);
+    const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
       scheduleIdleCleanup(() => localStorage.removeItem(key));
       return baseState;
@@ -147,7 +154,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 
-        const validated = validateWithSchema(config.schema, cached.data);
+        const validated = parsePersistedStoreData(cached.data, dataSchema);
         if (validated === null) {
           scheduleIdleCleanup(() => void handle.clear());
           return;
@@ -190,7 +197,17 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
 
         handle.scheduleSave(() => {
           const storeData = store.state.data;
-          return { data: storeData ?? capturedData };
+          const dataToPersist = storeData ?? capturedData;
+          const converted = convertStoreDataForPersistence(
+            dataToPersist,
+            dataSchema,
+          );
+
+          if (!converted.ok) {
+            throw converted.error;
+          }
+
+          return { data: converted.value };
         });
       }
     });

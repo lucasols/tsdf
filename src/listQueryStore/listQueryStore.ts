@@ -190,6 +190,7 @@ type ListQueryStoreOptionsBase<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
+  StorageState = unknown,
 > = {
   debugName?: string;
   /** Stable id shared by the same logical list-query store across browser tabs. */
@@ -277,7 +278,8 @@ type ListQueryStoreOptionsBase<
   persistentStorage?: ListQueryPersistentStorageConfig<
     ItemState,
     QueryPayload,
-    ItemPayload
+    ItemPayload,
+    StorageState
   >;
 } & ([TPartialResources] extends [true]
   ? { partialResources: PartialResourcesConfig<ItemState> }
@@ -289,11 +291,13 @@ export type ListQueryStoreOptions<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  StorageState = unknown,
 > = ListQueryStoreOptionsBase<
   ItemState,
   QueryPayload,
   ItemPayload,
-  TPartialResources
+  TPartialResources,
+  StorageState
 > &
   ([TOffsetPagination] extends [true]
     ? {
@@ -315,13 +319,15 @@ export function createListQueryStore<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  StorageState = unknown,
 >(
   storeOptions: ListQueryStoreOptions<
     ItemState,
     QueryPayload,
     ItemPayload,
     TPartialResources,
-    TOffsetPagination
+    TOffsetPagination,
+    StorageState
   >,
 ) {
   const {
@@ -518,7 +524,7 @@ export function createListQueryStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
+    ? setupListQueryPersistence(
         { ...persistentStorageConfig, getSessionKey },
         { adapter: testOptions?.storageAdapter, getItemKey, getQueryKey },
       )

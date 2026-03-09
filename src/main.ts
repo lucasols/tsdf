@@ -59,6 +59,8 @@ export type {
 // Persistent Storage types
 export type {
   PersistentStorageSchema,
+  PersistentStorageDataSchema,
+  ConvertedPersistentStorageDataSchema,
   StorageBackend,
   PersistentStorageBaseConfig,
   PersistentStoragePreloadResult,
