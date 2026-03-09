@@ -87,6 +87,8 @@ export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload = ValidPayload,
 > = StorePersistentStorageBaseConfig<ItemState> & {
+  /** Schema used to validate cached item payloads on load. */
+  payloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
   maxItems?: number;
   /** Item payloads that should never be evicted from storage. */
@@ -105,6 +107,10 @@ export type ListQueryPersistentStorageConfig<
   QueryPayload extends ValidPayload = ValidPayload,
   ItemPayload extends ValidPayload = ValidPayload,
 > = StorePersistentStorageBaseConfig<ItemState> & {
+  /** Schema used to validate cached item payloads on load. */
+  itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
+  /** Schema used to validate cached query payloads on load. */
+  queryPayloadSchema: PersistentStorageSchema<QueryPayload>;
   /** Maximum number of items to persist. Defaults to 500. */
   maxItems?: number;
   /** Maximum number of queries to persist. Defaults to 100. */

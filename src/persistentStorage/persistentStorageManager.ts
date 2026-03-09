@@ -1,4 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_number,
   rc_object,
@@ -296,9 +295,12 @@ export function readFromLocalStorageSync<T>(
     const raw = localStorage.getItem(key);
     if (raw === null) return null;
 
-    const entry = __LEGIT_CAST__<StorageCacheEntry<unknown>, unknown>(
-      JSON.parse(raw),
-    );
+    const entryResult = rc_parse_json(raw, cacheEntrySchema);
+    if (!entryResult.ok) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return null;
+    }
+    const entry = entryResult.value;
 
     if (entry.version !== version) {
       scheduleIdleCleanup(() => localStorage.removeItem(key));
@@ -321,17 +323,20 @@ export function readFromLocalStorageSync<T>(
   }
 }
 
-export function readStorageEntryFromLocalStorageSync<T>(
+export function readStorageEntryFromLocalStorageSync(
   key: string,
   version: number,
-): StorageCacheEntry<T> | null {
+): StorageCacheEntry<unknown> | null {
   try {
     const raw = localStorage.getItem(key);
     if (raw === null) return null;
 
-    const entry = __LEGIT_CAST__<StorageCacheEntry<T>, unknown>(
-      JSON.parse(raw),
-    );
+    const result = rc_parse_json(raw, cacheEntrySchema);
+    if (!result.ok) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return null;
+    }
+    const entry = result.value;
     if (entry.version !== version) {
       scheduleIdleCleanup(() => localStorage.removeItem(key));
       return null;

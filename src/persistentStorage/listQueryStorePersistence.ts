@@ -1,6 +1,5 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
   TSDFItemQuery,
@@ -8,6 +7,11 @@ import type {
   TSFDListQueryState,
 } from '../listQueryStore/types';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  parsePersistedListQueryData,
+  parsePersistedListQueryItemData,
+  type ParsedPersistedListQueryItemData,
+} from './parsePersistedData';
 import {
   createPersistentStorageNamespaceHandle,
   getStoragePrefixForStoreNamespace,
@@ -42,32 +46,18 @@ function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
   return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
 }
 
-function createShouldIgnorePersistedItemPredicate<
-  ItemPayload extends ValidPayload,
->(
-  shouldIgnoreItem: (payload: ItemPayload) => boolean,
-): (payload: unknown) => boolean {
-  return (payload) => {
-    try {
-      return shouldIgnoreItem(__LEGIT_CAST__<ItemPayload, unknown>(payload));
-    } catch {
-      return false;
-    }
-  };
-}
-
 function toItemState<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 >(
-  persisted: PersistedListQueryItemData<unknown>,
+  persisted: ParsedPersistedListQueryItemData<ItemPayload>,
   config: ListQueryPersistentStorageConfig<
     ItemState,
     QueryPayload,
     ItemPayload
   >,
-  shouldIgnorePersistedItem: (payload: unknown) => boolean,
+  shouldIgnoreItem: (payload: ItemPayload) => boolean,
 ): {
   item: ItemState;
   itemQuery: TSDFItemQuery<ItemPayload>;
@@ -76,9 +66,7 @@ function toItemState<
   const validated = validateWithSchema(config.schema, persisted.data);
   if (validated === null) return null;
 
-  if (shouldIgnorePersistedItem(persisted.payload)) return null;
-
-  const payload = __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload);
+  if (shouldIgnoreItem(persisted.payload)) return null;
 
   const loadedFields = Array.isArray(persisted.loadedFields)
     ? Array.from(new Set(persisted.loadedFields)).sort()
@@ -88,7 +76,7 @@ function toItemState<
     item: validated,
     itemQuery: {
       error: null,
-      payload,
+      payload: persisted.payload,
       refetchOnMount: 'lowPriority',
       status: 'success',
       wasLoaded: true,
@@ -124,15 +112,16 @@ function defineLazyLocalStorageItem<
     QueryPayload,
     ItemPayload
   >,
-  shouldIgnorePersistedItem: (payload: unknown) => boolean,
+  shouldIgnoreItem: (payload: ItemPayload) => boolean,
 ): void {
   function readItemFromLocalStorage():
     | ItemState
     | TSDFItemQuery<ItemPayload>
     | undefined {
-    const cacheEntry = readStorageEntryFromLocalStorageSync<
-      PersistedListQueryItemData<unknown>
-    >(storageKey, version);
+    const cacheEntry = readStorageEntryFromLocalStorageSync(
+      storageKey,
+      version,
+    );
 
     if (!cacheEntry) {
       Object.defineProperty(state.items, itemKey, {
@@ -151,10 +140,32 @@ function defineLazyLocalStorageItem<
       return undefined;
     }
 
-    const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+    const persisted = parsePersistedListQueryItemData(
       cacheEntry.data,
+      config.itemPayloadSchema,
+    );
+    if (!persisted) {
+      scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+      Object.defineProperty(state.items, itemKey, {
+        configurable: true,
+        enumerable: false,
+        value: undefined,
+        writable: true,
+      });
+      Object.defineProperty(state.itemQueries, itemKey, {
+        configurable: true,
+        enumerable: false,
+        value: undefined,
+        writable: true,
+      });
+      delete state.itemLoadedFields[itemKey];
+      return undefined;
+    }
+
+    const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+      persisted,
       config,
-      shouldIgnorePersistedItem,
+      shouldIgnoreItem,
     );
 
     if (!itemState) {
@@ -218,17 +229,21 @@ function defineLazyLocalStorageQuery<
   queryKey: string,
   storageKey: string,
   version: number,
+  queryPayloadSchema: ListQueryPersistentStorageConfig<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  >['queryPayloadSchema'],
   maxQuerySize: number,
 ): void {
   Object.defineProperty(state.queries, queryKey, {
     configurable: true,
     enumerable: false,
     get() {
-      const cacheEntry =
-        readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
-          storageKey,
-          version,
-        );
+      const cacheEntry = readStorageEntryFromLocalStorageSync(
+        storageKey,
+        version,
+      );
 
       if (!cacheEntry) {
         Object.defineProperty(state.queries, queryKey, {
@@ -240,9 +255,24 @@ function defineLazyLocalStorageQuery<
         return undefined;
       }
 
+      const persistedQuery = parsePersistedListQueryData(
+        cacheEntry.data,
+        queryPayloadSchema,
+      );
+      if (!persistedQuery) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        Object.defineProperty(state.queries, queryKey, {
+          configurable: true,
+          enumerable: false,
+          value: undefined,
+          writable: true,
+        });
+        return undefined;
+      }
+
       scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
 
-      const filteredItemKeys = cacheEntry.data.items.filter((itemKey) => {
+      const filteredItemKeys = persistedQuery.items.filter((itemKey) => {
         void state.itemQueries[itemKey];
         return (
           state.items[itemKey] !== undefined &&
@@ -251,7 +281,7 @@ function defineLazyLocalStorageQuery<
       });
       const limitedQuery = limitPersistedQueryItems(
         filteredItemKeys,
-        cacheEntry.data.hasMore,
+        persistedQuery.hasMore,
         maxQuerySize,
       );
 
@@ -259,7 +289,7 @@ function defineLazyLocalStorageQuery<
         error: null,
         hasMore: limitedQuery.hasMore,
         items: limitedQuery.itemKeys,
-        payload: __LEGIT_CAST__<QueryPayload, unknown>(cacheEntry.data.payload),
+        payload: persistedQuery.payload,
         refetchOnMount: 'lowPriority',
         status: 'success',
         wasLoaded: true,
@@ -335,8 +365,6 @@ export function setupListQueryPersistence<
     config.ignoreItems,
     resolveItemKey,
   );
-  const shouldIgnorePersistedItem =
-    createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
 
   const itemNamespace = createPersistentStorageNamespaceHandle<
@@ -402,7 +430,7 @@ export function setupListQueryPersistence<
         storageKey,
         version,
         config,
-        shouldIgnorePersistedItem,
+        shouldIgnoreItem,
       );
     }
 
@@ -415,6 +443,7 @@ export function setupListQueryPersistence<
         queryKey,
         storageKey,
         version,
+        config.queryPayloadSchema,
         maxQuerySize,
       );
     }
@@ -440,16 +469,26 @@ export function setupListQueryPersistence<
         config.storeName,
         'listQuery.item',
       )}${itemKey}`;
-      const cacheEntry = readStorageEntryFromLocalStorageSync<
-        PersistedListQueryItemData<unknown>
-      >(storageKey, version);
+      const cacheEntry = readStorageEntryFromLocalStorageSync(
+        storageKey,
+        version,
+      );
 
       if (!cacheEntry) return false;
 
-      const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+      const persisted = parsePersistedListQueryItemData(
         cacheEntry.data,
+        config.itemPayloadSchema,
+      );
+      if (!persisted) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        return false;
+      }
+
+      const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+        persisted,
         config,
-        shouldIgnorePersistedItem,
+        shouldIgnoreItem,
       );
       if (!itemState) {
         scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
@@ -483,10 +522,19 @@ export function setupListQueryPersistence<
           return false;
         }
 
-        const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+        const persisted = parsePersistedListQueryItemData(
           cached,
+          config.itemPayloadSchema,
+        );
+        if (!persisted) {
+          scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
+          return false;
+        }
+
+        const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
+          persisted,
           config,
-          shouldIgnorePersistedItem,
+          shouldIgnoreItem,
         );
         if (!itemState) {
           scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
@@ -543,23 +591,31 @@ export function setupListQueryPersistence<
         config.storeName,
         'listQuery.query',
       )}${queryKey}`;
-      const cacheEntry =
-        readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
-          storageKey,
-          version,
-        );
+      const cacheEntry = readStorageEntryFromLocalStorageSync(
+        storageKey,
+        version,
+      );
 
       if (!cacheEntry) return false;
+
+      const persistedQuery = parsePersistedListQueryData(
+        cacheEntry.data,
+        config.queryPayloadSchema,
+      );
+      if (!persistedQuery) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        return false;
+      }
 
       scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
 
       const activeStore = storeRef;
 
       await Promise.all(
-        cacheEntry.data.items.map((itemKey) => preloadItem(itemKey)),
+        persistedQuery.items.map((itemKey) => preloadItem(itemKey)),
       );
 
-      const filteredItemKeys = cacheEntry.data.items.filter((itemKey) => {
+      const filteredItemKeys = persistedQuery.items.filter((itemKey) => {
         return (
           activeStore.state.items[itemKey] !== undefined &&
           activeStore.state.itemQueries[itemKey] !== undefined
@@ -567,7 +623,7 @@ export function setupListQueryPersistence<
       });
       const limitedQuery = limitPersistedQueryItems(
         filteredItemKeys,
-        cacheEntry.data.hasMore,
+        persistedQuery.hasMore,
         maxQuerySize,
       );
 
@@ -578,9 +634,7 @@ export function setupListQueryPersistence<
               error: null,
               hasMore: limitedQuery.hasMore,
               items: limitedQuery.itemKeys,
-              payload: __LEGIT_CAST__<QueryPayload, unknown>(
-                cacheEntry.data.payload,
-              ),
+              payload: persistedQuery.payload,
               refetchOnMount: 'lowPriority',
               status: 'success',
               wasLoaded: true,
@@ -604,8 +658,16 @@ export function setupListQueryPersistence<
           return false;
         }
         const activeStore = storeRef;
+        const persistedQuery = parsePersistedListQueryData(
+          cached,
+          config.queryPayloadSchema,
+        );
+        if (!persistedQuery) {
+          scheduleIdleCleanup(() => void queryNamespace.remove(queryKey));
+          return false;
+        }
 
-        await preloadItems(cached.items);
+        await preloadItems(persistedQuery.items);
         if (currentGeneration !== generation || activeStore !== storeRef) {
           return false;
         }
@@ -613,7 +675,7 @@ export function setupListQueryPersistence<
           return true;
         }
 
-        const filteredItemKeys = cached.items.filter((itemKey) => {
+        const filteredItemKeys = persistedQuery.items.filter((itemKey) => {
           return (
             activeStore.state.items[itemKey] !== undefined &&
             activeStore.state.itemQueries[itemKey] !== undefined
@@ -621,7 +683,7 @@ export function setupListQueryPersistence<
         });
         const limitedQuery = limitPersistedQueryItems(
           filteredItemKeys,
-          cached.hasMore,
+          persistedQuery.hasMore,
           maxQuerySize,
         );
 
@@ -632,7 +694,7 @@ export function setupListQueryPersistence<
                 error: null,
                 hasMore: limitedQuery.hasMore,
                 items: limitedQuery.itemKeys,
-                payload: __LEGIT_CAST__<QueryPayload, unknown>(cached.payload),
+                payload: persistedQuery.payload,
                 refetchOnMount: 'lowPriority',
                 status: 'success',
                 wasLoaded: true,
@@ -676,8 +738,28 @@ export function setupListQueryPersistence<
       })),
     );
 
+    const invalidEntries = filterAndMap(entries, ({ queryKey, entry }) => {
+      if (!entry) return false;
+
+      return parsePersistedListQueryData(entry.data, config.queryPayloadSchema)
+        ? false
+        : { queryKey };
+    });
+
+    if (invalidEntries.length > 0) {
+      await Promise.all(
+        invalidEntries.map(({ queryKey }) => queryNamespace.remove(queryKey)),
+      );
+    }
+
     const validEntries = filterAndMap(entries, ({ queryKey, entry }) => {
-      return entry ? { queryKey, entry } : false;
+      if (!entry) return false;
+
+      const persisted = parsePersistedListQueryData(
+        entry.data,
+        config.queryPayloadSchema,
+      );
+      return persisted ? { queryKey, entry } : false;
     });
 
     validEntries.sort((a, b) => {
@@ -721,7 +803,6 @@ export function setupListQueryPersistence<
     }
 
     const itemKeys = await itemNamespace.listKeys();
-    if (!hasIgnoreItemFilter && itemKeys.length <= maxItems) return;
     const itemEntries = await Promise.all(
       itemKeys.map(async (itemKey) => ({
         itemKey,
@@ -729,12 +810,38 @@ export function setupListQueryPersistence<
       })),
     );
 
+    const invalidItemEntries = filterAndMap(
+      itemEntries,
+      ({ itemKey, entry }) => {
+        if (!entry) return false;
+
+        return parsePersistedListQueryItemData(
+          entry.data,
+          config.itemPayloadSchema,
+        )
+          ? false
+          : { itemKey };
+      },
+    );
+
+    if (invalidItemEntries.length > 0) {
+      await Promise.all(
+        invalidItemEntries.map(({ itemKey }) => itemNamespace.remove(itemKey)),
+      );
+    }
+
     const validItemEntries = filterAndMap(itemEntries, ({ itemKey, entry }) => {
-      return entry ? { itemKey, entry } : false;
+      if (!entry) return false;
+
+      const persisted = parsePersistedListQueryItemData(
+        entry.data,
+        config.itemPayloadSchema,
+      );
+      return persisted ? { itemKey, entry, persisted } : false;
     });
 
-    const ignoredItemEntries = validItemEntries.filter(({ entry }) =>
-      shouldIgnorePersistedItem(entry.data.payload),
+    const ignoredItemEntries = validItemEntries.filter(({ persisted }) =>
+      shouldIgnoreItem(persisted.payload),
     );
 
     if (ignoredItemEntries.length > 0) {
@@ -744,8 +851,10 @@ export function setupListQueryPersistence<
     }
 
     const persistedItemEntries = validItemEntries.filter(
-      ({ entry }) => !shouldIgnorePersistedItem(entry.data.payload),
+      ({ persisted }) => !shouldIgnoreItem(persisted.payload),
     );
+
+    if (!hasIgnoreItemFilter && persistedItemEntries.length <= maxItems) return;
 
     persistedItemEntries.sort((a, b) => {
       const aPinned = pinnedItemKeys.has(a.itemKey);

@@ -28,6 +28,7 @@ import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const rowSchema = rc_object({ id: rc_number, name: rc_string });
+const listQueryParamsSchema = rc_object({ tableId: rc_string });
 const docSchema = rc_object({ value: rc_number });
 const colSchema = rc_object({ value: rc_object({ name: rc_string }) });
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
@@ -83,6 +84,8 @@ describe('persistence + browser tabs sync integration', () => {
       storeName,
       backend: 'localStorage' as const,
       schema: rowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryParamsSchema,
     };
 
     const tabA = createListQueryStoreTestEnv(freshServerData, {
@@ -177,6 +180,8 @@ describe('persistence + browser tabs sync integration', () => {
       storeName,
       backend: 'localStorage' as const,
       schema: rowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryParamsSchema,
     };
 
     const tabA = createListQueryStoreTestEnv(serverData, {
@@ -315,6 +320,8 @@ describe('persistence + browser tabs sync integration', () => {
         storeName,
         backend: 'localStorage',
         schema: rowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryParamsSchema,
       },
     });
 
@@ -460,6 +467,7 @@ describe('persistence + browser tabs sync integration', () => {
       storeName,
       backend: 'localStorage' as const,
       schema: colSchema,
+      payloadSchema: rc_string,
     };
 
     const tabA = createCollectionStoreTestEnv(

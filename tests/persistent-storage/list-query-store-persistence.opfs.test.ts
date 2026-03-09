@@ -16,6 +16,7 @@ import type {
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
 import type {
+  PersistedListQueryData,
   PersistedListQueryItemData,
   PersistentStorageSchema,
   StorageCacheEntry,
@@ -37,6 +38,7 @@ const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
     email: rc_string.optional(),
   }),
 );
+const listQueryParamsSchema = rc_object({ tableId: rc_string });
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
     if (!prev) return fetched;
@@ -75,6 +77,8 @@ function createEnv(options: {
       storeName: options.storeName,
       backend: 'opfs',
       schema: rowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryParamsSchema,
       maxQuerySize: options.maxQuerySize,
       ignoreItems: options.ignoreItems,
     },
@@ -930,6 +934,83 @@ describe('opfs: list query store persistence', () => {
     await advanceTime(50);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
+    `);
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(mockAdapter.has(key)).toBe(false);
+  });
+
+  test('invalid cached item payloads are removed during targeted preload', async () => {
+    const storeName = 'lq-opfs-invalid-item-payload';
+    const sessionKey = 'sess1';
+    const mockAdapter = createMockOpfsStorageAdapter({
+      readDelayMs: 50,
+      storeName,
+      sessionKey,
+    });
+    const key = mockAdapter.listQuery.itemStorageKey('users', 1);
+    const entry: StorageCacheEntry<
+      PersistedListQueryItemData<Row> & { payload: boolean }
+    > = {
+      data: { data: { id: 1, name: 'Alice' }, payload: true },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    mockAdapter.storage.writeValue(key, entry);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+    });
+
+    const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
+    await advanceTime(50);
+    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
+    `);
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(mockAdapter.has(key)).toBe(false);
+  });
+
+  test('invalid cached queries are removed during targeted preload', async () => {
+    const storeName = 'lq-opfs-invalid-query';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const mockAdapter = createMockOpfsStorageAdapter({
+      readDelayMs: 50,
+      storeName,
+      sessionKey,
+    });
+    const key = mockAdapter.listQuery.queryStorageKey(usersQuery);
+    const entry: StorageCacheEntry<
+      PersistedListQueryData & { payload: boolean }
+    > = {
+      data: {
+        payload: true,
+        items: [mockAdapter.listQuery.itemKey('users', 1)],
+        hasMore: false,
+      },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    mockAdapter.storage.writeValue(key, entry);
+    mockAdapter.listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+    });
+
+    const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
+    await advanceTime(50);
+    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+      - payload: { tableId: 'users' }
+        preloaded: '❌'
     `);
     await advanceTime(2100);
     await flushAllTimers();

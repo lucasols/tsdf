@@ -1,10 +1,11 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type { DocumentStoreState } from '../documentStore';
 import type { ValidStoreState } from '../utils/storeShared';
+import { parsePersistedDocumentData } from './parsePersistedData';
 import {
   createPersistentStorageHandle,
   getStorageKeyForStore,
+  readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
@@ -23,38 +24,10 @@ function readDocumentFromLocalStorageSync(
   key: string,
   version: number,
 ): PersistedDocumentData<unknown> | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
+  const entry = readStorageEntryFromLocalStorageSync(key, version);
+  if (!entry) return null;
 
-    const entry: unknown = JSON.parse(raw);
-
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      !('version' in entry) ||
-      !('data' in entry)
-    ) {
-      return null;
-    }
-
-    const typedEntry = __LEGIT_CAST__<
-      { version: unknown; data: unknown },
-      object
-    >(entry);
-
-    if (typedEntry.version !== version) return null;
-
-    const data = typedEntry.data;
-
-    if (!data || typeof data !== 'object' || !('data' in data)) {
-      return null;
-    }
-
-    return __LEGIT_CAST__<PersistedDocumentData<unknown>, object>(data);
-  } catch {
-    return null;
-  }
+  return parsePersistedDocumentData(entry.data);
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {

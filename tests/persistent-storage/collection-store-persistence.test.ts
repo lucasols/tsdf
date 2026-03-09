@@ -128,6 +128,7 @@ function createEnv(options: {
       storeName: options.storeName,
       backend: 'localStorage',
       schema: wrappedItemSchema,
+      payloadSchema: rc_string,
       version: options.version,
       maxItems: options.maxItems,
       pinnedItems: options.pinnedItems,
@@ -476,6 +477,30 @@ describe('localStorage: collection store persistence', () => {
         isOffScreen: true,
       });
     });
+
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('invalid cached payloads are cleaned up only after the item is read', async () => {
+    const key = itemStorageKey('col-invalid-payload', 'sess1', 'bad');
+    const entry: StorageCacheEntry<
+      PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
+    > = {
+      data: { data: { value: { id: 'bad', name: 'Old' } }, payload: true },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    localStorage.setItem(key, JSON.stringify(entry));
+
+    const env = createEnv({
+      storeName: 'col-invalid-payload',
+      sessionKey: 'sess1',
+    });
+
+    expect(localStorage.getItem(key)).not.toBeNull();
+    expect(env.apiStore.getItemState('bad')).toBeUndefined();
 
     await advanceTime(2100);
 
