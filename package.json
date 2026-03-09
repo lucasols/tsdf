@@ -25,6 +25,7 @@
   "scripts": {
     "test": "vitest --mode development --run",
     "test:ui": "vitest --ui --mode development",
+    "test:watch": "vitest --watch --mode development",
     "test:changed": "vitest --changed --mode development",
     "test:playwright": "playwright test",
     "test:all": "vitest --run && playwright test",
