@@ -602,6 +602,7 @@ export function createListQueryStore<
         : Promise.resolve(),
   };
   const offlineMutationController = {
+    canQueueMutation: () => offlineController?.canQueueMutation() ?? false,
     queueMutation: <TName extends keyof TOfflineOperations>(args: {
       operationName: TName;
       input: OperationInput<TOfflineOperations, TName>;
@@ -1434,7 +1435,7 @@ export function createListQueryStore<
       QueryPayload,
       QueryMetadata
     >[] {
-      return useMultipleListQueriesHook<
+      const result = useMultipleListQueriesHook<
         ItemState,
         QueryPayload,
         ItemPayload,
@@ -1460,6 +1461,45 @@ export function createListQueryStore<
         globalDisableRefetchOnMount,
         partialResources,
       );
+
+      const queryItemKeys = store.useSelectorRC((state) =>
+        result.map((queryResult) =>
+          queryResult.queryKey
+            ? (state.queries[queryResult.queryKey]?.items ?? [])
+            : [],
+        ),
+      );
+      const offlineEntities = useOfflineStoreEntities({
+        sessionKey: getSessionKey(),
+        inactiveScope: id,
+        storeName: persistentStorageConfig?.storeName,
+      });
+
+      return result.map((queryResult, index) => {
+        const itemKeys = queryItemKeys[index] ?? [];
+        const pendingEntities = offlineEntities.filter(
+          (entity) =>
+            itemKeys.includes(entity.entityKey) &&
+            entity.syncState !== 'conflict',
+        );
+        const conflictedEntities = offlineEntities.filter(
+          (entity) => itemKeys.includes(entity.entityKey) && entity.hasConflict,
+        );
+
+        return {
+          ...queryResult,
+          isPendingOfflineSync: pendingEntities.length > 0,
+          pendingOfflineMutations: pendingEntities.reduce(
+            (total, entity) => total + entity.pendingMutations,
+            0,
+          ),
+          hasOfflineConflict: conflictedEntities.length > 0,
+          pendingItemKeys: pendingEntities.map((entity) => entity.entityKey),
+          conflictedItemKeys: conflictedEntities.map(
+            (entity) => entity.entityKey,
+          ),
+        };
+      });
     };
 
   const useListQuery: {
@@ -1529,7 +1569,7 @@ export function createListQueryStore<
     items: ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
-    return useMultipleItemsHook<
+    const result = useMultipleItemsHook<
       ItemState,
       QueryPayload,
       ItemPayload,
@@ -1555,6 +1595,25 @@ export function createListQueryStore<
       fetchItemFn,
       partialResources,
     );
+
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
+
+    return result.map((itemResult) => {
+      const offlineEntity = offlineEntities.find(
+        (entity) => entity.entityKey === itemResult.itemStateKey,
+      );
+
+      return {
+        ...itemResult,
+        isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
+        pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
+        hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+      };
+    });
   };
 
   const useItem: {

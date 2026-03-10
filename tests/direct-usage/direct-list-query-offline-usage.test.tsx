@@ -276,6 +276,131 @@ test('direct list-query store offline public api works and stays strongly typed'
   });
 });
 
+test('useMultipleListQueries exposes offline pending metadata for queued mutations', async () => {
+  let online = true;
+  const sessionKey = 'direct-list-query-multi-offline-session';
+  Object.defineProperty(window.navigator, 'onLine', {
+    configurable: true,
+    get: () => online,
+  });
+
+  const userState = new Map<number, User>([
+    [1, { id: 1, name: 'Ada' }],
+    [2, { id: 2, name: 'Grace' }],
+  ]);
+
+  const listQueryStore = createListQueryStore<
+    User,
+    UsersQueryPayload,
+    UserPayload,
+    false,
+    false,
+    RenameUserOperations
+  >({
+    id: 'direct-list-query-multi-offline',
+    getSessionKey: () => sessionKey,
+    fetchListFn: async (_payload__: UsersQueryPayload, size: number) => {
+      await delay(FETCH_DELAY_MS);
+      return {
+        items: [...userState.values()]
+          .slice(0, size)
+          .map((user) => ({
+            itemPayload: { tableId: 'users' as const, id: user.id },
+            data: { ...user },
+          })),
+        hasMore: userState.size > size,
+      };
+    },
+    fetchItemFn: async (payload: UserPayload) => {
+      await delay(FETCH_DELAY_MS);
+      const item = userState.get(payload.id);
+      if (!item) {
+        throw new Error(`Missing user ${payload.id}`);
+      }
+      return { ...item };
+    },
+    getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
+    getItemKey: (payload: UserPayload) => ['users', payload.id],
+    errorNormalizer: normalizeError,
+    defaultQuerySize: 2,
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      storeName: 'direct-list-query-multi-offline',
+      backend: 'localStorage',
+      schema: userSchema,
+      offlineMode: {
+        network: { enabled: true, getIsOffline: () => !online },
+        operations: {
+          renameUser: {
+            inputSchema: userInputSchema,
+            execute: ({ input, helpers }) => {
+              userState.set(input.id, { id: input.id, name: input.name });
+              helpers.updateItemState(
+                { tableId: 'users', id: input.id },
+                (item) => ({ ...item, name: input.name }),
+              );
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const queryPayload = { tableId: 'users' as const };
+  const userPayload = { tableId: 'users' as const, id: 1 };
+
+  const listHook = renderHook(() =>
+    listQueryStore.useMultipleListQueries(
+      [{ payload: queryPayload, loadSize: 2 }],
+      { itemSelector: (item) => item.name },
+    ),
+  );
+  await flushAllTimers();
+
+  online = false;
+  act(() => {
+    window.dispatchEvent(new Event('offline'));
+  });
+  await Promise.resolve();
+
+  await act(async () => {
+    await listQueryStore.performMutation(userPayload, {
+      optimisticUpdate: (payload) => {
+        if (Array.isArray(payload) || typeof payload === 'function') return;
+        listQueryStore.updateItemState(payload, (item) => ({
+          ...item,
+          name: 'Ada offline',
+        }));
+      },
+      mutation: () => Promise.resolve({ id: 1, name: 'Ada offline' }),
+      offline: {
+        operation: 'renameUser',
+        input: { id: 1, name: 'Ada offline' },
+      },
+    });
+  });
+  await Promise.resolve();
+
+  expect(
+    pick(listHook.result.current[0], [
+      'isPendingOfflineSync',
+      'pendingOfflineMutations',
+      'hasOfflineConflict',
+      'pendingItemKeys',
+      'conflictedItemKeys',
+    ]),
+  ).toMatchInlineSnapshot(`
+    conflictedItemKeys: []
+    hasOfflineConflict: '❌'
+    isPendingOfflineSync: '✅'
+    pendingItemKeys: ['["users",1]']
+    pendingOfflineMutations: 1
+  `);
+});
+
 test('list-query offline accumulation merges same-item mutations and keeps different items separate', async () => {
   let online = true;
   const sessionKey = 'direct-list-query-offline-accumulation-session';

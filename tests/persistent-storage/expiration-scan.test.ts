@@ -246,6 +246,49 @@ describe('expiration scan', () => {
     expect(localStorage.getItem(accountADoc.document.storageKey())).toBeNull();
   });
 
+  test('protected entries are preserved for dotted session keys', async () => {
+    const staleTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const dottedSessionKey = 'user@example.com';
+    const protectedDoc = persistentStore.scope(
+      'protected-doc',
+      dottedSessionKey,
+    );
+    const triggerDoc = persistentStore.scope('trigger-doc', 'sess-trigger');
+
+    protectedDoc.document.seed(
+      { value: { name: 'protected', value: 1 } },
+      { timestamp: staleTimestamp },
+    );
+    persistentStore.storage.writeValue(
+      `tsdf.${dottedSessionKey}.__offline__.protected`,
+      {
+        data: { keys: [protectedDoc.document.storageKey()] },
+        timestamp: Date.now(),
+        version: 1,
+      },
+    );
+    triggerDoc.document.seed({ value: { name: 'trigger', value: 2 } });
+
+    createDocumentStoreTestEnv(
+      { name: 'trigger', value: 2 },
+      {
+        getSessionKey: () => 'sess-trigger',
+        persistentStorage: {
+          storeName: 'trigger-doc',
+          backend: 'localStorage',
+          schema: wrappedSchema,
+        },
+      },
+    );
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(
+      localStorage.getItem(protectedDoc.document.storageKey()),
+    ).not.toBeNull();
+  });
+
   test('scan does not run for test adapter overrides', async () => {
     const oldTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const key = 'tsdf.sess1.old-entry';

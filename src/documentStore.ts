@@ -11,7 +11,7 @@ import {
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { useCallback, useContext, useEffect } from 'react';
-import { unknownToError, type Result } from 't-result';
+import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
@@ -43,6 +43,7 @@ import {
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
+  offlineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
 import { useOfflineStoreEntities } from './persistentStorage/offline/sessionCoordinator';
 import {
@@ -777,7 +778,11 @@ export function createDocumentStore<
      * sync controller. The immediate result only reflects queue persistence.
      */
     offline?: OfflineMutationDescriptor<TOfflineOperations>;
-  }): Promise<Result<Awaited<T>, StoreError | true>> {
+  }): Promise<ResultType<Awaited<T>, StoreError | true>> {
+    if (offline && offlineController && !offlineController.canQueueMutation()) {
+      return Result.err(offlineSessionUnavailableError);
+    }
+
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
     const result = await performMutationWithLifecycle({

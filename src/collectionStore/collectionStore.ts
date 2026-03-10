@@ -7,7 +7,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { unknownToError, type Result } from 't-result';
+import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
@@ -16,6 +16,7 @@ import { setupCollectionPersistence } from '../persistentStorage/collectionStore
 import {
   createOfflineStoreController,
   initializeOfflineStoreController,
+  offlineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
@@ -1145,7 +1146,7 @@ export function createCollectionStore<
     items: CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ) {
-    return useMultipleItemsBase<
+    const result = useMultipleItemsBase<
       ItemState,
       ItemPayload,
       Selected,
@@ -1167,6 +1168,25 @@ export function createCollectionStore<
       invalidationWasTriggered,
       globalDisableRefetchOnMount,
     );
+
+    const offlineEntities = useOfflineStoreEntities({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
+
+    return result.map((itemResult) => {
+      const offlineEntity = offlineEntities.find(
+        (entity) => entity.entityKey === itemResult.itemStateKey,
+      );
+
+      return {
+        ...itemResult,
+        isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
+        pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
+        hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+      };
+    });
   }
 
   function useItem<Selected = ItemState | null>(
@@ -1346,7 +1366,11 @@ export function createCollectionStore<
        */
       offline?: OfflineMutationDescriptor<TOfflineOperations>;
     },
-  ): Promise<Result<Awaited<T>, StoreError | true>> {
+  ): Promise<ResultType<Awaited<T>, StoreError | true>> {
+    if (offline && offlineController && !offlineController.canQueueMutation()) {
+      return Result.err(offlineSessionUnavailableError);
+    }
+
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId, payload });
     const result = await performMutationWithLifecycle({

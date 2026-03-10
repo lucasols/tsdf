@@ -90,6 +90,7 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   operation: string;
   input: TInput;
   conflict: TConflict;
+  mutationPayload?: unknown;
   entityRefs: OfflineEntityRef[];
   createdAt: number;
   updatedAt: number;
@@ -103,6 +104,7 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   storeType: OfflineStoreType;
   operation: string;
   input: TInput;
+  mutationPayload?: unknown;
   entityRefs: OfflineEntityRef[];
   attempts: number;
   createdAt: number;

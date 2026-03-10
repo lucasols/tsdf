@@ -1,13 +1,19 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   type CollectionOfflineOperationDefinition,
   type DocumentOfflineOperationDefinition,
+  type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import type { DocumentOfflineHelpers } from '../../src/persistentStorage/offline/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import {
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
@@ -45,6 +51,31 @@ type UpdateValueConflictOperations = {
     { value: number }
   >;
 };
+
+type PatchUserOperations = {
+  patchUserName: ListQueryOfflineOperationDefinition<
+    { id: number; name: string },
+    ListQueryParams,
+    string,
+    { name: string },
+    unknown,
+    { name: string }
+  >;
+};
+
+const userPatchSchema = rc_object({ name: rc_string });
+const userRowSchema = rc_object({ id: rc_number, name: rc_string });
+
+function getLocalStorageKeys(): string[] {
+  const keys: string[] = [];
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key) keys.push(key);
+  }
+
+  return keys.sort();
+}
 
 describe('offline mode replay and conflict handling', () => {
   let online = true;
@@ -230,6 +261,68 @@ describe('offline mode replay and conflict handling', () => {
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   });
 
+  test('needs-confirmation entries retry while outage mode stays disabled', async () => {
+    const execute = vi
+      .fn<
+        ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+      >()
+      .mockRejectedValueOnce(new Error('dispatch failed after send'));
+    const confirmRemoteOutcome = vi
+      .fn<
+        ({
+          input,
+        }: {
+          input: { value: number };
+          sessionKey: string;
+          helpers: DocumentOfflineHelpers<{ value: number }>;
+        }) => Promise<{ type: 'applied' }>
+      >()
+      .mockResolvedValue({ type: 'applied' });
+
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      getSessionKey: () => 'needs-confirmation-no-outage-session',
+      testScenario: 'loaded',
+      persistentStorage: {
+        storeName: 'needs-confirmation-no-outage-doc',
+        backend: 'localStorage',
+        schema: docSchema,
+        offlineMode: {
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              confirmRemoteOutcome,
+            },
+          },
+        },
+      },
+    });
+
+    const mutationResult = await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: () => Promise.resolve(2),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect(mutationResult.ok).toBe(true);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(0);
+
+    await advanceTime(300);
+    await flushAllTimers();
+
+    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(1);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  });
+
   test('offline conflicts move out of the queue, surface through selectors, and can be resolved', async () => {
     online = false;
     const env = createDocumentStoreTestEnv<
@@ -358,7 +451,8 @@ describe('offline mode replay and conflict handling', () => {
     act(() => {
       window.dispatchEvent(new Event('online'));
     });
-    await flushAllTimers();
+    await advanceTime(1);
+    await Promise.resolve();
 
     expect(env.apiStore.getOfflineEntities()).toMatchObject([
       {
@@ -382,5 +476,206 @@ describe('offline mode replay and conflict handling', () => {
     expect(env.apiStore.getOfflineEntities()).toMatchObject([
       { entityKey: 'document', pendingMutations: 2 },
     ]);
+  });
+
+  test('needs-confirmation entries keep retrying confirmation while the session stays online', async () => {
+    online = true;
+    const execute = vi
+      .fn<
+        ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+      >()
+      .mockRejectedValueOnce(new Error('dispatch failed after send'));
+    const confirmRemoteOutcome = vi
+      .fn<
+        ({
+          input,
+        }: {
+          input: { value: number };
+          sessionKey: string;
+          helpers: DocumentOfflineHelpers<{ value: number }>;
+        }) => Promise<{ type: 'applied' }>
+      >()
+      .mockResolvedValue({ type: 'applied' });
+
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      getSessionKey: () => 'online-needs-confirmation-retry-session',
+      testScenario: 'loaded',
+      persistentStorage: {
+        storeName: 'online-needs-confirmation-retry-doc',
+        backend: 'localStorage',
+        schema: docSchema,
+        offlineMode: {
+          network: { enabled: true, getIsOffline: () => !online },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              confirmRemoteOutcome,
+            },
+          },
+        },
+      },
+    });
+
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: () => Promise.resolve(2),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    await Promise.resolve();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(0);
+    expect(env.apiStore.getOfflineEntities()).toMatchObject([
+      {
+        entityKey: 'document',
+        pendingMutations: 1,
+        syncState: 'needs-confirmation',
+      },
+    ]);
+
+    await advanceTime(300);
+    await flushAllTimers();
+
+    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(1);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('list-query offline replay forwards the original mutation payload', async () => {
+    online = false;
+    const execute = vi.fn(
+      ({
+        input,
+        mutationPayload,
+        helpers,
+      }: {
+        input: { name: string };
+        mutationPayload?: string | string[];
+        helpers: {
+          updateItemState: (
+            payload: string | string[],
+            updater: (item: {
+              id: number;
+              name: string;
+            }) => { id: number; name: string } | undefined,
+          ) => boolean;
+        };
+      }) => {
+        if (!mutationPayload || Array.isArray(mutationPayload)) {
+          throw new Error('Expected mutationPayload during offline replay');
+        }
+
+        helpers.updateItemState(mutationPayload, (item) => ({
+          ...item,
+          name: input.name,
+        }));
+
+        return { name: input.name };
+      },
+    );
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      PatchUserOperations
+    >(
+      { users: [{ id: 1, name: 'Ada' }] },
+      {
+        getSessionKey: () => 'offline-replay-mutation-payload-session',
+        testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+        persistentStorage: {
+          storeName: 'offline-replay-mutation-payload',
+          backend: 'localStorage',
+          schema: userRowSchema,
+          offlineMode: {
+            network: { enabled: true, getIsOffline: () => !online },
+            operations: {
+              patchUserName: { inputSchema: userPatchSchema, execute },
+            },
+          },
+        },
+      },
+    );
+
+    await env.apiStore.performMutation('users||1', {
+      mutation: () => Promise.resolve({ name: 'Ada offline' }),
+      offline: { operation: 'patchUserName', input: { name: 'Ada offline' } },
+    });
+
+    online = true;
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await flushAllTimers();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[0]?.mutationPayload).toBe('users||1');
+  });
+
+  test('session switches do not leave replayed queue entries in the old namespace', async () => {
+    online = false;
+    let sessionKey: string | false = 'replay-session-a';
+    let resolveReplay: ((result: { value: number }) => void) | undefined;
+
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        storeName: 'replay-session-switch-doc',
+        backend: 'localStorage',
+        schema: docSchema,
+        offlineMode: {
+          network: { enabled: true, getIsOffline: () => !online },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: () =>
+                new Promise<{ value: number }>((resolve) => {
+                  resolveReplay = resolve;
+                }),
+            },
+          },
+        },
+      },
+    });
+
+    await env.apiStore.performMutation({
+      mutation: () => Promise.resolve(2),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect(
+      getLocalStorageKeys().filter((key) =>
+        key.startsWith(
+          'tsdf.replay-session-a.replay-session-switch-doc.offline.queue.',
+        ),
+      ),
+    ).toHaveLength(1);
+
+    online = true;
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    for (let index = 0; index < 4 && !resolveReplay; index += 1) {
+      await Promise.resolve();
+    }
+
+    expect(resolveReplay).toBeDefined();
+    sessionKey = 'replay-session-b';
+    resolveReplay?.({ value: 2 });
+    await flushAllTimers();
+
+    expect(
+      getLocalStorageKeys().filter((key) =>
+        key.startsWith(
+          'tsdf.replay-session-a.replay-session-switch-doc.offline.queue.',
+        ),
+      ),
+    ).toMatchInlineSnapshot(`[]`);
   });
 });

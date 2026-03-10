@@ -132,4 +132,99 @@ describe('offline session coordinator browser tabs sync', () => {
     firstCoordinator.dispose();
     secondCoordinator.dispose();
   });
+
+  test('stale async network checks are ignored after a newer result settles first', async () => {
+    const resolvers: Array<(result: boolean) => void> = [];
+    const coordinator = new SessionOfflineCoordinator({
+      sessionKey: 'offline-session-network-race',
+      backend: 'localStorage',
+      config: {
+        network: {
+          enabled: true,
+          listenToBrowserEvents: false,
+          getIsOffline: () =>
+            new Promise<boolean>((resolve) => {
+              resolvers.push(resolve);
+            }),
+        },
+        operations: {},
+      },
+    });
+
+    const initialResolvers = resolvers.splice(0);
+    for (const resolve of initialResolvers) {
+      resolve(false);
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const firstRefresh = coordinator.refreshNetworkState();
+    const secondRefresh = coordinator.refreshNetworkState();
+    const [resolveFirst, resolveSecond] = resolvers.splice(0, 2);
+
+    resolveSecond?.(false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(coordinator.getStatus()).toMatchObject({
+      effectiveOffline: false,
+      network: { active: false, enabled: true },
+    });
+
+    resolveFirst?.(true);
+    await Promise.all([firstRefresh, secondRefresh]);
+
+    expect(coordinator.getStatus()).toMatchObject({
+      effectiveOffline: false,
+      network: { active: false, enabled: true },
+    });
+
+    coordinator.dispose();
+  });
+
+  test('recovery probes continue after recoveryCheck rejects', async () => {
+    const recoveryCheck = vi
+      .fn<({ sessionKey }: { sessionKey: string }) => Promise<boolean>>()
+      .mockRejectedValueOnce(new Error('probe failed'))
+      .mockResolvedValueOnce(true);
+    const coordinator = new SessionOfflineCoordinator({
+      sessionKey: 'offline-session-recovery-retry',
+      backend: 'localStorage',
+      config: {
+        outage: {
+          enabled: true,
+          classifyFailure: () => 'outage',
+          recoveryCheck,
+          recoveryProbe: {
+            intervalMs: 50,
+            maxIntervalMs: 50,
+            backoffMultiplier: 1,
+            jitterRatio: 0,
+          },
+        },
+        operations: {},
+      },
+    });
+    const unregister = coordinator.registerStore({
+      storeName: 'offline-session-recovery-doc',
+    });
+
+    coordinator.setOutageActive(true);
+    await vi.advanceTimersByTimeAsync(60);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recoveryCheck).toHaveBeenCalledTimes(1);
+    expect(coordinator.getStatus().outage.active).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(60);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recoveryCheck).toHaveBeenCalledTimes(2);
+    expect(coordinator.getStatus().outage.active).toBe(false);
+
+    unregister();
+    coordinator.dispose();
+  });
 });

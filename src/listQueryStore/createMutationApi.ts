@@ -2,8 +2,9 @@ import { filterAndMap, sortBy } from '@ls-stack/utils/arrayUtils';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { unknownToError, type Result } from 't-result';
+import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
+import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import type {
   ListQueryOfflineOperationsRegistry,
@@ -99,6 +100,7 @@ export type CreateMutationApiOptions<
   emitInvalidateItem: (event: InvalidateItemEvent) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
   offlineController?: {
+    canQueueMutation: () => boolean;
     queueMutation: <TName extends keyof TOfflineOperations>(args: {
       operationName: TName;
       input: OperationInput<TOfflineOperations, TName>;
@@ -725,9 +727,13 @@ export function createMutationApi<
        */
       offline?: OfflineMutationDescriptor<TOfflineOperations>;
     },
-  ): Promise<Result<Awaited<T>, StoreError | true>> {
+  ): Promise<ResultType<Awaited<T>, StoreError | true>> {
     const matchAllItems: FilterItem = () => true;
     const payloadToUse: MutationPayloadToUse = payload ?? matchAllItems;
+
+    if (offline && offlineController && !offlineController.canQueueMutation()) {
+      return Result.err(offlineSessionUnavailableError);
+    }
 
     const affectedItems = resolveAffectedItems(payloadToUse);
     const mutationId = getAutoIncrementId();

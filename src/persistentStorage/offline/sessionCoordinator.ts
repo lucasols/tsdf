@@ -2,7 +2,10 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { Store } from 't-state';
 import { useMemo } from 'react';
 import { createStorageAdapter } from '../storageAdapter';
-import { createPersistentStorageHandle } from '../persistentStorageManager';
+import {
+  createPersistentStorageHandle,
+  type PersistentStorageHandle,
+} from '../persistentStorageManager';
 import type { StorageBackend, StorageAdapter } from '../types';
 import {
   createBrowserTabsCoordinatorWithPriority,
@@ -167,6 +170,41 @@ function sameCanonicalConfig(
   );
 }
 
+function createSessionPersistenceHandles(args: {
+  sessionKey: string;
+  backend: StorageBackend;
+  adapter?: StorageAdapter;
+  onPersistentStorageError?: (error: unknown) => void;
+}): {
+  adapter: StorageAdapter;
+  sessionHandle: PersistentStorageHandle<GlobalOfflineStatus>;
+  protectedKeysHandle: PersistentStorageHandle<{ keys: string[] }>;
+} {
+  const adapter = args.adapter ?? createStorageAdapter(args.backend);
+
+  return {
+    adapter,
+    sessionHandle: createPersistentStorageHandle<GlobalOfflineStatus>(
+      {
+        storeName: '__offline__.session',
+        backend: args.backend,
+        getSessionKey: () => args.sessionKey,
+        onPersistentStorageError: args.onPersistentStorageError,
+      },
+      { adapter },
+    ),
+    protectedKeysHandle: createPersistentStorageHandle<{ keys: string[] }>(
+      {
+        storeName: '__offline__.protected',
+        backend: args.backend,
+        getSessionKey: () => args.sessionKey,
+        onPersistentStorageError: args.onPersistentStorageError,
+      },
+      { adapter },
+    ),
+  };
+}
+
 export class SessionOfflineCoordinator {
   readonly sessionKey: string;
   readonly store: Store<SessionStoreState>;
@@ -176,19 +214,22 @@ export class SessionOfflineCoordinator {
     string,
     SessionStoreContribution
   >();
-  private readonly sessionHandle;
-  private readonly protectedKeysHandle;
-  private readonly adapter: StorageAdapter;
+  private sessionHandle: PersistentStorageHandle<GlobalOfflineStatus>;
+  private protectedKeysHandle: PersistentStorageHandle<{ keys: string[] }>;
+  private adapter: StorageAdapter;
   private readonly browserTabs;
-  private readonly canonicalBackend: StorageBackend;
+  private canonicalBackend: StorageBackend;
+  private onPersistentStorageError: ((error: unknown) => void) | undefined;
   private cleanupNetworkListeners: (() => void) | null = null;
   private canonicalConfig: SessionCanonicalConfig;
   private hasCanonicalConfig: boolean;
   private classificationToken = 0;
+  private networkStateToken = 0;
   private lastRemoteSnapshotAt = 0;
   private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private recoveryAttempt = 0;
   private hydrated = false;
+  private hydrationToken = 0;
   private protectedKeys: string[] = [];
 
   constructor({
@@ -200,7 +241,16 @@ export class SessionOfflineCoordinator {
   }: SessionCoordinatorOptions) {
     this.sessionKey = sessionKey;
     this.canonicalBackend = backend;
-    this.adapter = adapter ?? createStorageAdapter(backend);
+    this.onPersistentStorageError = onPersistentStorageError;
+    const persistence = createSessionPersistenceHandles({
+      sessionKey,
+      backend,
+      adapter,
+      onPersistentStorageError,
+    });
+    this.adapter = persistence.adapter;
+    this.sessionHandle = persistence.sessionHandle;
+    this.protectedKeysHandle = persistence.protectedKeysHandle;
     this.canonicalConfig = toCanonicalConfig(backend, config);
     this.hasCanonicalConfig = config !== undefined;
     this.store = new Store<SessionStoreState>({
@@ -211,26 +261,6 @@ export class SessionOfflineCoordinator {
         conflicts: [],
       }),
     });
-    this.sessionHandle = createPersistentStorageHandle<GlobalOfflineStatus>(
-      {
-        storeName: '__offline__.session',
-        backend,
-        getSessionKey: () => this.sessionKey,
-        onPersistentStorageError,
-      },
-      { adapter: this.adapter },
-    );
-    this.protectedKeysHandle = createPersistentStorageHandle<{
-      keys: string[];
-    }>(
-      {
-        storeName: '__offline__.protected',
-        backend,
-        getSessionKey: () => this.sessionKey,
-        onPersistentStorageError,
-      },
-      { adapter: this.adapter },
-    );
 
     this.browserTabs =
       createBrowserTabsCoordinatorWithPriority<OfflineSessionMessage>({
@@ -259,11 +289,14 @@ export class SessionOfflineCoordinator {
   async hydrate(): Promise<void> {
     if (this.hydrated) return;
     this.hydrated = true;
+    const hydrationToken = this.hydrationToken;
 
     const [persistedStatus, protectedKeysEntry] = await Promise.all([
       this.sessionHandle.load(),
       this.protectedKeysHandle.load(),
     ]);
+
+    if (hydrationToken !== this.hydrationToken) return;
 
     if (persistedStatus) {
       this.store.setPartialState(
@@ -283,16 +316,29 @@ export class SessionOfflineCoordinator {
 
   configure(options: {
     backend?: StorageBackend;
+    adapter?: StorageAdapter;
+    onPersistentStorageError?: (error: unknown) => void;
     config?: OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>;
   }): void {
-    const nextConfig = toCanonicalConfig(
-      options.backend ?? this.canonicalBackend,
-      options.config,
-    );
+    const nextBackend = options.backend ?? this.canonicalBackend;
+    const nextConfig = toCanonicalConfig(nextBackend, options.config);
 
     if (!this.hasCanonicalConfig && options.config) {
+      if (
+        nextBackend !== this.canonicalBackend ||
+        options.adapter !== undefined ||
+        options.onPersistentStorageError !== undefined
+      ) {
+        this.recreatePersistenceHandles({
+          backend: nextBackend,
+          adapter: options.adapter,
+          onPersistentStorageError:
+            options.onPersistentStorageError ?? this.onPersistentStorageError,
+        });
+      }
       this.canonicalConfig = nextConfig;
       this.hasCanonicalConfig = true;
+      void this.hydrate();
       this.refreshNetworkConfig();
       return;
     }
@@ -307,6 +353,29 @@ export class SessionOfflineCoordinator {
     }
 
     this.refreshNetworkConfig();
+  }
+
+  private recreatePersistenceHandles(args: {
+    backend: StorageBackend;
+    adapter?: StorageAdapter;
+    onPersistentStorageError?: (error: unknown) => void;
+  }): void {
+    this.sessionHandle.dispose();
+    this.protectedKeysHandle.dispose();
+    this.canonicalBackend = args.backend;
+    this.onPersistentStorageError = args.onPersistentStorageError;
+    const persistence = createSessionPersistenceHandles({
+      sessionKey: this.sessionKey,
+      backend: args.backend,
+      adapter: args.adapter,
+      onPersistentStorageError: args.onPersistentStorageError,
+    });
+    this.adapter = persistence.adapter;
+    this.sessionHandle = persistence.sessionHandle;
+    this.protectedKeysHandle = persistence.protectedKeysHandle;
+    this.protectedKeys = [];
+    this.hydrated = false;
+    this.hydrationToken += 1;
   }
 
   registerStore(registration: SessionRegistration): () => void {
@@ -374,7 +443,11 @@ export class SessionOfflineCoordinator {
       return false;
     }
 
+    const token = ++this.networkStateToken;
     const next = await this.getCurrentOfflineState();
+    if (token !== this.networkStateToken) {
+      return this.store.state.status.network.active;
+    }
     this.setNetworkActive(next);
     return next;
   }
@@ -631,9 +704,16 @@ export class SessionOfflineCoordinator {
           return;
         }
 
-        const recovered = await this.canonicalConfig.recoveryCheck?.({
-          sessionKey: this.sessionKey,
-        });
+        let recovered = false;
+
+        try {
+          recovered =
+            (await this.canonicalConfig.recoveryCheck?.({
+              sessionKey: this.sessionKey,
+            })) ?? false;
+        } catch {
+          recovered = false;
+        }
 
         this.updateStatus((current: GlobalOfflineStatus) => ({
           ...current,
@@ -678,7 +758,12 @@ export function getOrCreateSessionOfflineCoordinator(
 ): SessionOfflineCoordinator {
   const existing = registry.get(sessionKey);
   if (existing) {
-    existing.configure({ backend: options.backend, config: options.config });
+    existing.configure({
+      backend: options.backend,
+      adapter: options.adapter,
+      onPersistentStorageError: options.onPersistentStorageError,
+      config: options.config,
+    });
     return existing;
   }
 
@@ -745,7 +830,7 @@ export function useOfflineStoreEntities(args: {
     resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
   );
 
-  if (!args.storeName) return entities;
+  if (!args.storeName) return [];
 
   return entities.filter((entity) => entity.storeName === args.storeName);
 }
