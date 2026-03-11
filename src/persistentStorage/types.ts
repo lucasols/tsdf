@@ -9,14 +9,135 @@ import type {
 
 // --- Storage Adapter ---
 
-/** Uniform async interface for reading/writing persistent data. */
-export type StorageAdapter = {
+/** Synchronous storage contract used by `localStorage`. */
+export type SyncStorageAdapter = {
   read<T>(key: string): Promise<T | null>;
   write<T>(key: string, value: T): Promise<void>;
   remove(key: string): Promise<void>;
   removeByPrefix(prefix: string): Promise<void>;
   listKeys(prefix: string): Promise<string[]>;
 };
+
+export type AsyncStorageNamespaceKind =
+  | 'document'
+  | 'collection.item'
+  | 'listQuery.item'
+  | 'listQuery.query'
+  | 'offline.queue'
+  | 'offline.conflict'
+  | 'offline.entity'
+  | '__internal.protected';
+
+export type AsyncStorageNamespaceScope = {
+  sessionKey: string;
+  storeName: string;
+  kind: AsyncStorageNamespaceKind;
+};
+
+export type AsyncStorageProtectedEntryRef = AsyncStorageNamespaceScope & {
+  key: string;
+};
+
+export type AsyncStorageTouchMode = 'never' | 'coarse' | 'force';
+
+export type AsyncStorageReadOptions = { touch?: AsyncStorageTouchMode };
+
+export type AsyncStorageMetadataOrder = 'key' | 'lru-asc' | 'lru-desc';
+
+export type AsyncStorageEntryMetadataBase = {
+  key: string;
+  payloadRef: string;
+  writtenAt: number;
+  lastAccessAt: number;
+  sizeBytes?: number;
+  version: number;
+};
+
+export type AsyncStorageEntryMetadata<
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+> = AsyncStorageEntryMetadataBase & TCustomMetadata;
+
+export type AsyncStorageNamespaceGetResult<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+> = { value: TValue; metadata: AsyncStorageEntryMetadata<TCustomMetadata> };
+
+export type AsyncStorageNamespaceCommitUpsert<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+> = { key: string; value: TValue; version: number; metadata?: TCustomMetadata };
+
+export type AsyncStorageNamespaceCommitTouch = {
+  key: string;
+  lastAccessAt?: number;
+};
+
+export type AsyncStorageNamespaceCommitArgs<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+> = {
+  upserts?: AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>[];
+  removes?: string[];
+  touches?: AsyncStorageNamespaceCommitTouch[];
+};
+
+export type AsyncStorageMetadataPage<
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+> = {
+  entries: AsyncStorageEntryMetadata<TCustomMetadata>[];
+  cursor: string | null;
+};
+
+export type AsyncStorageMaintenanceState = {
+  lastSuccessfulCleanupAt: number | null;
+  startupCleanupLease: { holderId: string; expiresAt: number } | null;
+};
+
+export type AsyncStorageNamespaceHandle<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+> = {
+  get(
+    key: string,
+    options?: AsyncStorageReadOptions,
+  ): Promise<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>;
+  getMany(
+    keys: string[],
+    options?: AsyncStorageReadOptions,
+  ): Promise<
+    Array<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
+  >;
+  commit(
+    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+  ): Promise<void>;
+  listMetadata(args?: {
+    cursor?: string | null;
+    limit?: number;
+    order?: AsyncStorageMetadataOrder;
+  }): Promise<AsyncStorageMetadataPage<TCustomMetadata>>;
+  clear(): Promise<void>;
+};
+
+/** Namespace-native async storage contract used by slow backends like OPFS. */
+export type AsyncStorageAdapter = {
+  openNamespace<
+    TValue,
+    TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+  >(
+    scope: AsyncStorageNamespaceScope,
+  ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
+  readMaintenanceState(): Promise<AsyncStorageMaintenanceState>;
+  tryAcquireStartupCleanupLease(args: {
+    holderId: string;
+    ttlMs: number;
+  }): Promise<boolean>;
+  finishStartupCleanup(args: {
+    holderId: string;
+    finishedAt: number;
+  }): Promise<void>;
+};
+
+export type StorageAdapter = SyncStorageAdapter | AsyncStorageAdapter;
 
 export type StorageBackend = 'localStorage' | 'opfs';
 

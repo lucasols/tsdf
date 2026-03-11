@@ -1,3 +1,4 @@
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_number,
@@ -6,9 +7,25 @@ import {
   rc_parse_json,
   rc_unknown,
 } from 'runcheck';
+import {
+  OpfsAsyncStorageAdapter,
+  serializeProtectedRef,
+} from './opfsAsyncStorageAdapter';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import { createStorageAdapter } from './storageAdapter';
+import {
+  createStorageAdapter,
+  isAsyncStorageAdapter,
+  isSyncStorageAdapter,
+} from './storageAdapter';
 import type {
+  AsyncStorageAdapter,
+  AsyncStorageEntryMetadata,
+  AsyncStorageMetadataPage,
+  AsyncStorageNamespaceGetResult,
+  AsyncStorageNamespaceHandle,
+  AsyncStorageNamespaceKind,
+  AsyncStorageProtectedEntryRef,
+  SyncStorageAdapter,
   PersistentStorageBaseConfig,
   PersistentStorageSchema,
   StorageAdapter,
@@ -18,15 +35,8 @@ import type {
 import { validateWithSchema } from './validateWithSchema';
 
 const DEBOUNCE_MS = 1000;
-
-const LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
-const OPFS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 2 weeks
-
-function getMaxAgeForBackend(backend: StorageBackend): number {
-  return backend === 'localStorage'
-    ? LOCAL_STORAGE_MAX_AGE_MS
-    : OPFS_MAX_AGE_MS;
-}
+const LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const scannedSyncBackends = new Set<StorageBackend>();
 
 const cacheEntrySchema = rc_object({
   data: rc_unknown,
@@ -36,110 +46,149 @@ const cacheEntrySchema = rc_object({
 
 const timestampSchema = rc_object({ timestamp: rc_number });
 
-const scannedBackends = new Set<StorageBackend>();
-
 function getStorageKey(sessionKey: string, storeName: string): string {
   return `tsdf.${sessionKey}.${storeName}`;
 }
 
+function ensureSyncAdapter(
+  adapter: StorageAdapter,
+  backend: StorageBackend,
+): SyncStorageAdapter {
+  if (isSyncStorageAdapter(adapter)) return adapter;
+
+  throw new Error(
+    `[tsdf] Backend "${backend}" requires a sync storage adapter`,
+  );
+}
+
+function ensureAsyncAdapter(
+  adapter: StorageAdapter,
+  backend: StorageBackend,
+): AsyncStorageAdapter {
+  if (isAsyncStorageAdapter(adapter)) return adapter;
+
+  throw new Error(
+    `[tsdf] Backend "${backend}" requires a namespace-native async storage adapter`,
+  );
+}
+
+function scheduleLocalStorageExpirationScanIfNeeded(
+  adapter: StorageAdapter,
+  backend: StorageBackend,
+  adapterOverride: boolean,
+): void {
+  if (backend !== 'localStorage') return;
+  if (adapterOverride) return;
+  if (scannedSyncBackends.has(backend)) return;
+
+  scannedSyncBackends.add(backend);
+  scheduleIdleCleanup(() => {
+    void runLocalStorageExpirationScan(adapter);
+  });
+}
+
 export type PersistentStorageHandle<T> = {
-  /** Loads persisted data, validating version and schema. Returns null if not found or invalid. */
   load(): Promise<T | null>;
-  /** Schedules a debounced save. getData is called at save time to capture latest state. */
   scheduleSave(getData: () => T): void;
-  /** Immediately saves data, canceling any pending debounce. */
   saveNow(data: T): Promise<void>;
-  /** Removes the persisted entry and cancels any pending debounce. */
   clear(): Promise<void>;
-  /** Cancels any pending debounce timer without saving. */
   dispose(): void;
 };
 
-/**
- * Creates a handle for reading/writing a single persisted storage entry.
- *
- * @param config - Storage configuration including backend, schema, and version.
- * @param itemValidator - Optional per-item validator for compound data structures.
- *   Called after the overall cache entry is loaded. Use this to validate individual
- *   items within collections/queries.
- */
 export function createPersistentStorageHandle<T>(
-  config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
-  {
-    adapter: adapterOverride,
-  }: {
-    /** Override the storage adapter (useful for testing). */
-    adapter?: StorageAdapter;
-  } = {},
+  config: Omit<PersistentStorageBaseConfig<never>, 'schema'> & {
+    namespaceKind?: AsyncStorageNamespaceKind;
+    entryKey?: string;
+  },
+  { adapter: adapterOverride }: { adapter?: StorageAdapter } = {},
 ): PersistentStorageHandle<T> {
   const version = config.version ?? 1;
   const backendKey: StorageBackend = config.backend ?? 'opfs';
-  const { onPersistentStorageError } = config;
+  const entryKey = config.entryKey ?? 'document';
+  const namespaceKind = config.namespaceKind ?? 'document';
   const adapter = adapterOverride ?? createStorageAdapter(backendKey);
+  scheduleLocalStorageExpirationScanIfNeeded(
+    adapter,
+    backendKey,
+    adapterOverride !== undefined,
+  );
+
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Schedule expiration scan once per backend per session
-  if (!adapterOverride && !scannedBackends.has(backendKey)) {
-    scannedBackends.add(backendKey);
-    scheduleIdleCleanup(() => {
-      void runExpirationScan(adapter, getMaxAgeForBackend(backendKey));
-    });
-  }
-
-  function getKey(): string | false {
+  async function load(): Promise<T | null> {
     const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return false;
-    return getStorageKey(sessionKey, config.storeName);
+    if (sessionKey === false) return null;
+
+    if (backendKey === 'localStorage') {
+      const syncAdapter = ensureSyncAdapter(adapter, backendKey);
+      const key = getStorageKey(sessionKey, config.storeName);
+      const entry = await syncAdapter.read<StorageCacheEntry<T>>(key);
+      if (!entry) return null;
+
+      if (entry.version !== version) {
+        scheduleIdleCleanup(() => void syncAdapter.remove(key));
+        return null;
+      }
+
+      scheduleIdleCleanup(() => {
+        void syncAdapter.write(key, { ...entry, timestamp: Date.now() });
+      });
+      return entry.data;
+    }
+
+    const asyncAdapter = ensureAsyncAdapter(adapter, backendKey);
+    const namespace = asyncAdapter.openNamespace<T>({
+      sessionKey,
+      storeName: config.storeName,
+      kind: namespaceKind,
+    });
+    const entry = await namespace.get(entryKey, { touch: 'coarse' });
+    if (!entry) return null;
+    if (entry.metadata.version !== version) {
+      await namespace.commit({ removes: [entryKey] });
+      return null;
+    }
+    return entry.value;
   }
 
-  function clearTimer() {
+  async function writeEntry(data: T): Promise<void> {
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return;
+
+    try {
+      if (backendKey === 'localStorage') {
+        const syncAdapter = ensureSyncAdapter(adapter, backendKey);
+        await syncAdapter.write(getStorageKey(sessionKey, config.storeName), {
+          data,
+          timestamp: Date.now(),
+          version,
+        } satisfies StorageCacheEntry<T>);
+        return;
+      }
+
+      const asyncAdapter = ensureAsyncAdapter(adapter, backendKey);
+      const namespace = asyncAdapter.openNamespace<T>({
+        sessionKey,
+        storeName: config.storeName,
+        kind: namespaceKind,
+      });
+      await namespace.commit({
+        upserts: [{ key: entryKey, value: data, version }],
+      });
+    } catch (error) {
+      config.onPersistentStorageError?.(error);
+    }
+  }
+
+  function clearTimer(): void {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
   }
 
-  async function load(): Promise<T | null> {
-    const key = getKey();
-    if (key === false) return null;
-
-    const entry = await adapter.read<StorageCacheEntry<T>>(key);
-
-    if (!entry) return null;
-
-    if (entry.version !== version) {
-      scheduleIdleCleanup(() => void adapter.remove(key));
-      return null;
-    }
-
-    // Refresh timestamp to track last access time for expiration
-    scheduleIdleCleanup(() => {
-      void adapter.write(key, { ...entry, timestamp: Date.now() });
-    });
-
-    return entry.data;
-  }
-
-  async function writeEntry(data: T): Promise<void> {
-    const key = getKey();
-    if (key === false) return;
-
-    const entry: StorageCacheEntry<T> = {
-      data,
-      timestamp: Date.now(),
-      version,
-    };
-
-    try {
-      await adapter.write(key, entry);
-    } catch (error) {
-      onPersistentStorageError?.(error);
-    }
-  }
-
   function scheduleSave(getData: () => T): void {
     clearTimer();
-
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       void writeEntry(getData());
@@ -153,10 +202,22 @@ export function createPersistentStorageHandle<T>(
 
   async function clear(): Promise<void> {
     clearTimer();
-    const key = getKey();
-    if (key === false) return;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return;
 
-    await adapter.remove(key);
+    if (backendKey === 'localStorage') {
+      const syncAdapter = ensureSyncAdapter(adapter, backendKey);
+      await syncAdapter.remove(getStorageKey(sessionKey, config.storeName));
+      return;
+    }
+
+    const asyncAdapter = ensureAsyncAdapter(adapter, backendKey);
+    const namespace = asyncAdapter.openNamespace<T>({
+      sessionKey,
+      storeName: config.storeName,
+      kind: namespaceKind,
+    });
+    await namespace.commit({ removes: [entryKey] });
   }
 
   function dispose(): void {
@@ -166,127 +227,143 @@ export function createPersistentStorageHandle<T>(
   return { load, scheduleSave, saveNow, clear, dispose };
 }
 
-export type PersistentStorageNamespaceHandle<T> = {
-  readEntry(entryKey: string): Promise<StorageCacheEntry<T> | null>;
-  load(entryKey: string): Promise<T | null>;
-  save(entryKey: string, data: T): Promise<void>;
-  remove(entryKey: string): Promise<void>;
-  listKeys(): Promise<string[]>;
-  clear(): Promise<void>;
-  dispose(): void;
-};
-
-export function createPersistentStorageNamespaceHandle<T>(
+export function openAsyncStorageNamespace<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+>(
   config: Omit<PersistentStorageBaseConfig<never>, 'schema'> & {
-    entryPrefix: string;
+    kind: AsyncStorageNamespaceKind;
   },
   { adapter: adapterOverride }: { adapter?: StorageAdapter } = {},
-): PersistentStorageNamespaceHandle<T> {
-  const version = config.version ?? 1;
-  const backendKey: StorageBackend = config.backend ?? 'opfs';
-  const { onPersistentStorageError } = config;
-  const adapter = adapterOverride ?? createStorageAdapter(backendKey);
+): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> | null {
+  const backend = config.backend ?? 'opfs';
+  if (backend !== 'opfs') return null;
 
-  if (!adapterOverride && !scannedBackends.has(backendKey)) {
-    scannedBackends.add(backendKey);
-    scheduleIdleCleanup(() => {
-      void runExpirationScan(adapter, getMaxAgeForBackend(backendKey));
-    });
-  }
+  const adapter = adapterOverride ?? createStorageAdapter(backend);
+  const asyncAdapter = ensureAsyncAdapter(adapter, backend);
 
-  function getPrefix(): string | false {
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return false;
+  const sessionKey = config.getSessionKey();
+  if (sessionKey === false) return null;
 
-    return `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
-  }
-
-  function getKey(entryKey: string): string | false {
-    const prefix = getPrefix();
-    if (prefix === false) return false;
-    return `${prefix}${entryKey}`;
-  }
-
-  async function readEntry(
-    entryKey: string,
-  ): Promise<StorageCacheEntry<T> | null> {
-    const key = getKey(entryKey);
-    if (key === false) return null;
-
-    const entry = await adapter.read<StorageCacheEntry<T>>(key);
-    if (!entry) return null;
-
-    if (entry.version !== version) {
-      scheduleIdleCleanup(() => void adapter.remove(key));
-      return null;
-    }
-
-    return entry;
-  }
-
-  async function load(entryKey: string): Promise<T | null> {
-    const key = getKey(entryKey);
-    const entry = await readEntry(entryKey);
-    if (!key || !entry) return null;
-
-    scheduleIdleCleanup(() => {
-      void adapter.write(key, { ...entry, timestamp: Date.now() });
-    });
-
-    return entry.data;
-  }
-
-  async function save(entryKey: string, data: T): Promise<void> {
-    const key = getKey(entryKey);
-    if (key === false) return;
-
-    const entry: StorageCacheEntry<T> = {
-      data,
-      timestamp: Date.now(),
-      version,
-    };
-
-    try {
-      await adapter.write(key, entry);
-    } catch (error) {
-      onPersistentStorageError?.(error);
-    }
-  }
-
-  async function remove(entryKey: string): Promise<void> {
-    const key = getKey(entryKey);
-    if (key === false) return;
-
-    await adapter.remove(key);
-  }
-
-  async function listKeys(): Promise<string[]> {
-    const prefix = getPrefix();
-    if (prefix === false) return [];
-
-    const keys = await adapter.listKeys(prefix);
-    return keys.map((key) => key.slice(prefix.length));
-  }
-
-  async function clear(): Promise<void> {
-    const prefix = getPrefix();
-    if (prefix === false) return;
-
-    await adapter.removeByPrefix(prefix);
-  }
-
-  function dispose(): void {
-    // No-op for namespaced handles: debouncing lives in the store integrations.
-  }
-
-  return { readEntry, load, save, remove, listKeys, clear, dispose };
+  return asyncAdapter.openNamespace<TValue, TCustomMetadata>({
+    sessionKey,
+    storeName: config.storeName,
+    kind: config.kind,
+  });
 }
 
-/**
- * Synchronously reads from localStorage for initial state hydration.
- * Only works with localStorage backend. Returns null if data is not found,
- * version mismatches, or schema validation fails.
- */
+export async function readAllAsyncStorageMetadata<
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+>(
+  namespace: AsyncStorageNamespaceHandle<unknown, TCustomMetadata>,
+  options: { order?: 'key' | 'lru-asc' | 'lru-desc'; limit?: number } = {},
+): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
+  const entries: AsyncStorageEntryMetadata<TCustomMetadata>[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const page: AsyncStorageMetadataPage<TCustomMetadata> =
+      await namespace.listMetadata({
+        cursor,
+        limit: options.limit,
+        order: options.order,
+      });
+    entries.push(...page.entries);
+    cursor = page.cursor;
+  } while (cursor !== null);
+
+  return entries;
+}
+
+export async function getManyFromAsyncStorageNamespace<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
+>(
+  namespace: AsyncStorageNamespaceHandle<TValue, TCustomMetadata>,
+  keys: string[],
+  options?: { touch?: 'never' | 'coarse' | 'force' },
+): Promise<
+  Array<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
+> {
+  return namespace.getMany(keys, options);
+}
+
+export function createProtectedStorageRef(
+  ref: AsyncStorageProtectedEntryRef,
+): string {
+  return serializeProtectedRef(ref);
+}
+
+export function createProtectedStorageKey(args: {
+  backend?: StorageBackend;
+  sessionKey: string;
+  storeName: string;
+  kind: AsyncStorageNamespaceKind;
+  key: string;
+}): string {
+  if ((args.backend ?? 'opfs') === 'localStorage') {
+    if (args.kind === 'document' && args.key === 'document') {
+      return getStorageKeyForStore(args.sessionKey, args.storeName);
+    }
+
+    return `${getStoragePrefixForStoreNamespace(
+      args.sessionKey,
+      args.storeName,
+      args.kind,
+    )}${args.key}`;
+  }
+
+  return createProtectedStorageRef(args);
+}
+
+export function listProtectedLocalStorageNamespaceKeys(
+  protectedStorageKeys: Set<string>,
+  prefix: string,
+): Set<string> {
+  return new Set(
+    [...protectedStorageKeys]
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length)),
+  );
+}
+
+export function readLocalStorageNamespaceEntries<T>(
+  prefix: string,
+  version: number,
+): Array<{ key: string; entry: StorageCacheEntry<T> }> {
+  return filterAndMap(
+    listLocalStorageKeysSync(prefix).map((storageKey) => {
+      const key = storageKey.slice(prefix.length);
+      const entry = readStorageEntryFromLocalStorageSync<T>(
+        storageKey,
+        version,
+      );
+      return entry ? { key, entry } : false;
+    }),
+    (entry) => entry,
+  );
+}
+
+export async function readProtectedStorageKeys(
+  adapter: StorageAdapter,
+  sessionKey: string,
+): Promise<Set<string>> {
+  if (isSyncStorageAdapter(adapter)) {
+    const entry = await adapter.read<StorageCacheEntry<{ keys: string[] }>>(
+      `tsdf.${sessionKey}.__offline__.protected`,
+    );
+    return new Set(entry?.data.keys ?? []);
+  }
+
+  const namespace = adapter.openNamespace<{ keys: string[] }>({
+    sessionKey,
+    storeName: '__offline__',
+    kind: '__internal.protected',
+  });
+  const entry = await namespace.get('registry', { touch: 'never' });
+  return new Set(entry?.value.keys ?? []);
+}
+
 export function readFromLocalStorageSync<T>(
   key: string,
   version: number,
@@ -305,9 +382,7 @@ export function readFromLocalStorageSync<T>(
       return null;
     }
 
-    // Validate as a single item
     const validated = validateWithSchema(schema, entry.data);
-
     if (validated !== null) {
       scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
     } else {
@@ -344,10 +419,6 @@ export function readStorageEntryFromLocalStorageSync<T>(
   }
 }
 
-/**
- * Gets the storage key for a given session and store name.
- * Exported for use by store persistence integrations.
- */
 export function getStorageKeyForStore(
   sessionKey: string,
   storeName: string,
@@ -366,8 +437,8 @@ export function getStoragePrefixForStoreNamespace(
 export function listLocalStorageKeysSync(prefix: string): string[] {
   const keys: string[] = [];
 
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
     if (key?.startsWith(prefix)) {
       keys.push(key);
     }
@@ -376,16 +447,23 @@ export function listLocalStorageKeysSync(prefix: string): string[] {
   return keys;
 }
 
-/** Clears all persistent storage entries for a given session key and backend. */
 export async function clearSessionStorage(
   sessionKey: string,
   backend: StorageBackend,
 ): Promise<void> {
   const adapter = createStorageAdapter(backend);
-  await adapter.removeByPrefix(`tsdf.${sessionKey}.`);
+
+  if (backend === 'localStorage') {
+    const syncAdapter = ensureSyncAdapter(adapter, backend);
+    await syncAdapter.removeByPrefix(`tsdf.${sessionKey}.`);
+    return;
+  }
+
+  if (adapter instanceof OpfsAsyncStorageAdapter) {
+    await adapter.clearSession(sessionKey);
+  }
 }
 
-/** Clears all persistent storage entries for a given session key across all backends. */
 export async function clearAllSessionStorage(
   sessionKey: string,
 ): Promise<void> {
@@ -395,10 +473,6 @@ export async function clearAllSessionStorage(
   ]);
 }
 
-/**
- * Refreshes the timestamp of a localStorage cache entry to track last access time.
- * Used by store persistence setup functions after successful sync reads.
- */
 export function refreshLocalStorageTimestamp(key: string): void {
   const raw = localStorage.getItem(key);
   if (raw === null) return;
@@ -412,10 +486,11 @@ export function refreshLocalStorageTimestamp(key: string): void {
   );
 }
 
-async function runExpirationScan(
+async function runLocalStorageExpirationScan(
   adapter: StorageAdapter,
-  maxAgeMs: number,
 ): Promise<void> {
+  if (!isSyncStorageAdapter(adapter)) return;
+
   const prefix = 'tsdf.';
   const keys = await adapter.listKeys(prefix);
   const now = Date.now();
@@ -443,24 +518,12 @@ async function runExpirationScan(
     }
 
     const result = rc_parse(raw, timestampSchema);
-    if (!result.ok || now - result.value.timestamp > maxAgeMs) {
+    if (!result.ok || now - result.value.timestamp > LOCAL_STORAGE_MAX_AGE_MS) {
       await adapter.remove(key);
     }
   }
 }
 
-/** Resets expiration scan tracking. Exported for test cleanup. */
 export function resetExpirationScanTracking(): void {
-  scannedBackends.clear();
-}
-
-export async function readProtectedStorageKeys(
-  adapter: StorageAdapter,
-  sessionKey: string,
-): Promise<Set<string>> {
-  const entry = await adapter.read<StorageCacheEntry<{ keys: string[] }>>(
-    `tsdf.${sessionKey}.__offline__.protected`,
-  );
-
-  return new Set(entry?.data.keys ?? []);
+  scannedSyncBackends.clear();
 }

@@ -23,7 +23,7 @@ import type {
   CollectionOfflineOperationsRegistry,
   OfflineMutationDescriptor,
 } from '../persistentStorage/offline/types';
-import { getStoragePrefixForStoreNamespace } from '../persistentStorage/persistentStorageManager';
+import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   CollectionPersistentStorageConfig,
   PersistentStoragePreloadResult,
@@ -411,13 +411,15 @@ export function createCollectionStore<
           getProtectedCacheKeys: (entityRefs) => {
             const sessionKey = getSessionKey();
             if (sessionKey === false) return [];
-
-            const prefix = getStoragePrefixForStoreNamespace(
-              sessionKey,
-              persistentStorageConfig.storeName,
-              'collection.item',
+            return entityRefs.map((ref) =>
+              createProtectedStorageKey({
+                backend: persistentStorageConfig.backend,
+                sessionKey,
+                storeName: persistentStorageConfig.storeName,
+                kind: 'collection.item',
+                key: ref.entityKey,
+              }),
             );
-            return entityRefs.map((ref) => `${prefix}${ref.entityKey}`);
           },
           applyPendingEntity: ({ tempId, pendingEntity }) => {
             if (!pendingEntity || typeof pendingEntity !== 'object') return;

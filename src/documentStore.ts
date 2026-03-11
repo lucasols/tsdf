@@ -74,7 +74,7 @@ import {
 } from './utils/storeShared';
 import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
-import { getStorageKeyForStore } from './persistentStorage/persistentStorageManager';
+import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
 
@@ -280,10 +280,13 @@ export function createDocumentStore<
             const sessionKey = getSessionKey();
             if (sessionKey === false) return [];
             return [
-              getStorageKeyForStore(
+              createProtectedStorageKey({
+                backend: persistentStorageConfig.backend,
                 sessionKey,
-                persistentStorageConfig.storeName,
-              ),
+                storeName: persistentStorageConfig.storeName,
+                kind: 'document',
+                key: 'document',
+              }),
             ];
           },
           applyPendingEntity: ({ pendingEntity }) => {

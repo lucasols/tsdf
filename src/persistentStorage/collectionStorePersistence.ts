@@ -1,4 +1,3 @@
-import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
@@ -8,24 +7,32 @@ import type {
 } from '../collectionStore/collectionStore';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
-  createPersistentStorageNamespaceHandle,
+  createProtectedStorageRef,
   getStoragePrefixForStoreNamespace,
   listLocalStorageKeysSync,
+  listProtectedLocalStorageNamespaceKeys,
+  openAsyncStorageNamespace,
+  readLocalStorageNamespaceEntries,
+  readAllAsyncStorageMetadata,
   readProtectedStorageKeys,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import { isAsyncStorageAdapter, createStorageAdapter } from './storageAdapter';
 import type {
+  AsyncStorageEntryMetadata,
   CollectionPersistentStorageConfig,
-  PersistedCollectionItemData,
   StorageAdapter,
 } from './types';
-import { createStorageAdapter } from './storageAdapter';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
+
+type PersistedCollectionItemValue<ItemState> = { data: ItemState };
+
+type CollectionItemMetadata = { payload: unknown };
 
 function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
   ignoreItems:
@@ -58,21 +65,19 @@ function toCollectionItemState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
 >(
-  persisted: PersistedCollectionItemData<unknown>,
+  value: PersistedCollectionItemValue<unknown>,
+  metadata: CollectionItemMetadata,
   config: CollectionPersistentStorageConfig<ItemState, ItemPayload>,
   shouldIgnorePersistedItem: (payload: unknown) => boolean,
 ): TSFDCollectionItem<ItemState, ItemPayload> | null {
-  const validated = validateWithSchema(config.schema, persisted.data);
+  const validated = validateWithSchema(config.schema, value.data);
   if (validated === null) return null;
-
-  if (shouldIgnorePersistedItem(persisted.payload)) return null;
-
-  const payload = __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload);
+  if (shouldIgnorePersistedItem(metadata.payload)) return null;
 
   return {
     data: validated,
     error: null,
-    payload,
+    payload: __LEGIT_CAST__<ItemPayload, unknown>(metadata.payload),
     refetchOnMount: 'lowPriority',
     status: 'success',
     wasLoaded: true,
@@ -94,9 +99,10 @@ function defineLazyLocalStorageItem<
     configurable: true,
     enumerable: false,
     get() {
-      const cacheEntry = readStorageEntryFromLocalStorageSync<
-        PersistedCollectionItemData<unknown>
-      >(storageKey, version);
+      const cacheEntry = readStorageEntryFromLocalStorageSync<{
+        data: unknown;
+        payload: unknown;
+      }>(storageKey, version);
 
       if (!cacheEntry) {
         Object.defineProperty(state, itemKey, {
@@ -109,7 +115,8 @@ function defineLazyLocalStorageItem<
       }
 
       const item = toCollectionItemState<ItemState, ItemPayload>(
-        cacheEntry.data,
+        { data: cacheEntry.data.data },
+        { payload: cacheEntry.data.payload },
         config,
         shouldIgnorePersistedItem,
       );
@@ -137,6 +144,25 @@ function defineLazyLocalStorageItem<
       return item;
     },
   });
+}
+
+function samePersistedProjection<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+>(
+  left: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined,
+  right: TSFDCollectionItem<ItemState, ItemPayload> | null | undefined,
+): boolean {
+  const leftPresent = left !== undefined && left !== null && left.data !== null;
+  const rightPresent =
+    right !== undefined && right !== null && right.data !== null;
+
+  if (leftPresent !== rightPresent) return false;
+  if (!leftPresent && !rightPresent) {
+    return left === right;
+  }
+
+  return left?.data === right?.data && left?.payload === right?.payload;
 }
 
 export type CollectionPersistenceSetup<
@@ -182,17 +208,21 @@ export function setupCollectionPersistence<
     createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = options.adapter ?? createStorageAdapter(backend);
-
-  const namespace = createPersistentStorageNamespaceHandle<
-    PersistedCollectionItemData<ItemState>
-  >({ ...config, entryPrefix: 'collection.item' }, { adapter: storageAdapter });
+  const asyncNamespace = openAsyncStorageNamespace<
+    PersistedCollectionItemValue<ItemState>,
+    CollectionItemMetadata
+  >({ ...config, kind: 'collection.item' }, { adapter: storageAdapter });
 
   let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =
     null;
   let unsubscribe: (() => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
+  let suppressDirtyTracking = 0;
   const pendingPreloads = new Map<string, Promise<boolean>>();
+  const dirtyItemKeys = new Set<string>();
+  const deletedItemKeys = new Set<string>();
+  let lastSnapshot: TSFDCollectionState<ItemState, ItemPayload> | null = null;
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -214,7 +244,6 @@ export function setupCollectionPersistence<
       config.storeName,
       'collection.item',
     );
-
     const initialState = { ...baseState };
 
     for (const storageKey of listLocalStorageKeysSync(prefix)) {
@@ -236,8 +265,9 @@ export function setupCollectionPersistence<
 
   async function preloadItem(itemKey: string): Promise<boolean> {
     if (!storeRef) return false;
-    if (storeRef.state[itemKey] !== undefined)
+    if (storeRef.state[itemKey] !== undefined) {
       return storeRef.state[itemKey] !== null;
+    }
 
     if (backend === 'localStorage') {
       const sessionKey = config.getSessionKey();
@@ -248,18 +278,18 @@ export function setupCollectionPersistence<
         config.storeName,
         'collection.item',
       )}${itemKey}`;
-      const cacheEntry = readStorageEntryFromLocalStorageSync<
-        PersistedCollectionItemData<unknown>
-      >(storageKey, version);
-
+      const cacheEntry = readStorageEntryFromLocalStorageSync<{
+        data: unknown;
+        payload: unknown;
+      }>(storageKey, version);
       if (!cacheEntry) return false;
 
       const validated = toCollectionItemState<ItemState, ItemPayload>(
-        cacheEntry.data,
+        { data: cacheEntry.data.data },
+        { payload: cacheEntry.data.payload },
         config,
         shouldIgnorePersistedItem,
       );
-
       if (!validated) {
         scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
         return false;
@@ -267,6 +297,7 @@ export function setupCollectionPersistence<
 
       scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
 
+      suppressDirtyTracking++;
       storeRef.produceState(
         (draft) => {
           if (draft[itemKey] === undefined) {
@@ -275,29 +306,36 @@ export function setupCollectionPersistence<
         },
         { action: 'persistent-storage-hydrate' },
       );
+      suppressDirtyTracking--;
 
       return true;
     }
+
+    if (!asyncNamespace) return false;
 
     const existingPromise = pendingPreloads.get(itemKey);
     if (existingPromise) return existingPromise;
 
     const currentGeneration = generation;
-    const promise = namespace
-      .load(itemKey)
-      .then((cached) => {
+    const promise = asyncNamespace
+      .get(itemKey, { touch: 'coarse' })
+      .then(async (cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
+          return false;
+        }
+        if (cached.metadata.version !== version) {
+          await asyncNamespace.commit({ removes: [itemKey] });
           return false;
         }
 
         const validated = toCollectionItemState<ItemState, ItemPayload>(
-          cached,
+          cached.value,
+          { payload: cached.metadata.payload },
           config,
           shouldIgnorePersistedItem,
         );
-
         if (!validated) {
-          scheduleIdleCleanup(() => void namespace.remove(itemKey));
+          await asyncNamespace.commit({ removes: [itemKey] });
           return false;
         }
 
@@ -305,6 +343,7 @@ export function setupCollectionPersistence<
           return storeRef.state[itemKey] !== null;
         }
 
+        suppressDirtyTracking++;
         storeRef.produceState(
           (draft) => {
             if (draft[itemKey] === undefined) {
@@ -313,6 +352,7 @@ export function setupCollectionPersistence<
           },
           { action: 'persistent-storage-hydrate' },
         );
+        suppressDirtyTracking--;
 
         return true;
       })
@@ -336,121 +376,219 @@ export function setupCollectionPersistence<
   }
 
   async function evictStoredItems(): Promise<void> {
-    const keys = await namespace.listKeys();
-    if (keys.length === 0) return;
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return;
+
+      const prefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'collection.item',
+      );
+      const protectedStorageKeys = await readProtectedStorageKeys(
+        storageAdapter,
+        sessionKey,
+      );
+      const protectedItemKeys = listProtectedLocalStorageNamespaceKeys(
+        protectedStorageKeys,
+        prefix,
+      );
+      const entries = readLocalStorageNamespaceEntries<{
+        data: unknown;
+        payload: unknown;
+      }>(prefix, version).map(({ key, entry }) => ({ itemKey: key, entry }));
+      if (!hasIgnoreItemFilter && entries.length <= maxItems) {
+        return;
+      }
+
+      const ignoredEntries = entries.filter(({ entry }) =>
+        shouldIgnorePersistedItem(entry.data.payload),
+      );
+
+      for (const { itemKey } of ignoredEntries) {
+        localStorage.removeItem(`${prefix}${itemKey}`);
+      }
+
+      const persistedEntries = entries.filter(
+        ({ entry }) => !shouldIgnorePersistedItem(entry.data.payload),
+      );
+      persistedEntries.sort((left, right) => {
+        const leftProtected = protectedItemKeys.has(left.itemKey);
+        const rightProtected = protectedItemKeys.has(right.itemKey);
+        if (leftProtected !== rightProtected) {
+          return leftProtected ? -1 : 1;
+        }
+
+        const leftPinned = pinnedItemKeys.has(left.itemKey);
+        const rightPinned = pinnedItemKeys.has(right.itemKey);
+        if (leftPinned !== rightPinned) {
+          return leftPinned ? -1 : 1;
+        }
+
+        return right.entry.timestamp - left.entry.timestamp;
+      });
+
+      for (const { itemKey } of persistedEntries.slice(maxItems)) {
+        localStorage.removeItem(`${prefix}${itemKey}`);
+      }
+      return;
+    }
+
+    if (!asyncNamespace) return;
+
     const sessionKey = config.getSessionKey();
     const protectedStorageKeys =
       sessionKey !== false
         ? await readProtectedStorageKeys(storageAdapter, sessionKey)
         : new Set<string>();
-    const protectedItemKeys =
+    const isProtectedKey =
       sessionKey === false
-        ? new Set<string>()
-        : new Set(
-            [...protectedStorageKeys]
-              .filter((key) =>
-                key.startsWith(
-                  getStoragePrefixForStoreNamespace(
-                    sessionKey,
-                    config.storeName,
-                    'collection.item',
-                  ),
-                ),
-              )
-              .map((key) =>
-                key.slice(
-                  getStoragePrefixForStoreNamespace(
-                    sessionKey,
-                    config.storeName,
-                    'collection.item',
-                  ).length,
-                ),
-              ),
-          );
+        ? (_key_: string) => false
+        : (key: string) =>
+            protectedStorageKeys.has(
+              createProtectedStorageRef({
+                sessionKey,
+                storeName: config.storeName,
+                kind: 'collection.item',
+                key,
+              }),
+            );
+    const metadataEntries = await readAllAsyncStorageMetadata(asyncNamespace, {
+      order: 'lru-desc',
+    });
+
+    const validEntries = metadataEntries.filter(
+      (entry): entry is AsyncStorageEntryMetadata<CollectionItemMetadata> =>
+        entry.version === version,
+    );
+
+    const ignoredKeys = validEntries
+      .filter((entry) => shouldIgnorePersistedItem(entry.payload))
+      .map((entry) => entry.key);
+    if (ignoredKeys.length > 0) {
+      await asyncNamespace.commit({ removes: ignoredKeys });
+    }
+
+    const keptCandidates = validEntries.filter(
+      (entry) => !shouldIgnorePersistedItem(entry.payload),
+    );
     if (
       !hasIgnoreItemFilter &&
-      keys.filter((key) => !protectedItemKeys.has(key)).length <= maxItems
+      keptCandidates.filter((entry) => !isProtectedKey(entry.key)).length <=
+        maxItems
     ) {
       return;
     }
 
-    const entries = await Promise.all(
-      keys.map(async (itemKey) => ({
-        itemKey,
-        entry: await namespace.readEntry(itemKey),
-      })),
-    );
+    keptCandidates.sort((left, right) => {
+      const leftProtected = isProtectedKey(left.key);
+      const rightProtected = isProtectedKey(right.key);
 
-    const validEntries = filterAndMap(entries, ({ itemKey, entry }) => {
-      return entry ? { itemKey, entry } : false;
-    });
+      if (leftProtected !== rightProtected) {
+        return leftProtected ? -1 : 1;
+      }
 
-    const ignoredEntries = validEntries.filter(({ entry }) =>
-      shouldIgnorePersistedItem(entry.data.payload),
-    );
+      const leftPinned = pinnedItemKeys.has(left.key);
+      const rightPinned = pinnedItemKeys.has(right.key);
+      if (leftPinned !== rightPinned) {
+        return leftPinned ? -1 : 1;
+      }
 
-    if (ignoredEntries.length > 0) {
-      await Promise.all(
-        ignoredEntries.map(({ itemKey }) => namespace.remove(itemKey)),
-      );
-    }
-
-    const filteredEntries = validEntries.filter(
-      ({ entry }) => !shouldIgnorePersistedItem(entry.data.payload),
-    );
-
-    if (filteredEntries.length <= maxItems) return;
-
-    filteredEntries.sort((a, b) => {
-      const aProtected = protectedItemKeys.has(a.itemKey);
-      const bProtected = protectedItemKeys.has(b.itemKey);
-
-      if (aProtected && !bProtected) return -1;
-      if (!aProtected && bProtected) return 1;
-
-      const aPinned = pinnedItemKeys.has(a.itemKey);
-      const bPinned = pinnedItemKeys.has(b.itemKey);
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-
-      return b.entry.timestamp - a.entry.timestamp;
+      return right.lastAccessAt - left.lastAccessAt;
     });
 
     const keptKeys = new Set(
-      filteredEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+      keptCandidates.slice(0, maxItems).map((entry) => entry.key),
     );
-
-    await Promise.all(
-      filteredEntries
-        .filter(({ itemKey }) => !keptKeys.has(itemKey))
-        .map(({ itemKey }) => namespace.remove(itemKey)),
-    );
+    const removals = keptCandidates
+      .filter((entry) => !keptKeys.has(entry.key))
+      .map((entry) => entry.key);
+    if (removals.length > 0) {
+      await asyncNamespace.commit({ removes: removals });
+    }
   }
 
   async function flushPersistedState(): Promise<void> {
     if (!storeRef) return;
 
-    const state = storeRef.state;
-    const tasks: Promise<void>[] = [];
-
-    for (const [itemKey, item] of Object.entries(state)) {
-      if (!item?.data) {
-        tasks.push(namespace.remove(itemKey));
-        continue;
-      }
-
-      if (shouldIgnoreItem(item.payload)) {
-        tasks.push(namespace.remove(itemKey));
-        continue;
-      }
-
-      tasks.push(
-        namespace.save(itemKey, { data: item.data, payload: item.payload }),
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return;
+      const prefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'collection.item',
       );
+      const tasks: Promise<void>[] = [];
+
+      for (const [itemKey, item] of Object.entries(storeRef.state)) {
+        const storageKey = `${prefix}${itemKey}`;
+        if (!item?.data || shouldIgnoreItem(item.payload)) {
+          tasks.push(Promise.resolve(localStorage.removeItem(storageKey)));
+          continue;
+        }
+
+        tasks.push(
+          Promise.resolve(
+            localStorage.setItem(
+              storageKey,
+              JSON.stringify({
+                data: { data: item.data, payload: item.payload },
+                timestamp: Date.now(),
+                version,
+              }),
+            ),
+          ),
+        );
+      }
+
+      for (const itemKey of deletedItemKeys) {
+        const item = storeRef.state[itemKey];
+        const storageKey = `${prefix}${itemKey}`;
+
+        if (!item?.data || shouldIgnoreItem(item.payload)) {
+          tasks.push(Promise.resolve(localStorage.removeItem(storageKey)));
+        }
+      }
+
+      dirtyItemKeys.clear();
+      deletedItemKeys.clear();
+      await Promise.all(tasks);
+      await evictStoredItems();
+      return;
     }
 
-    await Promise.all(tasks);
+    if (!asyncNamespace) return;
+
+    const upserts: Array<{
+      key: string;
+      value: PersistedCollectionItemValue<ItemState>;
+      version: number;
+      metadata: CollectionItemMetadata;
+    }> = [];
+    const removes = new Set<string>(deletedItemKeys);
+    const keysToFlush = new Set([...dirtyItemKeys, ...deletedItemKeys]);
+
+    dirtyItemKeys.clear();
+    deletedItemKeys.clear();
+
+    for (const itemKey of keysToFlush) {
+      const item = storeRef.state[itemKey];
+      if (!item?.data || shouldIgnoreItem(item.payload)) {
+        removes.add(itemKey);
+        continue;
+      }
+
+      removes.delete(itemKey);
+      upserts.push({
+        key: itemKey,
+        value: { data: item.data },
+        version,
+        metadata: { payload: item.payload },
+      });
+    }
+
+    await asyncNamespace.commit({ upserts, removes: [...removes] });
     await evictStoredItems();
   }
 
@@ -466,24 +604,78 @@ export function setupCollectionPersistence<
     store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
   ): void {
     storeRef = store;
-    unsubscribe = store.subscribe(() => {
-      schedulePersistedStateFlush();
+    if (backend === 'localStorage') {
+      unsubscribe = store.subscribe(() => {
+        schedulePersistedStateFlush();
+      });
+      return;
+    }
+
+    lastSnapshot = store.state;
+    unsubscribe = store.subscribe(({ current }) => {
+      if (suppressDirtyTracking > 0) {
+        lastSnapshot = current;
+        return;
+      }
+
+      const previous = lastSnapshot;
+      lastSnapshot = current;
+      const allKeys = new Set([
+        ...Object.keys(previous ?? {}),
+        ...Object.keys(current),
+      ]);
+
+      for (const itemKey of allKeys) {
+        if (
+          previous &&
+          samePersistedProjection(previous[itemKey], current[itemKey])
+        ) {
+          continue;
+        }
+
+        dirtyItemKeys.add(itemKey);
+        if (!current[itemKey]?.data) {
+          deletedItemKeys.add(itemKey);
+        } else {
+          deletedItemKeys.delete(itemKey);
+        }
+      }
+
+      if (dirtyItemKeys.size > 0 || deletedItemKeys.size > 0) {
+        schedulePersistedStateFlush();
+      }
     });
   }
 
   function dispose(): void {
     generation++;
     pendingPreloads.clear();
+    dirtyItemKeys.clear();
+    deletedItemKeys.clear();
     clearSaveTimer();
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
-    namespace.dispose();
+    lastSnapshot = null;
   }
 
   async function clear(): Promise<void> {
     clearSaveTimer();
-    await namespace.clear();
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return;
+      const prefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'collection.item',
+      );
+      for (const key of listLocalStorageKeysSync(prefix)) {
+        localStorage.removeItem(key);
+      }
+      return;
+    }
+
+    await asyncNamespace?.clear();
   }
 
   return {
@@ -491,7 +683,8 @@ export function setupCollectionPersistence<
     attach,
     maybeHydrateItems,
     preloadItems,
-    hasAsyncPreload: backend === 'opfs',
+    hasAsyncPreload:
+      backend === 'opfs' && isAsyncStorageAdapter(storageAdapter),
     dispose,
     clear,
   };

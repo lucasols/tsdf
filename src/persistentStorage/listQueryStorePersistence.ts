@@ -9,27 +9,48 @@ import type {
 } from '../listQueryStore/types';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
-  createPersistentStorageNamespaceHandle,
+  createProtectedStorageRef,
   getStoragePrefixForStoreNamespace,
   listLocalStorageKeysSync,
-  readProtectedStorageKeys,
+  listProtectedLocalStorageNamespaceKeys,
+  openAsyncStorageNamespace,
+  readLocalStorageNamespaceEntries,
+  readAllAsyncStorageMetadata,
   readStorageEntryFromLocalStorageSync,
+  readProtectedStorageKeys,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import { createStorageAdapter, isAsyncStorageAdapter } from './storageAdapter';
 import type {
+  AsyncStorageEntryMetadata,
   ListQueryPersistentStorageConfig,
   PersistedListQueryData,
   PersistedListQueryItemData,
   StorageAdapter,
+  StorageCacheEntry,
 } from './types';
-import { createStorageAdapter } from './storageAdapter';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 500;
 const DEFAULT_MAX_QUERIES = 100;
 const DEFAULT_MAX_QUERY_SIZE = 100;
 const SAVE_DEBOUNCE_MS = 1000;
+
+type PersistedListQueryItemValue<ItemState> = {
+  data: ItemState;
+  loadedFields?: string[];
+};
+
+type PersistedListQueryItemMetadata = { payload: unknown };
+
+type PersistedListQueryValue = Record<string, never>;
+
+type PersistedListQueryMetadata = {
+  payload: unknown;
+  items: string[];
+  hasMore: boolean;
+};
 
 function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
   ignoreItems:
@@ -58,12 +79,23 @@ function createShouldIgnorePersistedItemPredicate<
   };
 }
 
+function arraysEqual(
+  left: string[] | undefined,
+  right: string[] | undefined,
+): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
 function toItemState<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
 >(
-  persisted: PersistedListQueryItemData<unknown>,
+  value: PersistedListQueryItemValue<unknown>,
+  metadata: PersistedListQueryItemMetadata,
   config: ListQueryPersistentStorageConfig<
     ItemState,
     QueryPayload,
@@ -75,22 +107,19 @@ function toItemState<
   itemQuery: TSDFItemQuery<ItemPayload>;
   loadedFields: string[];
 } | null {
-  const validated = validateWithSchema(config.schema, persisted.data);
+  const validated = validateWithSchema(config.schema, value.data);
   if (validated === null) return null;
+  if (shouldIgnorePersistedItem(metadata.payload)) return null;
 
-  if (shouldIgnorePersistedItem(persisted.payload)) return null;
-
-  const payload = __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload);
-
-  const loadedFields = Array.isArray(persisted.loadedFields)
-    ? Array.from(new Set(persisted.loadedFields)).sort()
+  const loadedFields = Array.isArray(value.loadedFields)
+    ? Array.from(new Set(value.loadedFields)).sort()
     : Object.keys(validated).sort();
 
   return {
     item: validated,
     itemQuery: {
       error: null,
-      payload,
+      payload: __LEGIT_CAST__<ItemPayload, unknown>(metadata.payload),
       refetchOnMount: 'lowPriority',
       status: 'success',
       wasLoaded: true,
@@ -154,7 +183,11 @@ function defineLazyLocalStorageItem<
     }
 
     const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
-      cacheEntry.data,
+      {
+        data: cacheEntry.data.data,
+        loadedFields: cacheEntry.data.loadedFields,
+      },
+      { payload: cacheEntry.data.payload },
       config,
       shouldIgnorePersistedItem,
     );
@@ -279,6 +312,75 @@ function defineLazyLocalStorageQuery<
   });
 }
 
+function samePersistedQueryProjection<QueryPayload extends ValidPayload>(
+  current: TSFDListQuery<QueryPayload> | undefined,
+  previous: TSFDListQuery<QueryPayload> | undefined,
+): boolean {
+  const currentEligible =
+    !!current && (current.status === 'success' || current.wasLoaded);
+  const previousEligible =
+    !!previous && (previous.status === 'success' || previous.wasLoaded);
+
+  if (currentEligible !== previousEligible) return false;
+  if (!currentEligible && !previousEligible) return true;
+
+  return (
+    current?.payload === previous?.payload &&
+    current?.items === previous?.items &&
+    current?.hasMore === previous?.hasMore
+  );
+}
+
+function buildReferenceIndexes<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+>(
+  state: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
+  shouldIgnoreItem: (payload: ItemPayload) => boolean,
+  maxQuerySize: number,
+): {
+  rawQueryRefCount: Map<string, number>;
+  persistedQueryRefCount: Map<string, number>;
+} {
+  const rawQueryRefCount = new Map<string, number>();
+  const persistedQueryRefCount = new Map<string, number>();
+
+  for (const query of Object.values(state.queries)) {
+    for (const itemKey of query.items) {
+      rawQueryRefCount.set(itemKey, (rawQueryRefCount.get(itemKey) ?? 0) + 1);
+    }
+
+    if (query.status !== 'success' && !query.wasLoaded) continue;
+
+    const filteredItems = query.items.filter((itemKey) => {
+      const item = state.items[itemKey];
+      const itemQuery = state.itemQueries[itemKey];
+
+      return (
+        item !== null &&
+        item !== undefined &&
+        itemQuery !== null &&
+        itemQuery !== undefined &&
+        !shouldIgnoreItem(itemQuery.payload)
+      );
+    });
+    const limited = limitPersistedQueryItems(
+      filteredItems,
+      query.hasMore,
+      maxQuerySize,
+    );
+    for (const itemKey of limited.itemKeys) {
+      persistedQueryRefCount.set(
+        itemKey,
+        (persistedQueryRefCount.get(itemKey) ?? 0) + 1,
+      );
+    }
+  }
+
+  return { rawQueryRefCount, persistedQueryRefCount };
+}
+
 export type ListQueryPersistenceSetup<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -341,22 +443,27 @@ export function setupListQueryPersistence<
     createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = options.adapter ?? createStorageAdapter(backend);
-
-  const itemNamespace = createPersistentStorageNamespaceHandle<
-    PersistedListQueryItemData<ItemState>
-  >({ ...config, entryPrefix: 'listQuery.item' }, { adapter: storageAdapter });
-  const queryNamespace =
-    createPersistentStorageNamespaceHandle<PersistedListQueryData>(
-      { ...config, entryPrefix: 'listQuery.query' },
-      { adapter: storageAdapter },
-    );
+  const itemNamespace = openAsyncStorageNamespace<
+    PersistedListQueryItemValue<ItemState>,
+    PersistedListQueryItemMetadata
+  >({ ...config, kind: 'listQuery.item' }, { adapter: storageAdapter });
+  const queryNamespace = openAsyncStorageNamespace<
+    PersistedListQueryValue,
+    PersistedListQueryMetadata
+  >({ ...config, kind: 'listQuery.query' }, { adapter: storageAdapter });
 
   let storeRef: Store<State> | null = null;
   let unsubscribe: (() => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
+  let suppressDirtyTracking = 0;
+  let lastSnapshot: State | null = null;
   const pendingItemPreloads = new Map<string, Promise<boolean>>();
   const pendingQueryPreloads = new Map<string, Promise<boolean>>();
+  const dirtyItemKeys = new Set<string>();
+  const dirtyQueryKeys = new Set<string>();
+  const deletedItemKeys = new Set<string>();
+  const deletedQueryKeys = new Set<string>();
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -446,11 +553,14 @@ export function setupListQueryPersistence<
       const cacheEntry = readStorageEntryFromLocalStorageSync<
         PersistedListQueryItemData<unknown>
       >(storageKey, version);
-
       if (!cacheEntry) return false;
 
       const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
-        cacheEntry.data,
+        {
+          data: cacheEntry.data.data,
+          loadedFields: cacheEntry.data.loadedFields,
+        },
+        { payload: cacheEntry.data.payload },
         config,
         shouldIgnorePersistedItem,
       );
@@ -461,6 +571,7 @@ export function setupListQueryPersistence<
 
       scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
 
+      suppressDirtyTracking++;
       storeRef.produceState(
         (draft) => {
           if (draft.itemQueries[itemKey] === undefined) {
@@ -471,28 +582,36 @@ export function setupListQueryPersistence<
         },
         { action: 'persistent-storage-hydrate' },
       );
+      suppressDirtyTracking--;
 
       return true;
     }
+
+    if (!itemNamespace) return false;
 
     const existingPromise = pendingItemPreloads.get(itemKey);
     if (existingPromise) return existingPromise;
 
     const currentGeneration = generation;
     const promise = itemNamespace
-      .load(itemKey)
-      .then((cached) => {
+      .get(itemKey, { touch: 'coarse' })
+      .then(async (cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
+          return false;
+        }
+        if (cached.metadata.version !== version) {
+          await itemNamespace.commit({ removes: [itemKey] });
           return false;
         }
 
         const itemState = toItemState<ItemState, QueryPayload, ItemPayload>(
-          cached,
+          cached.value,
+          { payload: cached.metadata.payload },
           config,
           shouldIgnorePersistedItem,
         );
         if (!itemState) {
-          scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
+          await itemNamespace.commit({ removes: [itemKey] });
           return false;
         }
 
@@ -503,6 +622,7 @@ export function setupListQueryPersistence<
           );
         }
 
+        suppressDirtyTracking++;
         storeRef.produceState(
           (draft) => {
             if (draft.itemQueries[itemKey] === undefined) {
@@ -513,6 +633,7 @@ export function setupListQueryPersistence<
           },
           { action: 'persistent-storage-hydrate' },
         );
+        suppressDirtyTracking--;
 
         return true;
       })
@@ -551,17 +672,13 @@ export function setupListQueryPersistence<
           storageKey,
           version,
         );
-
       if (!cacheEntry) return false;
 
       scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
-
       const activeStore = storeRef;
-
       await Promise.all(
         cacheEntry.data.items.map((itemKey) => preloadItem(itemKey)),
       );
-
       const filteredItemKeys = cacheEntry.data.items.filter((itemKey) => {
         return (
           activeStore.state.items[itemKey] !== undefined &&
@@ -574,6 +691,7 @@ export function setupListQueryPersistence<
         maxQuerySize,
       );
 
+      suppressDirtyTracking++;
       activeStore.produceState(
         (draft) => {
           if (draft.queries[queryKey] === undefined) {
@@ -592,23 +710,30 @@ export function setupListQueryPersistence<
         },
         { action: 'persistent-storage-hydrate' },
       );
+      suppressDirtyTracking--;
 
       return true;
     }
+
+    if (!queryNamespace) return false;
 
     const existingPromise = pendingQueryPreloads.get(queryKey);
     if (existingPromise) return existingPromise;
 
     const currentGeneration = generation;
     const promise = queryNamespace
-      .load(queryKey)
+      .get(queryKey, { touch: 'coarse' })
       .then(async (cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;
         }
-        const activeStore = storeRef;
+        if (cached.metadata.version !== version) {
+          await queryNamespace.commit({ removes: [queryKey] });
+          return false;
+        }
 
-        await preloadItems(cached.items);
+        const activeStore = storeRef;
+        await preloadItems(cached.metadata.items);
         if (currentGeneration !== generation || activeStore !== storeRef) {
           return false;
         }
@@ -616,7 +741,7 @@ export function setupListQueryPersistence<
           return true;
         }
 
-        const filteredItemKeys = cached.items.filter((itemKey) => {
+        const filteredItemKeys = cached.metadata.items.filter((itemKey) => {
           return (
             activeStore.state.items[itemKey] !== undefined &&
             activeStore.state.itemQueries[itemKey] !== undefined
@@ -624,10 +749,11 @@ export function setupListQueryPersistence<
         });
         const limitedQuery = limitPersistedQueryItems(
           filteredItemKeys,
-          cached.hasMore,
+          cached.metadata.hasMore,
           maxQuerySize,
         );
 
+        suppressDirtyTracking++;
         activeStore.produceState(
           (draft) => {
             if (draft.queries[queryKey] === undefined) {
@@ -635,7 +761,9 @@ export function setupListQueryPersistence<
                 error: null,
                 hasMore: limitedQuery.hasMore,
                 items: limitedQuery.itemKeys,
-                payload: __LEGIT_CAST__<QueryPayload, unknown>(cached.payload),
+                payload: __LEGIT_CAST__<QueryPayload, unknown>(
+                  cached.metadata.payload,
+                ),
                 refetchOnMount: 'lowPriority',
                 status: 'success',
                 wasLoaded: true,
@@ -644,6 +772,7 @@ export function setupListQueryPersistence<
           },
           { action: 'persistent-storage-hydrate' },
         );
+        suppressDirtyTracking--;
 
         return true;
       })
@@ -671,211 +800,542 @@ export function setupListQueryPersistence<
   }
 
   async function evictStoredQueries(): Promise<Set<string>> {
-    const queryKeys = await queryNamespace.listKeys();
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return new Set<string>();
+
+      const queryPrefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.query',
+      );
+      const protectedStorageKeys = await readProtectedStorageKeys(
+        storageAdapter,
+        sessionKey,
+      );
+      const protectedQueryKeys = listProtectedLocalStorageNamespaceKeys(
+        protectedStorageKeys,
+        queryPrefix,
+      );
+      const entries = readLocalStorageNamespaceEntries<PersistedListQueryData>(
+        queryPrefix,
+        version,
+      ).map(({ key, entry }) => ({ queryKey: key, entry }));
+
+      entries.sort((left, right) => {
+        const leftProtected = protectedQueryKeys.has(left.queryKey);
+        const rightProtected = protectedQueryKeys.has(right.queryKey);
+        if (leftProtected !== rightProtected) {
+          return leftProtected ? -1 : 1;
+        }
+
+        const leftPinned = pinnedQueryKeys.has(left.queryKey);
+        const rightPinned = pinnedQueryKeys.has(right.queryKey);
+        if (leftPinned !== rightPinned) {
+          return leftPinned ? -1 : 1;
+        }
+
+        return right.entry.timestamp - left.entry.timestamp;
+      });
+
+      const keptQueryKeys = new Set(
+        entries.slice(0, maxQueries).map(({ queryKey }) => queryKey),
+      );
+
+      for (const { queryKey } of entries) {
+        if (!keptQueryKeys.has(queryKey)) {
+          localStorage.removeItem(`${queryPrefix}${queryKey}`);
+        }
+      }
+
+      return keptQueryKeys;
+    }
+
+    if (!queryNamespace) return new Set<string>();
+
     const sessionKey = config.getSessionKey();
     const protectedStorageKeys =
       sessionKey !== false
         ? await readProtectedStorageKeys(storageAdapter, sessionKey)
         : new Set<string>();
-    const queryPrefix =
+    const isProtectedQueryKey =
       sessionKey === false
-        ? null
-        : getStoragePrefixForStoreNamespace(
-            sessionKey,
-            config.storeName,
-            'listQuery.query',
-          );
-    const protectedQueryKeys =
-      queryPrefix === null
-        ? new Set<string>()
-        : new Set(
-            [...protectedStorageKeys]
-              .filter((key) => key.startsWith(queryPrefix))
-              .map((key) => key.slice(queryPrefix.length)),
-          );
-    const entries = await Promise.all(
-      queryKeys.map(async (queryKey) => ({
-        queryKey,
-        entry: await queryNamespace.readEntry(queryKey),
-      })),
+        ? (_key_: string) => false
+        : (key: string) =>
+            protectedStorageKeys.has(
+              createProtectedStorageRef({
+                sessionKey,
+                storeName: config.storeName,
+                kind: 'listQuery.query',
+                key,
+              }),
+            );
+    const metadataEntries = await readAllAsyncStorageMetadata(queryNamespace, {
+      order: 'lru-desc',
+    });
+    const validEntries = metadataEntries.filter(
+      (entry): entry is AsyncStorageEntryMetadata<PersistedListQueryMetadata> =>
+        entry.version === version,
     );
 
-    const validEntries = filterAndMap(entries, ({ queryKey, entry }) => {
-      return entry ? { queryKey, entry } : false;
-    });
+    validEntries.sort((left, right) => {
+      const leftProtected = isProtectedQueryKey(left.key);
+      const rightProtected = isProtectedQueryKey(right.key);
+      if (leftProtected !== rightProtected) {
+        return leftProtected ? -1 : 1;
+      }
 
-    validEntries.sort((a, b) => {
-      const aProtected = protectedQueryKeys.has(a.queryKey);
-      const bProtected = protectedQueryKeys.has(b.queryKey);
+      const leftPinned = pinnedQueryKeys.has(left.key);
+      const rightPinned = pinnedQueryKeys.has(right.key);
+      if (leftPinned !== rightPinned) {
+        return leftPinned ? -1 : 1;
+      }
 
-      if (aProtected && !bProtected) return -1;
-      if (!aProtected && bProtected) return 1;
-
-      const aPinned = pinnedQueryKeys.has(a.queryKey);
-      const bPinned = pinnedQueryKeys.has(b.queryKey);
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-
-      return b.entry.timestamp - a.entry.timestamp;
+      return right.lastAccessAt - left.lastAccessAt;
     });
 
     const keptQueryKeys = new Set(
-      validEntries.slice(0, maxQueries).map(({ queryKey }) => queryKey),
+      validEntries.slice(0, maxQueries).map((entry) => entry.key),
     );
-
-    await Promise.all(
-      validEntries
-        .filter(({ queryKey }) => !keptQueryKeys.has(queryKey))
-        .map(({ queryKey }) => queryNamespace.remove(queryKey)),
-    );
+    const removals = validEntries
+      .filter((entry) => !keptQueryKeys.has(entry.key))
+      .map((entry) => entry.key);
+    if (removals.length > 0) {
+      await queryNamespace.commit({ removes: removals });
+    }
 
     return keptQueryKeys;
   }
 
   async function evictStoredItems(keptQueryKeys: Set<string>): Promise<void> {
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return;
+
+      const protectedStorageKeys = await readProtectedStorageKeys(
+        storageAdapter,
+        sessionKey,
+      );
+      const itemPrefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.item',
+      );
+      const queryPrefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.query',
+      );
+      const protectedItemKeys = listProtectedLocalStorageNamespaceKeys(
+        protectedStorageKeys,
+        itemPrefix,
+      );
+      const queryEntries = filterAndMap(
+        [...keptQueryKeys].map((queryKey) => {
+          const entry =
+            readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
+              `${queryPrefix}${queryKey}`,
+              version,
+            );
+          return entry ? { queryKey, entry } : false;
+        }),
+        (entry) => entry,
+      );
+
+      const referencedItems = new Set<string>();
+      for (const { entry } of queryEntries) {
+        for (const itemKey of entry.data.items) {
+          referencedItems.add(itemKey);
+        }
+      }
+
+      const itemEntries = readLocalStorageNamespaceEntries<
+        PersistedListQueryItemData<unknown>
+      >(itemPrefix, version).map(({ key, entry }) => ({ itemKey: key, entry }));
+      if (!hasIgnoreItemFilter && itemEntries.length <= maxItems) {
+        return;
+      }
+      const ignoredEntries = itemEntries.filter(({ entry }) =>
+        shouldIgnorePersistedItem(entry.data.payload),
+      );
+
+      for (const { itemKey } of ignoredEntries) {
+        localStorage.removeItem(`${itemPrefix}${itemKey}`);
+      }
+
+      const persistedEntries = itemEntries.filter(
+        ({ entry }) => !shouldIgnorePersistedItem(entry.data.payload),
+      );
+      persistedEntries.sort((left, right) => {
+        const leftProtected = protectedItemKeys.has(left.itemKey);
+        const rightProtected = protectedItemKeys.has(right.itemKey);
+        if (leftProtected !== rightProtected) {
+          return leftProtected ? -1 : 1;
+        }
+
+        const leftPinned = pinnedItemKeys.has(left.itemKey);
+        const rightPinned = pinnedItemKeys.has(right.itemKey);
+        if (leftPinned !== rightPinned) {
+          return leftPinned ? -1 : 1;
+        }
+
+        const leftReferenced = referencedItems.has(left.itemKey);
+        const rightReferenced = referencedItems.has(right.itemKey);
+        if (leftReferenced !== rightReferenced) {
+          return leftReferenced ? -1 : 1;
+        }
+
+        return right.entry.timestamp - left.entry.timestamp;
+      });
+
+      const keptItemKeys = new Set(
+        persistedEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+      );
+
+      for (const { itemKey } of persistedEntries) {
+        if (!keptItemKeys.has(itemKey)) {
+          localStorage.removeItem(`${itemPrefix}${itemKey}`);
+        }
+      }
+
+      for (const { queryKey, entry } of queryEntries) {
+        const filteredItems = entry.data.items.filter((itemKey) =>
+          keptItemKeys.has(itemKey),
+        );
+        const limitedQuery = limitPersistedQueryItems(
+          filteredItems,
+          entry.data.hasMore,
+          maxQuerySize,
+        );
+        if (
+          limitedQuery.itemKeys.length === entry.data.items.length &&
+          limitedQuery.hasMore === entry.data.hasMore
+        ) {
+          continue;
+        }
+
+        localStorage.setItem(
+          `${queryPrefix}${queryKey}`,
+          JSON.stringify({
+            data: {
+              payload: entry.data.payload,
+              items: limitedQuery.itemKeys,
+              hasMore: limitedQuery.hasMore,
+            },
+            timestamp: Date.now(),
+            version,
+          } satisfies StorageCacheEntry<PersistedListQueryData>),
+        );
+      }
+
+      return;
+    }
+
+    if (!itemNamespace || !queryNamespace) return;
+
     const sessionKey = config.getSessionKey();
     const protectedStorageKeys =
       sessionKey !== false
         ? await readProtectedStorageKeys(storageAdapter, sessionKey)
         : new Set<string>();
-    const itemPrefix =
+    const isProtectedItemKey =
       sessionKey === false
-        ? null
-        : getStoragePrefixForStoreNamespace(
-            sessionKey,
-            config.storeName,
-            'listQuery.item',
-          );
-    const protectedItemKeys =
-      itemPrefix === null
-        ? new Set<string>()
-        : new Set(
-            [...protectedStorageKeys]
-              .filter((key) => key.startsWith(itemPrefix))
-              .map((key) => key.slice(itemPrefix.length)),
-          );
-    const queryEntries = await Promise.all(
-      [...keptQueryKeys].map(async (queryKey) => ({
-        queryKey,
-        entry: await queryNamespace.readEntry(queryKey),
-      })),
+        ? (_key_: string) => false
+        : (key: string) =>
+            protectedStorageKeys.has(
+              createProtectedStorageRef({
+                sessionKey,
+                storeName: config.storeName,
+                kind: 'listQuery.item',
+                key,
+              }),
+            );
+    const keptQueryMetadata = (
+      await readAllAsyncStorageMetadata(queryNamespace, { order: 'key' })
+    ).filter(
+      (entry): entry is AsyncStorageEntryMetadata<PersistedListQueryMetadata> =>
+        entry.version === version && keptQueryKeys.has(entry.key),
     );
 
     const referencedItems = new Set<string>();
-    for (const { entry } of queryEntries) {
-      if (!entry) continue;
-
-      for (const itemKey of entry.data.items) {
+    for (const entry of keptQueryMetadata) {
+      for (const itemKey of entry.items) {
         referencedItems.add(itemKey);
       }
     }
 
-    const itemKeys = await itemNamespace.listKeys();
-    if (!hasIgnoreItemFilter && itemKeys.length <= maxItems) return;
-    const itemEntries = await Promise.all(
-      itemKeys.map(async (itemKey) => ({
-        itemKey,
-        entry: await itemNamespace.readEntry(itemKey),
-      })),
-    );
-
-    const validItemEntries = filterAndMap(itemEntries, ({ itemKey, entry }) => {
-      return entry ? { itemKey, entry } : false;
+    const metadataEntries = await readAllAsyncStorageMetadata(itemNamespace, {
+      order: 'lru-desc',
     });
-
-    const ignoredItemEntries = validItemEntries.filter(({ entry }) =>
-      shouldIgnorePersistedItem(entry.data.payload),
+    const validEntries = metadataEntries.filter(
+      (
+        entry,
+      ): entry is AsyncStorageEntryMetadata<PersistedListQueryItemMetadata> =>
+        entry.version === version,
     );
 
-    if (ignoredItemEntries.length > 0) {
-      await Promise.all(
-        ignoredItemEntries.map(({ itemKey }) => itemNamespace.remove(itemKey)),
-      );
+    const ignoredKeys = validEntries
+      .filter((entry) => shouldIgnorePersistedItem(entry.payload))
+      .map((entry) => entry.key);
+    if (ignoredKeys.length > 0) {
+      await itemNamespace.commit({ removes: ignoredKeys });
     }
 
-    const persistedItemEntries = validItemEntries.filter(
-      ({ entry }) => !shouldIgnorePersistedItem(entry.data.payload),
+    const persistedEntries = validEntries.filter(
+      (entry) => !shouldIgnorePersistedItem(entry.payload),
     );
+    if (!hasIgnoreItemFilter && persistedEntries.length <= maxItems) {
+      return;
+    }
 
-    persistedItemEntries.sort((a, b) => {
-      const aProtected = protectedItemKeys.has(a.itemKey);
-      const bProtected = protectedItemKeys.has(b.itemKey);
+    persistedEntries.sort((left, right) => {
+      const leftProtected = isProtectedItemKey(left.key);
+      const rightProtected = isProtectedItemKey(right.key);
+      if (leftProtected !== rightProtected) {
+        return leftProtected ? -1 : 1;
+      }
 
-      if (aProtected && !bProtected) return -1;
-      if (!aProtected && bProtected) return 1;
+      const leftPinned = pinnedItemKeys.has(left.key);
+      const rightPinned = pinnedItemKeys.has(right.key);
+      if (leftPinned !== rightPinned) {
+        return leftPinned ? -1 : 1;
+      }
 
-      const aPinned = pinnedItemKeys.has(a.itemKey);
-      const bPinned = pinnedItemKeys.has(b.itemKey);
+      const leftReferenced = referencedItems.has(left.key);
+      const rightReferenced = referencedItems.has(right.key);
+      if (leftReferenced !== rightReferenced) {
+        return leftReferenced ? -1 : 1;
+      }
 
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-
-      const aReferenced = referencedItems.has(a.itemKey);
-      const bReferenced = referencedItems.has(b.itemKey);
-
-      if (aReferenced && !bReferenced) return -1;
-      if (!aReferenced && bReferenced) return 1;
-
-      return b.entry.timestamp - a.entry.timestamp;
+      return right.lastAccessAt - left.lastAccessAt;
     });
 
     const keptItemKeys = new Set(
-      persistedItemEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+      persistedEntries.slice(0, maxItems).map((entry) => entry.key),
     );
+    const removals = persistedEntries
+      .filter((entry) => !keptItemKeys.has(entry.key))
+      .map((entry) => entry.key);
+    if (removals.length > 0) {
+      await itemNamespace.commit({ removes: removals });
+    }
 
-    await Promise.all(
-      persistedItemEntries
-        .filter(({ itemKey }) => !keptItemKeys.has(itemKey))
-        .map(({ itemKey }) => itemNamespace.remove(itemKey)),
-    );
+    const queryUpdates: Array<{
+      key: string;
+      value: PersistedListQueryValue;
+      metadata: PersistedListQueryMetadata;
+      version: number;
+    }> = [];
+    for (const queryEntry of keptQueryMetadata) {
+      const filteredItems = queryEntry.items.filter((itemKey) =>
+        keptItemKeys.has(itemKey),
+      );
+      const limitedQuery = limitPersistedQueryItems(
+        filteredItems,
+        queryEntry.hasMore,
+        maxQuerySize,
+      );
+      if (
+        limitedQuery.itemKeys.length === queryEntry.items.length &&
+        limitedQuery.hasMore === queryEntry.hasMore
+      ) {
+        continue;
+      }
 
-    await Promise.all(
-      [...keptQueryKeys].map(async (queryKey) => {
-        const entry = await queryNamespace.load(queryKey);
-        if (!entry) return;
-
-        const filteredItems = entry.items.filter((itemKey) =>
-          keptItemKeys.has(itemKey),
-        );
-        const limitedQuery = limitPersistedQueryItems(
-          filteredItems,
-          entry.hasMore,
-          maxQuerySize,
-        );
-
-        if (
-          limitedQuery.itemKeys.length === entry.items.length &&
-          limitedQuery.hasMore === entry.hasMore
-        ) {
-          return;
-        }
-
-        await queryNamespace.save(queryKey, {
-          ...entry,
+      queryUpdates.push({
+        key: queryEntry.key,
+        value: {},
+        version,
+        metadata: {
+          payload: queryEntry.payload,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
-        });
-      }),
-    );
+        },
+      });
+    }
+
+    if (queryUpdates.length > 0) {
+      await queryNamespace.commit({ upserts: queryUpdates });
+    }
   }
 
   async function flushPersistedState(): Promise<void> {
     if (!storeRef) return;
 
     const state = storeRef.state;
-    const tasks: Promise<void>[] = [];
-    const queryReferencedItemKeys = new Set<string>();
-    const persistedQueryItemKeys = new Set<string>();
 
-    for (const query of Object.values(state.queries)) {
-      for (const itemKey of query.items) {
-        queryReferencedItemKeys.add(itemKey);
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return;
+
+      const itemPrefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.item',
+      );
+      const queryPrefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.query',
+      );
+      const tasks: Promise<void>[] = [];
+      const queryReferencedItemKeys = new Set<string>();
+      const persistedQueryItemKeys = new Set<string>();
+
+      for (const query of Object.values(state.queries)) {
+        for (const itemKey of query.items) {
+          queryReferencedItemKeys.add(itemKey);
+        }
       }
+
+      for (const [queryKey, query] of Object.entries(state.queries)) {
+        const storageKey = `${queryPrefix}${queryKey}`;
+
+        if (!query || (query.status !== 'success' && !query.wasLoaded)) {
+          tasks.push(Promise.resolve(localStorage.removeItem(storageKey)));
+          continue;
+        }
+
+        const filteredItems = query.items.filter((itemKey) => {
+          const item = state.items[itemKey];
+          const itemQuery = state.itemQueries[itemKey];
+
+          return (
+            item !== null &&
+            item !== undefined &&
+            itemQuery !== null &&
+            itemQuery !== undefined &&
+            !shouldIgnoreItem(itemQuery.payload)
+          );
+        });
+        const limitedQuery = limitPersistedQueryItems(
+          filteredItems,
+          query.hasMore,
+          maxQuerySize,
+        );
+        for (const itemKey of limitedQuery.itemKeys) {
+          persistedQueryItemKeys.add(itemKey);
+        }
+        tasks.push(
+          Promise.resolve(
+            localStorage.setItem(
+              storageKey,
+              JSON.stringify({
+                data: {
+                  payload: query.payload,
+                  items: limitedQuery.itemKeys,
+                  hasMore: limitedQuery.hasMore,
+                },
+                timestamp: Date.now(),
+                version,
+              } satisfies StorageCacheEntry<PersistedListQueryData>),
+            ),
+          ),
+        );
+      }
+
+      for (const [itemKey, item] of Object.entries(state.items)) {
+        const itemQuery = state.itemQueries[itemKey];
+        const storageKey = `${itemPrefix}${itemKey}`;
+
+        if (
+          item === null ||
+          item === undefined ||
+          itemQuery === null ||
+          itemQuery === undefined
+        ) {
+          tasks.push(Promise.resolve(localStorage.removeItem(storageKey)));
+          continue;
+        }
+        if (shouldIgnoreItem(itemQuery.payload)) {
+          tasks.push(Promise.resolve(localStorage.removeItem(storageKey)));
+          continue;
+        }
+        if (
+          queryReferencedItemKeys.has(itemKey) &&
+          !persistedQueryItemKeys.has(itemKey)
+        ) {
+          tasks.push(Promise.resolve(localStorage.removeItem(storageKey)));
+          continue;
+        }
+
+        tasks.push(
+          Promise.resolve(
+            localStorage.setItem(
+              storageKey,
+              JSON.stringify({
+                data: {
+                  data: item,
+                  payload: itemQuery.payload,
+                  loadedFields: state.itemLoadedFields[itemKey],
+                },
+                timestamp: Date.now(),
+                version,
+              } satisfies StorageCacheEntry<
+                PersistedListQueryItemData<ItemState>
+              >),
+            ),
+          ),
+        );
+      }
+
+      for (const queryKey of deletedQueryKeys) {
+        tasks.push(
+          Promise.resolve(localStorage.removeItem(`${queryPrefix}${queryKey}`)),
+        );
+      }
+
+      for (const itemKey of deletedItemKeys) {
+        tasks.push(
+          Promise.resolve(localStorage.removeItem(`${itemPrefix}${itemKey}`)),
+        );
+      }
+
+      dirtyItemKeys.clear();
+      dirtyQueryKeys.clear();
+      deletedItemKeys.clear();
+      deletedQueryKeys.clear();
+      await Promise.all(tasks);
+      const keptQueryKeys = await evictStoredQueries();
+      await evictStoredItems(keptQueryKeys);
+      return;
     }
 
-    for (const [queryKey, query] of Object.entries(state.queries)) {
-      if (query.status !== 'success' && !query.wasLoaded) continue;
+    if (!itemNamespace || !queryNamespace) return;
+
+    const { rawQueryRefCount, persistedQueryRefCount } = buildReferenceIndexes(
+      state,
+      shouldIgnoreItem,
+      maxQuerySize,
+    );
+    const queryKeysToFlush = new Set([...dirtyQueryKeys, ...deletedQueryKeys]);
+    const itemKeysToFlush = new Set([...dirtyItemKeys, ...deletedItemKeys]);
+    const queryUpserts: Array<{
+      key: string;
+      value: PersistedListQueryValue;
+      version: number;
+      metadata: PersistedListQueryMetadata;
+    }> = [];
+    const itemUpserts: Array<{
+      key: string;
+      value: PersistedListQueryItemValue<ItemState>;
+      version: number;
+      metadata: PersistedListQueryItemMetadata;
+    }> = [];
+    const queryRemoves = new Set<string>(deletedQueryKeys);
+    const itemRemoves = new Set<string>(deletedItemKeys);
+
+    dirtyItemKeys.clear();
+    dirtyQueryKeys.clear();
+    deletedItemKeys.clear();
+    deletedQueryKeys.clear();
+
+    for (const queryKey of queryKeysToFlush) {
+      const query = state.queries[queryKey];
+      if (!query || (query.status !== 'success' && !query.wasLoaded)) {
+        queryRemoves.add(queryKey);
+        continue;
+      }
 
       const filteredItems = query.items.filter((itemKey) => {
         const item = state.items[itemKey];
@@ -894,49 +1354,60 @@ export function setupListQueryPersistence<
         query.hasMore,
         maxQuerySize,
       );
-
-      for (const itemKey of limitedQuery.itemKeys) {
-        persistedQueryItemKeys.add(itemKey);
-      }
-
-      tasks.push(
-        queryNamespace.save(queryKey, {
+      queryRemoves.delete(queryKey);
+      queryUpserts.push({
+        key: queryKey,
+        value: {},
+        version,
+        metadata: {
           payload: query.payload,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
-        }),
-      );
+        },
+      });
     }
 
-    for (const [itemKey, item] of Object.entries(state.items)) {
+    for (const itemKey of itemKeysToFlush) {
+      const item = state.items[itemKey];
       const itemQuery = state.itemQueries[itemKey];
 
-      if (item === null || itemQuery === null || itemQuery === undefined) {
-        tasks.push(itemNamespace.remove(itemKey));
+      if (
+        item === null ||
+        item === undefined ||
+        itemQuery === null ||
+        itemQuery === undefined
+      ) {
+        itemRemoves.add(itemKey);
         continue;
       }
-
       if (shouldIgnoreItem(itemQuery.payload)) {
-        tasks.push(itemNamespace.remove(itemKey));
+        itemRemoves.add(itemKey);
+        continue;
+      }
+      if (
+        (rawQueryRefCount.get(itemKey) ?? 0) > 0 &&
+        (persistedQueryRefCount.get(itemKey) ?? 0) === 0
+      ) {
+        itemRemoves.add(itemKey);
         continue;
       }
 
-      const isQueryReferenced = queryReferencedItemKeys.has(itemKey);
-      if (isQueryReferenced && !persistedQueryItemKeys.has(itemKey)) {
-        tasks.push(itemNamespace.remove(itemKey));
-        continue;
-      }
-
-      tasks.push(
-        itemNamespace.save(itemKey, {
-          data: item,
-          payload: itemQuery.payload,
-          loadedFields: state.itemLoadedFields[itemKey],
-        }),
-      );
+      itemRemoves.delete(itemKey);
+      itemUpserts.push({
+        key: itemKey,
+        value: { data: item, loadedFields: state.itemLoadedFields[itemKey] },
+        version,
+        metadata: { payload: itemQuery.payload },
+      });
     }
 
-    await Promise.all(tasks);
+    await Promise.all([
+      queryNamespace.commit({
+        upserts: queryUpserts,
+        removes: [...queryRemoves],
+      }),
+      itemNamespace.commit({ upserts: itemUpserts, removes: [...itemRemoves] }),
+    ]);
     const keptQueryKeys = await evictStoredQueries();
     await evictStoredItems(keptQueryKeys);
   }
@@ -951,8 +1422,91 @@ export function setupListQueryPersistence<
 
   function attach(store: Store<State>): void {
     storeRef = store;
-    unsubscribe = store.subscribe(() => {
-      schedulePersistedStateFlush();
+    if (backend === 'localStorage') {
+      unsubscribe = store.subscribe(() => {
+        schedulePersistedStateFlush();
+      });
+      return;
+    }
+
+    lastSnapshot = store.state;
+    unsubscribe = store.subscribe(({ current }) => {
+      if (suppressDirtyTracking > 0) {
+        lastSnapshot = current;
+        return;
+      }
+
+      const previous = lastSnapshot;
+      lastSnapshot = current;
+      if (!previous) {
+        schedulePersistedStateFlush();
+        return;
+      }
+
+      const queryKeys = new Set([
+        ...Object.keys(previous.queries),
+        ...Object.keys(current.queries),
+      ]);
+      for (const queryKey of queryKeys) {
+        const previousQuery = previous.queries[queryKey];
+        const currentQuery = current.queries[queryKey];
+        if (samePersistedQueryProjection(currentQuery, previousQuery)) {
+          continue;
+        }
+
+        dirtyQueryKeys.add(queryKey);
+        if (!currentQuery) {
+          deletedQueryKeys.add(queryKey);
+        } else {
+          deletedQueryKeys.delete(queryKey);
+        }
+
+        for (const itemKey of previousQuery?.items ?? []) {
+          dirtyItemKeys.add(itemKey);
+        }
+        for (const itemKey of currentQuery?.items ?? []) {
+          dirtyItemKeys.add(itemKey);
+        }
+      }
+
+      const itemKeys = new Set([
+        ...Object.keys(previous.items),
+        ...Object.keys(current.items),
+        ...Object.keys(previous.itemQueries),
+        ...Object.keys(current.itemQueries),
+      ]);
+      for (const itemKey of itemKeys) {
+        if (
+          current.items[itemKey] === previous.items[itemKey] &&
+          current.itemQueries[itemKey] === previous.itemQueries[itemKey] &&
+          arraysEqual(
+            current.itemLoadedFields[itemKey],
+            previous.itemLoadedFields[itemKey],
+          )
+        ) {
+          continue;
+        }
+
+        dirtyItemKeys.add(itemKey);
+        if (
+          current.items[itemKey] === null ||
+          current.itemQueries[itemKey] === null ||
+          current.itemQueries[itemKey] === undefined
+        ) {
+          deletedItemKeys.add(itemKey);
+        } else {
+          deletedItemKeys.delete(itemKey);
+        }
+      }
+
+      if (
+        dirtyItemKeys.size > 0 ||
+        dirtyQueryKeys.size > 0 ||
+        deletedItemKeys.size > 0 ||
+        deletedQueryKeys.size > 0
+      ) {
+        schedulePersistedStateFlush();
+      }
     });
   }
 
@@ -960,17 +1514,45 @@ export function setupListQueryPersistence<
     generation++;
     pendingItemPreloads.clear();
     pendingQueryPreloads.clear();
+    dirtyItemKeys.clear();
+    dirtyQueryKeys.clear();
+    deletedItemKeys.clear();
+    deletedQueryKeys.clear();
     clearSaveTimer();
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
-    itemNamespace.dispose();
-    queryNamespace.dispose();
+    lastSnapshot = null;
   }
 
   async function clear(): Promise<void> {
     clearSaveTimer();
-    await Promise.all([itemNamespace.clear(), queryNamespace.clear()]);
+
+    if (backend === 'localStorage') {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return;
+
+      const itemPrefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.item',
+      );
+      const queryPrefix = getStoragePrefixForStoreNamespace(
+        sessionKey,
+        config.storeName,
+        'listQuery.query',
+      );
+
+      for (const key of listLocalStorageKeysSync(itemPrefix)) {
+        localStorage.removeItem(key);
+      }
+      for (const key of listLocalStorageKeysSync(queryPrefix)) {
+        localStorage.removeItem(key);
+      }
+      return;
+    }
+
+    await Promise.all([itemNamespace?.clear(), queryNamespace?.clear()]);
   }
 
   return {
@@ -980,7 +1562,8 @@ export function setupListQueryPersistence<
     maybeHydrateQueries,
     preloadItems,
     preloadQueries,
-    hasAsyncPreload: backend === 'opfs',
+    hasAsyncPreload:
+      backend === 'opfs' && isAsyncStorageAdapter(storageAdapter),
     dispose,
     clear,
   };

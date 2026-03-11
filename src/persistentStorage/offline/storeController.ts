@@ -1,8 +1,15 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { ValidPayload } from '../../utils/storeShared';
-import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
-import type { StorageAdapter, StorageBackend } from '../types';
+import { getStoragePrefixForStoreNamespace } from '../persistentStorageManager';
+import { createStorageAdapter, isAsyncStorageAdapter } from '../storageAdapter';
+import type {
+  AsyncStorageNamespaceHandle,
+  StorageAdapter,
+  StorageBackend,
+  StorageCacheEntry,
+  SyncStorageAdapter,
+} from '../types';
 import { validateWithSchema } from '../validateWithSchema';
 import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
 import type {
@@ -58,19 +65,26 @@ type CreateOfflineStoreControllerOptions<
   storeAdapter: OfflineStoreAdapter<THelpers, TMutationPayload>;
 };
 
+type OfflineNamespaceHandle<T> = {
+  get: (key: string) => Promise<T | null>;
+  getMany: (keys: string[]) => Promise<Array<T | null>>;
+  commit: (args: {
+    upserts?: Array<{ key: string; value: T }>;
+    removes?: string[];
+  }) => Promise<void>;
+  listPage: (
+    cursor?: string | null,
+  ) => Promise<{ keys: string[]; cursor: string | null }>;
+  clear: () => Promise<void>;
+};
+
 type ActiveSessionState = {
   sessionKey: string;
   session: ReturnType<typeof getOrCreateSessionOfflineCoordinator>;
   unregister: (() => void) | null;
-  queueNamespace: ReturnType<
-    typeof createPersistentStorageNamespaceHandle<OfflineQueueEntry>
-  >;
-  conflictNamespace: ReturnType<
-    typeof createPersistentStorageNamespaceHandle<OfflineConflictRecord>
-  >;
-  entityNamespace: ReturnType<
-    typeof createPersistentStorageNamespaceHandle<GlobalOfflineEntity>
-  >;
+  queueNamespace: OfflineNamespaceHandle<OfflineQueueEntry>;
+  conflictNamespace: OfflineNamespaceHandle<OfflineConflictRecord>;
+  entityNamespace: OfflineNamespaceHandle<GlobalOfflineEntity>;
 };
 
 function buildEntityId(
@@ -108,6 +122,146 @@ function compareQueueEntries(
     return left.createdAt - right.createdAt;
   }
   return left.id.localeCompare(right.id);
+}
+
+function encodePageCursor(offset: number): string {
+  return JSON.stringify({ offset });
+}
+
+function decodePageCursor(cursor: string | null | undefined): number {
+  if (!cursor) return 0;
+
+  try {
+    const parsed: unknown = JSON.parse(cursor);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'offset' in parsed &&
+      typeof parsed.offset === 'number'
+    ) {
+      return parsed.offset;
+    }
+  } catch {
+    // Ignore malformed cursors and restart from the beginning.
+  }
+
+  return 0;
+}
+
+function createLocalNamespaceHandle<T>(args: {
+  adapter: SyncStorageAdapter;
+  sessionKey: string;
+  storeName: string;
+  entryPrefix: string;
+  version: number;
+}): OfflineNamespaceHandle<T> {
+  const prefix = getStoragePrefixForStoreNamespace(
+    args.sessionKey,
+    args.storeName,
+    args.entryPrefix,
+  );
+
+  async function readOne(key: string): Promise<T | null> {
+    const entry = await args.adapter.read<StorageCacheEntry<T>>(
+      `${prefix}${key}`,
+    );
+    if (!entry || entry.version !== args.version) return null;
+    return entry.data;
+  }
+
+  return {
+    get: readOne,
+    async getMany(keys: string[]): Promise<Array<T | null>> {
+      return Promise.all(keys.map((key) => readOne(key)));
+    },
+    async commit({
+      upserts = [],
+      removes = [],
+    }: {
+      upserts?: Array<{ key: string; value: T }>;
+      removes?: string[];
+    }): Promise<void> {
+      const now = Date.now();
+      await Promise.all([
+        ...upserts.map((entry) =>
+          args.adapter.write(`${prefix}${entry.key}`, {
+            data: entry.value,
+            timestamp: now,
+            version: args.version,
+          } satisfies StorageCacheEntry<T>),
+        ),
+        ...removes.map((key) => args.adapter.remove(`${prefix}${key}`)),
+      ]);
+    },
+    async listPage(
+      cursor?: string | null,
+    ): Promise<{ keys: string[]; cursor: string | null }> {
+      const offset = decodePageCursor(cursor);
+      const keys = (await args.adapter.listKeys(prefix))
+        .map((key) => key.slice(prefix.length))
+        .sort();
+      const page = keys.slice(offset, offset + 100);
+
+      return {
+        keys: page,
+        cursor:
+          offset + page.length >= keys.length
+            ? null
+            : encodePageCursor(offset + page.length),
+      };
+    },
+    clear(): Promise<void> {
+      return args.adapter.removeByPrefix(prefix);
+    },
+  };
+}
+
+function createAsyncNamespaceHandle<T>(args: {
+  namespace: AsyncStorageNamespaceHandle<T>;
+}): OfflineNamespaceHandle<T> {
+  return {
+    async get(key: string): Promise<T | null> {
+      const entry = await args.namespace.get(key, { touch: 'never' });
+      return entry?.value ?? null;
+    },
+    async getMany(keys: string[]): Promise<Array<T | null>> {
+      const entries = await args.namespace.getMany(keys, { touch: 'never' });
+      return entries.map((entry) => entry?.value ?? null);
+    },
+    commit({
+      upserts = [],
+      removes = [],
+    }: {
+      upserts?: Array<{ key: string; value: T }>;
+      removes?: string[];
+    }): Promise<void> {
+      return args.namespace.commit({
+        upserts: upserts.map((entry) => ({
+          key: entry.key,
+          value: entry.value,
+          version: 1,
+        })),
+        removes,
+      });
+    },
+    async listPage(
+      cursor?: string | null,
+    ): Promise<{ keys: string[]; cursor: string | null }> {
+      const page = await args.namespace.listMetadata({
+        cursor,
+        limit: 100,
+        order: 'key',
+      });
+
+      return {
+        keys: page.entries.map((entry) => entry.key),
+        cursor: page.cursor,
+      };
+    },
+    clear(): Promise<void> {
+      return args.namespace.clear();
+    },
+  };
 }
 
 export type OfflineStoreController<
@@ -228,39 +382,52 @@ export function createOfflineStoreController<
       >(offlineMode),
     });
 
-    const queueNamespace =
-      createPersistentStorageNamespaceHandle<OfflineQueueEntry>(
-        {
+    const resolvedAdapter = adapter ?? createStorageAdapter(backend);
+    const queueNamespace = isAsyncStorageAdapter(resolvedAdapter)
+      ? createAsyncNamespaceHandle({
+          namespace: resolvedAdapter.openNamespace<OfflineQueueEntry>({
+            sessionKey,
+            storeName,
+            kind: 'offline.queue',
+          }),
+        })
+      : createLocalNamespaceHandle<OfflineQueueEntry>({
+          adapter: resolvedAdapter,
+          sessionKey,
           storeName,
-          backend,
-          getSessionKey: () => sessionKey,
-          onPersistentStorageError,
           entryPrefix: 'offline.queue',
-        },
-        { adapter },
-      );
-    const conflictNamespace =
-      createPersistentStorageNamespaceHandle<OfflineConflictRecord>(
-        {
+          version: 1,
+        });
+    const conflictNamespace = isAsyncStorageAdapter(resolvedAdapter)
+      ? createAsyncNamespaceHandle({
+          namespace: resolvedAdapter.openNamespace<OfflineConflictRecord>({
+            sessionKey,
+            storeName,
+            kind: 'offline.conflict',
+          }),
+        })
+      : createLocalNamespaceHandle<OfflineConflictRecord>({
+          adapter: resolvedAdapter,
+          sessionKey,
           storeName,
-          backend,
-          getSessionKey: () => sessionKey,
-          onPersistentStorageError,
           entryPrefix: 'offline.conflict',
-        },
-        { adapter },
-      );
-    const entityNamespace =
-      createPersistentStorageNamespaceHandle<GlobalOfflineEntity>(
-        {
+          version: 1,
+        });
+    const entityNamespace = isAsyncStorageAdapter(resolvedAdapter)
+      ? createAsyncNamespaceHandle({
+          namespace: resolvedAdapter.openNamespace<GlobalOfflineEntity>({
+            sessionKey,
+            storeName,
+            kind: 'offline.entity',
+          }),
+        })
+      : createLocalNamespaceHandle<GlobalOfflineEntity>({
+          adapter: resolvedAdapter,
+          sessionKey,
           storeName,
-          backend,
-          getSessionKey: () => sessionKey,
-          onPersistentStorageError,
           entryPrefix: 'offline.entity',
-        },
-        { adapter },
-      );
+          version: 1,
+        });
 
     const unregister = session.registerStore({
       storeName,
@@ -289,28 +456,30 @@ export function createOfflineStoreController<
     if (hydratedPromise) return hydratedPromise;
 
     hydratedPromise = (async () => {
-      const [queueKeys, conflictKeys] = await Promise.all([
-        current.queueNamespace.listKeys(),
-        current.conflictNamespace.listKeys(),
-      ]);
-
       const loadedQueueEntries = new Map<string, OfflineQueueEntry>();
-      const loadedEntries = await Promise.all(
-        queueKeys.map((key) => current.queueNamespace.load(key)),
-      );
-      for (const entry of loadedEntries) {
-        if (!entry) continue;
-        loadedQueueEntries.set(entry.id, entry);
-      }
-
       const loadedConflictEntries = new Map<string, OfflineConflictRecord>();
-      const loadedConflicts = await Promise.all(
-        conflictKeys.map((key) => current.conflictNamespace.load(key)),
-      );
-      for (const conflict of loadedConflicts) {
-        if (!conflict) continue;
-        loadedConflictEntries.set(conflict.id, conflict);
-      }
+      let queueCursor: string | null = null;
+      let conflictCursor: string | null = null;
+
+      do {
+        const page = await current.queueNamespace.listPage(queueCursor);
+        const entries = await current.queueNamespace.getMany(page.keys);
+        for (const entry of entries) {
+          if (!entry) continue;
+          loadedQueueEntries.set(entry.id, entry);
+        }
+        queueCursor = page.cursor;
+      } while (queueCursor !== null);
+
+      do {
+        const page = await current.conflictNamespace.listPage(conflictCursor);
+        const entries = await current.conflictNamespace.getMany(page.keys);
+        for (const conflict of entries) {
+          if (!conflict) continue;
+          loadedConflictEntries.set(conflict.id, conflict);
+        }
+        conflictCursor = page.cursor;
+      } while (conflictCursor !== null);
 
       if (!isActiveSessionState(current)) return;
 
@@ -413,17 +582,23 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     entities: GlobalOfflineEntity[],
   ): Promise<void> {
-    const existingKeys = await current.entityNamespace.listKeys();
     const nextKeys = new Set(entities.map((entity) => entity.entityKey));
+    const existingKeys: string[] = [];
+    let cursor: string | null = null;
 
-    await Promise.all([
-      ...entities.map((entity) =>
-        current.entityNamespace.save(entity.entityKey, entity),
-      ),
-      ...existingKeys
-        .filter((key) => !nextKeys.has(key))
-        .map((key) => current.entityNamespace.remove(key)),
-    ]);
+    do {
+      const page = await current.entityNamespace.listPage(cursor);
+      existingKeys.push(...page.keys);
+      cursor = page.cursor;
+    } while (cursor !== null);
+
+    await current.entityNamespace.commit({
+      upserts: entities.map((entity) => ({
+        key: entity.entityKey,
+        value: entity,
+      })),
+      removes: existingKeys.filter((key) => !nextKeys.has(key)),
+    });
   }
 
   function getSortedEntries(): OfflineQueueEntry[] {
@@ -487,7 +662,9 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       queueEntries.set(entry.id, entry);
     }
-    await session.queueNamespace.save(entry.id, entry);
+    await session.queueNamespace.commit({
+      upserts: [{ key: entry.id, value: entry }],
+    });
     if (isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -506,7 +683,7 @@ export function createOfflineStoreController<
         resetConfirmationRetries();
       }
     }
-    await session.queueNamespace.remove(entryId);
+    await session.queueNamespace.commit({ removes: [entryId] });
     if (isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -521,7 +698,9 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       conflicts.set(conflict.id, conflict);
     }
-    await session.conflictNamespace.save(conflict.id, conflict);
+    await session.conflictNamespace.commit({
+      upserts: [{ key: conflict.id, value: conflict }],
+    });
     if (isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
@@ -536,7 +715,7 @@ export function createOfflineStoreController<
     if (isActiveSessionState(session)) {
       conflicts.delete(conflictId);
     }
-    await session.conflictNamespace.remove(conflictId);
+    await session.conflictNamespace.commit({ removes: [conflictId] });
     if (isActiveSessionState(session)) {
       refreshDerivedState(session);
     }

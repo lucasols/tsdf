@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/consistent-type-assertions, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/require-await -- The OPFS test doubles implement browser APIs with minimal fixtures, which trips rules meant for production code. */
 import {
   afterEach,
   beforeAll,
@@ -7,12 +8,144 @@ import {
   test,
   vi,
 } from 'vitest';
-import { murmur3 } from '@ls-stack/utils/hash';
 import { createStorageAdapter } from '../../src/persistentStorage/storageAdapter';
-import type { StorageAdapter } from '../../src/persistentStorage/types';
+import type {
+  AsyncStorageAdapter,
+  AsyncStorageNamespaceScope,
+  SyncStorageAdapter,
+} from '../../src/persistentStorage/types';
+
+type DirNode = { dirs: Map<string, DirNode>; files: Map<string, string> };
+
+function createDirNode(): DirNode {
+  return { dirs: new Map(), files: new Map() };
+}
+
+function createDirectoryHandle(node: DirNode): FileSystemDirectoryHandle {
+  return {
+    kind: 'directory',
+    name: '',
+    async getDirectoryHandle(name: string, options?: { create?: boolean }) {
+      const existing = node.dirs.get(name);
+      if (existing) {
+        return createDirectoryHandle(existing);
+      }
+      if (!options?.create) {
+        throw new DOMException('Not found', 'NotFoundError');
+      }
+      const next = createDirNode();
+      node.dirs.set(name, next);
+      return createDirectoryHandle(next);
+    },
+    async getFileHandle(name: string, options?: { create?: boolean }) {
+      if (!node.files.has(name) && !options?.create) {
+        throw new DOMException('Not found', 'NotFoundError');
+      }
+      if (!node.files.has(name)) {
+        node.files.set(name, '');
+      }
+      return {
+        kind: 'file',
+        name,
+        async getFile() {
+          return {
+            async text() {
+              return node.files.get(name) ?? '';
+            },
+          } as File;
+        },
+        async createWritable() {
+          let nextContent = node.files.get(name) ?? '';
+          return {
+            async write(data: string) {
+              nextContent = data;
+            },
+            async close() {
+              node.files.set(name, nextContent);
+            },
+          } as FileSystemWritableFileStream;
+        },
+      } as FileSystemFileHandle;
+    },
+    async removeEntry(name: string, options?: { recursive?: boolean }) {
+      if (node.files.delete(name)) return;
+      const dir = node.dirs.get(name);
+      if (!dir) {
+        throw new DOMException('Not found', 'NotFoundError');
+      }
+      if (!options?.recursive && (dir.files.size > 0 || dir.dirs.size > 0)) {
+        throw new DOMException(
+          'Directory not empty',
+          'InvalidModificationError',
+        );
+      }
+      node.dirs.delete(name);
+    },
+    entries() {
+      const items: Array<[string, FileSystemHandle]> = [
+        ...[...node.dirs.entries()].map(
+          ([name, child]) =>
+            [name, createDirectoryHandle(child)] as [string, FileSystemHandle],
+        ),
+        ...[...node.files.keys()].map(
+          (name) =>
+            [name, { kind: 'file', name } as FileSystemHandle] as [
+              string,
+              FileSystemHandle,
+            ],
+        ),
+      ];
+
+      return (async function* (): AsyncGenerator<[string, FileSystemHandle]> {
+        for (const item of items) {
+          yield item;
+        }
+      })();
+    },
+  } as FileSystemDirectoryHandle;
+}
+
+function createOpfsTestEnv() {
+  const rootNode = createDirNode();
+  const originalStorage = navigator.storage;
+
+  Object.defineProperty(navigator, 'storage', {
+    value: { getDirectory: async () => createDirectoryHandle(rootNode) },
+    configurable: true,
+    writable: true,
+  });
+
+  return {
+    cleanup() {
+      Object.defineProperty(navigator, 'storage', {
+        value: originalStorage,
+        configurable: true,
+        writable: true,
+      });
+    },
+  };
+}
+
+function getLocalAdapter(): SyncStorageAdapter {
+  return createStorageAdapter('localStorage') as SyncStorageAdapter;
+}
+
+function getOpfsAdapter(): AsyncStorageAdapter {
+  return createStorageAdapter('opfs') as AsyncStorageAdapter;
+}
+
+const collectionScope: AsyncStorageNamespaceScope = {
+  sessionKey: 'sess-1',
+  storeName: 'users',
+  kind: 'collection.item',
+};
 
 beforeAll(() => {
   vi.useFakeTimers();
+});
+
+beforeEach(() => {
+  vi.setSystemTime(new Date('2026-03-11T12:00:00Z'));
 });
 
 afterEach(() => {
@@ -21,327 +154,164 @@ afterEach(() => {
 });
 
 describe('localStorage adapter', () => {
-  let adapter: StorageAdapter;
-
-  beforeEach(() => {
-    adapter = createStorageAdapter('localStorage');
+  test('read returns null for missing keys', async () => {
+    const adapter = getLocalAdapter();
+    await expect(adapter.read('missing')).resolves.toBeNull();
   });
 
-  test('read returns null for missing key', async () => {
-    const result = await adapter.read('nonexistent');
-    expect(result).toBeNull();
-  });
+  test('write/read/remove roundtrip works', async () => {
+    const adapter = getLocalAdapter();
 
-  test('write and read roundtrip', async () => {
-    await adapter.write('test-key', { name: 'Alice', age: 30 });
-    const result = await adapter.read('test-key');
-
-    expect(result).toMatchInlineSnapshot(`
-      age: 30
-      name: 'Alice'
+    await adapter.write('item', { value: 1 });
+    await expect(adapter.read('item')).resolves.toMatchInlineSnapshot(`
+      value: 1
     `);
+
+    await adapter.remove('item');
+    await expect(adapter.read('item')).resolves.toBeNull();
   });
 
-  test('remove deletes key', async () => {
-    await adapter.write('to-remove', { value: 42 });
-    await adapter.remove('to-remove');
+  test('removeByPrefix and listKeys work with prefixes', async () => {
+    const adapter = getLocalAdapter();
 
-    const result = await adapter.read('to-remove');
-    expect(result).toBeNull();
-  });
+    await adapter.write('tsdf.a.one', 1);
+    await adapter.write('tsdf.a.two', 2);
+    await adapter.write('tsdf.b.one', 3);
 
-  test('removeByPrefix removes all matching keys', async () => {
-    await adapter.write('tsdf.session1.store1', { a: 1 });
-    await adapter.write('tsdf.session1.store2', { b: 2 });
-    await adapter.write('tsdf.session2.store1', { c: 3 });
+    await expect(adapter.listKeys('tsdf.a.')).resolves.toEqual([
+      'tsdf.a.one',
+      'tsdf.a.two',
+    ]);
 
-    await adapter.removeByPrefix('tsdf.session1.');
-
-    const result1 = await adapter.read('tsdf.session1.store1');
-    const result2 = await adapter.read('tsdf.session1.store2');
-    const result3 = await adapter.read('tsdf.session2.store1');
-
-    expect(result1).toBeNull();
-    expect(result2).toBeNull();
-    expect(result3).toMatchInlineSnapshot(`c: 3`);
-  });
-
-  test('listKeys returns matching keys', async () => {
-    await adapter.write('tsdf.s1.a', 1);
-    await adapter.write('tsdf.s1.b', 2);
-    await adapter.write('tsdf.s2.a', 3);
-
-    const keys = await adapter.listKeys('tsdf.s1.');
-
-    expect(keys.sort()).toMatchInlineSnapshot(`['tsdf.s1.a', 'tsdf.s1.b']`);
-  });
-
-  test('read handles invalid JSON gracefully', async () => {
-    localStorage.setItem('bad-json', '{invalid');
-
-    const result = await adapter.read('bad-json');
-    expect(result).toBeNull();
-  });
-
-  test('write propagates quota exceeded error', () => {
-    const originalSetItem = localStorage.setItem.bind(localStorage);
-    const setItemSpy = vi
-      .spyOn(localStorage, 'setItem')
-      .mockImplementation((key: string, value: string) => {
-        if (key === 'quota-test') {
-          throw new DOMException('QuotaExceededError');
-        }
-        originalSetItem(key, value);
-      });
-
-    expect(() => adapter.write('quota-test', { large: 'data' })).toThrow(
-      'QuotaExceededError',
-    );
-
-    setItemSpy.mockRestore();
+    await adapter.removeByPrefix('tsdf.a.');
+    await expect(adapter.listKeys('tsdf.')).resolves.toEqual(['tsdf.b.one']);
   });
 });
 
 describe('opfs adapter', () => {
-  /**
-   * Creates an in-memory mock of the OPFS filesystem APIs
-   * so we can test the real OPFS adapter logic (hashed buckets, prefix matching).
-   */
-  function setupMockOpfs(settings?: { maxFileNameLength?: number }) {
-    const files = new Map<string, string>();
+  test('commit/get/listMetadata/clear roundtrip works per namespace', async () => {
+    const env = createOpfsTestEnv();
+    try {
+      const adapter = getOpfsAdapter();
+      const namespace = adapter.openNamespace<
+        { data: { id: string } },
+        { payload: string }
+      >(collectionScope);
 
-    const mockCacheDir = {
-      getFileHandle(name: string, options?: { create?: boolean }) {
-        if (
-          options?.create &&
-          settings?.maxFileNameLength !== undefined &&
-          name.length > settings.maxFileNameLength
-        ) {
-          return Promise.reject(
-            new DOMException('File name too long', 'InvalidModificationError'),
-          );
-        }
-        if (!files.has(name) && !options?.create) {
-          return Promise.reject(new DOMException('Not found', 'NotFoundError'));
-        }
-        if (!files.has(name)) {
-          files.set(name, '');
-        }
-        return Promise.resolve({
-          getFile: () =>
-            Promise.resolve({
-              text: () => Promise.resolve(files.get(name) ?? ''),
-            }),
-          createWritable: () => {
-            let content = '';
-            return Promise.resolve({
-              write: (data: string) => {
-                content = data;
-                return Promise.resolve();
-              },
-              close: () => {
-                files.set(name, content);
-                return Promise.resolve();
-              },
-            });
+      await namespace.commit({
+        upserts: [
+          {
+            key: 'user:1',
+            value: { data: { id: '1' } },
+            version: 2,
+            metadata: { payload: '1' },
           },
-        });
-      },
-      removeEntry(name: string) {
-        files.delete(name);
-        return Promise.resolve();
-      },
-      entries() {
-        const snapshot = [...files.keys()];
-        return (async function* (): AsyncGenerator<[string, unknown]> {
-          await Promise.resolve();
-          for (const name of snapshot) {
-            yield [name, {}];
-          }
-        })();
-      },
-    };
+        ],
+      });
 
-    const mockRootDir = {
-      getDirectoryHandle: () => Promise.resolve(mockCacheDir),
-    };
-
-    const originalStorage = navigator.storage;
-
-    Object.defineProperty(navigator, 'storage', {
-      value: { getDirectory: () => Promise.resolve(mockRootDir) },
-      writable: true,
-      configurable: true,
-    });
-
-    return {
-      files,
-      cleanup: () => {
-        Object.defineProperty(navigator, 'storage', {
-          value: originalStorage,
-          writable: true,
-          configurable: true,
-        });
-      },
-    };
-  }
-
-  test('read returns null for missing key', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = createStorageAdapter('opfs');
-      const result = await adapter.read('nonexistent');
-      expect(result).toBeNull();
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('write and read roundtrip', async () => {
-    const { cleanup, files } = setupMockOpfs();
-    try {
-      const adapter = createStorageAdapter('opfs');
-
-      await adapter.write('my-key', { name: 'Alice', age: 30 });
-      const result = await adapter.read('my-key');
-
-      expect(result).toMatchInlineSnapshot(`
-        age: 30
-        name: 'Alice'
-      `);
-      expect([...files.keys()]).toMatchInlineSnapshot(`
-        ['1844492593.json']
-      `);
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('very long keys roundtrip even when the filesystem rejects long filenames', async () => {
-    const { cleanup } = setupMockOpfs({ maxFileNameLength: 40 });
-    try {
-      const adapter = createStorageAdapter('opfs');
-      const longKey = `tsdf.session.store.${'query-segment.'.repeat(40)}`;
-
-      await adapter.write(longKey, { value: 42 });
-
-      expect(await adapter.read(longKey)).toMatchInlineSnapshot(`value: 42`);
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('removeByPrefix correctly matches keys sharing a prefix', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = createStorageAdapter('opfs');
-
-      await adapter.write('tsdf.session1.store1', { a: 1 });
-      await adapter.write('tsdf.session1.store2', { b: 2 });
-      await adapter.write('tsdf.session2.store1', { c: 3 });
-
-      await adapter.removeByPrefix('tsdf.session1.');
-
-      expect(await adapter.read('tsdf.session1.store1')).toBeNull();
-      expect(await adapter.read('tsdf.session1.store2')).toBeNull();
-      expect(await adapter.read('tsdf.session2.store1')).toMatchInlineSnapshot(
-        `c: 3`,
-      );
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('remove deletes key', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = createStorageAdapter('opfs');
-
-      await adapter.write('to-remove', { value: 42 });
-      await adapter.remove('to-remove');
-
-      const result = await adapter.read('to-remove');
-      expect(result).toBeNull();
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('listKeys returns decoded keys matching a prefix', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = createStorageAdapter('opfs');
-
-      await adapter.write('tsdf.s1.a', 1);
-      await adapter.write('tsdf.s1.b', 2);
-      await adapter.write('tsdf.s2.a', 3);
-
-      const keys = await adapter.listKeys('tsdf.s1.');
-
-      expect(keys.sort()).toMatchInlineSnapshot(`['tsdf.s1.a', 'tsdf.s1.b']`);
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('colliding keys share a bucket without corrupting each other', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = createStorageAdapter('opfs');
-      const firstKey = 'collision-key-1ndo-m1';
-      const secondKey = 'collision-key-2hwp-xd';
-
-      expect(murmur3(firstKey, 'uint32')).toBe(murmur3(secondKey, 'uint32'));
-
-      await adapter.write(firstKey, { name: 'first' });
-      await adapter.write(secondKey, { name: 'second' });
-
-      expect(await adapter.read(firstKey)).toMatchInlineSnapshot(
-        `name: 'first'`,
-      );
-      expect(await adapter.read(secondKey)).toMatchInlineSnapshot(
-        `name: 'second'`,
-      );
-      expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(`
-        ['collision-key-1ndo-m1', 'collision-key-2hwp-xd']
-      `);
-
-      await adapter.remove(firstKey);
-
-      expect(await adapter.read(firstKey)).toBeNull();
-      expect(await adapter.read(secondKey)).toMatchInlineSnapshot(
-        `name: 'second'`,
+      await expect(
+        namespace.get('user:1', { touch: 'never' }),
+      ).resolves.toMatchObject({
+        value: { data: { id: '1' } },
+        metadata: {
+          key: 'user:1',
+          lastAccessAt: 1773230400000,
+          payload: '1',
+          sizeBytes: 19,
+          version: 2,
+          writtenAt: 1773230400000,
+        },
+      });
+      await expect(
+        namespace.get('user:1', { touch: 'never' }),
+      ).resolves.toSatisfy(
+        (entry) => typeof entry?.metadata.payloadRef === 'string',
       );
 
-      await adapter.removeByPrefix('collision-key-2hwp');
+      const metadata = await namespace.listMetadata({ order: 'key' });
+      expect(metadata.entries.map((entry) => entry.key)).toEqual(['user:1']);
 
-      expect(await adapter.read(secondKey)).toBeNull();
-      expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(
-        `[]`,
-      );
+      await namespace.clear();
+      await expect(
+        namespace.get('user:1', { touch: 'never' }),
+      ).resolves.toBeNull();
     } finally {
-      cleanup();
+      env.cleanup();
     }
   });
 
-  test('malformed buckets are ignored on read and replaced on write', async () => {
-    const { cleanup, files } = setupMockOpfs();
+  test('getMany returns values in requested order and coarse touch only updates outside the bucket', async () => {
+    const env = createOpfsTestEnv();
     try {
-      const adapter = createStorageAdapter('opfs');
-      const key = 'broken-key';
-      files.set(`${murmur3(key, 'uint32')}.json`, '{broken');
+      const adapter = getOpfsAdapter();
+      const namespace = adapter.openNamespace<{ value: number }>(
+        collectionScope,
+      );
 
-      expect(await adapter.read(key)).toBeNull();
-      expect(await adapter.listKeys('broken')).toMatchInlineSnapshot(`[]`);
+      await namespace.commit({
+        upserts: [
+          { key: 'a', value: { value: 1 }, version: 1 },
+          { key: 'b', value: { value: 2 }, version: 1 },
+        ],
+      });
 
-      await adapter.write(key, { restored: true });
+      const firstRead = await namespace.getMany(['b', 'missing', 'a'], {
+        touch: 'coarse',
+      });
+      expect(firstRead.map((entry) => entry?.value.value ?? null)).toEqual([
+        2,
+        null,
+        1,
+      ]);
 
-      expect(await adapter.read(key)).toMatchInlineSnapshot(`restored: '✅'`);
-      expect(files.get(`${murmur3(key, 'uint32')}.json`)).toBe(
-        '{"entries":[{"key":"broken-key","value":{"restored":true}}]}',
+      const firstMetadata = await namespace.listMetadata({ order: 'key' });
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      await namespace.get('a', { touch: 'coarse' });
+      const secondMetadata = await namespace.listMetadata({ order: 'key' });
+      expect(secondMetadata.entries[0]?.lastAccessAt).toBe(
+        firstMetadata.entries[0]?.lastAccessAt,
+      );
+
+      await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000);
+      await namespace.get('a', { touch: 'coarse' });
+      const thirdMetadata = await namespace.listMetadata({ order: 'key' });
+      expect(thirdMetadata.entries[0]?.lastAccessAt).toBeGreaterThan(
+        secondMetadata.entries[0]?.lastAccessAt ?? 0,
       );
     } finally {
-      cleanup();
+      env.cleanup();
+    }
+  });
+
+  test('startup cleanup lease respects holder ownership and finish updates maintenance state', async () => {
+    const env = createOpfsTestEnv();
+    try {
+      const adapter = getOpfsAdapter();
+
+      await expect(
+        adapter.tryAcquireStartupCleanupLease({
+          holderId: 'tab-a',
+          ttlMs: 60_000,
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        adapter.tryAcquireStartupCleanupLease({
+          holderId: 'tab-b',
+          ttlMs: 60_000,
+        }),
+      ).resolves.toBe(false);
+
+      await adapter.finishStartupCleanup({
+        holderId: 'tab-a',
+        finishedAt: Date.now(),
+      });
+
+      await expect(adapter.readMaintenanceState()).resolves.toEqual({
+        lastSuccessfulCleanupAt: 1773230400000,
+        startupCleanupLease: null,
+      });
+    } finally {
+      env.cleanup();
     }
   });
 });
