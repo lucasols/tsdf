@@ -6,6 +6,28 @@ export type ValidPayload = number | string | Record<string, unknown>;
 
 export type ValidStoreState = Record<string, unknown> | unknown[];
 
+/**
+ * Debounce settings for payload-driven automatic fetches in store hooks.
+ *
+ * The hook still reads data from state using the latest payload immediately.
+ * Only the automatic fetch side is delayed. Single hooks do not support
+ * combining this with `ensureIsLoaded`.
+ */
+export type PayloadDebounce = {
+  /** Debounce window in milliseconds before the latest payload is fetched. */
+  ms: number;
+  /**
+   * Maximum time a burst may stay deferred before the latest payload is
+   * fetched, even if changes keep happening within the debounce window.
+   */
+  maxWait?: number;
+  /**
+   * When true, the first payload in a burst may fetch immediately, and later
+   * changes within the same burst stay debounced until the wait window ends.
+   */
+  leading?: boolean;
+};
+
 export const invalidPayloadError = {
   code: 461,
   id: 'invalid-payload',

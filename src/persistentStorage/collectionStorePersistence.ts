@@ -1,13 +1,19 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { rc_object, rc_unknown } from 'runcheck';
 import type { Store } from 't-state';
 import type {
   TSFDCollectionItem,
   TSFDCollectionState,
 } from '../collectionStore/collectionStore';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  convertStoreDataForPersistence,
+  normalizePersistentStorageDataSchema,
+  parsePersistedCollectionItemData,
+  parsePersistedStoreData,
+  type NormalizedPersistentStorageDataSchema,
+  type ParsedPersistedCollectionItemData,
+} from './parsePersistedData';
 import {
   getManagedLocalStorageRootKeyForPrefix,
   readManagedLocalStorageManifestEntriesByPrefix,
@@ -30,18 +36,9 @@ import type {
   CollectionPersistentStorageConfig,
   PersistedCollectionItemData,
 } from './types';
-import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
-
-const collectionManifestMetaSchema = rc_object({
-  payload: rc_unknown.optionalKey(),
-});
-
-function readCollectionManifestPayload(meta: unknown): unknown {
-  return collectionManifestMetaSchema.parse(meta).unwrapOrNull()?.payload;
-}
 
 function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
   ignoreItems:
@@ -56,39 +53,24 @@ function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
   return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
 }
 
-function createShouldIgnorePersistedItemPredicate<
-  ItemPayload extends ValidPayload,
->(
-  shouldIgnoreItem: (payload: ItemPayload) => boolean,
-): (payload: unknown) => boolean {
-  return (payload) => {
-    try {
-      return shouldIgnoreItem(__LEGIT_CAST__<ItemPayload, unknown>(payload));
-    } catch {
-      return false;
-    }
-  };
-}
-
 function toCollectionItemState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  StorageState = unknown,
 >(
-  persisted: PersistedCollectionItemData<unknown>,
-  config: CollectionPersistentStorageConfig<ItemState, ItemPayload>,
-  shouldIgnorePersistedItem: (payload: unknown) => boolean,
+  persisted: ParsedPersistedCollectionItemData<ItemPayload>,
+  dataSchema: NormalizedPersistentStorageDataSchema<ItemState, StorageState>,
+  shouldIgnoreItem: (payload: ItemPayload) => boolean,
 ): TSFDCollectionItem<ItemState, ItemPayload> | null {
-  const validated = validateWithSchema(config.schema, persisted.data);
+  const validated = parsePersistedStoreData(persisted.data, dataSchema);
   if (validated === null) return null;
 
-  if (shouldIgnorePersistedItem(persisted.payload)) return null;
-
-  const payload = __LEGIT_CAST__<ItemPayload, unknown>(persisted.payload);
+  if (shouldIgnoreItem(persisted.payload)) return null;
 
   return {
     data: validated,
     error: null,
-    payload,
+    payload: persisted.payload,
     refetchOnMount: 'lowPriority',
     status: 'success',
     wasLoaded: true,
@@ -98,13 +80,18 @@ function toCollectionItemState<
 function defineLazyLocalStorageItem<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  StorageState = unknown,
 >(
   state: TSFDCollectionState<ItemState, ItemPayload>,
   itemKey: string,
   storageKey: string,
   version: number,
-  config: CollectionPersistentStorageConfig<ItemState, ItemPayload>,
-  shouldIgnorePersistedItem: (payload: unknown) => boolean,
+  payloadSchema: CollectionPersistentStorageConfig<
+    ItemState,
+    ItemPayload
+  >['payloadSchema'],
+  dataSchema: NormalizedPersistentStorageDataSchema<ItemState, StorageState>,
+  shouldIgnoreItem: (payload: ItemPayload) => boolean,
   onHydrated: (
     itemKey: string,
     persisted: PersistedCollectionItemData<unknown>,
@@ -128,10 +115,25 @@ function defineLazyLocalStorageItem<
         return undefined;
       }
 
-      const item = toCollectionItemState<ItemState, ItemPayload>(
+      const persisted = parsePersistedCollectionItemData(
         cacheEntry.data,
-        config,
-        shouldIgnorePersistedItem,
+        payloadSchema,
+      );
+      if (!persisted) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        Object.defineProperty(state, itemKey, {
+          configurable: true,
+          enumerable: false,
+          value: undefined,
+          writable: true,
+        });
+        return undefined;
+      }
+
+      const item = toCollectionItemState(
+        persisted,
+        dataSchema,
+        shouldIgnoreItem,
       );
 
       if (!item) {
@@ -178,13 +180,14 @@ export type CollectionPersistenceSetup<
 export function setupCollectionPersistence<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  StorageState = unknown,
 >(
-  config: CollectionPersistentStorageConfig<ItemState, ItemPayload> & {
-    getSessionKey: () => string | false;
-  },
-  options: {
-    getItemKey?: (payload: ItemPayload) => string;
-  } = {},
+  config: CollectionPersistentStorageConfig<
+    ItemState,
+    ItemPayload,
+    StorageState
+  > & { getSessionKey: () => string | false },
+  options: { getItemKey?: (payload: ItemPayload) => string } = {},
 ): CollectionPersistenceSetup<ItemState, ItemPayload> {
   const version = config.version ?? 1;
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
@@ -197,20 +200,17 @@ export function setupCollectionPersistence<
     config.ignoreItems,
     resolveItemKey,
   );
-  const shouldIgnorePersistedItem =
-    createShouldIgnorePersistedItemPredicate(shouldIgnoreItem);
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = config.adapter;
   const usesManagedLocalStorage = storageAdapter === localPersistentStorage;
   const persistentConfig = config;
+  const dataSchema = normalizePersistentStorageDataSchema(config.schema);
 
   const namespace = createPersistentStorageNamespaceHandle<
-    PersistedCollectionItemData<ItemState>
+    PersistedCollectionItemData<ItemState | StorageState>
   >(
     { ...persistentConfig, entryPrefix: 'collection.item' },
-    {
-      getManifestMeta: (data) => ({ payload: data.payload }),
-    },
+    { getManifestMeta: (data) => ({ payload: data.payload }) },
   );
 
   let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =
@@ -294,8 +294,9 @@ export function setupCollectionPersistence<
         itemKey,
         storageKey,
         version,
-        config,
-        shouldIgnorePersistedItem,
+        config.payloadSchema,
+        dataSchema,
+        shouldIgnoreItem,
         (hydratedItemKey, persisted) => {
           hydratedPersistedKeys.add(hydratedItemKey);
           persistedSnapshotByKey.set(
@@ -329,10 +330,19 @@ export function setupCollectionPersistence<
 
       if (!cacheEntry) return false;
 
-      const validated = toCollectionItemState<ItemState, ItemPayload>(
+      const persisted = parsePersistedCollectionItemData(
         cacheEntry.data,
-        config,
-        shouldIgnorePersistedItem,
+        config.payloadSchema,
+      );
+      if (!persisted) {
+        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        return false;
+      }
+
+      const validated = toCollectionItemState(
+        persisted,
+        dataSchema,
+        shouldIgnoreItem,
       );
 
       if (!validated) {
@@ -367,10 +377,19 @@ export function setupCollectionPersistence<
           return false;
         }
 
-        const validated = toCollectionItemState<ItemState, ItemPayload>(
+        const persisted = parsePersistedCollectionItemData(
           cached,
-          config,
-          shouldIgnorePersistedItem,
+          config.payloadSchema,
+        );
+        if (!persisted) {
+          scheduleIdleCleanup(() => void namespace.remove(itemKey));
+          return false;
+        }
+
+        const validated = toCollectionItemState(
+          persisted,
+          dataSchema,
+          shouldIgnoreItem,
         );
 
         if (!validated) {
@@ -438,36 +457,65 @@ export function setupCollectionPersistence<
       return;
     }
 
-    const validEntries: Array<{
-      itemKey: string;
-      payload: unknown;
-      lastAccessAt: number;
-    }> = usesManagedLocalStorage
-      ? readManagedLocalStorageManifestEntriesByPrefix(prefix).map((entry) => ({
-          itemKey: entry.entryKey,
-          payload: readCollectionManifestPayload(entry.meta),
-          lastAccessAt: entry.lastAccessAt,
-        }))
-      : filterAndMap(
-          await Promise.all(
-            keys.map(async (itemKey) => ({
-              itemKey,
-              entry: await namespace.readEntry(itemKey),
-            })),
+    const managedEntriesByKey = usesManagedLocalStorage
+      ? new Map(
+          readManagedLocalStorageManifestEntriesByPrefix(prefix).map(
+            (entry) => [entry.entryKey, entry],
           ),
-          ({ itemKey, entry }) => {
-            return entry
-              ? {
-                  itemKey,
-                  payload: entry.data.payload,
-                  lastAccessAt: entry.timestamp,
-                }
-              : false;
-          },
-        );
+        )
+      : null;
 
-    const ignoredEntries = validEntries.filter(({ payload }) =>
-      shouldIgnorePersistedItem(payload),
+    const entries = await Promise.all(
+      keys.map(async (itemKey) => ({
+        itemKey,
+        entry: await namespace.readEntry(itemKey),
+        lastAccessAt: managedEntriesByKey?.get(itemKey)?.lastAccessAt,
+      })),
+    );
+
+    const invalidEntries = filterAndMap(entries, ({ itemKey, entry }) => {
+      if (!entry) return false;
+
+      const persisted = parsePersistedCollectionItemData(
+        entry.data,
+        config.payloadSchema,
+      );
+
+      if (!persisted) return { itemKey };
+
+      return parsePersistedStoreData(persisted.data, dataSchema)
+        ? false
+        : { itemKey };
+    });
+
+    if (invalidEntries.length > 0) {
+      await Promise.all(
+        invalidEntries.map(({ itemKey }) => namespace.remove(itemKey)),
+      );
+    }
+
+    const validEntries = filterAndMap(entries, ({ itemKey, entry }) => {
+      if (!entry) return false;
+
+      const persisted = parsePersistedCollectionItemData(
+        entry.data,
+        config.payloadSchema,
+      );
+      if (!persisted) return false;
+
+      return parsePersistedStoreData(persisted.data, dataSchema)
+        ? {
+            itemKey,
+            lastAccessAt:
+              managedEntriesByKey?.get(itemKey)?.lastAccessAt ??
+              entry.timestamp,
+            persisted,
+          }
+        : false;
+    });
+
+    const ignoredEntries = validEntries.filter(({ persisted }) =>
+      shouldIgnoreItem(persisted.payload),
     );
 
     if (ignoredEntries.length > 0) {
@@ -480,7 +528,7 @@ export function setupCollectionPersistence<
     }
 
     const filteredEntries = validEntries.filter(
-      ({ payload }) => !shouldIgnorePersistedItem(payload),
+      ({ persisted }) => !shouldIgnoreItem(persisted.payload),
     );
 
     if (filteredEntries.length <= maxItems) {
@@ -563,7 +611,13 @@ export function setupCollectionPersistence<
       }
 
       nextPersistedKeys.add(itemKey);
-      const nextValue = { data: item.data, payload: item.payload };
+      const converted = convertStoreDataForPersistence(item.data, dataSchema);
+      if (!converted.ok) {
+        config.onPersistentStorageError?.(converted.error);
+        continue;
+      }
+
+      const nextValue = { data: converted.value, payload: item.payload };
       const nextSnapshot = JSON.stringify(nextValue);
 
       if (

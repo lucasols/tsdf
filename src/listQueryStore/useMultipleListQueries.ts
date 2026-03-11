@@ -1,16 +1,23 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
 import { useConst } from '@ls-stack/react-utils/useConst';
+import { useDebouncedValue } from '@ls-stack/react-utils/useDebouncedValue';
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
+import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import {
+  getPayloadDebounceOptions,
+  shouldDebouncePayload,
+} from '../utils/payloadDebounce';
+import {
   fetchTypePriority,
+  type PayloadDebounce,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -47,6 +54,12 @@ export type UseMultipleListQueriesOptions<
   disableRefetchOnMount?: boolean;
   isOffScreen?: boolean;
   loadSize?: number;
+  /**
+   * Debounces automatic fetches caused by payload changes, while selection
+   * still reads from the latest payload. Supports trailing debounce via `ms`,
+   * optional `leading`, and optional `maxWait`.
+   */
+  debouncePayload?: PayloadDebounce;
 };
 
 export function useMultipleListQueries<
@@ -67,10 +80,13 @@ export function useMultipleListQueries<
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
     isOffScreen: allItemsIsOffScreen,
     loadSize: allItemsLoadSize,
+    debouncePayload,
   }: UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   events: Emitter<ListQueryStoreEvents>,
   getQueryKey: (params: QueryPayload) => string,
+  registerActiveQueries: (queryKeys: string[]) => () => void,
+  touchQueries: (queryKeys: string[]) => void,
   getQueryState: (
     params: QueryPayload,
   ) => TSFDListQuery<QueryPayload> | undefined,
@@ -154,6 +170,20 @@ export function useMultipleListQueries<
     globalDisableRefetchOnMount,
     isOffScreenFromContext,
   ]);
+
+  const activeQueryKeys = useMemo(() => {
+    return queriesWithId.map(({ key }) => key);
+  }, [queriesWithId]);
+
+  const shouldDebounceFetchQueries = shouldDebouncePayload(debouncePayload);
+  const [debouncedFetchQueriesWithId] = useDebouncedValue(
+    queriesWithId,
+    shouldDebounceFetchQueries ? (debouncePayload?.ms ?? 0) : 0,
+    getPayloadDebounceOptions(debouncePayload),
+  );
+  const fetchQueriesWithId = shouldDebounceFetchQueries
+    ? debouncedFetchQueriesWithId
+    : queriesWithId;
 
   const getQueryItems = useCallback(
     (
@@ -501,7 +531,7 @@ export function useMultipleListQueries<
       fields,
       isOffScreen,
       disableRefetches,
-    } of queriesWithId) {
+    } of fetchQueriesWithId) {
       if (isOffScreen) continue;
 
       if (key !== event.queryKey) continue;
@@ -526,12 +556,14 @@ export function useMultipleListQueries<
 
   const ignoreQueriesInRefetchOnMount = useConst(() => new Set<string>());
 
+  useRegisterActiveKeys(activeQueryKeys, registerActiveQueries, touchQueries);
+
   useEffect(() => {
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (preloadQueries && queriesWithId.length > 0) {
-        await preloadQueries(queriesWithId.map(({ payload }) => payload));
+      if (preloadQueries && fetchQueriesWithId.length > 0) {
+        await preloadQueries(fetchQueriesWithId.map(({ payload }) => payload));
         if (effectState.cancelled) return;
       }
 
@@ -545,7 +577,7 @@ export function useMultipleListQueries<
         loadSize,
         disableRefetches,
         disableRefetchOnMount,
-      } of queriesWithId) {
+      } of fetchQueriesWithId) {
         removedQueries.delete(queryId);
 
         if (isOffScreen) continue;
@@ -674,7 +706,7 @@ export function useMultipleListQueries<
     getQueryState,
     ignoreQueriesInRefetchOnMount,
     preloadQueries,
-    queriesWithId,
+    fetchQueriesWithId,
     store,
     scheduleAutomaticListQueryFetch,
     partialResources,

@@ -4,6 +4,7 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -86,6 +87,38 @@ describe('update state functions', () => {
         payload: 'users||4'
       - data: { id: 5, name: 'modified' }
         payload: 'users||5'
+    `);
+  });
+
+  test('predicate updates keep touched items fresh for cache eviction', async () => {
+    const env = createListQueryStoreTestEnv(
+      { users: range(1, 3).map((id) => ({ id, name: `User ${id}` })) },
+      { maxItems: 2 },
+    );
+
+    env.scheduleItemFetch('highPriority', 'users||1');
+    await flushAllTimers();
+    env.scheduleItemFetch('highPriority', 'users||2');
+    await flushAllTimers();
+
+    env.apiStore.updateItemState(
+      (_, state) => state.name === 'User 1',
+      (data) => {
+        data.name = 'Updated User 1';
+      },
+    );
+
+    env.scheduleItemFetch('highPriority', 'users||3');
+    await flushAllTimers();
+
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Updated User 1'
+    `);
+    expect(env.apiStore.getItemState('users||2')).toBeUndefined();
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'User 3'
     `);
   });
 

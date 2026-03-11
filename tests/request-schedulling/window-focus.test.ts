@@ -17,6 +17,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const TRANSPORT_RECONNECT_COOLDOWN_MS = 200;
+
 // -- DocumentStore: revalidateOnWindowFocus ------------------------------------
 
 test('document store: focus triggers lowPriority invalidation for non-realtime store', async () => {
@@ -424,6 +426,123 @@ test('document store: onTransportReconnect while focused triggers immediate real
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 });
 
+test('document store: focused reconnect burst runs immediately once and schedules one trailing fetch', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    transportReconnectCooldownMs: TRANSPORT_RECONNECT_COOLDOWN_MS,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => env.apiStore.useDocument().data?.value);
+
+  await advanceTime(100);
+
+  const fetchesBefore = env.serverMock.numOfStartedFetches;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await advanceTime(20);
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+    env.apiStore.onTransportReconnect();
+  });
+
+  await advanceTime(TRANSPORT_RECONNECT_COOLDOWN_MS - 1);
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+
+  await advanceTime(1);
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 2);
+
+  await advanceTime(TRANSPORT_RECONNECT_COOLDOWN_MS + 1);
+
+  const fetchesBeforeCooldownExpiryReconnect =
+    env.serverMock.numOfStartedFetches;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(
+    fetchesBeforeCooldownExpiryReconnect + 1,
+  );
+
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  |
+    110ms | 🔴 >fetch-started
+    910ms | 🔴 <fetch-finished (value: 0)
+    1.21s | scheduled-rt-fetch-started
+    1.22s | 🟠 >fetch-started
+    2.02s | 🟠 <fetch-finished (value: 0)
+    2.32s | scheduled-rt-fetch-started
+    2.33s | 🟡 >fetch-started
+    3.13s | 🟡 <fetch-finished (value: 0)
+    "
+  `);
+});
+
+test('document store: immediate reconnect after cooldown clears older trailing timer', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+  const reconnectCooldownMs = 2_000;
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    transportReconnectCooldownMs: reconnectCooldownMs,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => env.apiStore.useDocument().data?.value);
+
+  await advanceTime(100);
+
+  const fetchesBefore = env.serverMock.numOfStartedFetches;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+
+  await advanceTime(reconnectCooldownMs - 10 - 810);
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await advanceTime(20);
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 2);
+
+  await advanceTime(reconnectCooldownMs);
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 2);
+});
+
 test('document store: onTransportReconnect while unfocused defers invalidation to next focus', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
@@ -508,6 +627,47 @@ test('document store: multiple onTransportReconnect calls while unfocused are co
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 });
 
+test('document store: reconnect trailing flush waits for focus and fires once', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+
+  const env = createDocumentStoreTestEnv(0, {
+    testScenario: 'loaded',
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    transportReconnectCooldownMs: TRANSPORT_RECONNECT_COOLDOWN_MS,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => env.apiStore.useDocument().data?.value);
+
+  await advanceTime(100);
+
+  const fetchesBefore = env.serverMock.numOfStartedFetches;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await advanceTime(20);
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await tabs.blur();
+  await advanceTime(TRANSPORT_RECONNECT_COOLDOWN_MS);
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
+
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 2);
+});
+
 test('document store: onTransportReconnect is no-op when usesRealTimeUpdates is false', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
@@ -533,13 +693,14 @@ test('document store: onTransportReconnect is no-op when usesRealTimeUpdates is 
   expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
 });
 
-test('document store: reset() cleans up pending onTransportReconnect listener', async () => {
+test('document store: reset() cleans up pending onTransportReconnect listener and timer', async () => {
   const tabs = createFocusChangeCoordinator(['a'], 'a');
 
   const env = createDocumentStoreTestEnv(0, {
     testScenario: 'loaded',
     usesRealTimeUpdates: true,
     dynamicRealtimeThrottleMs: () => 300,
+    transportReconnectCooldownMs: TRANSPORT_RECONNECT_COOLDOWN_MS,
     bindFocusController: tabs.bind('a'),
   });
 
@@ -551,6 +712,12 @@ test('document store: reset() cleans up pending onTransportReconnect listener', 
 
   const fetchesBefore = env.serverMock.numOfStartedFetches;
 
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await advanceTime(20);
+
   await tabs.blur();
 
   act(() => {
@@ -561,11 +728,13 @@ test('document store: reset() cleans up pending onTransportReconnect listener', 
     env.apiStore.reset();
   });
 
+  await advanceTime(TRANSPORT_RECONNECT_COOLDOWN_MS);
   await tabs.focusTab('a');
   await flushAllTimers();
 
-  // No stale fetch after reset
-  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore);
+  // The leading reconnect may already have started, but reset must prevent any
+  // additional trailing/background reconnect fetches.
+  expect(env.serverMock.numOfStartedFetches).toBe(fetchesBefore + 1);
 });
 
 // -- CollectionStore: onTransportReconnect ------------------------------------
@@ -603,6 +772,57 @@ test('collection store: onTransportReconnect while focused invalidates all items
   expect(fetchedItemIds).toMatchInlineSnapshot(`
     ['1', '2']
   `);
+});
+
+test('collection store: focused reconnect burst runs one immediate and one trailing invalidation', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+  const reconnectCooldownMs = 2_000;
+
+  const env = createCollectionStoreTestEnv(
+    { '1': { name: 'Alice' }, '2': { name: 'Bob' } },
+    {
+      testScenario: 'loaded',
+      usesRealTimeUpdates: true,
+      dynamicRealtimeThrottleMs: () => 300,
+      transportReconnectCooldownMs: reconnectCooldownMs,
+      bindFocusController: tabs.bind('a'),
+    },
+  );
+
+  renderHook(() => env.apiStore.useItem('1'));
+  renderHook(() => env.apiStore.useItem('2'));
+
+  await flushAllTimers();
+
+  env.serverTable.fetchHistory.length = 0;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(
+    env.serverTable.fetchHistory.filter((entry) => entry.type === 'fetch'),
+  ).toHaveLength(2);
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+    env.apiStore.onTransportReconnect();
+  });
+
+  await advanceTime(reconnectCooldownMs - 1);
+
+  expect(
+    env.serverTable.fetchHistory.filter((entry) => entry.type === 'fetch'),
+  ).toHaveLength(2);
+
+  await advanceTime(1);
+  await flushAllTimers();
+
+  expect(
+    env.serverTable.fetchHistory.filter((entry) => entry.type === 'fetch'),
+  ).toHaveLength(4);
 });
 
 test('collection store: onTransportReconnect while unfocused defers and coalesces', async () => {
@@ -776,6 +996,57 @@ test('list query store: onTransportReconnect while unfocused defers and coalesce
   expect(fetchedItemIdsAfterSecondFocus).toMatchInlineSnapshot(`
     ['users||1', 'users||2']
   `);
+});
+
+test('list query store: reconnect trailing flush waits for focus and invalidates once', async () => {
+  const tabs = createFocusChangeCoordinator(['a'], 'a');
+  const reconnectCooldownMs = 2_000;
+
+  const initialData = {
+    users: [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+    ],
+  };
+
+  const env = createListQueryStoreTestEnv(initialData, {
+    testScenario: { loaded: { tables: ['users'] } },
+    usesRealTimeUpdates: true,
+    dynamicRealtimeThrottleMs: () => 300,
+    transportReconnectCooldownMs: reconnectCooldownMs,
+    bindFocusController: tabs.bind('a'),
+  });
+
+  renderHook(() => env.apiStore.useListQuery({ tableId: 'users' }));
+  renderHook(() => env.apiStore.useItem('users||1'));
+  renderHook(() => env.apiStore.useItem('users||2'));
+
+  await flushAllTimers();
+
+  env.serverTable.fetchHistory.length = 0;
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await flushAllTimers();
+
+  expect(env.serverTable.fetchHistory).toHaveLength(3);
+
+  act(() => {
+    env.apiStore.onTransportReconnect();
+  });
+
+  await tabs.blur();
+  await advanceTime(reconnectCooldownMs);
+  await flushAllTimers();
+
+  expect(env.serverTable.fetchHistory).toHaveLength(3);
+
+  await tabs.focusTab('a');
+  await flushAllTimers();
+
+  expect(env.serverTable.fetchHistory).toHaveLength(6);
 });
 
 test('list query store: focus with dynamic disable function', async () => {

@@ -592,6 +592,18 @@ export function createFetchApi<
     }
   }
 
+  function deleteQueryFetchResources(queryKeys: string[]): void {
+    for (const queryKey of queryKeys) {
+      queryInitialFetchStartTime.delete(queryKey);
+
+      const queryScheduler = querySchedulers.get(queryKey);
+      if (!queryScheduler) continue;
+
+      queryScheduler.reset();
+      querySchedulers.delete(queryKey);
+    }
+  }
+
   function getQueryState(params: QueryPayload): Query | undefined {
     const queryKey = getQueryKey(params);
     return store.state.queries[queryKey];
@@ -1107,6 +1119,7 @@ export function createFetchApi<
     getOrCreateItemScheduler,
     syncRemoteFetchStart,
     syncRemoteFetchSuccess,
+    deleteQueryFetchResources,
     deleteItemFetchResources,
     resetSchedulers,
   };

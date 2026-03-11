@@ -52,6 +52,29 @@ export type StandardSchemaLike<T> = {
 /** Union of supported schema types for persistent storage validation. */
 export type PersistentStorageSchema<T> = RcType<T> | StandardSchemaLike<T>;
 
+/**
+ * Converts between the in-memory store data shape and the persisted storage shape.
+ * Use this when the cached representation should differ from the API store format.
+ */
+export type ConvertedPersistentStorageDataSchema<TFinal, TStorage> = {
+  /** Schema for the final in-memory store data after hydration. */
+  storeSchema: PersistentStorageSchema<TFinal>;
+  /** Schema for the raw persisted storage representation. */
+  storageSchema: PersistentStorageSchema<TStorage>;
+  /** Converts in-memory store data into the persisted storage representation. */
+  convertToStorage: (value: TFinal) => TStorage;
+  /** Converts persisted storage data into the final in-memory store representation. */
+  convertFromStorage: (value: TStorage) => TFinal;
+};
+
+/**
+ * Schema configuration for persisted store data.
+ * Accept either the final store schema directly or a converted storage format.
+ */
+export type PersistentStorageDataSchema<TFinal, TStorage = unknown> =
+  | PersistentStorageSchema<TFinal>
+  | ConvertedPersistentStorageDataSchema<TFinal, TStorage>;
+
 // --- Cache Entry ---
 
 export type StorageCacheEntry<T> = {
@@ -68,13 +91,13 @@ export type PersistentStoragePreloadResult<
 // --- Config Types ---
 
 /** Base config shared by all store types. */
-export type PersistentStorageBaseConfig<T> = {
+export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
   /** Unique name for this store's persistent storage key. */
   storeName: string;
   /** Injected adapter used to save and restore persistent data. */
   adapter: StorageAdapter;
-  /** Schema used to validate cached data on load. */
-  schema: PersistentStorageSchema<T>;
+  /** Schema used to validate cached data on load and optionally convert persisted data. */
+  schema: PersistentStorageDataSchema<TFinal, TStorage>;
   /** Version number for cache invalidation. Defaults to 1. */
   version?: number;
   /**
@@ -97,17 +120,18 @@ export type PersistentStorageBaseConfig<T> = {
 };
 
 /** Store-level persistent storage config. Session scoping comes from the parent store. */
-type StorePersistentStorageBaseConfig<T> = Omit<
-  PersistentStorageBaseConfig<T>,
+type StorePersistentStorageBaseConfig<TFinal, TStorage = unknown> = Omit<
+  PersistentStorageBaseConfig<TFinal, TStorage>,
   'getSessionKey'
 >;
 
 /** Persistent storage config for DocumentStore. */
 export type DocumentPersistentStorageConfig<
   State extends ValidStoreState,
+  StorageState = unknown,
   TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
     DocumentOfflineOperationsRegistry<State>,
-> = StorePersistentStorageBaseConfig<State> & {
+> = StorePersistentStorageBaseConfig<State, StorageState> & {
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
 };
 
@@ -115,12 +139,15 @@ export type DocumentPersistentStorageConfig<
 export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload = ValidPayload,
+  StorageState = unknown,
   TOfflineOperations extends CollectionOfflineOperationsRegistry<
     ItemState,
     ItemPayload
   > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
-> = StorePersistentStorageBaseConfig<ItemState> & {
+> = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
+  /** Schema used to validate cached item payloads on load. Falls back to trusting persisted payloads when omitted. */
+  payloadSchema?: PersistentStorageSchema<ItemPayload>;
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
   maxItems?: number;
   /** Item payloads that should never be evicted from storage. */
@@ -138,13 +165,18 @@ export type ListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload = ValidPayload,
   ItemPayload extends ValidPayload = ValidPayload,
+  StorageState = unknown,
   TOfflineOperations extends ListQueryOfflineOperationsRegistry<
     ItemState,
     QueryPayload,
     ItemPayload
   > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
-> = StorePersistentStorageBaseConfig<ItemState> & {
+> = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
+  /** Schema used to validate cached item payloads on load. Falls back to trusting persisted payloads when omitted. */
+  itemPayloadSchema?: PersistentStorageSchema<ItemPayload>;
+  /** Schema used to validate cached query payloads on load. Falls back to trusting persisted payloads when omitted. */
+  queryPayloadSchema?: PersistentStorageSchema<QueryPayload>;
   /** Maximum number of items to persist. Defaults to 500. */
   maxItems?: number;
   /** Maximum number of queries to persist. Defaults to 100. */

@@ -8,27 +8,21 @@
       "script": "npm-publish",
       "label": "publish package",
       "problemMatcher": [],
-      "presentation": {
-        "clear": true
-      }
+      "presentation": { "clear": true }
     },
     {
       "type": "npm",
       "script": "test:ui",
       "label": "run tests ui",
       "problemMatcher": [],
-      "presentation": {
-        "clear": true
-      }
+      "presentation": { "clear": true }
     },
     {
       "type": "npm",
-      "script": "test:changed",
-      "label": "run changed tests",
+      "script": "test:watch",
+      "label": "run tests in watch mode",
       "problemMatcher": [],
-      "presentation": {
-        "clear": true
-      }
+      "presentation": { "clear": true }
     },
     {
       "type": "npm",
@@ -36,9 +30,7 @@
       "problemMatcher": ["$eslint-stylish"],
       "label": "eslint",
       "detail": "CI=true eslint --ext .jsx,.js,.ts,.tsx src/ test/",
-      "presentation": {
-        "clear": true
-      }
+      "presentation": { "clear": true }
     },
     {
       "label": "bump version and deploy",

@@ -3,6 +3,7 @@ import {
   createCollectionStore,
   type CollectionBrowserTabsMessage,
   type CollectionInitialStateItem,
+  type CollectionStoreOptions,
 } from '../../src/collectionStore/collectionStore';
 import type { CollectionOfflineOperationsRegistry } from '../../src/persistentStorage/offline/types';
 import type { FetchType } from '../../src/requestScheduler';
@@ -49,6 +50,7 @@ export type CollectionStoreTestEnvOptions<
     CollectionTestItem<D>,
     string
   > = CollectionOfflineOperationsRegistry<CollectionTestItem<D>, string>,
+  StorageState = unknown,
 > = {
   id?: string;
   getSessionKey?: () => string | false;
@@ -66,6 +68,7 @@ export type CollectionStoreTestEnvOptions<
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  transportReconnectCooldownMs?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
@@ -73,14 +76,20 @@ export type CollectionStoreTestEnvOptions<
   useBatchFetch?: boolean;
   /** Max items per batch (only used when useBatchFetch is true) */
   maxBatchSize?: number;
+  maxItems?: number;
   /** Optional function to group batch fetches by key */
   getItemsBatchKey?: (payload: string) => string | false;
+  onStateCleanup?: CollectionStoreOptions<
+    CollectionTestItem<D>,
+    string
+  >['onStateCleanup'];
   testScenario?: CollectionStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: CollectionPersistentStorageConfig<
     CollectionTestItem<D>,
     string,
+    StorageState,
     TOfflineOperations
   >;
   storageAdapter?: StorageAdapter;
@@ -93,6 +102,7 @@ export function createCollectionStoreTestEnv<
     CollectionTestItem<D>,
     string
   > = CollectionOfflineOperationsRegistry<CollectionTestItem<D>, string>,
+  StorageState = unknown,
 >(
   serverInitialData: Record<string, D>,
   {
@@ -104,19 +114,22 @@ export function createCollectionStoreTestEnv<
     bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
     useBatchFetch,
     maxBatchSize,
+    maxItems,
     getItemsBatchKey,
+    onStateCleanup,
     testScenario,
     usesRealTimeUpdates,
     blockWindowClose,
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: CollectionStoreTestEnvOptions<D, TOfflineOperations> = {},
+  }: CollectionStoreTestEnvOptions<D, TOfflineOperations, StorageState> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -195,7 +208,8 @@ export function createCollectionStoreTestEnv<
   const collectionStore = createCollectionStore<
     CollectionTestItem<D>,
     string,
-    TOfflineOperations
+    TOfflineOperations,
+    StorageState
   >({
     id,
     getSessionKey,
@@ -203,6 +217,8 @@ export function createCollectionStoreTestEnv<
     lowPriorityThrottleMs,
     baseCoalescingWindowMs,
     maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
+    maxItems,
+    onStateCleanup,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     fetchFn: async (payload, signal) => {
       const value = await serverTable.fetch(payload, signal);
@@ -212,6 +228,7 @@ export function createCollectionStoreTestEnv<
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     persistentStorage: resolvedPersistentStorage,

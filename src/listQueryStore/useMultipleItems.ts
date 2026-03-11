@@ -1,15 +1,22 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
 import { useConst } from '@ls-stack/react-utils/useConst';
+import { useDebouncedValue } from '@ls-stack/react-utils/useDebouncedValue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
+import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import {
+  getPayloadDebounceOptions,
+  shouldDebouncePayload,
+} from '../utils/payloadDebounce';
+import {
   fetchTypePriority,
+  type PayloadDebounce,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -45,6 +52,12 @@ export type UseMultipleItemsOptions<
   disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   isOffScreen?: boolean;
+  /**
+   * Debounces automatic fetches caused by payload changes, while selection
+   * still reads from the latest payload. Supports trailing debounce via `ms`,
+   * optional `leading`, and optional `maxWait`.
+   */
+  debouncePayload?: PayloadDebounce;
 };
 
 export function useMultipleItems<
@@ -64,10 +77,13 @@ export function useMultipleItems<
     disableRefetches: allItemsDisableRefetches,
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
     isOffScreen: allItemsIsOffScreen,
+    debouncePayload,
   }: UseMultipleItemsOptions<ItemState, Selected>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   events: Emitter<ListQueryStoreEvents>,
   getItemKey: (params: ItemPayload) => string,
+  registerActiveItems: (itemKeys: string[]) => () => void,
+  touchItems: (itemKeys: string[]) => void,
   scheduleAutomaticItemFetch: (
     fetchType: FetchType,
     payload: ItemPayload,
@@ -136,6 +152,22 @@ export function useMultipleItems<
     globalDisableRefetchOnMount,
     isOffScreenFromContext,
   ]);
+
+  const activeItemKeys = useMemo(() => {
+    return queriesWithId.map(({ itemKey }) => itemKey);
+  }, [queriesWithId]);
+
+  useRegisterActiveKeys(activeItemKeys, registerActiveItems, touchItems);
+
+  const shouldDebounceFetchQueries = shouldDebouncePayload(debouncePayload);
+  const [debouncedFetchQueriesWithId] = useDebouncedValue(
+    queriesWithId,
+    shouldDebounceFetchQueries ? (debouncePayload?.ms ?? 0) : 0,
+    getPayloadDebounceOptions(debouncePayload),
+  );
+  const fetchQueriesWithId = shouldDebounceFetchQueries
+    ? debouncedFetchQueriesWithId
+    : queriesWithId;
 
   const resultSelector = useCallback(
     (state: State) => {
@@ -359,7 +391,7 @@ export function useMultipleItems<
   useOnEvtmitterEvent(events, 'invalidateItem', ({ payload: event }) => {
     if (loadFromStateOnly || !fetchItemFn) return;
 
-    const matchingQueries = queriesWithId.filter(
+    const matchingQueries = fetchQueriesWithId.filter(
       ({ itemKey, isOffScreen }) => !isOffScreen && itemKey === event.itemKey,
     );
 
@@ -411,8 +443,8 @@ export function useMultipleItems<
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (preloadItems && queriesWithId.length > 0) {
-        await preloadItems(queriesWithId.map(({ payload }) => payload));
+      if (preloadItems && fetchQueriesWithId.length > 0) {
+        await preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
         if (effectState.cancelled) return;
       }
 
@@ -427,7 +459,7 @@ export function useMultipleItems<
         isOffScreen,
         disableRefetches,
         disableRefetchOnMount,
-      } of queriesWithId) {
+      } of fetchQueriesWithId) {
         removedItems.delete(itemKey);
 
         if (isOffScreen) continue;
@@ -526,7 +558,7 @@ export function useMultipleItems<
     ignoreItemsInRefetchOnMount,
     loadFromStateOnly,
     preloadItems,
-    queriesWithId,
+    fetchQueriesWithId,
     scheduleAutomaticItemFetch,
     autoFetchSignals,
     fetchItemFn,

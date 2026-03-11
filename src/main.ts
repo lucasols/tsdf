@@ -44,6 +44,7 @@ export type {
 
 // Shared types
 export type {
+  PayloadDebounce,
   StoreError,
   TSDFStatus,
   ValidPayload,
@@ -60,6 +61,8 @@ export type {
 export type {
   AsyncStorageAdapter,
   PersistentStorageSchema,
+  PersistentStorageDataSchema,
+  ConvertedPersistentStorageDataSchema,
   PersistentStorageBaseConfig,
   PersistentStoragePreloadResult,
   DocumentPersistentStorageConfig,

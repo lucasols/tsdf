@@ -2,6 +2,12 @@ import type { Store } from 't-state';
 import type { DocumentStoreState } from '../documentStore';
 import type { ValidStoreState } from '../utils/storeShared';
 import {
+  convertStoreDataForPersistence,
+  normalizePersistentStorageDataSchema,
+  parsePersistedDocumentData,
+  parsePersistedStoreData,
+} from './parsePersistedData';
+import {
   createPersistentStorageHandle,
   getStorageKeyForStore,
   readStorageEntryFromLocalStorageSync,
@@ -12,25 +18,19 @@ import type {
   DocumentPersistentStorageConfig,
   PersistedDocumentData,
 } from './types';
-import { validateWithSchema } from './validateWithSchema';
 
 function readDocumentFromLocalStorageSync(
   key: string,
   version: number,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
   const foundEntry = localStorage.getItem(key) !== null;
-  const entry =
-    readStorageEntryFromLocalStorageSync<PersistedDocumentData<unknown>>(
-      key,
-      version,
-    );
+  const entry = readStorageEntryFromLocalStorageSync<
+    PersistedDocumentData<unknown>
+  >(key, version);
   if (!entry) return { persisted: null, foundEntry };
 
-  const persisted = entry.data;
-  return {
-    persisted,
-    foundEntry,
-  };
+  const persisted = parsePersistedDocumentData(entry.data);
+  return { persisted, foundEntry };
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {
@@ -45,18 +45,20 @@ export type DocumentPersistenceSetup<State extends ValidStoreState> = {
   clear(): Promise<void>;
 };
 
-export function setupDocumentPersistence<State extends ValidStoreState>(
-  config: DocumentPersistentStorageConfig<State> & {
+export function setupDocumentPersistence<
+  State extends ValidStoreState,
+  StorageState = unknown,
+>(
+  config: DocumentPersistentStorageConfig<State, StorageState> & {
     getSessionKey: () => string | false;
   },
 ): DocumentPersistenceSetup<State> {
   const version = config.version ?? 1;
   const storageAdapter = config.adapter;
-  const persistentConfig = config;
-  const handle =
-    createPersistentStorageHandle<PersistedDocumentData<State>>(
-      persistentConfig,
-    );
+  const dataSchema = normalizePersistentStorageDataSchema(config.schema);
+  const handle = createPersistentStorageHandle<
+    PersistedDocumentData<State | StorageState>
+  >(config);
 
   let storeRef: Store<DocumentStoreState<State>> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -69,13 +71,10 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
     const currentState = storeRef.state;
     if (currentState.status !== 'idle' || currentState.data !== null) return;
 
-    const sessionKey = persistentConfig.getSessionKey();
+    const sessionKey = config.getSessionKey();
     if (sessionKey === false) return;
 
-    const key = getStorageKeyForStore(
-      sessionKey,
-      persistentConfig.storeName,
-    );
+    const key = getStorageKeyForStore(sessionKey, config.storeName);
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
       key,
       version,
@@ -88,10 +87,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
       return;
     }
 
-    const validated = validateWithSchema(
-      persistentConfig.schema,
-      persisted.data,
-    );
+    const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
       scheduleIdleCleanup(() => void handle.clear());
       return;
@@ -118,13 +114,10 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
 
     if (storageAdapter.kind !== 'sync') return baseState;
 
-    const sessionKey = persistentConfig.getSessionKey();
+    const sessionKey = config.getSessionKey();
     if (sessionKey === false) return baseState;
 
-    const key = getStorageKeyForStore(
-      sessionKey,
-      persistentConfig.storeName,
-    );
+    const key = getStorageKeyForStore(sessionKey, config.storeName);
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
       key,
       version,
@@ -137,10 +130,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
       return baseState;
     }
 
-    const validated = validateWithSchema(
-      persistentConfig.schema,
-      persisted.data,
-    );
+    const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
       scheduleIdleCleanup(() => void handle.clear());
       return baseState;
@@ -166,7 +156,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 
-        const validated = validateWithSchema(config.schema, cached.data);
+        const validated = parsePersistedStoreData(cached.data, dataSchema);
         if (validated === null) {
           scheduleIdleCleanup(() => void handle.clear());
           return;
@@ -209,7 +199,17 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
 
         handle.scheduleSave(() => {
           const storeData = store.state.data;
-          return { data: storeData ?? capturedData };
+          const dataToPersist = storeData ?? capturedData;
+          const converted = convertStoreDataForPersistence(
+            dataToPersist,
+            dataSchema,
+          );
+
+          if (!converted.ok) {
+            throw converted.error;
+          }
+
+          return { data: converted.value };
         });
       }
     });

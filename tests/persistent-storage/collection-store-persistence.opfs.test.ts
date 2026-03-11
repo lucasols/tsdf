@@ -73,6 +73,7 @@ function createEnv(options: {
       storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: wrappedItemSchema,
+      payloadSchema: rc_string,
       ignoreItems: options.ignoreItems,
     },
   });
@@ -207,6 +208,35 @@ describe('opfs: collection store persistence', () => {
 
     const env = createEnv({
       storeName: 'col-opfs-invalid',
+      sessionKey: 'sess1',
+      storageAdapter: mockAdapter.adapter,
+    });
+
+    const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
+    await advanceTime(50);
+    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+      - { payload: 'bad', preloaded: '❌' }
+    `);
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(mockAdapter.has(key)).toBe(false);
+  });
+
+  test('invalid cached payloads are removed during targeted preload', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const key = itemStorageKey('col-opfs-invalid-payload', 'sess1', 'bad');
+    const entry: StorageCacheEntry<
+      PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
+    > = {
+      data: { data: { value: { id: 'bad', name: 'Old' } }, payload: true },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    mockAdapter.setValue(key, entry);
+
+    const env = createEnv({
+      storeName: 'col-opfs-invalid-payload',
       sessionKey: 'sess1',
       storageAdapter: mockAdapter.adapter,
     });

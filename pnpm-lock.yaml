@@ -15,11 +15,11 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/react-utils':
-        specifier: ^0.9.0
-        version: 0.9.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+        specifier: ^0.12.1
+        version: 0.12.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/utils':
-        specifier: ^3.73.0
-        version: 3.73.0
+        specifier: ^3.73.1
+        version: 3.73.1
       evtmitter:
         specifier: ^1.0.2
         version: 1.0.2
@@ -453,8 +453,8 @@ packages:
       eslint: ^9.33.0
       typescript: ^5.9.2
 
-  '@ls-stack/react-utils@0.9.0':
-    resolution: {integrity: sha512-wy4SUO1PgQJVnb8u8NA4Gkg+uliCn+FVydWcTEVlXXHK3gsWS3hqP6cwlssc2UeXCAcecgqHZg4bgwtsGOgKFg==}
+  '@ls-stack/react-utils@0.12.1':
+    resolution: {integrity: sha512-KO0gLgDHpc88tS6pHe8Jiz5ws83r3O61TboVa29sGUWycijeLSKGDhQuR5VJfutLS8gUt7+F0OGUQ67LHeIYxA==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       react: '>=18.0.0||^19.0.0'
@@ -463,12 +463,8 @@ packages:
     resolution: {integrity: sha512-07hSR0SSooobOov4lakqFkzL01dMWPZ3az1TUp2uq5z1LFVRQ7m2vDgdca3EPLmPTPyrlC96dRG91H0SqJENzg==}
     engines: {node: '>=20.0.0'}
 
-  '@ls-stack/utils@3.65.0':
-    resolution: {integrity: sha512-dOMK9LNuPmLRkraaRORBQqTq/JWGXyKHOKva25NhzWJgjOSZwPm/r8Ty8zd/bLCjaIO6aBUNl7zqJ6JTM6YaCQ==}
-    engines: {node: '>=20.0.0'}
-
-  '@ls-stack/utils@3.73.0':
-    resolution: {integrity: sha512-pGLqb+fq1k0NrDGdrgMXx78iDLmVbainVCmusGWzY3t8SM1Lt7SMX+26rLv8IFnKOoEKLvesoha6WkuhYoRNCQ==}
+  '@ls-stack/utils@3.73.1':
+    resolution: {integrity: sha512-DxtUXHMWXbzbk7iVSNkPaOJ53NTFT3X5zZ3AgXijj0FWl9a11+avC9SlZ7O14rnujeZOsCSExeFYa+jVWQN4PQ==}
     engines: {node: '>=20.0.0'}
 
   '@nodelib/fs.scandir@2.1.5':
@@ -2343,11 +2339,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@ls-stack/react-utils@0.9.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+  '@ls-stack/react-utils@0.12.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@evtmitter/react': 0.1.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/browser-utils': 0.3.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@ls-stack/utils': 3.65.0
+      '@ls-stack/utils': 3.73.1
       evtmitter: 1.0.2
       react: 19.2.3
       t-result: 0.6.1
@@ -2362,12 +2358,7 @@ snapshots:
       - react
       - react-dom
 
-  '@ls-stack/utils@3.65.0':
-    dependencies:
-      evtmitter: 1.0.2
-      t-result: 0.6.1
-
-  '@ls-stack/utils@3.73.0':
+  '@ls-stack/utils@3.73.1':
     dependencies:
       '@leeoniya/ufuzzy': 1.0.19
       evtmitter: 1.0.2

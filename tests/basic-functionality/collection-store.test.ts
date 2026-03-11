@@ -3,7 +3,9 @@ import { createCollectionStore } from '../../src/collectionStore/collectionStore
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+
+const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 
 type TodoItem = { title: string; completed: boolean };
 
@@ -197,6 +199,100 @@ test('initialization fetch', async () => {
       refetchOnMount: '❌'
       status: 'success'
       wasLoaded: '✅'
+  `);
+});
+
+test('maxItems evicts the least recently used inactive item from memory', async () => {
+  const env = createCollectionStoreTestEnv(
+    {
+      '1': { title: 'first', completed: false },
+      '2': { title: 'second', completed: false },
+      '3': { title: 'third', completed: false },
+    },
+    { maxItems: 2 },
+  );
+
+  env.scheduleFetch('highPriority', '1');
+  await flushAllTimers();
+  env.scheduleFetch('highPriority', '2');
+  await flushAllTimers();
+  env.scheduleFetch('highPriority', '3');
+  await flushAllTimers();
+
+  expect(env.apiStore.getItemState('1')).toBeUndefined();
+  expect(env.apiStore.getItemState('2')?.data?.value.title).toBe('second');
+  expect(env.apiStore.getItemState('3')?.data?.value.title).toBe('third');
+  expect(env.store.state['1']).toBeUndefined();
+  expect(Object.keys(env.store.state).sort()).toEqual(['"2', '"3']);
+});
+
+test('maxItems throttles repeated cache-limit evictions after the first overflow', async () => {
+  const env = createCollectionStoreTestEnv(
+    {
+      '1': { title: 'first', completed: false },
+      '2': { title: 'second', completed: false },
+      '3': { title: 'third', completed: false },
+    },
+    { maxItems: 1 },
+  );
+
+  env.apiStore.addItemToState('1', {
+    value: { title: 'first', completed: false },
+  });
+  await flushAllTimers();
+
+  env.apiStore.addItemToState('2', {
+    value: { title: 'second', completed: false },
+  });
+  await flushAllTimers();
+
+  expect(env.apiStore.getItemState('1')).toBeUndefined();
+  expect(env.apiStore.getItemState('2')?.data?.value.title).toBe('second');
+
+  env.apiStore.addItemToState('3', {
+    value: { title: 'third', completed: false },
+  });
+
+  await advanceTime(CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS - 1);
+  expect(env.apiStore.getItemState('2')?.data?.value.title).toBe('second');
+  expect(env.apiStore.getItemState('3')?.data?.value.title).toBe('third');
+  expect(env.apiStore.getItemState('1')).toBeUndefined();
+  expect(env.apiStore.getItemState('2')?.data?.value.title).toBe('second');
+
+  await advanceTime(1);
+  await flushAllTimers();
+
+  expect(env.apiStore.getItemState('2')).toBeUndefined();
+  expect(env.apiStore.getItemState('3')?.data?.value.title).toBe('third');
+});
+
+test('onStateCleanup is called when cache-limit eviction removes items from memory', async () => {
+  const cleanupCalls: unknown[] = [];
+  const env = createCollectionStoreTestEnv(
+    {
+      '1': { title: 'first', completed: false },
+      '2': { title: 'second', completed: false },
+      '3': { title: 'third', completed: false },
+    },
+    {
+      maxItems: 2,
+      onStateCleanup: (cleanup) => {
+        cleanupCalls.push(cleanup);
+      },
+    },
+  );
+
+  env.scheduleFetch('highPriority', '1');
+  await flushAllTimers();
+  env.scheduleFetch('highPriority', '2');
+  await flushAllTimers();
+  env.scheduleFetch('highPriority', '3');
+  await flushAllTimers();
+
+  expect(cleanupCalls).toMatchInlineSnapshot(`
+    - itemKeys: ['"1']
+      payloads: ['1']
+      reason: 'cacheLimitEviction'
   `);
 });
 

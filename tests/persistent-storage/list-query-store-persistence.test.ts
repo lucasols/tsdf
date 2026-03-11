@@ -2,11 +2,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
-import {
-  rc_number,
-  rc_object,
-  rc_string,
-} from 'runcheck';
+import { rc_number, rc_object, rc_string, rc_unknown } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -24,6 +20,7 @@ import type {
 } from '../../src/listQueryStore/types';
 import type {
   PersistedListQueryData,
+  PersistedListQueryItemData,
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -45,6 +42,12 @@ const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
     email: rc_string.optional(),
   }),
 );
+const listQueryParamsSchema = rc_object({ tableId: rc_string });
+const cacheEntryTimestampSchema = rc_object({
+  data: rc_unknown,
+  timestamp: rc_number,
+  version: rc_number,
+});
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
     if (!prev) return fetched;
@@ -197,6 +200,8 @@ function createEnv(options: {
       storeName: options.storeName,
       adapter: localPersistentStorage,
       schema: rowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryParamsSchema,
       version: options.version,
       maxItems: options.maxItems,
       maxQueries: options.maxQueries,
@@ -1364,5 +1369,68 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(2100);
 
     expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('invalid cached item payloads are cleaned up only after a direct read', async () => {
+    const key = itemStorageKey('lq-invalid-item-payload', 'sess1', 'users', 1);
+    const entry: StorageCacheEntry<
+      PersistedListQueryItemData<Row> & { payload: boolean }
+    > = {
+      data: { data: { id: 1, name: 'Alice' }, payload: true },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    localStorage.setItem(key, JSON.stringify(entry));
+
+    const env = createEnv({
+      storeName: 'lq-invalid-item-payload',
+      sessionKey: 'sess1',
+    });
+
+    expect(localStorage.getItem(key)).not.toBeNull();
+    expect(
+      env.apiStore.getItemState(rawItemPayload('users', 1)),
+    ).toBeUndefined();
+
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test('invalid cached query payloads are cleaned up only after a direct read', async () => {
+    const usersQuery = { tableId: 'users' };
+    const queryKey = queryStorageKey(
+      'lq-invalid-query-payload',
+      'sess1',
+      usersQuery,
+    );
+    const entry: StorageCacheEntry<
+      PersistedListQueryData & { payload: boolean }
+    > = {
+      data: {
+        payload: true,
+        items: [storeItemKey('users', 1)],
+        hasMore: false,
+      },
+      timestamp: Date.now(),
+      version: 1,
+    };
+    localStorage.setItem(queryKey, JSON.stringify(entry));
+    setCachedItem('lq-invalid-query-payload', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Alice',
+    });
+
+    const env = createEnv({
+      storeName: 'lq-invalid-query-payload',
+      sessionKey: 'sess1',
+    });
+
+    expect(localStorage.getItem(queryKey)).not.toBeNull();
+    expect(env.apiStore.getQueryState(usersQuery)).toBeUndefined();
+
+    await advanceTime(2100);
+
+    expect(localStorage.getItem(queryKey)).toBeNull();
   });
 });

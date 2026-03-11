@@ -2,6 +2,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType } from '../requestScheduler';
+import { assertNoEnsureIsLoadedWithDebouncePayload } from '../utils/payloadDebounce';
 import {
   ValidPayload,
   ValidStoreState,
@@ -18,7 +19,14 @@ import { UseMultipleItemsOptions } from './useMultipleItems';
 export type UseItemOptions<
   ItemState extends ValidStoreState,
   Selected,
-> = UseMultipleItemsOptions<ItemState, Selected> & { ensureIsLoaded?: boolean };
+> = UseMultipleItemsOptions<ItemState, Selected> & {
+  /**
+   * Forces a high-priority fetch on mount and keeps the hook in `loading`
+   * until the current payload finishes loading. Cannot be combined with
+   * `debouncePayload`.
+   */
+  ensureIsLoaded?: boolean;
+};
 
 export function useItem<
   ItemState extends ValidStoreState,
@@ -35,6 +43,7 @@ export function useItem<
     disableRefetchOnMount,
     returnIdleStatus,
     isOffScreen,
+    debouncePayload,
   }: UseItemOptions<ItemState, Selected>,
   store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
   scheduleFetch: (fetchType: FetchType, payload: ItemPayload) => void,
@@ -44,15 +53,22 @@ export function useItem<
   ) => readonly TSFDUseCollectionItemReturn<S, ItemPayload, undefined>[],
 ): TSFDUseCollectionItemReturn<Selected, ItemPayload> {
   const isInvalidPayload = payload === '';
+  const hasPayload =
+    payload !== false &&
+    payload !== null &&
+    payload !== undefined &&
+    payload !== '';
+
+  assertNoEnsureIsLoadedWithDebouncePayload(
+    'useItem',
+    ensureIsLoaded,
+    debouncePayload,
+  );
 
   const query = useMemo(
-    () =>
-      payload === false ||
-      payload === null ||
-      payload === undefined ||
-      payload === ''
-        ? []
-        : [
+    (): CollectionUseMultipleItemsQuery<ItemPayload, undefined>[] =>
+      hasPayload
+        ? [
             {
               payload,
               omitPayload,
@@ -62,19 +78,21 @@ export function useItem<
               returnIdleStatus,
               isOffScreen,
             },
-          ],
+          ]
+        : [],
     [
       disableRefetches,
       disableRefetchOnMount,
+      hasPayload,
       isOffScreen,
       omitPayload,
+      payload,
       returnIdleStatus,
       returnRefetchingStatus,
-      payload,
     ],
   );
 
-  const item = useMultipleItems(query, { selector });
+  const item = useMultipleItems(query, { selector, debouncePayload });
 
   const result = useMemo(
     (): TSFDUseCollectionItemReturn<Selected, ItemPayload> =>
@@ -104,21 +122,31 @@ export function useItem<
             isPendingOfflineSync: false,
             queryMetadata: undefined,
           }),
-    [item, selector, isInvalidPayload],
+    [isInvalidPayload, item, selector],
   );
+
+  const fetchQuery = hasPayload ? query[0] : undefined;
+  const isPayloadReadyForFetch = hasPayload;
 
   const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
     ensureIsLoaded,
-    !!payload,
+    hasPayload && isPayloadReadyForFetch,
     () => {
-      if (payload) {
-        scheduleFetch('highPriority', payload);
+      if (fetchQuery && isPayloadReadyForFetch) {
+        scheduleFetch('highPriority', fetchQuery.payload);
       }
     },
   );
 
   useSubscribeToStore(store, ({ observe }) => {
-    if (!ensureIsLoaded) return;
+    if (
+      !ensureIsLoaded ||
+      !hasPayload ||
+      !isPayloadReadyForFetch ||
+      !result.itemStateKey
+    ) {
+      return;
+    }
 
     observe
       .ifSelector((state) => state[result.itemStateKey]?.status)

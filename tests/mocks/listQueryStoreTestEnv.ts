@@ -107,6 +107,7 @@ export function createListQueryStoreTestEnv<
     ListQueryParams,
     ListQueryItemPayload
   >,
+  StorageState = unknown,
 >(
   serverInitialData: Tables<TRow>,
   {
@@ -118,6 +119,7 @@ export function createListQueryStoreTestEnv<
     bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
     mediumPriorityDelayMs,
     defaultQuerySize = 50,
@@ -126,6 +128,9 @@ export function createListQueryStoreTestEnv<
     usesRealTimeUpdates,
     useBatchFetch,
     maxItemBatchSize,
+    maxItems,
+    maxQueries,
+    onStateCleanup,
     getItemsBatchKey,
     disableFetchItemFn,
     optimisticListUpdates,
@@ -152,6 +157,7 @@ export function createListQueryStoreTestEnv<
       windowIsNotFocused: boolean;
     }) => number;
     revalidateOnWindowFocus?: boolean | (() => boolean);
+    transportReconnectCooldownMs?: number;
     baseCoalescingWindowMs?: number;
     mediumPriorityDelayMs?: number;
     defaultQuerySize?: number;
@@ -162,6 +168,15 @@ export function createListQueryStoreTestEnv<
     useBatchFetch?: boolean;
     /** Max items per batch (only used when useBatchFetch is true) */
     maxItemBatchSize?: number;
+    maxItems?: number;
+    maxQueries?: number;
+    onStateCleanup?: ListQueryStoreOptions<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      TPartialResources,
+      TOffsetPagination
+    >['onStateCleanup'];
     /** Optional function to group batch fetches by key */
     getItemsBatchKey?: (payload: string) => string | false;
     disableFetchItemFn?: boolean;
@@ -175,6 +190,7 @@ export function createListQueryStoreTestEnv<
       TRow,
       ListQueryParams,
       ListQueryItemPayload,
+      StorageState,
       TOfflineOperations
     >;
     storageAdapter?: StorageAdapter;
@@ -293,10 +309,14 @@ export function createListQueryStoreTestEnv<
     baseCoalescingWindowMs,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     mediumPriorityDelayMs,
     defaultQuerySize,
     usesRealTimeUpdates,
     maxItemBatchSize: useBatchFetch ? maxItemBatchSize : undefined,
+    maxItems,
+    maxQueries,
+    onStateCleanup,
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     blockWindowClose: blockWindowClose ?? null,
@@ -385,7 +405,8 @@ export function createListQueryStoreTestEnv<
     ListQueryItemPayload,
     TPartialResources,
     TOffsetPagination,
-    TOfflineOperations
+    TOfflineOperations,
+    StorageState
   >(
     __LEGIT_CAST__<
       ListQueryStoreOptions<
@@ -394,7 +415,8 @@ export function createListQueryStoreTestEnv<
         ListQueryItemPayload,
         TPartialResources,
         TOffsetPagination,
-        TOfflineOperations
+        TOfflineOperations,
+        StorageState
       >,
       unknown
     >(storeOptions),

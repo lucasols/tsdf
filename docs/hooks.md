@@ -24,6 +24,62 @@ These options are available across all data hooks:
 | `returnRefetchingStatus`   | `false`                                                   | When `false`, maps `refetching` status to `success` so the UI doesn't flicker during background refetches                                                   |
 | `ensureIsLoaded`           | `false`                                                   | Forces a high-priority fetch on mount and overrides status to `loading` until data is loaded. Useful for components that must show fresh data               |
 
+## `debouncePayload`
+
+Payload-based hooks support `debouncePayload` to debounce automatic fetches
+caused by rapid payload changes.
+
+This applies to:
+
+- `useItem`
+- `useListQuery`
+- `useMultipleItems`
+- `useMultipleListQueries`
+
+Behavior:
+
+- The hook still reads from state using the latest payload immediately
+- Only the automatic fetch side is delayed
+- Cached data for the latest payload is still returned right away when present
+- Intermediate payloads are skipped if they are replaced before the debounce
+  window ends
+- `useItem` and `useListQuery` throw if `debouncePayload` is combined with
+  `ensureIsLoaded`
+
+### Basic trailing debounce
+
+```tsx
+const result = store.useListQuery(filter, { debouncePayload: { ms: 200 } });
+```
+
+This waits `200ms` after the last payload change before fetching.
+
+### `leading`
+
+```tsx
+const result = store.useItem(itemId, {
+  debouncePayload: { ms: 300, leading: true },
+});
+```
+
+With `leading: true`:
+
+- The first payload in a burst may fetch immediately
+- Later payload changes inside the same burst stay debounced
+- When the debounce window ends, TSDF fetches the latest payload
+
+### `maxWait`
+
+```tsx
+const result = store.useListQuery(filter, {
+  debouncePayload: { ms: 300, maxWait: 1000 },
+});
+```
+
+`maxWait` limits how long a burst may stay deferred. Even if payload changes
+keep happening inside the debounce window, TSDF fetches the latest payload once
+`maxWait` is reached.
+
 ## useDocument
 
 **Store**: [Document Store](./document-store.md)
@@ -90,6 +146,19 @@ Passing an empty string `''` as payload returns an immediate error state with `{
 const itemName = store.useItem('item-1', { selector: (data) => data?.name });
 ```
 
+### Debouncing payload changes
+
+```tsx
+const item = store.useItem(selectedItemId, {
+  debouncePayload: { ms: 250, leading: true, maxWait: 1000 },
+});
+```
+
+This is useful when `selectedItemId` changes rapidly, such as typeahead-driven
+selection or fast keyboard navigation.
+
+`ensureIsLoaded` cannot be combined with `debouncePayload` on single hooks.
+
 ### List Query Store specific options
 
 - `loadFromStateOnly` - Don't fetch; return a cache-miss error (`{ code: 460, id: 'cache-miss' }`) if the item isn't already in the store
@@ -143,6 +212,20 @@ const result = store.useListQuery(filter, {
 store.useListQuery(filter, { loadSize: 20 }); // override defaultQuerySize
 ```
 
+### Debouncing query changes
+
+```tsx
+const result = store.useListQuery(
+  { search, status: 'open' },
+  { debouncePayload: { ms: 300, maxWait: 1200 } },
+);
+```
+
+`ensureIsLoaded` cannot be combined with `debouncePayload` on `useListQuery`.
+
+This is useful for search forms and filter panels where the query payload
+changes on every keystroke.
+
 ### Return value
 
 - `items` - Array of items (or selected items)
@@ -172,6 +255,15 @@ const items = store.useMultipleItems([
 
 Per-item options override the global options passed to the hook.
 
+You can debounce automatic fetches for rapid item-array changes:
+
+```tsx
+const items = store.useMultipleItems(
+  selectedIds.map((payload) => ({ payload })),
+  { debouncePayload: { ms: 150 } },
+);
+```
+
 ## useMultipleListQueries
 
 **Store**: [List Query Store](./list-query-store.md)
@@ -184,6 +276,14 @@ const queries = store.useMultipleListQueries([
   { payload: { projectId: 'proj-2' }, loadSize: 10 },
 ]);
 // queries[0].items, queries[1].items, etc.
+```
+
+You can debounce automatic fetches for rapid query-array changes:
+
+```tsx
+const queries = store.useMultipleListQueries(queryInputs, {
+  debouncePayload: { ms: 200, maxWait: 1000 },
+});
 ```
 
 ## useFindItem

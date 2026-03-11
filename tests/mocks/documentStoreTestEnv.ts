@@ -44,6 +44,7 @@ export type DocumentStoreTestEnvOptions<
   D,
   TOfflineOperations extends DocumentOfflineOperationsRegistry<{ value: D }> =
     DocumentOfflineOperationsRegistry<{ value: D }>,
+  StorageState = unknown,
 > = {
   id?: string;
   getSessionKey?: () => string | false;
@@ -61,6 +62,7 @@ export type DocumentStoreTestEnvOptions<
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  transportReconnectCooldownMs?: number;
   baseCoalescingWindowMs?: number;
   lowPriorityThrottleMs?: number;
   mediumPriorityDelayMs?: number;
@@ -69,6 +71,7 @@ export type DocumentStoreTestEnvOptions<
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: DocumentPersistentStorageConfig<
     { value: D },
+    StorageState,
     TOfflineOperations
   >;
   storageAdapter?: StorageAdapter;
@@ -79,6 +82,7 @@ export function createDocumentStoreTestEnv<
   D,
   TOfflineOperations extends DocumentOfflineOperationsRegistry<{ value: D }> =
     DocumentOfflineOperationsRegistry<{ value: D }>,
+  StorageState = unknown,
 >(
   serverInitialData: D,
   {
@@ -90,6 +94,7 @@ export function createDocumentStoreTestEnv<
     bindFocusController,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     baseCoalescingWindowMs = 10,
     lowPriorityThrottleMs = getDefaultLowPriorityThrottleMs(),
     mediumPriorityDelayMs,
@@ -99,7 +104,7 @@ export function createDocumentStoreTestEnv<
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: DocumentStoreTestEnvOptions<D, TOfflineOperations> = {},
+  }: DocumentStoreTestEnvOptions<D, TOfflineOperations, StorageState> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -135,7 +140,11 @@ export function createDocumentStoreTestEnv<
       ? { ...persistentStorage, adapter: storageAdapter }
       : persistentStorage;
 
-  const documentStore = createDocumentStore<{ value: D }, TOfflineOperations>({
+  const documentStore = createDocumentStore<
+    { value: D },
+    TOfflineOperations,
+    StorageState
+  >({
     id,
     getSessionKey,
     errorNormalizer: normalizeError,
@@ -148,6 +157,7 @@ export function createDocumentStoreTestEnv<
     usesRealTimeUpdates,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
     persistentStorage: resolvedPersistentStorage,

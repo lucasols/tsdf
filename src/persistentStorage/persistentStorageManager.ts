@@ -1,4 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_number,
   rc_object,
@@ -82,11 +81,7 @@ export type PersistentStorageHandle<T> = {
  */
 export function createPersistentStorageHandle<T>(
   config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
-  {
-    getManifestMeta,
-  }: {
-    getManifestMeta?: (data: T) => unknown;
-  } = {},
+  { getManifestMeta }: { getManifestMeta?: (data: T) => unknown } = {},
 ): PersistentStorageHandle<T> {
   const version = config.version ?? 1;
   const { onPersistentStorageError } = config;
@@ -108,9 +103,7 @@ export function createPersistentStorageHandle<T>(
     });
   }
 
-  if (
-    !usesManagedLocalStorage && !scannedAdapters.has(adapter)
-  ) {
+  if (!usesManagedLocalStorage && !scannedAdapters.has(adapter)) {
     scannedAdapters.add(adapter);
     scheduleIdleCleanup(() => {
       void runExpirationScan(adapter, getMaxAgeForAdapter(adapter));
@@ -204,7 +197,12 @@ export function createPersistentStorageHandle<T>(
 
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      void writeEntry(getData());
+
+      try {
+        void writeEntry(getData());
+      } catch (error) {
+        onPersistentStorageError?.(error);
+      }
     }, DEBOUNCE_MS);
   }
 
@@ -221,7 +219,9 @@ export function createPersistentStorageHandle<T>(
     try {
       await adapter.remove(key);
       if (usesManagedLocalStorage) {
-        clearManagedLocalStorageRoot(getManagedLocalStorageRootKeyForSingle(key));
+        clearManagedLocalStorageRoot(
+          getManagedLocalStorageRootKeyForSingle(key),
+        );
       }
     } catch (error) {
       onPersistentStorageError?.(error);
@@ -251,9 +251,7 @@ export function createPersistentStorageNamespaceHandle<T>(
   },
   {
     getManifestMeta,
-  }: {
-    getManifestMeta?: (data: T, entryKey: string) => unknown;
-  } = {},
+  }: { getManifestMeta?: (data: T, entryKey: string) => unknown } = {},
 ): PersistentStorageNamespaceHandle<T> {
   const version = config.version ?? 1;
   const { onPersistentStorageError } = config;
@@ -274,9 +272,7 @@ export function createPersistentStorageNamespaceHandle<T>(
     });
   }
 
-  if (
-    !usesManagedLocalStorage && !scannedAdapters.has(adapter)
-  ) {
+  if (!usesManagedLocalStorage && !scannedAdapters.has(adapter)) {
     scannedAdapters.add(adapter);
     scheduleIdleCleanup(() => {
       void runExpirationScan(adapter, getMaxAgeForAdapter(adapter));
@@ -452,9 +448,12 @@ export function readFromLocalStorageSync<T>(
     const raw = localStorage.getItem(key);
     if (raw === null) return null;
 
-    const entry = __LEGIT_CAST__<StorageCacheEntry<unknown>, unknown>(
-      JSON.parse(raw),
-    );
+    const entryResult = rc_parse_json(raw, cacheEntrySchema);
+    if (!entryResult.ok) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return null;
+    }
+    const entry = entryResult.value;
 
     if (entry.version !== version) {
       scheduleIdleCleanup(() => {
@@ -486,21 +485,23 @@ export function readFromLocalStorageSync<T>(
   }
 }
 
-export function readStorageEntryFromLocalStorageSync<T>(
+export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
   version: number,
 ): StorageCacheEntry<T> | null {
   if (readManagedLocalStorageEntryByPayload(key) === null) {
     return null;
   }
-
   try {
     const raw = localStorage.getItem(key);
     if (raw === null) return null;
 
-    const entry = __LEGIT_CAST__<StorageCacheEntry<T>, unknown>(
-      JSON.parse(raw),
-    );
+    const result = rc_parse_json(raw, cacheEntrySchema);
+    if (!result.ok) {
+      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      return null;
+    }
+    const entry = result.value;
     if (entry.version !== version) {
       scheduleIdleCleanup(() => {
         localStorage.removeItem(key);
@@ -509,7 +510,7 @@ export function readStorageEntryFromLocalStorageSync<T>(
       return null;
     }
 
-    return entry;
+    return entry as StorageCacheEntry<T>;
   } catch {
     scheduleIdleCleanup(() => {
       localStorage.removeItem(key);

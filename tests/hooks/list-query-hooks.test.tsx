@@ -81,6 +81,7 @@ describe('useMultipleItemsQuery invalidation tests', () => {
       productsRender.add(pick(products, ['status', 'payload', 'items']));
     });
 
+    await advanceTime(1);
     await flushAllTimers();
 
     expect(env.serverTable.numOfFinishedFetches).toBe(2);
@@ -716,6 +717,30 @@ describe('useQuery', () => {
     `);
   });
 
+  test('throws when ensureIsLoaded is combined with debouncePayload', () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+
+    expect(() =>
+      renderHook(() =>
+        listQueryStore.useListQuery(
+          { tableId: 'users' },
+          {
+            ensureIsLoaded: true,
+            debouncePayload: { ms: 100 },
+            itemSelector: (data) => data.name,
+          },
+        ),
+      ),
+    ).toThrowErrorMatchingInlineSnapshot(
+      `
+      Error#:
+        message: 'useListQuery does not support using ensureIsLoaded together with debouncePayload.'
+        name: 'Error'
+      `,
+    );
+  });
+
   test('disableRefetchOnMount', async () => {
     const env = createListQueryStoreTestEnv(initialServerData, {
       testScenario: { loaded: { tables: ['users'] } },
@@ -932,6 +957,26 @@ describe('useItem', () => {
       -> status: success ⋅ payload: users||1 ⋅ isLoading: ❌ ⋅ data: User 1
       "
     `);
+  });
+
+  test('throws when ensureIsLoaded is combined with debouncePayload', () => {
+    const env = createListQueryStoreTestEnv(initialServerData);
+    const listQueryStore = env.apiStore;
+
+    expect(() =>
+      renderHook(() =>
+        listQueryStore.useItem('users||1', {
+          ensureIsLoaded: true,
+          debouncePayload: { ms: 100 },
+        }),
+      ),
+    ).toThrowErrorMatchingInlineSnapshot(
+      `
+      Error#:
+        message: 'useItem does not support using ensureIsLoaded together with debouncePayload.'
+        name: 'Error'
+      `,
+    );
   });
 
   test('disableRefetchOnMount', async () => {

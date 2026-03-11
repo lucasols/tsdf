@@ -6,6 +6,8 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
+import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
+import { createIdleThrottledScheduler } from '../cacheLimits/scheduleIdleThrottled';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import {
   createOfflineStoreController,
@@ -57,6 +59,7 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
+import { createListQueryCacheLimits } from './listQueryCacheLimits';
 import { createMutationApi } from './createMutationApi';
 import {
   type FetchListFnReturn,
@@ -121,6 +124,19 @@ export type ListQueryStore<
     TOfflineOperations
   >
 >;
+
+export type ListQueryStateCleanup<
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = {
+  reason: 'cacheLimitEviction';
+  itemKeys: string[];
+  itemPayloads: ItemPayload[];
+  queryKeys: string[];
+  queryPayloads: QueryPayload[];
+};
+
+const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 
 const noFetchItemFnError = 'No fetchItemFn was provided';
 const noPartialResourcesFieldsOptionError =
@@ -201,6 +217,7 @@ type ListQueryStoreOptionsBase<
     QueryPayload,
     ItemPayload
   > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  StorageState = unknown,
 > = {
   debugName?: string;
   /** Stable id shared by the same logical list-query store across browser tabs. */
@@ -223,6 +240,14 @@ type ListQueryStoreOptionsBase<
   errorNormalizer: (exception: Error) => StoreError;
   defaultQuerySize?: number;
   maxItemBatchSize?: number;
+  /** Maximum number of cached items kept in memory. Defaults to 5,000. Item pressure may evict whole inactive queries to avoid leaving cached queries partially loaded. */
+  maxItems?: number;
+  /** Maximum number of cached queries kept in memory. Defaults to 1,000. Inactive queries are evicted in LRU order while mounted hook queries stay protected. */
+  maxQueries?: number;
+  /** Called when cache-limit eviction removes items or queries from in-memory state. */
+  onStateCleanup?: (
+    cleanup: ListQueryStateCleanup<QueryPayload, ItemPayload>,
+  ) => void;
   usesRealTimeUpdates?: boolean;
   '~test'?: {
     initialData?: ListQueryStoreInitialData<
@@ -254,6 +279,10 @@ type ListQueryStoreOptionsBase<
     windowIsNotFocused: boolean;
   }) => number;
   revalidateOnWindowFocus?: boolean | (() => boolean);
+  /** Reconnect-specific cooldown. The first reconnect revalidates immediately;
+   * additional reconnects within the cooldown are coalesced into one trailing
+   * revalidation. Set to `0` to disable this cooldown. */
+  transportReconnectCooldownMs?: number;
   optimisticListUpdates?: OptimisticListUpdate<
     ItemState,
     QueryPayload,
@@ -276,6 +305,7 @@ type ListQueryStoreOptionsBase<
     ItemState,
     QueryPayload,
     ItemPayload,
+    StorageState,
     TOfflineOperations
   >;
 } & ([TPartialResources] extends [true]
@@ -293,12 +323,14 @@ export type ListQueryStoreOptions<
     QueryPayload,
     ItemPayload
   > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  StorageState = unknown,
 > = ListQueryStoreOptionsBase<
   ItemState,
   QueryPayload,
   ItemPayload,
   TPartialResources,
-  TOfflineOperations
+  TOfflineOperations,
+  StorageState
 > &
   ([TOffsetPagination] extends [true]
     ? {
@@ -325,6 +357,7 @@ export function createListQueryStore<
     QueryPayload,
     ItemPayload
   > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  StorageState = unknown,
 >(
   storeOptions: ListQueryStoreOptions<
     ItemState,
@@ -332,7 +365,8 @@ export function createListQueryStore<
     ItemPayload,
     TPartialResources,
     TOffsetPagination,
-    TOfflineOperations
+    TOfflineOperations,
+    StorageState
   >,
 ) {
   const {
@@ -345,6 +379,9 @@ export function createListQueryStore<
     errorNormalizer,
     defaultQuerySize = 50,
     maxItemBatchSize,
+    maxItems = 5_000,
+    maxQueries = 1_000,
+    onStateCleanup,
     usesRealTimeUpdates = false,
     '~test': testOptions,
     lowPriorityThrottleMs,
@@ -352,6 +389,7 @@ export function createListQueryStore<
     mediumPriorityDelayMs,
     dynamicRealtimeThrottleMs,
     revalidateOnWindowFocus,
+    transportReconnectCooldownMs = 2_000,
     optimisticListUpdates,
     onInvalidateQuery,
     onInvalidateItem,
@@ -368,6 +406,8 @@ export function createListQueryStore<
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   const lastQuerySyncVersions = new Map<string, BrowserTabsSyncVersion>();
   const lastItemSyncVersions = new Map<string, BrowserTabsSyncVersion>();
+  const itemCacheRuntime = createLruCacheRuntime();
+  const queryCacheRuntime = createLruCacheRuntime();
 
   type HasPR = [TPartialResources] extends [true] ? true : false;
   const offsetPagination: OffsetPaginationConfig | undefined =
@@ -523,7 +563,7 @@ export function createListQueryStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
+    ? setupListQueryPersistence(
         { ...persistentStorageConfig, getSessionKey },
         { getItemKey, getQueryKey },
       )
@@ -615,6 +655,60 @@ export function createListQueryStore<
         ? offlineController.queueMutation(args)
         : Promise.resolve(),
   };
+
+  function touchQueries(queryKeys: string[]): void {
+    queryCacheRuntime.touch(queryKeys, (queryKey) => {
+      return store.state.queries[queryKey] !== undefined;
+    });
+  }
+
+  function touchItems(itemKeys: string[]): void {
+    itemCacheRuntime.touch(itemKeys, (itemKey) => {
+      return store.state.itemQueries[itemKey] !== undefined;
+    });
+  }
+
+  function registerActiveQueryRefs(queryKeys: string[]): () => void {
+    if (queryKeys.length === 0) return () => {};
+
+    const unregister = queryCacheRuntime.registerActive(queryKeys);
+
+    return () => {
+      unregister();
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
+    };
+  }
+
+  function registerActiveStandaloneItems(itemKeys: string[]): () => void {
+    if (itemKeys.length === 0) return () => {};
+
+    const unregister = itemCacheRuntime.registerActive(itemKeys);
+
+    return () => {
+      unregister();
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
+    };
+  }
+
+  function shouldScheduleCacheLimitEnforcement(): boolean {
+    if (Object.keys(store.state.queries).length > maxQueries) {
+      return true;
+    }
+
+    let itemCount = 0;
+    for (const itemQuery of Object.values(store.state.itemQueries)) {
+      if (itemQuery !== null) {
+        itemCount++;
+        if (itemCount > maxItems) return true;
+      }
+    }
+
+    return false;
+  }
 
   const getWindowIsFocused = testOptions?.getWindowIsFocused ?? isWindowFocused;
 
@@ -783,6 +877,20 @@ export function createListQueryStore<
     const results = await persistence.preloadQueries(
       payloads.map((queryPayload) => getQueryKey(queryPayload)),
     );
+    const preloadedQueryKeys = payloads.flatMap((queryPayload, index) =>
+      results[index] ? [getQueryKey(queryPayload)] : [],
+    );
+    if (preloadedQueryKeys.length > 0) {
+      touchQueries(preloadedQueryKeys);
+      touchItems(
+        preloadedQueryKeys.flatMap(
+          (queryKey) => store.state.queries[queryKey]?.items ?? [],
+        ),
+      );
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
+    }
     return payloads.map((queryPayload, index) => ({
       payload: queryPayload,
       preloaded: results[index] ?? false,
@@ -811,6 +919,15 @@ export function createListQueryStore<
     const results = await persistence.preloadItems(
       payloads.map((itemPayload) => getItemKey(itemPayload)),
     );
+    const preloadedItemKeys = payloads.flatMap((itemPayload, index) =>
+      results[index] ? [getItemKey(itemPayload)] : [],
+    );
+    if (preloadedItemKeys.length > 0) {
+      touchItems(preloadedItemKeys);
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
+      }
+    }
     return payloads.map((itemPayload, index) => ({
       payload: itemPayload,
       preloaded: results[index] ?? false,
@@ -833,6 +950,7 @@ export function createListQueryStore<
     getOrCreateItemScheduler,
     syncRemoteFetchStart,
     syncRemoteFetchSuccess,
+    deleteQueryFetchResources,
     deleteItemFetchResources,
     resetSchedulers,
   } = createFetchApi<ItemState, QueryPayload, ItemPayload>({
@@ -898,6 +1016,17 @@ export function createListQueryStore<
       const successfulQueryKeys = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map(({ requestId }) => requestId);
+      if (successfulQueryKeys.length > 0) {
+        touchQueries(successfulQueryKeys);
+        touchItems(
+          successfulQueryKeys.flatMap(
+            (queryKey) => store.state.queries[queryKey]?.items ?? [],
+          ),
+        );
+        if (shouldScheduleCacheLimitEnforcement()) {
+          scheduleCacheLimitEnforcement();
+        }
+      }
       const firstQueryKey = successfulQueryKeys[0];
 
       if (firstQueryKey) {
@@ -919,6 +1048,12 @@ export function createListQueryStore<
       const successfulItems = requests
         .filter(({ requestId }) => results.get(requestId) === true)
         .map((request) => ({ itemKey: request.requestId }));
+      if (successfulItems.length > 0) {
+        touchItems(successfulItems.map(({ itemKey }) => itemKey));
+        if (shouldScheduleCacheLimitEnforcement()) {
+          scheduleCacheLimitEnforcement();
+        }
+      }
       const firstSuccessfulItem = successfulItems[0];
 
       if (firstSuccessfulItem) {
@@ -953,9 +1088,9 @@ export function createListQueryStore<
     invalidateQueryAndItems,
     invalidateItem,
     startItemMutation,
-    updateItemState,
-    addItemToState,
-    deleteItemState,
+    updateItemState: updateItemStateBase,
+    addItemToState: addItemToStateBase,
+    deleteItemState: deleteItemStateBase,
     resetInvalidationTracking,
     performMutation: performMutationBase,
   } = createMutationApi<
@@ -1148,6 +1283,53 @@ export function createListQueryStore<
     }
   }
 
+  function cleanupItemStateMetadata(itemKey: string): void {
+    itemFieldInvalidationPriorities.delete(itemKey);
+    itemPendingInvalidationFields.delete(itemKey);
+    itemInvalidationWasTriggered.delete(itemKey);
+    itemCacheRuntime.clear(itemKey);
+  }
+
+  function cleanupQueryStateMetadata(queryKey: string): void {
+    queryInvalidationWasTriggered.delete(queryKey);
+    queryCacheRuntime.clear(queryKey);
+  }
+
+  function isQueryProtectedFromEviction(
+    queryKey: string,
+    query: TSFDListQuery<QueryPayload>,
+  ): boolean {
+    if (queryCacheRuntime.isActive(queryKey)) return true;
+    const scheduler = getOrCreateQueryScheduler(queryKey);
+    if (
+      query.status === 'loading' ||
+      query.status === 'refetching' ||
+      query.status === 'loadingMore' ||
+      scheduler.getFetchIsInProgress()
+    ) {
+      return true;
+    }
+
+    return scheduler.isMutationInProgress(queryKey);
+  }
+
+  function isStandaloneItemProtectedFromEviction(
+    itemKey: string,
+    itemQuery: TSDFItemQuery<ItemPayload>,
+  ): boolean {
+    if (itemCacheRuntime.isActive(itemKey)) return true;
+    const scheduler = getOrCreateItemScheduler(itemKey, itemQuery.payload);
+    if (
+      itemQuery.status === 'loading' ||
+      itemQuery.status === 'refetching' ||
+      scheduler.getFetchIsInProgress()
+    ) {
+      return true;
+    }
+
+    return scheduler.isMutationInProgress(itemKey);
+  }
+
   function mergeIncomingItemSnapshot(
     currentItem: ItemState | null | undefined,
     incomingItem: ItemState | null,
@@ -1206,8 +1388,7 @@ export function createListQueryStore<
 
     itemInvalidationWasTriggered.delete(message.itemKey);
     if (message.item === null && message.itemQuery === null) {
-      itemFieldInvalidationPriorities.delete(message.itemKey);
-      itemPendingInvalidationFields.delete(message.itemKey);
+      cleanupItemStateMetadata(message.itemKey);
     }
     pruneItemInvalidationTracking();
     if (message.item === null && message.itemQuery === null) {
@@ -1215,6 +1396,11 @@ export function createListQueryStore<
         deleteItemFetchResources([
           { itemKey: message.itemKey, payload: payloadToCleanup },
         ]);
+      }
+    } else if (message.item !== null && message.itemQuery !== null) {
+      touchItems([message.itemKey]);
+      if (shouldScheduleCacheLimitEnforcement()) {
+        scheduleCacheLimitEnforcement();
       }
     }
   }
@@ -1273,6 +1459,11 @@ export function createListQueryStore<
         item.itemKey,
         toBrowserTabsSyncVersion(message, message.consistency),
       );
+    }
+    touchQueries([message.queryKey]);
+    touchItems(message.items.map(({ itemKey }) => itemKey));
+    if (shouldScheduleCacheLimitEnforcement()) {
+      scheduleCacheLimitEnforcement();
     }
   }
 
@@ -1450,6 +1641,8 @@ export function createListQueryStore<
         store,
         events,
         getQueryKey,
+        registerActiveQueryRefs,
+        touchQueries,
         getQueryState,
         persistence
           ? (payloads) =>
@@ -1562,6 +1755,8 @@ export function createListQueryStore<
       store,
       events,
       getItemKey,
+      registerActiveStandaloneItems,
+      touchItems,
       scheduleAutomaticItemFetch,
       persistence
         ? (payloads) =>
@@ -1642,12 +1837,15 @@ export function createListQueryStore<
       findItemFn,
       options,
       store,
+      registerActiveStandaloneItems,
+      touchItems,
     );
   }
 
   const focusLifecycle = createStoreFocusLifecycle({
     revalidateOnWindowFocus,
     usesRealTimeUpdates,
+    transportReconnectCooldownMs,
     getWindowIsFocused,
     onWindowFocus: testOptions?.onWindowFocus ?? onWindowFocusDefault,
     onWindowFocusRevalidate: () => {
@@ -1667,8 +1865,43 @@ export function createListQueryStore<
   });
 
   // Attach persistent storage after store creation
+  const { enforceCacheLimits } = createListQueryCacheLimits({
+    store,
+    maxItems,
+    maxQueries,
+    itemCacheRuntime,
+    queryCacheRuntime,
+    isQueryProtectedFromEviction,
+    isStandaloneItemProtectedFromEviction,
+    cleanupItemStateMetadata,
+    cleanupQueryStateMetadata,
+    deleteQueryFetchResources,
+    deleteItemFetchResources,
+    onStateCleanup,
+  });
+
+  const cacheLimitEnforcementScheduler = createIdleThrottledScheduler({
+    throttleMs: CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
+    run: enforceCacheLimits,
+  });
+
+  function scheduleCacheLimitEnforcement(): void {
+    cacheLimitEnforcementScheduler.schedule();
+  }
+
   persistence?.attach(store);
   initializeOfflineStoreController(offlineController);
+  if (store.isInitialized) {
+    touchQueries(Object.keys(store.state.queries));
+    touchItems(
+      Object.keys(store.state.itemQueries).filter((itemKey) => {
+        return store.state.itemQueries[itemKey] !== undefined;
+      }),
+    );
+    if (shouldScheduleCacheLimitEnforcement()) {
+      scheduleCacheLimitEnforcement();
+    }
+  }
 
   /**
    * Signals that the real-time transport (e.g. WebSocket) has reconnected after
@@ -1676,11 +1909,12 @@ export function createListQueryStore<
    * queries and items need to be revalidated.
    *
    * - No-op when `usesRealTimeUpdates` is `false`.
-   * - If the window is focused, invalidates all queries and items immediately
-   *   with `realtimeUpdate` priority.
-   * - If the window is **not** focused, defers invalidation until the next
-   *   window focus event. Multiple calls while unfocused are coalesced (only
-   *   one invalidation fires on focus).
+   * - If the window is focused, the first reconnect invalidates all queries
+   *   and items immediately with `realtimeUpdate` priority.
+   * - Additional reconnects within `transportReconnectCooldownMs` are
+   *   coalesced into one trailing invalidation.
+   * - If the window is **not** focused, reconnect invalidation waits until the
+   *   next window focus event.
    */
   function onTransportReconnect(): void {
     focusLifecycle.onTransportReconnect();
@@ -1691,6 +1925,9 @@ export function createListQueryStore<
     resetInvalidationTracking();
     lastQuerySyncVersions.clear();
     lastItemSyncVersions.clear();
+    queryCacheRuntime.clearAll();
+    itemCacheRuntime.clearAll();
+    cacheLimitEnforcementScheduler.cancel();
     browserTabsPriority?.reset();
 
     persistence?.dispose();
@@ -1835,6 +2072,68 @@ export function createListQueryStore<
     const [options] = args;
     return awaitItemFetch(itemPayload, options);
   };
+
+  function getRelatedQueryKeysForItemEntries(
+    itemEntries: { payload: ItemPayload }[],
+  ): string[] {
+    return Array.from(
+      new Set(
+        itemEntries.flatMap(({ payload }) =>
+          getQueriesRelatedToItem(payload).map(({ key }) => key),
+        ),
+      ),
+    );
+  }
+
+  function touchUpdatedItemEntries(
+    itemEntries: { itemKey: string; payload: ItemPayload }[],
+  ): void {
+    touchItems(itemEntries.map(({ itemKey }) => itemKey));
+    touchQueries(getRelatedQueryKeysForItemEntries(itemEntries));
+    if (shouldScheduleCacheLimitEnforcement()) {
+      scheduleCacheLimitEnforcement();
+    }
+  }
+
+  function updateItemState(
+    itemIds: Parameters<typeof updateItemStateBase>[0],
+    produceNewData: Parameters<typeof updateItemStateBase>[1],
+    options?: Parameters<typeof updateItemStateBase>[2],
+  ): ReturnType<typeof updateItemStateBase> {
+    const itemEntries = getItemsKeyArray(itemIds);
+    const wasUpdated = updateItemStateBase(itemIds, produceNewData, options);
+
+    if (!wasUpdated) return wasUpdated;
+
+    touchUpdatedItemEntries(itemEntries);
+
+    return wasUpdated;
+  }
+
+  function addItemToState(
+    itemPayload: Parameters<typeof addItemToStateBase>[0],
+    data: Parameters<typeof addItemToStateBase>[1],
+    options?: Parameters<typeof addItemToStateBase>[2],
+  ): void {
+    addItemToStateBase(itemPayload, data, options);
+    touchUpdatedItemEntries([
+      { itemKey: getItemKey(itemPayload), payload: itemPayload },
+    ]);
+  }
+
+  function deleteItemState(
+    itemId: Parameters<typeof deleteItemStateBase>[0],
+  ): void {
+    const itemEntries = getItemsKeyArray(itemId);
+    const relatedQueryKeys = getRelatedQueryKeysForItemEntries(itemEntries);
+
+    deleteItemStateBase(itemId);
+
+    for (const { itemKey } of itemEntries) {
+      cleanupItemStateMetadata(itemKey);
+    }
+    touchQueries(relatedQueryKeys);
+  }
 
   return {
     store,
