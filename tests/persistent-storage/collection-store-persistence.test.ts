@@ -479,14 +479,25 @@ describe('localStorage: collection store persistence', () => {
 
   test('invalid cached payloads are cleaned up only after the item is read', async () => {
     const key = itemStorageKey('col-invalid-payload', 'sess1', 'bad');
-    const entry: StorageCacheEntry<
-      PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
-    > = {
-      data: { data: { value: { id: 'bad', name: 'Old' } }, payload: true },
-      timestamp: Date.now(),
-      version: 1,
-    };
-    localStorage.setItem(key, JSON.stringify(entry));
+    setCachedCollectionItem('col-invalid-payload', 'sess1', 'bad', {
+      value: { id: 'bad', name: 'Old' },
+    });
+    const entry =
+      persistentStore.storage.readEntry<
+        StorageCacheEntry<PersistedCollectionItemData<PersistedItemState>>
+      >(key);
+    if (entry === null) {
+      throw new Error(`Missing seeded entry for ${key}`);
+    }
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        ...entry,
+        data: { ...entry.data, payload: true },
+      } satisfies StorageCacheEntry<
+        PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
+      >),
+    );
 
     const env = createEnv({
       storeName: 'col-invalid-payload',

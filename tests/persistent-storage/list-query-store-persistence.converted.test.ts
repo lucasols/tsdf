@@ -191,11 +191,23 @@ describe('localStorage: converted list query store persistence', () => {
       'users',
       1,
     );
+    invalidPayloadStore.listQuery.seedItem('users', 1, {
+      rowId: 1,
+      label: 'Cached',
+    });
+    const invalidPayloadEntry =
+      invalidPayloadStore.storage.readEntry<
+        StorageCacheEntry<PersistedListQueryItemData<unknown>>
+      >(invalidPayloadKey);
+    if (invalidPayloadEntry === null) {
+      throw new Error(`Missing seeded entry for ${invalidPayloadKey}`);
+    }
     invalidPayloadStore.setValue(invalidPayloadKey, {
-      data: { data: { rowId: 1, label: 'Cached' }, payload: true },
-      timestamp: Date.now(),
-      version: 1,
-    } satisfies StorageCacheEntry<PersistedListQueryItemData<unknown>>);
+      ...invalidPayloadEntry,
+      data: { ...invalidPayloadEntry.data, payload: true },
+    } satisfies StorageCacheEntry<
+      PersistedListQueryItemData<unknown> & { payload: boolean }
+    >);
 
     const invalidStorageEnv = createEnv({
       storeName: 'lq-converted-invalid-storage',
@@ -339,9 +351,9 @@ describe('localStorage: converted list query store persistence', () => {
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
     expect(mockStore.listQuery.readItemData<StoredRow>('users', 1))
       .toMatchInlineSnapshot(`
-      label: 'Cached'
-      rowId: 1
-    `);
+        label: 'Cached'
+        rowId: 1
+      `);
     expect(mockStore.listQuery.readQueryEntry(usersQuery).data.payload)
       .toMatchInlineSnapshot(`
         tableId: 'users'

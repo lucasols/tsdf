@@ -23,6 +23,7 @@ import {
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
+  listQueryQueryPayloadSchema,
 } from './offlineTestShared';
 
 type CreateUserOperations = {
@@ -117,6 +118,7 @@ describe('offline mode replay and conflict handling', () => {
           storeName: 'offline-temp-id-collection',
           adapter: localPersistentStorage,
           schema: collectionSchema,
+          payloadSchema: rc_string,
           offlineMode: {
             network: { enabled: true, getIsOffline },
             operations: {
@@ -590,6 +592,8 @@ describe('offline mode replay and conflict handling', () => {
           storeName: 'offline-replay-mutation-payload',
           adapter: localPersistentStorage,
           schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
           offlineMode: {
             network: { enabled: true, getIsOffline: () => !online },
             operations: {

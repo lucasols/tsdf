@@ -14,6 +14,7 @@ import { flushAllTimers, pick } from '../utils/genericTestUtils';
 
 const todoSchema = rc_object({ title: rc_string, completed: rc_boolean });
 const todoInputSchema = rc_object({ id: rc_string, title: rc_string });
+const todoPayloadSchema = rc_object({ id: rc_string });
 const FETCH_DELAY_MS = 30;
 type TodoPayload = { id: string };
 type TodoItem = { title: string; completed: boolean };
@@ -49,6 +50,7 @@ function createTypedCollectionStore_() {
       storeName: 'typed-direct-offline-collection',
       adapter: localPersistentStorage,
       schema: todoSchema,
+      payloadSchema: todoPayloadSchema,
       offlineMode: {
         operations: {
           renameTodo: {
@@ -123,6 +125,7 @@ test('direct collection store offline public api works and stays strongly typed'
       storeName: 'direct-collection-offline',
       adapter: localPersistentStorage,
       schema: todoSchema,
+      payloadSchema: todoPayloadSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
         operations: {
@@ -295,6 +298,7 @@ test('collection offline accumulation merges same-item mutations and keeps diffe
       storeName: 'direct-collection-offline-accumulation',
       adapter: localPersistentStorage,
       schema: todoSchema,
+      payloadSchema: todoPayloadSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
         operations: {

@@ -11,10 +11,7 @@ import {
   test,
   vi,
 } from 'vitest';
-import type {
-  ConvertedPersistentStorageDataSchema,
-  DocumentPersistentStorageConfig,
-} from '../../src/persistentStorage/types';
+import type { ConvertedPersistentStorageDataSchema } from '../../src/persistentStorage/types';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
@@ -74,7 +71,7 @@ function createEnv(options: {
       adapter: opfsPersistentStorage,
       schema: options.schema ?? createConvertedSchema(),
       onPersistentStorageError: options.onPersistentStorageError,
-    } as DocumentPersistentStorageConfig<DocumentState, StoredDocumentState>,
+    },
   });
 }
 

@@ -1,4 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_array,
   rc_boolean,
@@ -105,14 +104,12 @@ export function parsePersistedCollectionItemData<
   ItemPayload extends ValidPayload,
 >(
   value: unknown,
-  payloadSchema?: PersistentStorageSchema<ItemPayload>,
+  payloadSchema: PersistentStorageSchema<ItemPayload>,
 ): ParsedPersistedCollectionItemData<ItemPayload> | null {
   const result = rc_parse(value, persistedCollectionItemDataSchema);
   if (!result.ok) return null;
 
-  const payload = payloadSchema
-    ? validateWithSchema(payloadSchema, result.value.payload)
-    : __LEGIT_CAST__<ItemPayload, unknown>(result.value.payload);
+  const payload = validateWithSchema(payloadSchema, result.value.payload);
   if (payload === null) return null;
 
   return { data: result.value.data, payload };
@@ -125,14 +122,12 @@ export function parsePersistedListQueryItemData<
   ItemPayload extends ValidPayload,
 >(
   value: unknown,
-  payloadSchema?: PersistentStorageSchema<ItemPayload>,
+  payloadSchema: PersistentStorageSchema<ItemPayload>,
 ): ParsedPersistedListQueryItemData<ItemPayload> | null {
   const result = rc_parse(value, persistedListQueryItemDataSchema);
   if (!result.ok) return null;
 
-  const payload = payloadSchema
-    ? validateWithSchema(payloadSchema, result.value.payload)
-    : __LEGIT_CAST__<ItemPayload, unknown>(result.value.payload);
+  const payload = validateWithSchema(payloadSchema, result.value.payload);
   if (payload === null) return null;
 
   return {
@@ -150,14 +145,12 @@ export type ParsedPersistedListQueryData<QueryPayload extends ValidPayload> = {
 
 export function parsePersistedListQueryData<QueryPayload extends ValidPayload>(
   value: unknown,
-  payloadSchema?: PersistentStorageSchema<QueryPayload>,
+  payloadSchema: PersistentStorageSchema<QueryPayload>,
 ): ParsedPersistedListQueryData<QueryPayload> | null {
   const result = rc_parse(value, persistedListQueryDataSchema);
   if (!result.ok) return null;
 
-  const payload = payloadSchema
-    ? validateWithSchema(payloadSchema, result.value.payload)
-    : __LEGIT_CAST__<QueryPayload, unknown>(result.value.payload);
+  const payload = validateWithSchema(payloadSchema, result.value.payload);
   if (payload === null) return null;
 
   return { payload, items: result.value.items, hasMore: result.value.hasMore };

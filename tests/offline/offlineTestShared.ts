@@ -1,27 +1,63 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import {
+  rc_array,
+  rc_discriminated_union,
+  rc_literals,
+  rc_number,
+  rc_object,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
+import type { FilterOperator } from '../mocks/serverTableMock';
 
-export const docSchema = __LEGIT_CAST__<
-  PersistentStorageSchema<{ value: number }>,
-  unknown
->(rc_object({ value: rc_number }));
+export const docSchema: PersistentStorageSchema<{ value: number }> = rc_object({
+  value: rc_number,
+});
 
-export const docMutationInputSchema = __LEGIT_CAST__<
-  PersistentStorageSchema<{ value: number }>,
-  unknown
->(rc_object({ value: rc_number }));
+export const docMutationInputSchema: PersistentStorageSchema<{
+  value: number;
+}> = rc_object({ value: rc_number });
 
-export const docConflictSchema = __LEGIT_CAST__<
-  PersistentStorageSchema<{ reason: string }>,
-  unknown
->(rc_object({ reason: rc_string }));
+export const docConflictSchema: PersistentStorageSchema<{ reason: string }> =
+  rc_object({ reason: rc_string });
 
-export const collectionCreateInputSchema = __LEGIT_CAST__<
-  PersistentStorageSchema<{ name: string }>,
-  unknown
->(rc_object({ name: rc_string }));
+export const collectionCreateInputSchema: PersistentStorageSchema<{
+  name: string;
+}> = rc_object({ name: rc_string });
 
 export const collectionSchema = rc_object({
   value: rc_object({ name: rc_string }),
 });
+
+const filterOperatorSchema: PersistentStorageSchema<FilterOperator> =
+  rc_discriminated_union('op', {
+    eq: { op: rc_literals('eq'), field: rc_string, value: rc_unknown },
+    neq: { op: rc_literals('neq'), field: rc_string, value: rc_unknown },
+    gt: { op: rc_literals('gt'), field: rc_string, value: rc_number },
+    gte: { op: rc_literals('gte'), field: rc_string, value: rc_number },
+    lt: { op: rc_literals('lt'), field: rc_string, value: rc_number },
+    lte: { op: rc_literals('lte'), field: rc_string, value: rc_number },
+    range: {
+      op: rc_literals('range'),
+      field: rc_string,
+      min: rc_number,
+      max: rc_number,
+    },
+    in: {
+      op: rc_literals('in'),
+      field: rc_string,
+      values: rc_array(rc_unknown),
+    },
+    startsWith: {
+      op: rc_literals('startsWith'),
+      field: rc_string,
+      value: rc_string,
+    },
+  });
+
+export const listQueryQueryPayloadSchema: PersistentStorageSchema<ListQueryParams> =
+  rc_object({
+    tableId: rc_string,
+    filters: rc_array(filterOperatorSchema).optionalKey(),
+  });

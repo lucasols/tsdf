@@ -146,8 +146,8 @@ export type CollectionPersistentStorageConfig<
   > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
-  /** Schema used to validate cached item payloads on load. Falls back to trusting persisted payloads when omitted. */
-  payloadSchema?: PersistentStorageSchema<ItemPayload>;
+  /** Schema used to validate cached item payloads on load. */
+  payloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
   maxItems?: number;
   /** Item payloads that should never be evicted from storage. */
@@ -173,10 +173,10 @@ export type ListQueryPersistentStorageConfig<
   > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
-  /** Schema used to validate cached item payloads on load. Falls back to trusting persisted payloads when omitted. */
-  itemPayloadSchema?: PersistentStorageSchema<ItemPayload>;
-  /** Schema used to validate cached query payloads on load. Falls back to trusting persisted payloads when omitted. */
-  queryPayloadSchema?: PersistentStorageSchema<QueryPayload>;
+  /** Schema used to validate cached item payloads on load. */
+  itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
+  /** Schema used to validate cached query payloads on load. */
+  queryPayloadSchema: PersistentStorageSchema<QueryPayload>;
   /** Maximum number of items to persist. Defaults to 500. */
   maxItems?: number;
   /** Maximum number of queries to persist. Defaults to 100. */

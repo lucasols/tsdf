@@ -153,11 +153,23 @@ describe('localStorage: converted collection store persistence', () => {
     // Keep data-shape and payload-shape failures together here because both are envelope-validation failures.
     const invalidPayloadKey =
       invalidPayloadStore.collection.itemStorageKey('true');
+    invalidPayloadStore.collection.seedItem('true', {
+      itemId: '1',
+      label: 'Cached',
+    });
+    const invalidPayloadEntry =
+      invalidPayloadStore.storage.readEntry<
+        StorageCacheEntry<PersistedCollectionItemData<unknown>>
+      >(invalidPayloadKey);
+    if (invalidPayloadEntry === null) {
+      throw new Error(`Missing seeded entry for ${invalidPayloadKey}`);
+    }
     invalidPayloadStore.setValue(invalidPayloadKey, {
-      data: { data: { itemId: '1', label: 'Cached' }, payload: true },
-      timestamp: Date.now(),
-      version: 1,
-    } satisfies StorageCacheEntry<PersistedCollectionItemData<unknown>>);
+      ...invalidPayloadEntry,
+      data: { ...invalidPayloadEntry.data, payload: true },
+    } satisfies StorageCacheEntry<
+      PersistedCollectionItemData<unknown> & { payload: boolean }
+    >);
 
     const invalidDataEnv = createEnv({
       storeName: 'col-converted-invalid-data',

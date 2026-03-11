@@ -337,8 +337,8 @@ describe('opfs: converted list query store persistence', () => {
       `);
     expect(readStoredQuery(mockAdapter, usersQuery).payload)
       .toMatchInlineSnapshot(`
-      tableId: 'users'
-    `);
+        tableId: 'users'
+      `);
     expect(readStoredQuery(mockAdapter, usersQuery).items).toEqual([
       usersItemKey,
     ]);

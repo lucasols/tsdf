@@ -120,3 +120,7 @@ When fixing a bug:
 ## Useful patterns
 
 - For unsafe data parsing, use `runcheck` lib
+
+## Bad patterns to avoid
+
+- Avoid as much as possible using `__LEGIT_CAST__`, it should be the ultimate last resort when properly typing the code is not possible.

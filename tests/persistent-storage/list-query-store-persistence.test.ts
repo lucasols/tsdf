@@ -2,7 +2,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
-import { rc_number, rc_object, rc_string, rc_unknown } from 'runcheck';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -43,11 +43,6 @@ const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   }),
 );
 const listQueryParamsSchema = rc_object({ tableId: rc_string });
-const cacheEntryTimestampSchema = rc_object({
-  data: rc_unknown,
-  timestamp: rc_number,
-  version: rc_number,
-});
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
     if (!prev) return fetched;
@@ -1373,14 +1368,25 @@ describe('localStorage: list query store persistence', () => {
 
   test('invalid cached item payloads are cleaned up only after a direct read', async () => {
     const key = itemStorageKey('lq-invalid-item-payload', 'sess1', 'users', 1);
-    const entry: StorageCacheEntry<
-      PersistedListQueryItemData<Row> & { payload: boolean }
-    > = {
-      data: { data: { id: 1, name: 'Alice' }, payload: true },
-      timestamp: Date.now(),
-      version: 1,
-    };
-    localStorage.setItem(key, JSON.stringify(entry));
+    persistentStore
+      .scope('lq-invalid-item-payload', 'sess1')
+      .listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
+    const entry =
+      persistentStore.storage.readEntry<
+        StorageCacheEntry<PersistedListQueryItemData<Row>>
+      >(key);
+    if (entry === null) {
+      throw new Error(`Missing seeded entry for ${key}`);
+    }
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        ...entry,
+        data: { ...entry.data, payload: true },
+      } satisfies StorageCacheEntry<
+        PersistedListQueryItemData<Row> & { payload: boolean }
+      >),
+    );
 
     const env = createEnv({
       storeName: 'lq-invalid-item-payload',
@@ -1404,22 +1410,25 @@ describe('localStorage: list query store persistence', () => {
       'sess1',
       usersQuery,
     );
-    const entry: StorageCacheEntry<
-      PersistedListQueryData & { payload: boolean }
-    > = {
-      data: {
-        payload: true,
-        items: [storeItemKey('users', 1)],
-        hasMore: false,
-      },
-      timestamp: Date.now(),
-      version: 1,
-    };
-    localStorage.setItem(queryKey, JSON.stringify(entry));
-    setCachedItem('lq-invalid-query-payload', 'sess1', 'users', 1, {
-      id: 1,
-      name: 'Alice',
-    });
+    const scope = persistentStore.scope('lq-invalid-query-payload', 'sess1');
+    scope.listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
+    scope.listQuery.seedQuery(usersQuery, [{ tableId: 'users', id: 1 }]);
+    const entry =
+      persistentStore.storage.readEntry<
+        StorageCacheEntry<PersistedListQueryData>
+      >(queryKey);
+    if (entry === null) {
+      throw new Error(`Missing seeded entry for ${queryKey}`);
+    }
+    localStorage.setItem(
+      queryKey,
+      JSON.stringify({
+        ...entry,
+        data: { ...entry.data, payload: true },
+      } satisfies StorageCacheEntry<
+        PersistedListQueryData & { payload: boolean }
+      >),
+    );
 
     const env = createEnv({
       storeName: 'lq-invalid-query-payload',

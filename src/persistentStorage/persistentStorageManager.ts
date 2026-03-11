@@ -1,3 +1,4 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_number,
   rc_object,
@@ -510,7 +511,9 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
       return null;
     }
 
-    return entry as StorageCacheEntry<T>;
+    return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
+      entry,
+    );
   } catch {
     scheduleIdleCleanup(() => {
       localStorage.removeItem(key);

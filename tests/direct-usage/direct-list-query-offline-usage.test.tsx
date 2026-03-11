@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   createListQueryStore,
@@ -13,12 +13,17 @@ import type { OfflineMutationDescriptor } from '../../src/persistentStorage/offl
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
 
-type UsersQueryPayload = { tableId: 'users' };
-type UserPayload = { tableId: 'users'; id: number };
-type User = { id: number; name: string };
-
 const userSchema = rc_object({ id: rc_number, name: rc_string });
 const userInputSchema = rc_object({ id: rc_number, name: rc_string });
+type UsersQueryPayload = { tableId: 'users' };
+
+const usersQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
+type UserPayload = { tableId: 'users'; id: number };
+
+const userPayloadSchema = rc_object({
+  tableId: rc_literals('users'),
+  id: rc_number,
+});
 const FETCH_DELAY_MS = 30;
 
 function delay(ms: number) {
@@ -26,6 +31,8 @@ function delay(ms: number) {
     setTimeout(resolve, ms);
   });
 }
+
+type User = { id: number; name: string };
 
 type RenameUserOperations = {
   renameUser: ListQueryOfflineOperationDefinition<
@@ -67,6 +74,8 @@ const typedListQueryStore_ = createListQueryStore<
     storeName: 'typed-direct-offline-list-query',
     adapter: localPersistentStorage,
     schema: userSchema,
+    itemPayloadSchema: userPayloadSchema,
+    queryPayloadSchema: usersQueryPayloadSchema,
     offlineMode: { operations: typedListQueryOperations_ },
   },
 });
@@ -163,6 +172,8 @@ test('direct list-query store offline public api works and stays strongly typed'
       storeName: 'direct-list-query-offline',
       adapter: localPersistentStorage,
       schema: userSchema,
+      itemPayloadSchema: userPayloadSchema,
+      queryPayloadSchema: usersQueryPayloadSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
         operations: {
@@ -331,6 +342,8 @@ test('useMultipleListQueries exposes offline pending metadata for queued mutatio
       storeName: 'direct-list-query-multi-offline',
       adapter: localPersistentStorage,
       schema: userSchema,
+      itemPayloadSchema: userPayloadSchema,
+      queryPayloadSchema: usersQueryPayloadSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
         operations: {
@@ -486,6 +499,8 @@ test('list-query offline accumulation merges same-item mutations and keeps diffe
       storeName: 'direct-list-query-offline-accumulation',
       adapter: localPersistentStorage,
       schema: userSchema,
+      itemPayloadSchema: userPayloadSchema,
+      queryPayloadSchema: usersQueryPayloadSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
         operations: {
