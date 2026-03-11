@@ -125,9 +125,15 @@ describe('disable', () => {
       await flushAllTimers();
     });
 
-    expect(result.current.data).toBeNull();
-    expect(result.current.status).toBe('idle');
     expect(env.serverMock.numOfFinishedFetches).toBe(0);
+
+    expect(result.current).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      isLoading: '❌'
+      isPendingOfflineSync: '❌'
+      status: 'idle'
+    `);
   });
 
   test('disable then enable fetch', async () => {

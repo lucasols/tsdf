@@ -148,8 +148,6 @@ export function useMultipleItems<
               payload: omitPayload ? undefined : payload,
               isLoading: false,
               isPendingOfflineSync: false,
-              pendingOfflineMutations: 0,
-              hasOfflineConflict: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -166,8 +164,6 @@ export function useMultipleItems<
               payload: omitPayload ? undefined : payload,
               isLoading: !returnIdleStatus,
               isPendingOfflineSync: false,
-              pendingOfflineMutations: 0,
-              hasOfflineConflict: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -188,8 +184,6 @@ export function useMultipleItems<
             error: item.error,
             isLoading: status === 'loading',
             isPendingOfflineSync: false,
-            pendingOfflineMutations: 0,
-            hasOfflineConflict: false,
             payload: omitPayload ? undefined : item.payload,
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,

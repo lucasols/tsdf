@@ -386,10 +386,8 @@ describe('offline mode replay and conflict handling', () => {
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 2 }
       error: null
-      hasOfflineConflict: '✅'
       isLoading: '❌'
       isPendingOfflineSync: '❌'
-      pendingOfflineMutations: 0
       status: 'success'
     `);
 
@@ -406,7 +404,6 @@ describe('offline mode replay and conflict handling', () => {
 
     expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-    expect(hook.result.current.hasOfflineConflict).toBe(false);
     hook.unmount();
   });
 

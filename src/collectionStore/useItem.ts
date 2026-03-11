@@ -90,8 +90,6 @@ export function useItem<
             itemStateKey: '',
             isLoading: false,
             isPendingOfflineSync: false,
-            pendingOfflineMutations: 0,
-            hasOfflineConflict: false,
             queryMetadata: undefined,
           }
         : {
@@ -104,8 +102,6 @@ export function useItem<
             itemStateKey: '',
             isLoading: false,
             isPendingOfflineSync: false,
-            pendingOfflineMutations: 0,
-            hasOfflineConflict: false,
             queryMetadata: undefined,
           }),
     [item, selector, isInvalidPayload],

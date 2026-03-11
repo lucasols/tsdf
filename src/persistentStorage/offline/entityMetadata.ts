@@ -12,23 +12,16 @@ export function createOfflineEntityLookup(
   return entitiesByKey;
 }
 
-export type OfflineEntityMetadata = {
+export function getIsPendingOfflineSync(
+  entity: GlobalOfflineEntity | null | undefined,
+): boolean {
+  return !!entity && !entity.hasConflict;
+}
+
+export type OfflineEntitiesMetadata = {
   isPendingOfflineSync: boolean;
   pendingOfflineMutations: number;
   hasOfflineConflict: boolean;
-};
-
-export function getOfflineEntityMetadata(
-  entity: GlobalOfflineEntity | null | undefined,
-): OfflineEntityMetadata {
-  return {
-    isPendingOfflineSync: !!entity && !entity.hasConflict,
-    pendingOfflineMutations: entity?.pendingMutations ?? 0,
-    hasOfflineConflict: entity?.hasConflict ?? false,
-  };
-}
-
-export type OfflineEntitiesMetadata = OfflineEntityMetadata & {
   pendingItemKeys: string[];
   conflictedItemKeys: string[];
 };

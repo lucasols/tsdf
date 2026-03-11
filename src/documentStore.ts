@@ -22,9 +22,7 @@ import type {
   DocumentOfflineOperationsRegistry,
   OfflineMutationDescriptor,
 } from './persistentStorage/offline/types';
-import type {
-  DocumentPersistentStorageConfig,
-} from './persistentStorage/types';
+import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import {
   BatchRequest,
   FetchContext,
@@ -44,7 +42,7 @@ import {
   initializeOfflineStoreController,
   offlineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
-import { getOfflineEntityMetadata } from './persistentStorage/offline/entityMetadata';
+import { getIsPendingOfflineSync } from './persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from './persistentStorage/offline/sessionCoordinator';
 import {
   type BrowserTabsPriorityTimings,
@@ -84,8 +82,6 @@ export type TSDFUseDocumentReturn<Selected> = {
   error: StoreError | null;
   isLoading: boolean;
   isPendingOfflineSync: boolean;
-  pendingOfflineMutations: number;
-  hasOfflineConflict: boolean;
 };
 
 export type DocumentStoreState<State extends ValidStoreState> = {
@@ -874,7 +870,7 @@ export function createDocumentStore<
           error,
           status,
           isLoading: status === 'loading',
-          ...getOfflineEntityMetadata(
+          isPendingOfflineSync: getIsPendingOfflineSync(
             offlineEntities.find(
               (entity) => entity.entityKey === DOC_TARGET_KEY,
             ),

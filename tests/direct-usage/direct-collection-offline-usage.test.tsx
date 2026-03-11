@@ -4,10 +4,10 @@ import { rc_boolean, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   createCollectionStore,
-  type CollectionOfflineOperationDefinition,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   localPersistentStorage,
+  type CollectionOfflineOperationDefinition,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';

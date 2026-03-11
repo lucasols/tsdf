@@ -160,10 +160,8 @@ describe('offline mode network and session', () => {
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 2 }
       error: null
-      hasOfflineConflict: '❌'
       isLoading: '❌'
       isPendingOfflineSync: '✅'
-      pendingOfflineMutations: 1
       status: 'success'
     `);
     hook.unmount();
@@ -225,17 +223,19 @@ describe('offline mode network and session', () => {
     });
 
     const documentHook = renderHook(() => plainEnv.apiStore.useDocument());
+    expect(documentHook.result.current.isPendingOfflineSync).toBe(false);
     expect(
-      pick(documentHook.result.current, [
-        'isPendingOfflineSync',
+      Object.prototype.hasOwnProperty.call(
+        documentHook.result.current,
         'pendingOfflineMutations',
+      ),
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        documentHook.result.current,
         'hasOfflineConflict',
-      ]),
-    ).toMatchInlineSnapshot(`
-      hasOfflineConflict: '❌'
-      isPendingOfflineSync: '❌'
-      pendingOfflineMutations: 0
-    `);
+      ),
+    ).toBe(false);
     documentHook.unmount();
 
     const offlineEntitiesHook = renderHook(() =>

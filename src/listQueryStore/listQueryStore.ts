@@ -15,7 +15,7 @@ import {
 import {
   createOfflineEntityLookup,
   getOfflineEntitiesMetadata,
-  getOfflineEntityMetadata,
+  getIsPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
@@ -1585,13 +1585,11 @@ export function createListQueryStore<
     const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
     return result.map((itemResult) => {
-      const offlineMetadata = getOfflineEntityMetadata(
-        offlineEntitiesByKey.get(itemResult.itemStateKey),
-      );
-
       return {
         ...itemResult,
-        isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
+        isPendingOfflineSync: getIsPendingOfflineSync(
+          offlineEntitiesByKey.get(itemResult.itemStateKey),
+        ),
       };
     });
   };
@@ -1624,15 +1622,13 @@ export function createListQueryStore<
       inactiveScope: id,
       storeName: persistentStorageConfig?.storeName,
     });
-    const offlineMetadata = getOfflineEntityMetadata(
-      offlineEntities.find(
-        (entity) => entity.entityKey === result.itemStateKey,
-      ),
-    );
-
     return {
       ...result,
-      isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
+      isPendingOfflineSync: getIsPendingOfflineSync(
+        offlineEntities.find(
+          (entity) => entity.entityKey === result.itemStateKey,
+        ),
+      ),
     };
   };
 

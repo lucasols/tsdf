@@ -20,7 +20,7 @@ import {
 } from '../persistentStorage/offline/storeController';
 import {
   createOfflineEntityLookup,
-  getOfflineEntityMetadata,
+  getIsPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
@@ -106,8 +106,6 @@ export type TSFDUseCollectionItemReturn<
   itemStateKey: string;
   isLoading: boolean;
   isPendingOfflineSync: boolean;
-  pendingOfflineMutations: number;
-  hasOfflineConflict: boolean;
   queryMetadata: QueryMetadata;
 };
 
@@ -1180,7 +1178,7 @@ export function createCollectionStore<
 
     return result.map((itemResult) => ({
       ...itemResult,
-      ...getOfflineEntityMetadata(
+      isPendingOfflineSync: getIsPendingOfflineSync(
         offlineEntitiesByKey.get(itemResult.itemStateKey),
       ),
     }));
@@ -1206,7 +1204,7 @@ export function createCollectionStore<
 
     return {
       ...result,
-      ...getOfflineEntityMetadata(
+      isPendingOfflineSync: getIsPendingOfflineSync(
         offlineEntities.find(
           (entity) => entity.entityKey === result.itemStateKey,
         ),
