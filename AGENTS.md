@@ -105,6 +105,7 @@ When adding a new feature, or adjust a existing one:
 - add jsdoc comments to the public API available to library users
   - when adding jsdoc to function arguments prefer adding them to the types/interfaces instead of the implementation, to ensure they are visible in IDEs when users hover the relevant types
 - if adding new public exports, update the relevant barrel file (`src/main.ts`)
+- if the feature requires changes to the documentation, update the relevant docs files in `docs/` and public api jsdoc comments in `src/`
 
 ## Bug fix instructions
 

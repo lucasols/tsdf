@@ -1,5 +1,6 @@
 import { useOnEvtmitterEvent } from '@evtmitter/react';
 import { useConst } from '@ls-stack/react-utils/useConst';
+import { useDebouncedValue } from '@ls-stack/react-utils/useDebouncedValue';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
@@ -9,7 +10,15 @@ import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
-import { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  getPayloadDebounceOptions,
+  shouldDebouncePayload,
+} from '../utils/payloadDebounce';
+import {
+  type PayloadDebounce,
+  ValidPayload,
+  ValidStoreState,
+} from '../utils/storeShared';
 import type {
   CollectionUseMultipleItemsQuery,
   TSFDCollectionItem,
@@ -33,6 +42,12 @@ export type UseMultipleItemsOptions<
   disableRefetches?: boolean;
   disableRefetchOnMount?: boolean;
   isOffScreen?: boolean;
+  /**
+   * Debounces automatic fetches caused by payload changes, while selection
+   * still reads from the latest payload. Supports trailing debounce via `ms`,
+   * optional `leading`, and optional `maxWait`.
+   */
+  debouncePayload?: PayloadDebounce;
 };
 
 export function useMultipleItems<
@@ -50,6 +65,7 @@ export function useMultipleItems<
     disableRefetches: allItemsDisableRefetches,
     disableRefetchOnMount: allItemsDisableRefetchOnMount,
     isOffScreen: allItemsIsOffScreen,
+    debouncePayload,
   }: UseMultipleItemsOptions<ItemState, Selected>,
   store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
   events: Emitter<CollectionStoreEvents>,
@@ -126,6 +142,16 @@ export function useMultipleItems<
   }, [queriesWithId]);
 
   useRegisterActiveKeys(activeItemKeys, registerActiveItems, touchItems);
+
+  const shouldDebounceFetchQueries = shouldDebouncePayload(debouncePayload);
+  const [debouncedFetchQueriesWithId] = useDebouncedValue(
+    queriesWithId,
+    shouldDebounceFetchQueries ? (debouncePayload?.ms ?? 0) : 0,
+    getPayloadDebounceOptions(debouncePayload),
+  );
+  const fetchQueriesWithId = shouldDebounceFetchQueries
+    ? debouncedFetchQueriesWithId
+    : queriesWithId;
 
   const resultSelector = useCallback(
     (state: CollectionState) => {
@@ -211,7 +237,7 @@ export function useMultipleItems<
       payload,
       isOffScreen,
       disableRefetches,
-    } of queriesWithId) {
+    } of fetchQueriesWithId) {
       if (isOffScreen) continue;
 
       if (itemKey !== event.itemKey) continue;
@@ -238,8 +264,8 @@ export function useMultipleItems<
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (preloadItems && queriesWithId.length > 0) {
-        await preloadItems(queriesWithId.map(({ payload }) => payload));
+      if (preloadItems && fetchQueriesWithId.length > 0) {
+        await preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
         if (effectState.cancelled) return;
       }
 
@@ -251,7 +277,7 @@ export function useMultipleItems<
         isOffScreen,
         disableRefetches,
         disableRefetchOnMount,
-      } of queriesWithId) {
+      } of fetchQueriesWithId) {
         removedQueries.delete(itemId);
 
         if (isOffScreen) continue;
@@ -299,9 +325,9 @@ export function useMultipleItems<
     };
   }, [
     getItemState,
+    fetchQueriesWithId,
     ignoreItemsInRefetchOnMount,
     preloadItems,
-    queriesWithId,
     scheduleAutomaticFetch,
   ]);
 

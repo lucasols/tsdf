@@ -67,8 +67,8 @@
   "dependencies": {
     "@evtmitter/react": "^0.1.0",
     "@ls-stack/browser-utils": "^0.3.0",
-    "@ls-stack/react-utils": "^0.9.0",
-    "@ls-stack/utils": "^3.73.0",
+    "@ls-stack/react-utils": "^0.12.1",
+    "@ls-stack/utils": "^3.73.1",
     "evtmitter": "^1.0.2",
     "immer": "^11.1.3",
     "klona": "^2.0.6",

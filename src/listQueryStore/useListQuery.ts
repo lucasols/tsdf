@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
+import { assertNoEnsureIsLoadedWithDebouncePayload } from '../utils/payloadDebounce';
 import {
   ValidPayload,
   ValidStoreState,
@@ -20,6 +21,11 @@ export type UseListQueryOptions<
   ItemPayload extends ValidPayload,
   SelectedItem,
 > = UseMultipleListQueriesOptions<ItemState, ItemPayload, SelectedItem> & {
+  /**
+   * Forces a high-priority fetch on mount and keeps the hook in `loading`
+   * until the current payload finishes loading. Cannot be combined with
+   * `debouncePayload`.
+   */
   ensureIsLoaded?: boolean;
   fields?: FieldsInput;
   /**
@@ -48,6 +54,7 @@ export function useListQuery<
     isOffScreen,
     ensureIsLoaded,
     fields,
+    debouncePayload,
   }: UseListQueryOptions<ItemState, ItemPayload, SelectedItem>,
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>,
   getQueryKey: (params: QueryPayload) => string,
@@ -63,15 +70,22 @@ export function useListQuery<
   ) => readonly TSFDUseListQueryReturn<S, QueryPayload, undefined>[],
 ): TSFDUseListQueryReturn<SelectedItem, QueryPayload> {
   const isInvalidPayload = payload === '';
+  const hasPayload =
+    payload !== false &&
+    payload !== null &&
+    payload !== undefined &&
+    payload !== '';
+
+  assertNoEnsureIsLoadedWithDebouncePayload(
+    'useListQuery',
+    ensureIsLoaded,
+    debouncePayload,
+  );
 
   const query = useMemo(
     (): ListQueryUseMultipleListQueriesQuery<QueryPayload, undefined>[] =>
-      payload === false ||
-      payload === null ||
-      payload === undefined ||
-      payload === ''
-        ? []
-        : [
+      hasPayload
+        ? [
             {
               payload,
               fields,
@@ -84,11 +98,13 @@ export function useListQuery<
               isOffScreen,
               loadSize,
             },
-          ],
+          ]
+        : [],
     [
       disableRefetches,
       disableRefetchOnMount,
       fields,
+      hasPayload,
       isOffScreen,
       loadSize,
       omitPayload,
@@ -99,7 +115,10 @@ export function useListQuery<
     ],
   );
 
-  const queryResult = useMultipleListQueries(query, { itemSelector });
+  const queryResult = useMultipleListQueries(query, {
+    itemSelector,
+    debouncePayload,
+  });
 
   const result = useMemo(
     (): TSFDUseListQueryReturn<SelectedItem, QueryPayload> =>
@@ -129,23 +148,37 @@ export function useListQuery<
             isLoadingMore: false,
             queryMetadata: undefined,
           }),
-    [queryResult, fields, isInvalidPayload],
+    [fields, isInvalidPayload, queryResult],
   );
 
-  const queryKey = payload ? getQueryKey(payload) : '';
+  const queryKey = hasPayload ? getQueryKey(payload) : '';
+  const fetchQuery = hasPayload ? query[0] : undefined;
+  const isPayloadReadyForFetch = hasPayload;
 
   const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
     ensureIsLoaded,
-    !!payload,
+    hasPayload && isPayloadReadyForFetch,
     () => {
-      if (payload) {
-        scheduleListQueryFetch('highPriority', payload, undefined, { fields });
+      if (fetchQuery && isPayloadReadyForFetch) {
+        scheduleListQueryFetch(
+          'highPriority',
+          fetchQuery.payload,
+          fetchQuery.loadSize,
+          { fields: fetchQuery.fields },
+        );
       }
     },
   );
 
   useSubscribeToStore(store, ({ observe }) => {
-    if (!ensureIsLoaded || !queryKey) return;
+    if (
+      !ensureIsLoaded ||
+      !hasPayload ||
+      !isPayloadReadyForFetch ||
+      !queryKey
+    ) {
+      return;
+    }
 
     observe
       .ifSelector((state) => state.queries[queryKey]?.status)

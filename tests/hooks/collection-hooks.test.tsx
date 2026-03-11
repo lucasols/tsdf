@@ -876,6 +876,25 @@ describe('useItem isolated tests', () => {
       "
     `);
   });
+
+  test('throws when ensureIsLoaded is combined with debouncePayload', () => {
+    const env = createCollectionStoreTestEnv<Todo>({ '1': defaultTodo });
+
+    expect(() =>
+      renderHook(() =>
+        env.apiStore.useItem('1', {
+          ensureIsLoaded: true,
+          debouncePayload: { ms: 100 },
+        }),
+      ),
+    ).toThrowErrorMatchingInlineSnapshot(
+      `
+      Error#:
+        message: 'useItem does not support using ensureIsLoaded together with debouncePayload.'
+        name: 'Error'
+      `,
+    );
+  });
 });
 
 test('RTU update works', async () => {

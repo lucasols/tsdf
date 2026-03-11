@@ -43,6 +43,50 @@ Payloads that identify items or queries must be one of:
 
 Payloads are converted to composite keys internally for state storage. Object payloads are serialized deterministically (key order doesn't matter).
 
+## PayloadDebounce
+
+Configuration for debouncing automatic fetches triggered by rapid payload
+changes in payload-based hooks.
+
+Supported by:
+
+- `useItem`
+- `useListQuery`
+- `useMultipleItems`
+- `useMultipleListQueries`
+
+Shape:
+
+```ts
+type PayloadDebounce = { ms: number; maxWait?: number; leading?: boolean };
+```
+
+Fields:
+
+- `ms` — debounce window in milliseconds
+- `maxWait` — optional upper bound for how long a burst may stay deferred
+- `leading` — allows the first payload in a burst to fetch immediately
+
+Important behavior:
+
+- The hook still reads from state using the latest payload immediately
+- Only the automatic fetch side is delayed
+- If cached data already exists for the latest payload, the hook can still
+  return it immediately while the fetch is deferred
+- `useItem` and `useListQuery` do not support combining `debouncePayload` with
+  `ensureIsLoaded`
+
+Example:
+
+```tsx
+const result = store.useListQuery(
+  { search, status: 'active' },
+  { debouncePayload: { ms: 300, leading: true, maxWait: 1200 } },
+);
+```
+
+See [React Hooks](./hooks.md#debouncepayload) for usage patterns.
+
 ## IsOffScreenContext
 
 A React context that disables all TSDF hooks in a subtree when set to `true`. Useful for tabs, modals, or off-screen content that shouldn't trigger fetches.
