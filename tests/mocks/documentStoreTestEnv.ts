@@ -130,6 +130,10 @@ export function createDocumentStoreTestEnv<
   );
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
+  const resolvedPersistentStorage =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
 
   const documentStore = createDocumentStore<{ value: D }, TOfflineOperations>({
     id,
@@ -146,10 +150,9 @@ export function createDocumentStoreTestEnv<
     revalidateOnWindowFocus,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
-    persistentStorage,
+    persistentStorage: resolvedPersistentStorage,
     '~test': {
       ...testOptions,
-      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {

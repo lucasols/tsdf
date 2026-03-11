@@ -2,6 +2,7 @@ import { test, expect } from 'vitest';
 import {
   createDocumentStore,
   type DocumentOfflineOperationDefinition,
+  localPersistentStorage,
 } from '../../src/main';
 import { docMutationInputSchema, docSchema } from './offlineTestShared';
 
@@ -32,7 +33,7 @@ const typedDocumentStore_ = createDocumentStore<
   blockWindowClose: null,
   persistentStorage: {
     storeName: 'offline-typing-doc',
-    backend: 'localStorage',
+    adapter: localPersistentStorage,
     schema: docSchema,
     offlineMode: {
       operations: {

@@ -4,10 +4,8 @@ import { act, renderHook } from '@testing-library/react';
 import {
   rc_number,
   rc_object,
-  rc_parse_json,
   rc_string,
   rc_to_standard,
-  rc_unknown,
 } from 'runcheck';
 import {
   afterEach,
@@ -19,6 +17,11 @@ import {
   vi,
 } from 'vitest';
 import { createDocumentStore } from '../../src/documentStore';
+import {
+  readManagedLocalStorageEntryByPayload,
+  upsertManagedLocalStorageSingleEntry,
+} from '../../src/persistentStorage/localStorageMetadata';
+import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
@@ -26,18 +29,36 @@ import type {
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-
-const cacheEntryTimestampSchema = rc_object({
-  data: rc_unknown,
-  timestamp: rc_number,
-  version: rc_number,
-});
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const testDataSchema = rc_object({ name: rc_string, value: rc_number });
 const wrappedSchema = rc_object({ value: testDataSchema });
+const persistentStore = createLocalStoragePersistentTestStore();
+const TEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 type TestData = { name: string; value: number };
 const defaultServerData: TestData = { name: 'test', value: 42 };
+
+function documentStorageKey(storeName: string, sessionKey: string): string {
+  return `tsdf.${sessionKey}.${storeName}`;
+}
+
+function registerManagedDocumentKey(
+  storeName: string,
+  sessionKey: string,
+  lastAccessAt = Date.now(),
+): string {
+  const key = documentStorageKey(storeName, sessionKey);
+  upsertManagedLocalStorageSingleEntry({
+    sessionKey,
+    storeName,
+    storageKey: key,
+    maxAgeMs: TEST_MAX_AGE_MS,
+    lastAccessAt,
+  });
+
+  return key;
+}
 
 function setCachedDocumentData(
   storeName: string,
@@ -45,27 +66,18 @@ function setCachedDocumentData(
   data: TestData,
   version = 1,
 ) {
-  const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> = {
-    data: { data: { value: data } },
-    timestamp: Date.now(),
-    version,
-  };
-  localStorage.setItem(key, JSON.stringify(entry));
+  persistentStore
+    .scope(storeName, sessionKey)
+    .document.seed({ value: data }, { version });
 }
 
 function getStoredEntryTimestamp(key: string): number {
-  const raw = localStorage.getItem(key);
-  if (raw === null) {
-    throw new Error(`Missing localStorage entry for ${key}`);
+  const entry = readManagedLocalStorageEntryByPayload(key);
+  if (entry === null) {
+    throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
 
-  const parsed = rc_parse_json(raw, cacheEntryTimestampSchema);
-  if (!parsed.ok) {
-    throw new Error(`Invalid localStorage entry for ${key}`);
-  }
-
-  return parsed.value.timestamp;
+  return entry.lastAccessAt;
 }
 
 function createDocPersistenceEnv(options: {
@@ -83,7 +95,7 @@ function createDocPersistenceEnv(options: {
     getSessionKey,
     persistentStorage: {
       storeName: options.storeName,
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: wrappedSchema,
       version: options.version,
       onPersistentStorageError: options.onPersistentStorageError,
@@ -209,13 +221,14 @@ describe('localStorage: document store persistence', () => {
 
   test('schema validation failure causes cached data to be discarded', () => {
     // Store invalid data (doesn't match wrapped schema { value: { name, value } })
-    const key = 'tsdf.sess1.doc4';
+    const key = documentStorageKey('doc4', 'sess1');
     const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
       data: { data: { invalid: true } },
       timestamp: Date.now(),
       version: 1,
     };
     localStorage.setItem(key, JSON.stringify(entry));
+    registerManagedDocumentKey('doc4', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
       storeName: 'doc4',
@@ -465,7 +478,7 @@ describe('localStorage: document store persistence', () => {
       name: 'stale',
       value: 1,
     });
-    const key = 'tsdf.sess1.doc-revalidation-no-refetch';
+    const key = documentStorageKey('doc-revalidation-no-refetch', 'sess1');
     const originalTimestamp = getStoredEntryTimestamp(key);
 
     const env = createDocPersistenceEnv({
@@ -522,13 +535,14 @@ describe('localStorage: invalid data cleanup', () => {
   });
 
   test('schema validation failure cleans up localStorage entry', async () => {
-    const key = 'tsdf.sess1.cleanup-schema';
+    const key = documentStorageKey('cleanup-schema', 'sess1');
     const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
       data: { data: { invalid: true } },
       timestamp: Date.now(),
       version: 1,
     };
     localStorage.setItem(key, JSON.stringify(entry));
+    registerManagedDocumentKey('cleanup-schema', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
       storeName: 'cleanup-schema',
@@ -545,11 +559,12 @@ describe('localStorage: invalid data cleanup', () => {
   });
 
   test('malformed cache entry cleans up localStorage entry', async () => {
-    const key = 'tsdf.sess1.cleanup-malformed';
+    const key = documentStorageKey('cleanup-malformed', 'sess1');
     localStorage.setItem(
       key,
       JSON.stringify({ timestamp: Date.now(), version: 1, wrongShape: true }),
     );
+    registerManagedDocumentKey('cleanup-malformed', 'sess1');
 
     const env = createDocPersistenceEnv({
       storeName: 'cleanup-malformed',
@@ -566,8 +581,9 @@ describe('localStorage: invalid data cleanup', () => {
   });
 
   test('invalid JSON cleans up localStorage entry', async () => {
-    const key = 'tsdf.sess1.cleanup-invalid-json';
+    const key = documentStorageKey('cleanup-invalid-json', 'sess1');
     localStorage.setItem(key, '{invalid');
+    registerManagedDocumentKey('cleanup-invalid-json', 'sess1');
 
     const env = createDocPersistenceEnv({
       storeName: 'cleanup-invalid-json',
@@ -585,7 +601,7 @@ describe('localStorage: invalid data cleanup', () => {
 
   test('timestamp is refreshed on successful localStorage read', async () => {
     const originalTimestamp = Date.now() - 100_000;
-    const key = 'tsdf.sess1.ts-refresh';
+    const key = documentStorageKey('ts-refresh', 'sess1');
     const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
       {
         data: { data: { value: { name: 'cached', value: 1 } } },
@@ -593,6 +609,7 @@ describe('localStorage: invalid data cleanup', () => {
         version: 1,
       };
     localStorage.setItem(key, JSON.stringify(entry));
+    registerManagedDocumentKey('ts-refresh', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
       storeName: 'ts-refresh',
@@ -606,15 +623,7 @@ describe('localStorage: invalid data cleanup', () => {
     // Advance past idle fallback timeout
     await advanceTime(2100);
 
-    const raw = localStorage.getItem(key);
-    expect(raw).not.toBeNull();
-
-    const parsed = rc_parse_json(raw ?? '', cacheEntryTimestampSchema);
-    expect(parsed.ok).toBe(true);
-
-    if (parsed.ok) {
-      expect(parsed.value.timestamp).toBeGreaterThan(originalTimestamp);
-    }
+    expect(getStoredEntryTimestamp(key)).toBeGreaterThan(originalTimestamp);
   });
 });
 
@@ -622,13 +631,14 @@ describe('standard schema support', () => {
   test('works with Standard Schema v1 via rc_to_standard', () => {
     const standardSchema = rc_to_standard(testDataSchema);
 
-    const key = 'tsdf.sess-std.std-doc';
+    const key = documentStorageKey('std-doc', 'sess-std');
     const entry: StorageCacheEntry<{ data: TestData }> = {
       data: { data: { name: 'standard', value: 99 } },
       timestamp: Date.now(),
       version: 1,
     };
     localStorage.setItem(key, JSON.stringify(entry));
+    registerManagedDocumentKey('std-doc', 'sess-std', entry.timestamp);
 
     const store = createDocumentStore<TestData>({
       id: 'std-doc',
@@ -640,7 +650,7 @@ describe('standard schema support', () => {
       blockWindowClose: null,
       persistentStorage: {
         storeName: 'std-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: standardSchema,
       },
     });

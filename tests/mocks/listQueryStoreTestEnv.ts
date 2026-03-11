@@ -253,6 +253,10 @@ export function createListQueryStoreTestEnv<
   };
 
   const testOptions = resolveTestOptions(testScenario, serverTable);
+  const resolvedPersistentStorage =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
 
   async function fetchFromServer(
     { tableId, filters }: ListQueryParams,
@@ -296,12 +300,11 @@ export function createListQueryStoreTestEnv<
     batchFetchItemFn: useBatchFetch ? batchFetchItemFn : undefined,
     getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
     blockWindowClose: blockWindowClose ?? null,
-    persistentStorage,
+    persistentStorage: resolvedPersistentStorage,
     optimisticListUpdates,
     partialResources,
     '~test': {
       ...testOptions,
-      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {

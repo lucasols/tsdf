@@ -1,60 +1,36 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type { DocumentStoreState } from '../documentStore';
 import type { ValidStoreState } from '../utils/storeShared';
 import {
   createPersistentStorageHandle,
   getStorageKeyForStore,
+  readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   DocumentPersistentStorageConfig,
   PersistedDocumentData,
-  StorageAdapter,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
-/**
- * Synchronously reads a persisted document from localStorage.
- * Returns the raw persisted data (not yet validated by user schema).
- */
 function readDocumentFromLocalStorageSync(
   key: string,
   version: number,
-): PersistedDocumentData<unknown> | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
+): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
+  const foundEntry = localStorage.getItem(key) !== null;
+  const entry =
+    readStorageEntryFromLocalStorageSync<PersistedDocumentData<unknown>>(
+      key,
+      version,
+    );
+  if (!entry) return { persisted: null, foundEntry };
 
-    const entry: unknown = JSON.parse(raw);
-
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      !('version' in entry) ||
-      !('data' in entry)
-    ) {
-      return null;
-    }
-
-    const typedEntry = __LEGIT_CAST__<
-      { version: unknown; data: unknown },
-      object
-    >(entry);
-
-    if (typedEntry.version !== version) return null;
-
-    const data = typedEntry.data;
-
-    if (!data || typeof data !== 'object' || !('data' in data)) {
-      return null;
-    }
-
-    return __LEGIT_CAST__<PersistedDocumentData<unknown>, object>(data);
-  } catch {
-    return null;
-  }
+  const persisted = entry.data;
+  return {
+    persisted,
+    foundEntry,
+  };
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {
@@ -73,14 +49,14 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   config: DocumentPersistentStorageConfig<State> & {
     getSessionKey: () => string | false;
   },
-  options: { adapter?: StorageAdapter } = {},
 ): DocumentPersistenceSetup<State> {
   const version = config.version ?? 1;
-  const backend = config.backend ?? 'opfs';
-  const handle = createPersistentStorageHandle<PersistedDocumentData<State>>(
-    config,
-    { adapter: options.adapter },
-  );
+  const storageAdapter = config.adapter;
+  const persistentConfig = config;
+  const handle =
+    createPersistentStorageHandle<PersistedDocumentData<State>>(
+      persistentConfig,
+    );
 
   let storeRef: Store<DocumentStoreState<State>> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -93,23 +69,31 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
     const currentState = storeRef.state;
     if (currentState.status !== 'idle' || currentState.data !== null) return;
 
-    const sessionKey = config.getSessionKey();
+    const sessionKey = persistentConfig.getSessionKey();
     if (sessionKey === false) return;
 
-    const key = getStorageKeyForStore(sessionKey, config.storeName);
-    const hasEntry = localStorage.getItem(key) !== null;
-    const persisted = readDocumentFromLocalStorageSync(key, version);
+    const key = getStorageKeyForStore(
+      sessionKey,
+      persistentConfig.storeName,
+    );
+    const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
+      key,
+      version,
+    );
 
     if (!persisted) {
-      if (hasEntry) {
-        scheduleIdleCleanup(() => localStorage.removeItem(key));
+      if (foundEntry) {
+        scheduleIdleCleanup(() => void handle.clear());
       }
       return;
     }
 
-    const validated = validateWithSchema(config.schema, persisted.data);
+    const validated = validateWithSchema(
+      persistentConfig.schema,
+      persisted.data,
+    );
     if (validated === null) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      scheduleIdleCleanup(() => void handle.clear());
       return;
     }
 
@@ -132,25 +116,33 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
       return baseState;
     }
 
-    if (backend !== 'localStorage') return baseState;
+    if (storageAdapter.kind !== 'sync') return baseState;
 
-    const sessionKey = config.getSessionKey();
+    const sessionKey = persistentConfig.getSessionKey();
     if (sessionKey === false) return baseState;
 
-    const key = getStorageKeyForStore(sessionKey, config.storeName);
-    const hasEntry = localStorage.getItem(key) !== null;
-    const persisted = readDocumentFromLocalStorageSync(key, version);
+    const key = getStorageKeyForStore(
+      sessionKey,
+      persistentConfig.storeName,
+    );
+    const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
+      key,
+      version,
+    );
 
     if (!persisted) {
-      if (hasEntry) {
-        scheduleIdleCleanup(() => localStorage.removeItem(key));
+      if (foundEntry) {
+        scheduleIdleCleanup(() => void handle.clear());
       }
       return baseState;
     }
 
-    const validated = validateWithSchema(config.schema, persisted.data);
+    const validated = validateWithSchema(
+      persistentConfig.schema,
+      persisted.data,
+    );
     if (validated === null) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      scheduleIdleCleanup(() => void handle.clear());
       return baseState;
     }
 
@@ -165,7 +157,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   }
 
   async function preloadPersistentStorage(): Promise<void> {
-    if (backend !== 'opfs' || !storeRef) return;
+    if (storageAdapter.kind === 'sync' || !storeRef) return;
     if (preloadPromise) return preloadPromise;
 
     const currentGeneration = generation;
@@ -200,7 +192,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
   }
 
   async function maybeHydrateFromStorage(): Promise<void> {
-    if (backend === 'localStorage') {
+    if (storageAdapter.kind === 'sync') {
       hydrateFromLocalStorage();
       return;
     }
@@ -241,7 +233,7 @@ export function setupDocumentPersistence<State extends ValidStoreState>(
     attach,
     maybeHydrateFromStorage,
     preloadPersistentStorage,
-    hasAsyncPreload: backend === 'opfs',
+    hasAsyncPreload: storageAdapter.kind === 'async',
     dispose,
     clear,
   };

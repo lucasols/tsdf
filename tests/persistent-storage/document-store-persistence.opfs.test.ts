@@ -14,6 +14,7 @@ import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -42,7 +43,7 @@ function createDocPersistenceEnv(options: {
     storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
-      backend: 'opfs',
+      adapter: opfsPersistentStorage,
       schema: wrappedSchema,
       version: options.version,
     },
@@ -99,6 +100,10 @@ describe('opfs: document store persistence', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
+    await advanceTime(2100);
+    await flushAllTimers();
+    mockAdapter.clearReadRequests();
+
     expect(mockAdapter.has(key)).toBe(true);
     expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
@@ -122,6 +127,10 @@ describe('opfs: document store persistence', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
+    await advanceTime(2100);
+    await flushAllTimers();
+    mockAdapter.clearReadRequests();
+
     expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
@@ -144,6 +153,10 @@ describe('opfs: document store persistence', () => {
       storeName: 'opfs-doc',
       storageAdapter: mockAdapter.adapter,
     });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+    mockAdapter.clearReadRequests();
 
     const renders = createLoggerStore();
 

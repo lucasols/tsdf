@@ -6,7 +6,8 @@ import {
   createCollectionStore,
   createDocumentStore,
   createListQueryStore,
-  type StorageBackend,
+  localPersistentStorage,
+  opfsPersistentStorage,
   type StoreError,
 } from '@src/main';
 
@@ -64,7 +65,7 @@ function getQueryParams(): {
   scenario: ScenarioName;
   storeId: string | null;
   sessionKey: string | null;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 } {
   const searchParams = new URLSearchParams(window.location.search);
   const pageId =
@@ -73,15 +74,23 @@ function getQueryParams(): {
   const scenario = (searchParams.get('scenario') ?? 'document') as ScenarioName;
   const storeId = searchParams.get('storeId');
   const sessionKey = searchParams.get('sessionKey');
-  const backend = (searchParams.get('backend') ?? 'opfs') as StorageBackend;
+  const adapterKey = (searchParams.get('adapter') ?? 'opfs') as
+    | 'localStorage'
+    | 'opfs';
 
   return {
     pageId,
     scenario,
     storeId,
     sessionKey,
-    backend,
+    adapterKey,
   };
+}
+
+function getPersistentStorageAdapter(adapterKey: 'localStorage' | 'opfs') {
+  return adapterKey === 'localStorage'
+    ? localPersistentStorage
+    : opfsPersistentStorage;
 }
 
 function FocusControls({
@@ -496,13 +505,14 @@ function PersistDocumentScenario({
   pageId,
   storeId,
   sessionKey,
-  backend,
+  adapterKey,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 }) {
+  const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createDocumentStore<DocumentState>({
       id: storeId,
@@ -513,7 +523,7 @@ function PersistDocumentScenario({
       lowPriorityThrottleMs: 10_000,
       persistentStorage: {
         storeName: `persist-doc-${storeId}`,
-        backend,
+        adapter,
         schema: documentSchema,
       },
     }),
@@ -561,7 +571,7 @@ function PersistDocumentScenario({
         data-testid="persist-doc-clear-storage"
         onClick={() => {
           if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, backend);
+            void clearSessionStorage(sessionKey, adapter);
           }
         }}
         type="button"
@@ -579,13 +589,14 @@ function PersistCollectionScenario({
   pageId,
   storeId,
   sessionKey,
-  backend,
+  adapterKey,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 }) {
+  const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createCollectionStore<CollectionItem, string>({
       id: storeId,
@@ -598,7 +609,7 @@ function PersistCollectionScenario({
       lowPriorityThrottleMs: 10_000,
       persistentStorage: {
         storeName: `persist-col-${storeId}`,
-        backend,
+        adapter,
         schema: collectionItemSchema,
       },
     }),
@@ -644,7 +655,7 @@ function PersistCollectionScenario({
         data-testid="persist-col-clear-storage"
         onClick={() => {
           if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, backend);
+            void clearSessionStorage(sessionKey, adapter);
           }
         }}
         type="button"
@@ -659,13 +670,14 @@ function PersistListScenario({
   pageId,
   storeId,
   sessionKey,
-  backend,
+  adapterKey,
 }: {
   pageId: string;
   storeId: string;
   sessionKey: string | false;
-  backend: StorageBackend;
+  adapterKey: 'localStorage' | 'opfs';
 }) {
+  const adapter = getPersistentStorageAdapter(adapterKey);
   const [store] = useState(() =>
     createListQueryStore<UserRow, ListQueryPayload, string>({
       id: storeId,
@@ -693,7 +705,7 @@ function PersistListScenario({
       defaultQuerySize: 10,
       persistentStorage: {
         storeName: `persist-list-${storeId}`,
-        backend,
+        adapter,
         schema: listItemSchema,
       },
     }),
@@ -739,7 +751,7 @@ function PersistListScenario({
         data-testid="persist-list-clear-storage"
         onClick={() => {
           if (sessionKey !== false) {
-            void clearSessionStorage(sessionKey, backend);
+            void clearSessionStorage(sessionKey, adapter);
           }
         }}
         type="button"
@@ -751,7 +763,8 @@ function PersistListScenario({
 }
 
 function App() {
-  const { pageId, scenario, storeId, sessionKey, backend } = getQueryParams();
+  const { pageId, scenario, storeId, sessionKey, adapterKey } =
+    getQueryParams();
   const resolvedStoreId =
     storeId ?? `playwright-${scenario === 'list' ? 'list' : scenario}-sync`;
   const resolvedSessionKey =
@@ -791,7 +804,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
-          backend={backend}
+          adapterKey={adapterKey}
         />
       ) : null}
       {scenario === 'persist-collection' ? (
@@ -799,7 +812,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
-          backend={backend}
+          adapterKey={adapterKey}
         />
       ) : null}
       {scenario === 'persist-list' ? (
@@ -807,7 +820,7 @@ function App() {
           pageId={pageId}
           storeId={resolvedStoreId}
           sessionKey={resolvedSessionKey}
-          backend={backend}
+          adapterKey={adapterKey}
         />
       ) : null}
     </main>

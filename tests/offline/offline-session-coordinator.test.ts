@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { SessionOfflineCoordinator } from '../../src/persistentStorage/offline/sessionCoordinator';
+import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 
 const publishedMessages: unknown[] = [];
@@ -85,12 +86,12 @@ describe('offline session coordinator browser tabs sync', () => {
     const sessionKey = 'offline-session-echo';
     const firstCoordinator = new SessionOfflineCoordinator({
       sessionKey,
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       config: { operations: {} },
     });
     const secondCoordinator = new SessionOfflineCoordinator({
       sessionKey,
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       config: { operations: {} },
     });
 
@@ -137,7 +138,7 @@ describe('offline session coordinator browser tabs sync', () => {
     const resolvers: Array<(result: boolean) => void> = [];
     const coordinator = new SessionOfflineCoordinator({
       sessionKey: 'offline-session-network-race',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       config: {
         network: {
           enabled: true,
@@ -189,7 +190,7 @@ describe('offline session coordinator browser tabs sync', () => {
       .mockResolvedValueOnce(true);
     const coordinator = new SessionOfflineCoordinator({
       sessionKey: 'offline-session-recovery-retry',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       config: {
         outage: {
           enabled: true,

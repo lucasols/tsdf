@@ -7,6 +7,7 @@ import {
   type CollectionOfflineOperationDefinition,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
+  localPersistentStorage,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
@@ -46,7 +47,7 @@ function createTypedCollectionStore_() {
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'typed-direct-offline-collection',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: todoSchema,
       offlineMode: {
         operations: {
@@ -120,7 +121,7 @@ test('direct collection store offline public api works and stays strongly typed'
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-collection-offline',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: todoSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
@@ -292,7 +293,7 @@ test('collection offline accumulation merges same-item mutations and keeps diffe
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-collection-offline-accumulation',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: todoSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },

@@ -187,6 +187,10 @@ export function createCollectionStoreTestEnv<
   };
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
+  const resolvedPersistentStorage =
+    persistentStorage && storageAdapter
+      ? { ...persistentStorage, adapter: storageAdapter }
+      : persistentStorage;
 
   const collectionStore = createCollectionStore<
     CollectionTestItem<D>,
@@ -210,10 +214,9 @@ export function createCollectionStoreTestEnv<
     revalidateOnWindowFocus,
     mediumPriorityDelayMs,
     blockWindowClose: blockWindowClose ?? null,
-    persistentStorage,
+    persistentStorage: resolvedPersistentStorage,
     '~test': {
       ...testOptions,
-      storageAdapter,
       getWindowIsFocused: bindFocusController?.getWindowIsFocused,
       onWindowFocus: bindFocusController
         ? (handler: () => void) => {

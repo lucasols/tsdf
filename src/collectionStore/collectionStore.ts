@@ -18,6 +18,10 @@ import {
   initializeOfflineStoreController,
   offlineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
+import {
+  createOfflineEntityLookup,
+  getOfflineEntityMetadata,
+} from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
   CollectionOfflineOperationsRegistry,
@@ -27,7 +31,6 @@ import { createProtectedStorageKey } from '../persistentStorage/persistentStorag
 import type {
   CollectionPersistentStorageConfig,
   PersistentStoragePreloadResult,
-  StorageAdapter,
 } from '../persistentStorage/types';
 import {
   BatchRequest,
@@ -247,7 +250,6 @@ export type CollectionStoreOptions<
     onReceiveRemoteMsg?: (
       message: CollectionBrowserTabsMessage<ItemState, ItemPayload>,
     ) => void;
-    storageAdapter?: StorageAdapter;
   };
 };
 
@@ -333,7 +335,7 @@ export function createCollectionStore<
   const persistence = persistentStorageConfig
     ? setupCollectionPersistence<ItemState, ItemPayload>(
         { ...persistentStorageConfig, getSessionKey },
-        { adapter: testOptions?.storageAdapter, getItemKey },
+        { getItemKey },
       )
     : null;
 
@@ -371,11 +373,10 @@ export function createCollectionStore<
     ? createOfflineStoreController({
         storeName: persistentStorageConfig.storeName,
         storeType: 'collection',
-        backend: persistentStorageConfig.backend,
         getSessionKey,
         onPersistentStorageError:
           persistentStorageConfig.onPersistentStorageError,
-        adapter: testOptions?.storageAdapter,
+        adapter: persistentStorageConfig.adapter,
         offlineMode: persistentStorageConfig.offlineMode,
         storeAdapter: {
           getHelpers: () => ({
@@ -413,7 +414,6 @@ export function createCollectionStore<
             if (sessionKey === false) return [];
             return entityRefs.map((ref) =>
               createProtectedStorageKey({
-                backend: persistentStorageConfig.backend,
                 sessionKey,
                 storeName: persistentStorageConfig.storeName,
                 kind: 'collection.item',
@@ -1176,19 +1176,14 @@ export function createCollectionStore<
       inactiveScope: id,
       storeName: persistentStorageConfig?.storeName,
     });
+    const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
-    return result.map((itemResult) => {
-      const offlineEntity = offlineEntities.find(
-        (entity) => entity.entityKey === itemResult.itemStateKey,
-      );
-
-      return {
-        ...itemResult,
-        isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
-        pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
-        hasOfflineConflict: offlineEntity?.hasConflict ?? false,
-      };
-    });
+    return result.map((itemResult) => ({
+      ...itemResult,
+      ...getOfflineEntityMetadata(
+        offlineEntitiesByKey.get(itemResult.itemStateKey),
+      ),
+    }));
   }
 
   function useItem<Selected = ItemState | null>(
@@ -1209,15 +1204,13 @@ export function createCollectionStore<
       storeName: persistentStorageConfig?.storeName,
     });
 
-    const offlineEntity = offlineEntities.find(
-      (entity) => entity.entityKey === result.itemStateKey,
-    );
-
     return {
       ...result,
-      isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
-      pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
-      hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+      ...getOfflineEntityMetadata(
+        offlineEntities.find(
+          (entity) => entity.entityKey === result.itemStateKey,
+        ),
+      ),
     };
   }
 

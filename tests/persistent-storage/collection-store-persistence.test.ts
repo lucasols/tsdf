@@ -11,13 +11,12 @@ import {
   test,
   vi,
 } from 'vitest';
-import type {
-  PersistedCollectionItemData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -27,6 +26,7 @@ const cachedCollectionItemEntrySchema = rc_object({
   timestamp: rc_number,
   version: rc_number,
 });
+const persistentStore = createLocalStoragePersistentTestStore();
 
 function itemKey(payload: string): string {
   return getCompositeKey(payload);
@@ -51,14 +51,9 @@ function setCachedCollectionItem(
   data: PersistedItemState,
   version = 1,
 ): string {
-  const key = itemStorageKey(storeName, sessionKey, payload);
-  const entry: StorageCacheEntry<
-    PersistedCollectionItemData<PersistedItemState>
-  > = { data: { data, payload }, timestamp: Date.now(), version };
-
-  localStorage.setItem(key, JSON.stringify(entry));
-
-  return key;
+  return persistentStore
+    .scope(storeName, sessionKey)
+    .collection.seedItem(payload, data, { version });
 }
 
 function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
@@ -99,17 +94,12 @@ function listStoredItemPayloads(
 }
 
 function getStoredCollectionItemTimestamp(key: string): number {
-  const rawEntry = localStorage.getItem(key);
-  if (rawEntry === null) {
-    throw new Error(`Missing localStorage entry for ${key}`);
+  const entry = readManagedLocalStorageEntryByPayload(key);
+  if (entry === null) {
+    throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
 
-  const parsed = rc_parse_json(rawEntry, cachedCollectionItemEntrySchema);
-  if (!parsed.ok) {
-    throw new Error(`Invalid localStorage entry for ${key}`);
-  }
-
-  return parsed.value.timestamp;
+  return entry.lastAccessAt;
 }
 
 function createEnv(options: {
@@ -126,7 +116,7 @@ function createEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       storeName: options.storeName,
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: wrappedItemSchema,
       version: options.version,
       maxItems: options.maxItems,

@@ -6,6 +6,7 @@ import {
   createListQueryStore,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
+  localPersistentStorage,
   type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
 import type { OfflineMutationDescriptor } from '../../src/persistentStorage/offline/types';
@@ -64,7 +65,7 @@ const typedListQueryStore_ = createListQueryStore<
   blockWindowClose: null,
   persistentStorage: {
     storeName: 'typed-direct-offline-list-query',
-    backend: 'localStorage',
+    adapter: localPersistentStorage,
     schema: userSchema,
     offlineMode: { operations: typedListQueryOperations_ },
   },
@@ -160,7 +161,7 @@ test('direct list-query store offline public api works and stays strongly typed'
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-list-query-offline',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: userSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
@@ -328,7 +329,7 @@ test('useMultipleListQueries exposes offline pending metadata for queued mutatio
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-list-query-multi-offline',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: userSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
@@ -492,7 +493,7 @@ test('list-query offline accumulation merges same-item mutations and keeps diffe
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-list-query-offline-accumulation',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: userSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },

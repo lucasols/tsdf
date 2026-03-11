@@ -24,7 +24,6 @@ import type {
 } from './persistentStorage/offline/types';
 import type {
   DocumentPersistentStorageConfig,
-  StorageAdapter,
 } from './persistentStorage/types';
 import {
   BatchRequest,
@@ -45,6 +44,7 @@ import {
   initializeOfflineStoreController,
   offlineSessionUnavailableError,
 } from './persistentStorage/offline/storeController';
+import { getOfflineEntityMetadata } from './persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from './persistentStorage/offline/sessionCoordinator';
 import {
   type BrowserTabsPriorityTimings,
@@ -184,7 +184,6 @@ export type DocumentStoreOptions<
     browserTabsPriorityTimings?: BrowserTabsPriorityTimings;
     browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
     onReceiveRemoteMsg?: (message: DocumentBrowserTabsMessage<State>) => void;
-    storageAdapter?: StorageAdapter;
   };
 };
 
@@ -251,21 +250,17 @@ export function createDocumentStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupDocumentPersistence(
-        { ...persistentStorageConfig, getSessionKey },
-        { adapter: testOptions?.storageAdapter },
-      )
+    ? setupDocumentPersistence({ ...persistentStorageConfig, getSessionKey })
     : null;
 
   const offlineController = persistentStorageConfig?.offlineMode
     ? createOfflineStoreController({
         storeName: persistentStorageConfig.storeName,
         storeType: 'document',
-        backend: persistentStorageConfig.backend,
         getSessionKey,
         onPersistentStorageError:
           persistentStorageConfig.onPersistentStorageError,
-        adapter: testOptions?.storageAdapter,
+        adapter: persistentStorageConfig.adapter,
         offlineMode: persistentStorageConfig.offlineMode,
         storeAdapter: {
           getHelpers: () => ({
@@ -281,7 +276,6 @@ export function createDocumentStore<
             if (sessionKey === false) return [];
             return [
               createProtectedStorageKey({
-                backend: persistentStorageConfig.backend,
                 sessionKey,
                 storeName: persistentStorageConfig.storeName,
                 kind: 'document',
@@ -865,10 +859,6 @@ export function createDocumentStore<
         const data = selector
           ? selector(state.data)
           : __LEGIT_CAST__<Selected, State | null>(state.data);
-
-        const offlineEntity = offlineEntities.find(
-          (entity) => entity.entityKey === DOC_TARGET_KEY,
-        );
         let status = state.status;
 
         if (!returnIdleStatus && status === 'idle') {
@@ -884,9 +874,11 @@ export function createDocumentStore<
           error,
           status,
           isLoading: status === 'loading',
-          isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
-          pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
-          hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+          ...getOfflineEntityMetadata(
+            offlineEntities.find(
+              (entity) => entity.entityKey === DOC_TARGET_KEY,
+            ),
+          ),
         };
       },
       [offlineEntities, selector, returnIdleStatus, returnRefetchingStatus],

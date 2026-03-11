@@ -5,6 +5,7 @@ import {
   type DocumentOfflineOperationDefinition,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
+  localPersistentStorage,
   useGlobalOfflineEntities,
   useGlobalOfflineStatus,
 } from '../../src/main';
@@ -60,7 +61,7 @@ describe('offline mode network and session', () => {
       testScenario: 'idle',
       persistentStorage: {
         storeName: 'plain-persistence-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
       },
     });
@@ -108,7 +109,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName,
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true, getIsOffline: () => !online },
@@ -189,7 +190,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-owned-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true, getIsOffline: () => !online },
@@ -253,7 +254,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-missing-session-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true, getIsOffline: () => !online },
@@ -312,7 +313,7 @@ describe('offline mode network and session', () => {
         testScenario: 'loaded',
         persistentStorage: {
           storeName: 'offline-global-hook-doc',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: docSchema,
           offlineMode: {
             network: { enabled: true, getIsOffline: () => !online },
@@ -364,7 +365,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-read-cache-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true, getIsOffline: () => !online },
@@ -398,7 +399,7 @@ describe('offline mode network and session', () => {
       testScenario: 'idle',
       persistentStorage: {
         storeName: 'offline-read-empty-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true, getIsOffline: () => !online },
@@ -432,7 +433,7 @@ describe('offline mode network and session', () => {
       getSessionKey: () => sessionKey,
       persistentStorage: {
         storeName: 'shared-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: { network: { enabled: true }, operations: {} },
       },
@@ -444,7 +445,7 @@ describe('offline mode network and session', () => {
         getSessionKey: () => sessionKey,
         persistentStorage: {
           storeName: 'shared-collection',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: collectionSchema,
           offlineMode: { network: { enabled: true }, operations: {} },
         },
@@ -482,7 +483,7 @@ describe('offline mode network and session', () => {
         testScenario: 'loaded',
         persistentStorage: {
           storeName,
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: docSchema,
           offlineMode: {
             network: { enabled: true, getIsOffline },

@@ -6,6 +6,7 @@ import {
   type CollectionOfflineOperationDefinition,
   type DocumentOfflineOperationDefinition,
   type ListQueryOfflineOperationDefinition,
+  localPersistentStorage,
 } from '../../src/main';
 import type { DocumentOfflineHelpers } from '../../src/persistentStorage/offline/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -114,7 +115,7 @@ describe('offline mode replay and conflict handling', () => {
         testScenario: 'loaded',
         persistentStorage: {
           storeName: 'offline-temp-id-collection',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: collectionSchema,
           offlineMode: {
             network: { enabled: true, getIsOffline },
@@ -211,7 +212,7 @@ describe('offline mode replay and conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'needs-confirmation-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true },
@@ -284,7 +285,7 @@ describe('offline mode replay and conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'needs-confirmation-no-outage-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           operations: {
@@ -333,7 +334,7 @@ describe('offline mode replay and conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-conflict-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true },
@@ -423,7 +424,7 @@ describe('offline mode replay and conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-needs-confirmation-accumulation-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true },
@@ -502,7 +503,7 @@ describe('offline mode replay and conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'online-needs-confirmation-retry-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true, getIsOffline: () => !online },
@@ -590,7 +591,7 @@ describe('offline mode replay and conflict handling', () => {
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           storeName: 'offline-replay-mutation-payload',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: userRowSchema,
           offlineMode: {
             network: { enabled: true, getIsOffline: () => !online },
@@ -627,7 +628,7 @@ describe('offline mode replay and conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'replay-session-switch-doc',
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
           network: { enabled: true, getIsOffline: () => !online },

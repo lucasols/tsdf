@@ -12,6 +12,11 @@ import {
   initializeOfflineStoreController,
   type OfflineStoreController,
 } from '../persistentStorage/offline/storeController';
+import {
+  createOfflineEntityLookup,
+  getOfflineEntitiesMetadata,
+  getOfflineEntityMetadata,
+} from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
   ListQueryOfflineOperationsRegistry,
@@ -20,7 +25,6 @@ import type {
 import type {
   ListQueryPersistentStorageConfig,
   PersistentStoragePreloadResult,
-  StorageAdapter,
 } from '../persistentStorage/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import {
@@ -241,7 +245,6 @@ type ListQueryStoreOptionsBase<
         ItemPayload
       >,
     ) => void;
-    storageAdapter?: StorageAdapter;
   };
   lowPriorityThrottleMs: number;
   baseCoalescingWindowMs: number;
@@ -522,7 +525,7 @@ export function createListQueryStore<
   const persistence = persistentStorageConfig
     ? setupListQueryPersistence<ItemState, QueryPayload, ItemPayload>(
         { ...persistentStorageConfig, getSessionKey },
-        { adapter: testOptions?.storageAdapter, getItemKey, getQueryKey },
+        { getItemKey, getQueryKey },
       )
     : null;
 
@@ -993,11 +996,10 @@ export function createListQueryStore<
     offlineController = createOfflineStoreController({
       storeName: persistentStorageConfig.storeName,
       storeType: 'listQuery',
-      backend: persistentStorageConfig.backend,
       getSessionKey,
       onPersistentStorageError:
         persistentStorageConfig.onPersistentStorageError,
-      adapter: testOptions?.storageAdapter,
+      adapter: persistentStorageConfig.adapter,
       offlineMode: persistentStorageConfig.offlineMode,
       storeAdapter: {
         getHelpers: () => ({
@@ -1057,7 +1059,6 @@ export function createListQueryStore<
           if (sessionKey === false) return [];
           return entityRefs.map((ref) =>
             createProtectedStorageKey({
-              backend: persistentStorageConfig.backend,
               sessionKey,
               storeName: persistentStorageConfig.storeName,
               kind: 'listQuery.item',
@@ -1476,29 +1477,14 @@ export function createListQueryStore<
         inactiveScope: id,
         storeName: persistentStorageConfig?.storeName,
       });
+      const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
       return result.map((queryResult, index) => {
-        const itemKeys = queryItemKeys[index] ?? [];
-        const pendingEntities = offlineEntities.filter(
-          (entity) =>
-            itemKeys.includes(entity.entityKey) &&
-            entity.syncState !== 'conflict',
-        );
-        const conflictedEntities = offlineEntities.filter(
-          (entity) => itemKeys.includes(entity.entityKey) && entity.hasConflict,
-        );
-
         return {
           ...queryResult,
-          isPendingOfflineSync: pendingEntities.length > 0,
-          pendingOfflineMutations: pendingEntities.reduce(
-            (total, entity) => total + entity.pendingMutations,
-            0,
-          ),
-          hasOfflineConflict: conflictedEntities.length > 0,
-          pendingItemKeys: pendingEntities.map((entity) => entity.entityKey),
-          conflictedItemKeys: conflictedEntities.map(
-            (entity) => entity.entityKey,
+          ...getOfflineEntitiesMetadata(
+            offlineEntitiesByKey,
+            queryItemKeys[index] ?? [],
           ),
         };
       });
@@ -1543,24 +1529,11 @@ export function createListQueryStore<
       inactiveScope: id,
       storeName: persistentStorageConfig?.storeName,
     });
-    const pendingEntities = offlineEntities.filter(
-      (entity) =>
-        itemKeys.includes(entity.entityKey) && entity.syncState !== 'conflict',
-    );
-    const conflictedEntities = offlineEntities.filter(
-      (entity) => itemKeys.includes(entity.entityKey) && entity.hasConflict,
-    );
+    const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
     return {
       ...result,
-      isPendingOfflineSync: pendingEntities.length > 0,
-      pendingOfflineMutations: pendingEntities.reduce(
-        (total, entity) => total + entity.pendingMutations,
-        0,
-      ),
-      hasOfflineConflict: conflictedEntities.length > 0,
-      pendingItemKeys: pendingEntities.map((entity) => entity.entityKey),
-      conflictedItemKeys: conflictedEntities.map((entity) => entity.entityKey),
+      ...getOfflineEntitiesMetadata(offlineEntitiesByKey, itemKeys),
     };
   };
 
@@ -1603,17 +1576,14 @@ export function createListQueryStore<
       inactiveScope: id,
       storeName: persistentStorageConfig?.storeName,
     });
+    const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
     return result.map((itemResult) => {
-      const offlineEntity = offlineEntities.find(
-        (entity) => entity.entityKey === itemResult.itemStateKey,
-      );
-
       return {
         ...itemResult,
-        isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
-        pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
-        hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+        ...getOfflineEntityMetadata(
+          offlineEntitiesByKey.get(itemResult.itemStateKey),
+        ),
       };
     });
   };
@@ -1646,15 +1616,14 @@ export function createListQueryStore<
       inactiveScope: id,
       storeName: persistentStorageConfig?.storeName,
     });
-    const offlineEntity = offlineEntities.find(
-      (entity) => entity.entityKey === result.itemStateKey,
-    );
 
     return {
       ...result,
-      isPendingOfflineSync: !!offlineEntity && !offlineEntity.hasConflict,
-      pendingOfflineMutations: offlineEntity?.pendingMutations ?? 0,
-      hasOfflineConflict: offlineEntity?.hasConflict ?? false,
+      ...getOfflineEntityMetadata(
+        offlineEntities.find(
+          (entity) => entity.entityKey === result.itemStateKey,
+        ),
+      ),
     };
   };
 

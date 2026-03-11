@@ -7,6 +7,7 @@ import {
   type DocumentOfflineOperationDefinition,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
+  localPersistentStorage,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
@@ -47,7 +48,7 @@ function createTypedDocumentStore_() {
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'typed-direct-offline-document',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
         operations: {
@@ -112,7 +113,7 @@ test('direct document store offline public api works and stays strongly typed', 
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-document-offline',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
@@ -272,7 +273,7 @@ test('document offline accumulation merges pending mutations into a single queue
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-document-offline-accumulation',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
@@ -426,7 +427,7 @@ test('document offline accumulation rejects invalid merged input without corrupt
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-document-offline-invalid-accumulation',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },
@@ -511,7 +512,7 @@ test('document offline mutations without accumulation stay as separate queued op
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-document-offline-no-accumulation',
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
         network: { enabled: true, getIsOffline: () => !online },

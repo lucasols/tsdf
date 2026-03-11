@@ -5,9 +5,7 @@ import { renderHook } from '@testing-library/react';
 import {
   rc_number,
   rc_object,
-  rc_parse_json,
   rc_string,
-  rc_unknown,
 } from 'runcheck';
 import {
   afterEach,
@@ -18,13 +16,14 @@ import {
   test,
   vi,
 } from 'vitest';
+import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
 import type {
   PersistedListQueryData,
-  PersistedListQueryItemData,
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -36,6 +35,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -45,11 +45,6 @@ const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
     email: rc_string.optional(),
   }),
 );
-const cacheEntryTimestampSchema = rc_object({
-  data: rc_unknown,
-  timestamp: rc_number,
-  version: rc_number,
-});
 const partialResourcesConfig: PartialResourcesConfig<Row> = {
   mergeItems: (prev, fetched) => {
     if (!prev) return fetched;
@@ -65,6 +60,7 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
     return __LEGIT_CAST__<Row, Record<string, unknown>>(result);
   },
 };
+const persistentStore = createLocalStoragePersistentTestStore();
 
 function rawItemPayload(tableId: string, id: number): string {
   return `${tableId}||${id}`;
@@ -103,16 +99,9 @@ function setCachedItem(
   data: Row,
   version = 1,
 ): string {
-  const key = itemStorageKey(storeName, sessionKey, tableId, id);
-  const entry: StorageCacheEntry<PersistedListQueryItemData<Row>> = {
-    data: { data, payload: rawItemPayload(tableId, id) },
-    timestamp: Date.now(),
-    version,
-  };
-
-  localStorage.setItem(key, JSON.stringify(entry));
-
-  return key;
+  return persistentStore
+    .scope(storeName, sessionKey)
+    .listQuery.seedItem(tableId, id, data, { version }).storageKey;
 }
 
 function setCachedQuery(
@@ -123,16 +112,9 @@ function setCachedQuery(
   hasMore = false,
   version = 1,
 ): string {
-  const key = queryStorageKey(storeName, sessionKey, params);
-  const entry: StorageCacheEntry<PersistedListQueryData> = {
-    data: { payload: params, items, hasMore },
-    timestamp: Date.now(),
-    version,
-  };
-
-  localStorage.setItem(key, JSON.stringify(entry));
-
-  return key;
+  return persistentStore
+    .scope(storeName, sessionKey)
+    .listQuery.seedQuery(params, items, { hasMore, version });
 }
 
 function listStoredKeys(prefix: string): string[] {
@@ -149,17 +131,12 @@ function listStoredKeys(prefix: string): string[] {
 }
 
 function getStoredEntryTimestamp(key: string): number {
-  const raw = localStorage.getItem(key);
-  if (raw === null) {
-    throw new Error(`Missing localStorage entry for ${key}`);
+  const entry = readManagedLocalStorageEntryByPayload(key);
+  if (entry === null) {
+    throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
 
-  const parsed = rc_parse_json(raw, cacheEntryTimestampSchema);
-  if (!parsed.ok) {
-    throw new Error(`Invalid localStorage entry for ${key}`);
-  }
-
-  return parsed.value.timestamp;
+  return entry.lastAccessAt;
 }
 
 function getStoredQueryItemKeys(
@@ -218,7 +195,7 @@ function createEnv(options: {
     bindFocusController: options.bindFocusController,
     persistentStorage: {
       storeName: options.storeName,
-      backend: 'localStorage',
+      adapter: localPersistentStorage,
       schema: rowSchema,
       version: options.version,
       maxItems: options.maxItems,
@@ -287,7 +264,12 @@ describe('localStorage: list query store persistence', () => {
       .toMatchInlineSnapshot(`
         ['{tableId:"users"}']
       `);
-    expect(env.apiStore.getItemState(() => true).map(({ payload }) => payload))
+    expect(
+      env.apiStore
+        .getItemState(() => true)
+        .map(({ payload }) => payload)
+        .sort(),
+    )
       .toMatchInlineSnapshot(`
         ['users||1', 'users||2']
       `);
@@ -618,14 +600,18 @@ describe('localStorage: list query store persistence', () => {
       -> status: success ⋅ item: {name:Fresh, age:21, email:fresh@site.test}
       "
     `);
-    expect(readerEnv.serverTable.getRequestHistory('list'))
+    expect(
+      readerEnv.serverTable.getRequestHistory('list').map((entry) => {
+        const { time: _time, ...request } = entry;
+        return request;
+      }),
+    )
       .toMatchInlineSnapshot(`
         - _type: 'list'
           payload:
             fields: ['id', 'name', 'age', 'email']
             pos: { limit: 50, offset: 0 }
           returned_items: 1
-          time: '2.92s -> 3.72s | duration: 800ms'
       `);
     expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
       .toMatchInlineSnapshot(`

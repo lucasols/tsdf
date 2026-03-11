@@ -15,6 +15,7 @@ import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -70,7 +71,7 @@ function createEnv(options: {
     storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
-      backend: 'opfs',
+      adapter: opfsPersistentStorage,
       schema: wrappedItemSchema,
       ignoreItems: options.ignoreItems,
     },
@@ -114,6 +115,10 @@ describe('opfs: collection store persistence', () => {
       storageAdapter: mockAdapter.adapter,
       serverData: { '1': { id: '1', name: 'Fresh' } },
     });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+    mockAdapter.clearReadRequests();
 
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getItemState('1')).toBeUndefined();

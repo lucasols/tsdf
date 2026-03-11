@@ -20,6 +20,7 @@ import type {
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createListQueryStoreTestEnv,
   type Row,
@@ -73,7 +74,7 @@ function createEnv(options: {
     defaultQuerySize: options.defaultQuerySize,
     persistentStorage: {
       storeName: options.storeName,
-      backend: 'opfs',
+      adapter: opfsPersistentStorage,
       schema: rowSchema,
       maxQuerySize: options.maxQuerySize,
       ignoreItems: options.ignoreItems,

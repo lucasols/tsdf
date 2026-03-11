@@ -6,6 +6,7 @@ import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
+import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createFocusChangeCoordinator,
   setupBrowserTabsTestLifecycle,
@@ -81,7 +82,7 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: localPersistentStorage,
       schema: rowSchema,
     };
 
@@ -175,7 +176,7 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: localPersistentStorage,
       schema: rowSchema,
     };
 
@@ -313,7 +314,7 @@ describe('persistence + browser tabs sync integration', () => {
       dynamicRealtimeThrottleMs: () => 300,
       persistentStorage: {
         storeName,
-        backend: 'localStorage',
+        adapter: localPersistentStorage,
         schema: rowSchema,
       },
     });
@@ -380,7 +381,7 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: localPersistentStorage,
       schema: docSchema,
     };
 
@@ -458,7 +459,7 @@ describe('persistence + browser tabs sync integration', () => {
 
     const persistenceConfig = {
       storeName,
-      backend: 'localStorage' as const,
+      adapter: localPersistentStorage,
       schema: colSchema,
     };
 

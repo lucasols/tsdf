@@ -8,7 +8,12 @@ import {
   test,
   vi,
 } from 'vitest';
+import { upsertManagedLocalStorageSingleEntry } from '../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../src/persistentStorage/persistentStorageManager';
+import {
+  localPersistentStorage,
+  opfsPersistentStorage,
+} from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -57,7 +62,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'fresh-doc',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -89,7 +94,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'keep-a',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -111,6 +116,12 @@ describe('expiration scan', () => {
       'tsdf.sess1.corrupted',
       JSON.stringify({ data: 'bad', version: 1 }),
     );
+    upsertManagedLocalStorageSingleEntry({
+      sessionKey: 'sess1',
+      storeName: 'corrupted',
+      storageKey: 'tsdf.sess1.corrupted',
+      maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+    });
 
     // Create a valid entry that triggers the scan
     triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
@@ -121,7 +132,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'trigger',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -134,7 +145,7 @@ describe('expiration scan', () => {
     expect(localStorage.getItem('tsdf.sess1.corrupted')).toBeNull();
   });
 
-  test('scan runs only once per backend per session', async () => {
+  test('scan runs only once per adapter per session', async () => {
     const scanOnceA = persistentStore.scope('scan-once-a', 'sess1');
     const scanOnceB = persistentStore.scope('scan-once-b', 'sess1');
     const shouldStay = persistentStore.scope('should-stay', 'sess1');
@@ -151,7 +162,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'scan-once-a',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -176,7 +187,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'scan-once-b',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -210,7 +221,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess-a',
         persistentStorage: {
           storeName: 'account-a-doc',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -234,7 +245,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess-b',
         persistentStorage: {
           storeName: 'account-b-doc',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -275,7 +286,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess-trigger',
         persistentStorage: {
           storeName: 'trigger-doc',
-          backend: 'localStorage',
+          adapter: localPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -289,7 +300,7 @@ describe('expiration scan', () => {
     ).not.toBeNull();
   });
 
-  test('scan does not run for test adapter overrides', async () => {
+  test('scan runs for explicit injected async adapters', async () => {
     const oldTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const key = 'tsdf.sess1.old-entry';
     const mockAdapter = createMockOpfsStorageAdapter({
@@ -314,7 +325,7 @@ describe('expiration scan', () => {
         storageAdapter: mockAdapter.adapter,
         persistentStorage: {
           storeName: 'adapter-test',
-          backend: 'opfs',
+          adapter: opfsPersistentStorage,
           schema: wrappedSchema,
         },
       },
@@ -323,7 +334,6 @@ describe('expiration scan', () => {
     await advanceTime(3000);
     await flushAllTimers();
 
-    // Old entry should NOT be removed (scan skipped for adapter overrides)
-    expect(mockAdapter.has(key)).toBe(true);
+    expect(mockAdapter.has(key)).toBe(false);
   });
 });

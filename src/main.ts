@@ -58,13 +58,15 @@ export type {
 
 // Persistent Storage types
 export type {
+  AsyncStorageAdapter,
   PersistentStorageSchema,
-  StorageBackend,
   PersistentStorageBaseConfig,
   PersistentStoragePreloadResult,
   DocumentPersistentStorageConfig,
   CollectionPersistentStorageConfig,
   ListQueryPersistentStorageConfig,
+  StorageAdapter,
+  SyncStorageAdapter,
 } from './persistentStorage/types';
 
 export type {
@@ -99,3 +101,8 @@ export {
   clearSessionStorage,
   clearAllSessionStorage,
 } from './persistentStorage/persistentStorageManager';
+
+export {
+  localPersistentStorage,
+  opfsPersistentStorage,
+} from './persistentStorage/storageAdapter';
