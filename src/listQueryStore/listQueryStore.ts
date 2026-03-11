@@ -1480,12 +1480,14 @@ export function createListQueryStore<
       const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
       return result.map((queryResult, index) => {
+        const offlineMetadata = getOfflineEntitiesMetadata(
+          offlineEntitiesByKey,
+          queryItemKeys[index] ?? [],
+        );
+
         return {
           ...queryResult,
-          ...getOfflineEntitiesMetadata(
-            offlineEntitiesByKey,
-            queryItemKeys[index] ?? [],
-          ),
+          isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
         };
       });
     };
@@ -1530,10 +1532,14 @@ export function createListQueryStore<
       storeName: persistentStorageConfig?.storeName,
     });
     const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
+    const offlineMetadata = getOfflineEntitiesMetadata(
+      offlineEntitiesByKey,
+      itemKeys,
+    );
 
     return {
       ...result,
-      ...getOfflineEntitiesMetadata(offlineEntitiesByKey, itemKeys),
+      isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
     };
   };
 
@@ -1579,11 +1585,13 @@ export function createListQueryStore<
     const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
     return result.map((itemResult) => {
+      const offlineMetadata = getOfflineEntityMetadata(
+        offlineEntitiesByKey.get(itemResult.itemStateKey),
+      );
+
       return {
         ...itemResult,
-        ...getOfflineEntityMetadata(
-          offlineEntitiesByKey.get(itemResult.itemStateKey),
-        ),
+        isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
       };
     });
   };
@@ -1616,14 +1624,15 @@ export function createListQueryStore<
       inactiveScope: id,
       storeName: persistentStorageConfig?.storeName,
     });
+    const offlineMetadata = getOfflineEntityMetadata(
+      offlineEntities.find(
+        (entity) => entity.entityKey === result.itemStateKey,
+      ),
+    );
 
     return {
       ...result,
-      ...getOfflineEntityMetadata(
-        offlineEntities.find(
-          (entity) => entity.entityKey === result.itemStateKey,
-        ),
-      ),
+      isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
     };
   };
 

@@ -60,10 +60,6 @@ export type TSFDUseListQueryReturn<
   isLoading: boolean;
   isLoadingMore: boolean;
   isPendingOfflineSync: boolean;
-  pendingOfflineMutations: number;
-  hasOfflineConflict: boolean;
-  pendingItemKeys: string[];
-  conflictedItemKeys: string[];
   queryMetadata: QueryMetadata;
 };
 
@@ -81,8 +77,6 @@ export type TSFDUseListItemReturn<
   isLoading: boolean;
   itemStateKey: string;
   isPendingOfflineSync: boolean;
-  pendingOfflineMutations: number;
-  hasOfflineConflict: boolean;
   queryMetadata: QueryMetadata;
 };
 

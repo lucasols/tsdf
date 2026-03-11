@@ -109,8 +109,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:User 1}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
 
     >>> first update (✅)
@@ -123,8 +121,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:User 1}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -134,8 +130,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:User 1}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -145,8 +139,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
 
     >>> set disabled
@@ -159,8 +151,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
 
     >>> ignored update (❌)
@@ -173,8 +163,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
 
     >>> enabled again
@@ -187,8 +175,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -198,8 +184,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -209,8 +193,6 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ data: {id:1, name:❌}
     ⋅ payload: users||1
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
     └─
     "
   `);
@@ -287,10 +269,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
-    ⋅ pendingItemKeys: []
-    ⋅ conflictedItemKeys: []
     └─
 
     >>> first update (✅)
@@ -306,10 +284,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
-    ⋅ pendingItemKeys: []
-    ⋅ conflictedItemKeys: []
     └─
     ┌─
     ⋅ queryKey: {tableId:"users"}
@@ -322,10 +296,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
-    ⋅ pendingItemKeys: []
-    ⋅ conflictedItemKeys: []
     └─
 
     >>> set disabled
@@ -341,10 +311,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
-    ⋅ pendingItemKeys: []
-    ⋅ conflictedItemKeys: []
     └─
 
     >>> ignored update (❌)
@@ -362,10 +328,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
-    ⋅ pendingItemKeys: []
-    ⋅ conflictedItemKeys: []
     └─
     ┌─
     ⋅ queryKey: {tableId:"users"}
@@ -378,10 +340,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
-    ⋅ pendingItemKeys: []
-    ⋅ conflictedItemKeys: []
     └─
     ┌─
     ⋅ queryKey: {tableId:"users"}
@@ -394,10 +352,6 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
     ⋅ isPendingOfflineSync: ❌
-    ⋅ pendingOfflineMutations: 0
-    ⋅ hasOfflineConflict: ❌
-    ⋅ pendingItemKeys: []
-    ⋅ conflictedItemKeys: []
     └─
     "
   `);
