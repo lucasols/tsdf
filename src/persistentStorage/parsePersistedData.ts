@@ -7,7 +7,11 @@ import {
   rc_unknown,
 } from 'runcheck';
 import type { ValidPayload } from '../utils/storeShared';
-import type { PersistentStorageSchema } from './types';
+import type {
+  ConvertedPersistentStorageDataSchema,
+  PersistentStorageDataSchema,
+  PersistentStorageSchema,
+} from './types';
 import { validateWithSchema } from './validateWithSchema';
 
 const persistedDocumentDataSchema = rc_object({ data: rc_unknown });
@@ -28,6 +32,60 @@ const persistedListQueryDataSchema = rc_object({
   items: rc_array(rc_string),
   hasMore: rc_boolean,
 });
+
+export type NormalizedPersistentStorageDataSchema<TFinal, TStorage = unknown> =
+  | { mode: 'direct'; storeSchema: PersistentStorageSchema<TFinal> }
+  | ({ mode: 'converted' } & ConvertedPersistentStorageDataSchema<
+      TFinal,
+      TStorage
+    >);
+
+export function normalizePersistentStorageDataSchema<
+  TFinal,
+  TStorage = unknown,
+>(
+  schema: PersistentStorageDataSchema<TFinal, TStorage>,
+): NormalizedPersistentStorageDataSchema<TFinal, TStorage> {
+  if (typeof schema === 'object' && 'storeSchema' in schema) {
+    return { mode: 'converted', ...schema };
+  }
+
+  return { mode: 'direct', storeSchema: schema };
+}
+
+export function parsePersistedStoreData<TFinal, TStorage = unknown>(
+  value: unknown,
+  schema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): TFinal | null {
+  if (schema.mode === 'direct') {
+    return validateWithSchema(schema.storeSchema, value);
+  }
+
+  const persistedData = validateWithSchema(schema.storageSchema, value);
+  if (persistedData === null) return null;
+
+  try {
+    const convertedData = schema.convertFromStorage(persistedData);
+    return validateWithSchema(schema.storeSchema, convertedData);
+  } catch {
+    return null;
+  }
+}
+
+export function convertStoreDataForPersistence<TFinal, TStorage = unknown>(
+  value: TFinal,
+  schema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): { ok: true; value: TFinal | TStorage } | { ok: false; error: unknown } {
+  if (schema.mode === 'direct') {
+    return { ok: true, value };
+  }
+
+  try {
+    return { ok: true, value: schema.convertToStorage(value) };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
 
 export type ParsedPersistedDocumentData = { data: unknown };
 

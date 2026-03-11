@@ -141,7 +141,12 @@ export function createPersistentStorageHandle<T>(
 
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      void writeEntry(getData());
+
+      try {
+        void writeEntry(getData());
+      } catch (error) {
+        onPersistentStorageError?.(error);
+      }
     }, DEBOUNCE_MS);
   }
 

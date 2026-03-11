@@ -34,6 +34,29 @@ export type StandardSchemaLike<T> = {
 /** Union of supported schema types for persistent storage validation. */
 export type PersistentStorageSchema<T> = RcType<T> | StandardSchemaLike<T>;
 
+/**
+ * Converts between the in-memory store data shape and the persisted storage shape.
+ * Use this when the cached representation should differ from the API store format.
+ */
+export type ConvertedPersistentStorageDataSchema<TFinal, TStorage> = {
+  /** Schema for the final in-memory store data after hydration. */
+  storeSchema: PersistentStorageSchema<TFinal>;
+  /** Schema for the raw persisted storage representation. */
+  storageSchema: PersistentStorageSchema<TStorage>;
+  /** Converts in-memory store data into the persisted storage representation. */
+  convertToStorage: (value: TFinal) => TStorage;
+  /** Converts persisted storage data into the final in-memory store representation. */
+  convertFromStorage: (value: TStorage) => TFinal;
+};
+
+/**
+ * Schema configuration for persisted store data.
+ * Accept either the final store schema directly or a converted storage format.
+ */
+export type PersistentStorageDataSchema<TFinal, TStorage = unknown> =
+  | PersistentStorageSchema<TFinal>
+  | ConvertedPersistentStorageDataSchema<TFinal, TStorage>;
+
 // --- Cache Entry ---
 
 export type StorageCacheEntry<T> = {
@@ -50,13 +73,13 @@ export type PersistentStoragePreloadResult<
 // --- Config Types ---
 
 /** Base config shared by all store types. */
-export type PersistentStorageBaseConfig<T> = {
+export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
   /** Unique name for this store's persistent storage key. */
   storeName: string;
   /** Storage backend to use. Defaults to `'opfs'`. */
   backend?: StorageBackend;
-  /** Schema used to validate cached data on load. */
-  schema: PersistentStorageSchema<T>;
+  /** Schema used to validate cached data on load and optionally convert persisted data. */
+  schema: PersistentStorageDataSchema<TFinal, TStorage>;
   /** Version number for cache invalidation. Defaults to 1. */
   version?: number;
   /**
@@ -73,20 +96,23 @@ export type PersistentStorageBaseConfig<T> = {
 };
 
 /** Store-level persistent storage config. Session scoping comes from the parent store. */
-type StorePersistentStorageBaseConfig<T> = Omit<
-  PersistentStorageBaseConfig<T>,
+type StorePersistentStorageBaseConfig<TFinal, TStorage = unknown> = Omit<
+  PersistentStorageBaseConfig<TFinal, TStorage>,
   'getSessionKey'
 >;
 
 /** Persistent storage config for DocumentStore. */
-export type DocumentPersistentStorageConfig<State extends ValidStoreState> =
-  StorePersistentStorageBaseConfig<State>;
+export type DocumentPersistentStorageConfig<
+  State extends ValidStoreState,
+  StorageState = unknown,
+> = StorePersistentStorageBaseConfig<State, StorageState>;
 
 /** Persistent storage config for CollectionStore. */
 export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload = ValidPayload,
-> = StorePersistentStorageBaseConfig<ItemState> & {
+  StorageState = unknown,
+> = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
@@ -106,7 +132,8 @@ export type ListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload = ValidPayload,
   ItemPayload extends ValidPayload = ValidPayload,
-> = StorePersistentStorageBaseConfig<ItemState> & {
+  StorageState = unknown,
+> = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Schema used to validate cached item payloads on load. */
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Schema used to validate cached query payloads on load. */

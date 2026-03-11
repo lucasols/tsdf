@@ -97,6 +97,7 @@ export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
+  StorageState = unknown,
 >(
   serverInitialData: Tables<TRow>,
   {
@@ -178,7 +179,8 @@ export function createListQueryStoreTestEnv<
     persistentStorage?: ListQueryPersistentStorageConfig<
       TRow,
       ListQueryParams,
-      ListQueryItemPayload
+      ListQueryItemPayload,
+      StorageState
     >;
     storageAdapter?: StorageAdapter;
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
@@ -388,7 +390,8 @@ export function createListQueryStoreTestEnv<
     ListQueryParams,
     ListQueryItemPayload,
     TPartialResources,
-    TOffsetPagination
+    TOffsetPagination,
+    StorageState
   >(
     __LEGIT_CAST__<
       ListQueryStoreOptions<
@@ -396,7 +399,8 @@ export function createListQueryStoreTestEnv<
         ListQueryParams,
         ListQueryItemPayload,
         TPartialResources,
-        TOffsetPagination
+        TOffsetPagination,
+        StorageState
       >,
       unknown
     >(storeOptions),

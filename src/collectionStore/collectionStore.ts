@@ -175,6 +175,7 @@ type CollectionItemSnapshotMessage<
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  StorageState = unknown,
 > = {
   debugName?: string;
   /** Stable id shared by the same logical collection store across browser tabs. */
@@ -225,7 +226,11 @@ export type CollectionStoreOptions<
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
-  persistentStorage?: CollectionPersistentStorageConfig<ItemState, ItemPayload>;
+  persistentStorage?: CollectionPersistentStorageConfig<
+    ItemState,
+    ItemPayload,
+    StorageState
+  >;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -260,6 +265,7 @@ const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 export function createCollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  StorageState = unknown,
 >({
   debugName,
   id,
@@ -285,7 +291,7 @@ export function createCollectionStore<
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
-}: CollectionStoreOptions<ItemState, ItemPayload>) {
+}: CollectionStoreOptions<ItemState, ItemPayload, StorageState>) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
 
@@ -322,7 +328,7 @@ export function createCollectionStore<
 
   // Persistent storage setup
   const persistence = persistentStorageConfig
-    ? setupCollectionPersistence<ItemState, ItemPayload>(
+    ? setupCollectionPersistence(
         { ...persistentStorageConfig, getSessionKey },
         { adapter: testOptions?.storageAdapter, getItemKey },
       )

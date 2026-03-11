@@ -39,7 +39,7 @@ export type DocumentStoreTestScenario<D> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: D };
 
-export type DocumentStoreTestEnvOptions<D> = {
+export type DocumentStoreTestEnvOptions<D, StorageState = unknown> = {
   id?: string;
   getSessionKey?: () => string | false;
   sharedServerState?: SharedServerMockState<D>;
@@ -63,12 +63,15 @@ export type DocumentStoreTestEnvOptions<D> = {
   testScenario?: DocumentStoreTestScenario<D>;
   usesRealTimeUpdates?: boolean;
   blockWindowClose?: BlockWindowCloseHandler;
-  persistentStorage?: DocumentPersistentStorageConfig<{ value: D }>;
+  persistentStorage?: DocumentPersistentStorageConfig<
+    { value: D },
+    StorageState
+  >;
   storageAdapter?: StorageAdapter;
   __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
-export function createDocumentStoreTestEnv<D>(
+export function createDocumentStoreTestEnv<D, StorageState = unknown>(
   serverInitialData: D,
   {
     id = getNextStoreId('document'),
@@ -89,7 +92,7 @@ export function createDocumentStoreTestEnv<D>(
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: DocumentStoreTestEnvOptions<D> = {},
+  }: DocumentStoreTestEnvOptions<D, StorageState> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -121,7 +124,7 @@ export function createDocumentStoreTestEnv<D>(
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
-  const documentStore = createDocumentStore<{ value: D }>({
+  const documentStore = createDocumentStore<{ value: D }, StorageState>({
     id,
     getSessionKey,
     errorNormalizer: normalizeError,

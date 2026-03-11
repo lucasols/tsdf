@@ -43,7 +43,10 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: Record<string, D> };
 
-export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
+export type CollectionStoreTestEnvOptions<
+  D extends Record<string, unknown>,
+  StorageState = unknown,
+> = {
   id?: string;
   getSessionKey?: () => string | false;
   sharedServerTableState?: ServerTableSharedState<D>;
@@ -80,13 +83,17 @@ export type CollectionStoreTestEnvOptions<D extends Record<string, unknown>> = {
   blockWindowClose?: BlockWindowCloseHandler;
   persistentStorage?: CollectionPersistentStorageConfig<
     CollectionTestItem<D>,
-    string
+    string,
+    StorageState
   >;
   storageAdapter?: StorageAdapter;
   __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__?: boolean;
 };
 
-export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
+export function createCollectionStoreTestEnv<
+  D extends Record<string, unknown>,
+  StorageState = unknown,
+>(
   serverInitialData: Record<string, D>,
   {
     id = getNextStoreId('collection'),
@@ -112,7 +119,7 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
     persistentStorage,
     storageAdapter,
     __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__,
-  }: CollectionStoreTestEnvOptions<D> = {},
+  }: CollectionStoreTestEnvOptions<D, StorageState> = {},
 ) {
   if (!__DANGEROUS_IGNORE_INITIAL_TIME_CHECK__) {
     if (Math.abs(Date.now() - TEST_INITIAL_TIME) > 1_000 * 60 * 60 * 24) {
@@ -184,7 +191,11 @@ export function createCollectionStoreTestEnv<D extends Record<string, unknown>>(
 
   const testOptions = resolveTestOptions(testScenario, serverInitialData);
 
-  const collectionStore = createCollectionStore<CollectionTestItem<D>, string>({
+  const collectionStore = createCollectionStore<
+    CollectionTestItem<D>,
+    string,
+    StorageState
+  >({
     id,
     getSessionKey,
     errorNormalizer: normalizeError,

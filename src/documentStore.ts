@@ -114,7 +114,10 @@ type DocumentSnapshotMessage<State extends ValidStoreState> = Extract<
   { kind: 'document-snapshot' }
 >;
 
-export type DocumentStoreOptions<State extends ValidStoreState> = {
+export type DocumentStoreOptions<
+  State extends ValidStoreState,
+  StorageState = unknown,
+> = {
   debugName?: string;
   /** Stable id shared by the same logical document store across browser tabs. */
   id: string;
@@ -148,7 +151,7 @@ export type DocumentStoreOptions<State extends ValidStoreState> = {
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
    * Session scoping always reuses this store's `getSessionKey`. */
-  persistentStorage?: DocumentPersistentStorageConfig<State>;
+  persistentStorage?: DocumentPersistentStorageConfig<State, StorageState>;
   /** @internal */
   '~test'?: {
     initialRefetchOnMount?: FetchType;
@@ -175,7 +178,10 @@ export type DocumentStore<State extends ValidStoreState> = ReturnType<
 const DOC_REQUEST_ID = '_doc';
 const DOC_TARGET_KEY = 'document' as const;
 
-export function createDocumentStore<State extends ValidStoreState>({
+export function createDocumentStore<
+  State extends ValidStoreState,
+  StorageState = unknown,
+>({
   debugName,
   id,
   getSessionKey,
@@ -193,7 +199,7 @@ export function createDocumentStore<State extends ValidStoreState>({
   usesRealTimeUpdates = false,
   persistentStorage: persistentStorageConfig,
   '~test': testOptions,
-}: DocumentStoreOptions<State>) {
+}: DocumentStoreOptions<State, StorageState>) {
   let invalidationWasTriggered = false;
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
