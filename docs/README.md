@@ -29,6 +29,11 @@ TSDF provides three store types for different data patterns:
 | [Offset Pagination](./offset-pagination.md)             | List Query             | Offset/limit-based pagination with chunked invalidation              |
 | [Shared Types](./shared-types.md)                       | All                    | Common types (`StoreError`, `FetchType`, `IsOffScreenContext`, etc.) |
 
+Notable additions:
+
+- Hook payload debouncing is documented in [React Hooks](./hooks.md#debouncepayload)
+- The exported `PayloadDebounce` type is documented in [Shared Types](./shared-types.md#payloaddebounce)
+
 ## Quick Start
 
 ```tsx

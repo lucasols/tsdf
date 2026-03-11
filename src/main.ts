@@ -44,6 +44,7 @@ export type {
 
 // Shared types
 export type {
+  PayloadDebounce,
   StoreError,
   TSDFStatus,
   ValidPayload,
