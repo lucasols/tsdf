@@ -8,7 +8,11 @@ import {
   test,
   vi,
 } from 'vitest';
-import { upsertManagedLocalStorageSingleEntry } from '../../src/persistentStorage/localStorageMetadata';
+import {
+  getManagedLocalStorageRootKeyForSingle,
+  readManagedLocalStorageRoot,
+  upsertManagedLocalStorageSingleEntry,
+} from '../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../src/persistentStorage/persistentStorageManager';
 import {
   localPersistentStorage,
@@ -18,11 +22,19 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
+import {
+  createLocalStoragePersistentTestStore,
+  TEST_MAX_AGE_MS,
+} from '../utils/persistentStorageTestStore';
 
 const wrappedSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
 });
+
+async function waitForScheduledCleanup(delayMs = 2100): Promise<void> {
+  await advanceTime(delayMs);
+  await flushAllTimers();
+}
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -69,9 +81,8 @@ describe('expiration scan', () => {
     );
 
     // Advance past idle cleanup timeout to trigger the expiration scan
-    await advanceTime(2100);
     // Allow async scan operations to complete
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     // Expired entry should be removed
     expect(localStorage.getItem(expiredDoc.document.storageKey())).toBeNull();
@@ -100,8 +111,7 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(2100);
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     // Both entries should still exist
     expect(localStorage.getItem(keepADoc.document.storageKey())).not.toBeNull();
@@ -138,8 +148,7 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(2100);
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     // Corrupted entry should be removed
     expect(localStorage.getItem('tsdf.sess1.corrupted')).toBeNull();
@@ -168,8 +177,7 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(2100);
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     const firstScanRemoveCalls = removeItemSpy.mock.calls.length;
 
@@ -193,8 +201,7 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(2100);
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     // The expired entry should still be there (second scan didn't run)
     expect(
@@ -227,8 +234,7 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(2100);
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     expect(
       localStorage.getItem(accountADoc.document.storageKey()),
@@ -251,8 +257,7 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(2100);
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     expect(localStorage.getItem(accountADoc.document.storageKey())).toBeNull();
   });
@@ -292,8 +297,7 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(2100);
-    await flushAllTimers();
+    await waitForScheduledCleanup();
 
     expect(
       localStorage.getItem(protectedDoc.document.storageKey()),
@@ -331,9 +335,188 @@ describe('expiration scan', () => {
       },
     );
 
-    await advanceTime(3000);
-    await flushAllTimers();
+    await waitForScheduledCleanup(3000);
 
     expect(mockAdapter.has(key)).toBe(false);
+  });
+
+  test('automatic cleanup is throttled by cleanupIntervalMs until the interval elapses', async () => {
+    const cleanupIntervalMs = 24 * 60 * 60 * 1000;
+    const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const staleDoc = persistentStore.scope('throttle-stale', 'sess1');
+
+    staleDoc.document.seed(
+      { value: { name: 'old', value: 1 } },
+      { timestamp: expiredTimestamp },
+    );
+
+    createDocumentStoreTestEnv(
+      { name: 'trigger', value: 2 },
+      {
+        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
+        getSessionKey: () => 'sess1',
+        persistentStorage: {
+          storeName: 'throttle-trigger',
+          adapter: localPersistentStorage,
+          schema: wrappedSchema,
+          cleanupIntervalMs,
+        },
+      },
+    );
+
+    await waitForScheduledCleanup();
+
+    expect(localStorage.getItem(staleDoc.document.storageKey())).toBeNull();
+
+    staleDoc.document.seed(
+      { value: { name: 'old-again', value: 3 } },
+      { timestamp: expiredTimestamp },
+    );
+
+    resetExpirationScanTracking();
+    await advanceTime(60 * 60 * 1000);
+
+    createDocumentStoreTestEnv(
+      { name: 'trigger', value: 2 },
+      {
+        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
+        getSessionKey: () => 'sess1',
+        persistentStorage: {
+          storeName: 'throttle-trigger',
+          adapter: localPersistentStorage,
+          schema: wrappedSchema,
+          cleanupIntervalMs,
+        },
+      },
+    );
+
+    await waitForScheduledCleanup();
+
+    expect(localStorage.getItem(staleDoc.document.storageKey())).not.toBeNull();
+
+    resetExpirationScanTracking();
+    await advanceTime(cleanupIntervalMs);
+
+    createDocumentStoreTestEnv(
+      { name: 'trigger', value: 2 },
+      {
+        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
+        getSessionKey: () => 'sess1',
+        persistentStorage: {
+          storeName: 'throttle-trigger',
+          adapter: localPersistentStorage,
+          schema: wrappedSchema,
+          cleanupIntervalMs,
+        },
+      },
+    );
+
+    await waitForScheduledCleanup();
+
+    expect(localStorage.getItem(staleDoc.document.storageKey())).toBeNull();
+  });
+
+  test('cleanupIntervalMs 0 allows cleanup on every eligible init', async () => {
+    const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const staleDoc = persistentStore.scope('eager-stale', 'sess1');
+
+    staleDoc.document.seed(
+      { value: { name: 'first', value: 1 } },
+      { timestamp: expiredTimestamp },
+    );
+    upsertManagedLocalStorageSingleEntry({
+      sessionKey: 'sess1',
+      storeName: 'eager-stale',
+      storageKey: staleDoc.document.storageKey(),
+      cleanupIntervalMs: 0,
+      maxAgeMs: TEST_MAX_AGE_MS,
+      lastAccessAt: expiredTimestamp,
+    });
+
+    createDocumentStoreTestEnv(
+      { name: 'trigger', value: 2 },
+      {
+        getSessionKey: () => 'sess1',
+        persistentStorage: {
+          storeName: 'eager-trigger',
+          adapter: localPersistentStorage,
+          schema: wrappedSchema,
+          cleanupIntervalMs: 0,
+        },
+      },
+    );
+
+    await waitForScheduledCleanup();
+
+    expect(localStorage.getItem(staleDoc.document.storageKey())).toBeNull();
+
+    staleDoc.document.seed(
+      { value: { name: 'second', value: 2 } },
+      { timestamp: expiredTimestamp },
+    );
+    upsertManagedLocalStorageSingleEntry({
+      sessionKey: 'sess1',
+      storeName: 'eager-stale',
+      storageKey: staleDoc.document.storageKey(),
+      cleanupIntervalMs: 0,
+      maxAgeMs: TEST_MAX_AGE_MS,
+      lastAccessAt: expiredTimestamp,
+    });
+
+    resetExpirationScanTracking();
+
+    createDocumentStoreTestEnv(
+      { name: 'trigger', value: 2 },
+      {
+        getSessionKey: () => 'sess1',
+        persistentStorage: {
+          storeName: 'eager-trigger',
+          adapter: localPersistentStorage,
+          schema: wrappedSchema,
+          cleanupIntervalMs: 0,
+        },
+      },
+    );
+
+    await waitForScheduledCleanup();
+
+    expect(localStorage.getItem(staleDoc.document.storageKey())).toBeNull();
+  });
+
+  test('cleanup interval config is stored and updated per root', () => {
+    createDocumentStoreTestEnv(
+      { name: 'config', value: 1 },
+      {
+        getSessionKey: () => 'sess1',
+        persistentStorage: {
+          storeName: 'interval-config',
+          adapter: localPersistentStorage,
+          schema: wrappedSchema,
+          cleanupIntervalMs: 1_000,
+        },
+      },
+    );
+
+    const rootKey = getManagedLocalStorageRootKeyForSingle(
+      'tsdf.sess1.interval-config',
+    );
+    expect(rootKey.startsWith('tsdf.__lsm__.r.')).toBe(true);
+    expect(rootKey.includes('__localStorageMeta__')).toBe(false);
+    expect(readManagedLocalStorageRoot(rootKey)?.cleanupIntervalMs).toBe(1_000);
+
+    createDocumentStoreTestEnv(
+      { name: 'config', value: 1 },
+      {
+        getSessionKey: () => 'sess1',
+        persistentStorage: {
+          storeName: 'interval-config',
+          adapter: localPersistentStorage,
+          schema: wrappedSchema,
+          cleanupIntervalMs: 5_000,
+        },
+      },
+    );
+
+    expect(readManagedLocalStorageRoot(rootKey)?.cleanupIntervalMs).toBe(5_000);
   });
 });

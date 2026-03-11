@@ -298,7 +298,10 @@ export function setupCollectionPersistence<
         shouldIgnorePersistedItem,
         (hydratedItemKey, persisted) => {
           hydratedPersistedKeys.add(hydratedItemKey);
-          persistedSnapshotByKey.set(hydratedItemKey, JSON.stringify(persisted));
+          persistedSnapshotByKey.set(
+            hydratedItemKey,
+            JSON.stringify(persisted),
+          );
         },
       );
     }
@@ -419,8 +422,10 @@ export function setupCollectionPersistence<
     const sessionKey = config.getSessionKey();
     const prefix = getCollectionPrefix();
     if (sessionKey === false || prefix === false) return;
-    const protectedStorageKeys =
-      await readProtectedStorageKeys(storageAdapter, sessionKey);
+    const protectedStorageKeys = await readProtectedStorageKeys(
+      storageAdapter,
+      sessionKey,
+    );
     const protectedItemKeys = new Set(
       [...protectedStorageKeys]
         .filter((key) => key.startsWith(prefix))
@@ -479,7 +484,9 @@ export function setupCollectionPersistence<
     );
 
     if (filteredEntries.length <= maxItems) {
-      knownPersistedKeys = new Set(filteredEntries.map(({ itemKey }) => itemKey));
+      knownPersistedKeys = new Set(
+        filteredEntries.map(({ itemKey }) => itemKey),
+      );
       return;
     }
 

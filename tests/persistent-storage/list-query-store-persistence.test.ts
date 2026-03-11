@@ -269,10 +269,9 @@ describe('localStorage: list query store persistence', () => {
         .getItemState(() => true)
         .map(({ payload }) => payload)
         .sort(),
-    )
-      .toMatchInlineSnapshot(`
-        ['users||1', 'users||2']
-      `);
+    ).toMatchInlineSnapshot(`
+      ['users||1', 'users||2']
+    `);
   });
 
   test('direct item reads lazily hydrate only the requested cached item', () => {
@@ -605,14 +604,13 @@ describe('localStorage: list query store persistence', () => {
         const { time: _time, ...request } = entry;
         return request;
       }),
-    )
-      .toMatchInlineSnapshot(`
-        - _type: 'list'
-          payload:
-            fields: ['id', 'name', 'age', 'email']
-            pos: { limit: 50, offset: 0 }
-          returned_items: 1
-      `);
+    ).toMatchInlineSnapshot(`
+      - _type: 'list'
+        payload:
+          fields: ['id', 'name', 'age', 'email']
+          pos: { limit: 50, offset: 0 }
+        returned_items: 1
+    `);
     expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
       .toMatchInlineSnapshot(`
         ['age', 'email', 'id', 'name']

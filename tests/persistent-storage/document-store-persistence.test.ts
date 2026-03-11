@@ -29,12 +29,14 @@ import type {
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
+import {
+  createLocalStoragePersistentTestStore,
+  TEST_MAX_AGE_MS,
+} from '../utils/persistentStorageTestStore';
 
 const testDataSchema = rc_object({ name: rc_string, value: rc_number });
 const wrappedSchema = rc_object({ value: testDataSchema });
 const persistentStore = createLocalStoragePersistentTestStore();
-const TEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 type TestData = { name: string; value: number };
 const defaultServerData: TestData = { name: 'test', value: 42 };

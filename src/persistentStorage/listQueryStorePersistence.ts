@@ -881,24 +881,24 @@ export function setupListQueryPersistence<
     }> = managedQueryEntriesByKey
       ? [...managedQueryEntriesByKey.values()]
       : filterAndMap(
-            await Promise.all(
-              (await queryNamespace.listKeys()).map(async (queryKey) => ({
-                queryKey,
-                entry: await queryNamespace.readEntry(queryKey),
-              })),
-            ),
-            ({ queryKey, entry }) => {
-              return entry
-                ? {
-                    queryKey,
-                    payload: entry.data.payload,
-                    items: entry.data.items,
-                    hasMore: entry.data.hasMore,
-                    lastAccessAt: entry.timestamp,
-                  }
+          await Promise.all(
+            (await queryNamespace.listKeys()).map(async (queryKey) => ({
+              queryKey,
+              entry: await queryNamespace.readEntry(queryKey),
+            })),
+          ),
+          ({ queryKey, entry }) => {
+            return entry
+              ? {
+                  queryKey,
+                  payload: entry.data.payload,
+                  items: entry.data.items,
+                  hasMore: entry.data.hasMore,
+                  lastAccessAt: entry.timestamp,
+                }
                 : false;
-            },
-          );
+          },
+        );
 
     validEntries.sort((a, b) => {
       const aProtected = protectedQueryKeys.has(a.queryKey);
@@ -973,16 +973,16 @@ export function setupListQueryPersistence<
           .filter(({ queryKey }) => keptQueryKeys.has(queryKey))
           .map(({ items }) => ({ items }))
       : filterAndMap(
-            await Promise.all(
-              [...keptQueryKeys].map(async (queryKey) => ({
-                queryKey,
-                entry: await queryNamespace.readEntry(queryKey),
-              })),
-            ),
-            ({ entry }) => {
-              return entry ? { items: entry.data.items } : false;
-            },
-          );
+          await Promise.all(
+            [...keptQueryKeys].map(async (queryKey) => ({
+              queryKey,
+              entry: await queryNamespace.readEntry(queryKey),
+            })),
+          ),
+          ({ entry }) => {
+            return entry ? { items: entry.data.items } : false;
+          },
+        );
 
     for (const entry of queryEntries) {
       const itemKeys = entry.items;
@@ -1084,7 +1084,8 @@ export function setupListQueryPersistence<
     await Promise.all(
       [...keptQueryKeys].map(async (queryKey) => {
         const queryData =
-          queryEntriesByKey?.get(queryKey) ?? (await queryNamespace.load(queryKey));
+          queryEntriesByKey?.get(queryKey) ??
+          (await queryNamespace.load(queryKey));
         if (!queryData) return;
 
         const filteredItems = queryData.items.filter((itemKey) =>

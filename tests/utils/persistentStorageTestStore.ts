@@ -20,9 +20,7 @@ type ListQuerySeedItemOptions = StorageSeedOptions & {
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
 
-
-
-const TEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export const TEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 type PersistentTestStoreStorage = {
   writeRaw: (key: string, raw: string) => void;
@@ -162,10 +160,7 @@ function createPersistentTestStore(
             { data },
             options,
           );
-          storage.writeValue(
-            documentStorageKey,
-            entry,
-          );
+          storage.writeValue(documentStorageKey, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageSingleEntry({
               sessionKey,
@@ -201,10 +196,7 @@ function createPersistentTestStore(
             { data, payload },
             options,
           );
-          storage.writeValue(
-            key,
-            entry,
-          );
+          storage.writeValue(key, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
               sessionKey,
@@ -251,10 +243,7 @@ function createPersistentTestStore(
             options,
           );
 
-          storage.writeValue(
-            storageKey,
-            entry,
-          );
+          storage.writeValue(storageKey, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
               sessionKey,
@@ -284,10 +273,7 @@ function createPersistentTestStore(
             },
             options,
           );
-          storage.writeValue(
-            key,
-            entry,
-          );
+          storage.writeValue(key, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
               sessionKey,
@@ -340,7 +326,10 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
     writeValue<T>(key: string, value: T) {
       localStorage.setItem(key, JSON.stringify(value));
       if (key.endsWith('.__offline__.protected')) {
-        const sessionKey = key.slice('tsdf.'.length, -'.__offline__.protected'.length);
+        const sessionKey = key.slice(
+          'tsdf.'.length,
+          -'.__offline__.protected'.length,
+        );
         upsertManagedLocalStorageSingleEntry({
           sessionKey,
           storeName: '__offline__.protected',
