@@ -11,11 +11,11 @@ import {
   test,
   vi,
 } from 'vitest';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -119,11 +119,13 @@ describe('opfs: collection store persistence', () => {
 
     await advanceTime(2100);
     await flushAllTimers();
-    mockAdapter.clearReadRequests();
 
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getItemState('1')).toBeUndefined();
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`
+      - 'tsdf.sess1.col-opfs-hook.collection.item."1'
+      - 'tsdf.sess1.col-opfs-hook.collection.item."2'
+    `);
 
     const renders = createLoggerStore();
 
