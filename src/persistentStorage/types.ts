@@ -101,7 +101,12 @@ export type StorageCacheEntry<T> = {
 /** Result entry returned by explicit persistent-storage preload APIs. */
 export type PersistentStoragePreloadResult<
   Payload extends ValidPayload = ValidPayload,
-> = { payload: Payload; preloaded: boolean };
+> = {
+  /** Payload loaded from storage or fresh store initialization result. */
+  payload: Payload;
+  /** `true` when payload came from storage cache, `false` when loaded from source. */
+  preloaded: boolean;
+};
 
 // --- Config Types ---
 
@@ -216,24 +221,35 @@ export type ListQueryPersistentStorageConfig<
 // --- Persisted Data Shapes ---
 
 /** Shape of persisted data for DocumentStore. */
-export type PersistedDocumentData<State> = { data: State };
+export type PersistedDocumentData<State> = {
+  /** Persisted document state snapshot. */
+  data: State;
+};
 
 /** Shape of a single persisted collection item entry. */
 export type PersistedCollectionItemData<State> = {
+  /** Persisted collection item state snapshot. */
   data: State;
+  /** Payload stored alongside the item for validation and retrieval. */
   payload: unknown;
 };
 
 /** Shape of a single persisted list item entry. */
 export type PersistedListQueryItemData<State> = {
+  /** Persisted list item state snapshot. */
   data: State;
+  /** Payload stored to validate and rehydrate item queries. */
   payload: unknown;
+  /** Optional list of selected fields that were loaded from the query result. */
   loadedFields?: string[];
 };
 
 /** Shape of a single persisted list query entry. */
 export type PersistedListQueryData = {
+  /** Persisted query payload. */
   payload: unknown;
+  /** Ordered list of item IDs included in the cached query page. */
   items: string[];
+  /** Whether the query has additional pages available. */
   hasMore: boolean;
 };

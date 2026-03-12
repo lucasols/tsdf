@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   createDocumentStore,
   type DocumentOfflineOperationDefinition,
-  type DocumentStore,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   localPersistentStorage,
@@ -28,31 +27,6 @@ function delay(ms: number) {
   });
 }
 
-type DocState = { value: number; label: string };
-
-type SetValueDocumentOperations = {
-  setValue: DocumentOfflineOperationDefinition<
-    DocState,
-    { value: number },
-    unknown,
-    { value: number }
-  >;
-};
-
-type TypedDocumentStore = DocumentStore<DocState, SetValueDocumentOperations>;
-
-type DocumentOfflineOption = NonNullable<
-  Parameters<TypedDocumentStore['performMutation']>[0]['offline']
->;
-
-const validDocumentOfflineOption_: DocumentOfflineOption = {
-  operation: 'setValue',
-  input: { value: 2 },
-};
-const invalidDocumentOfflineInput_: DocumentOfflineOption | undefined =
-  // @ts-expect-error invalid document offline input must be rejected
-  { operation: 'setValue', input: { wrong: 2 } };
-
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
@@ -64,6 +38,17 @@ afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
 });
+
+type DocState = { value: number; label: string };
+
+type SetValueDocumentOperations = {
+  setValue: DocumentOfflineOperationDefinition<
+    DocState,
+    { value: number },
+    unknown,
+    { value: number }
+  >;
+};
 
 test('direct document store offline public api works and stays strongly typed', async () => {
   const network = createOfflineNetworkMock();
@@ -94,7 +79,7 @@ test('direct document store offline public api works and stays strongly typed', 
         operations: {
           setValue: {
             inputSchema: docInputSchema,
-            execute: ({ input }) => {
+            execute: ({ input, mutationPayload }) => {
               documentState = {
                 value: input.value,
                 label: `doc:${input.value}`,

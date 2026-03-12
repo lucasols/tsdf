@@ -1,6 +1,6 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
-import type { PersistentStorageSchema } from '../types';
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
+import type { PersistentStorageSchema } from '../types';
 
 /** Store kinds supported by offline replay and sync state tracking. */
 export type OfflineStoreType = 'document' | 'collection' | 'listQuery';
@@ -13,8 +13,11 @@ export type OfflineEntityKind = 'document' | 'item' | 'query';
 
 /** Error shape emitted when runtime is operating in offline mode. */
 export type OfflineConnectivityError = {
+  /** Numeric error code used by offline failure handlers. */
   code: 0;
+  /** Stable machine-readable offline error identifier. */
   id: 'offline';
+  /** Default offline error message. */
   message: 'Offline';
 };
 
@@ -78,14 +81,23 @@ export type OfflineConnectivityState = 'online' | 'offline';
 
 /** Per-session offline status snapshot shared across tabs. */
 export type GlobalOfflineStatus = {
+  /** Session key for this status bucket. */
   sessionKey: string;
+  /** Network mode and current active state. */
   network: { enabled: boolean; active: boolean };
+  /** Outage mode and active recovery state. */
   outage: { enabled: boolean; active: boolean };
+  /** Effective mode after combining network and outage data. */
   effectiveMode: OfflineConnectivityState;
+  /** Whether offline behavior is currently active. */
   effectiveOffline: boolean;
+  /** Whether this tab currently acts as leader for this session. */
   isLeader: boolean;
+  /** Timestamp when this status entry was last updated. */
   updatedAt: number;
+  /** Timestamp of the last failure, if any. */
   lastFailureAt: number | null;
+  /** Timestamp of last recovery probe execution, if any. */
   lastRecoveryCheckAt: number | null;
 };
 
@@ -94,60 +106,103 @@ export type OfflineSyncState = 'pending' | 'syncing' | 'needs-confirmation';
 
 /** Aggregated offline status for a tracked document/item/query entity. */
 export type GlobalOfflineEntity = {
+  /** Internal entity identifier tracked by offline machinery. */
   id: string;
+  /** Session key for this offline entity. */
   sessionKey: string;
+  /** Store name where the entity is defined. */
   storeName: string;
+  /** Store type this entity belongs to. */
   storeType: OfflineStoreType;
+  /** Entity key used for deduping and conflict scoping. */
   entityKey: string;
+  /** Entity kind used in queue partitioning. */
   entityKind: OfflineEntityKind;
+  /** Number of pending mutations waiting for sync. */
   pendingMutations: number;
+  /** Current sync state for the entity. */
   syncState: OfflineSyncState | 'conflict';
+  /** Whether the entity is currently in conflict state. */
   hasConflict: boolean;
+  /** Creation timestamp for lifecycle bookkeeping. */
   createdAt: number;
+  /** Last mutation/update timestamp. */
   updatedAt: number;
+  /** Optional temporary ID for optimistic create flows. */
   tempId?: string;
 };
 
 /** Lightweight entity reference used to merge and protect related offline queue entries. */
 export type OfflineEntityRef = {
+  /** Entity key referenced by the relation. */
   entityKey: string;
+  /** Entity kind of the relation reference. */
   entityKind: OfflineEntityKind;
 };
 
 /** Persisted offline conflict payload. */
 export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
+  /** Conflict record identifier. */
   id: string;
+  /** Queue entry identifier that produced this conflict. */
   entryId: string;
+  /** Session key that owns this conflict record. */
   sessionKey: string;
+  /** Store name associated with the conflict. */
   storeName: string;
+  /** Store type associated with the conflict. */
   storeType: OfflineStoreType;
+  /** Operation name linked to the conflict. */
   operation: string;
+  /** Input value that triggered the conflict. */
   input: TInput;
+  /** Conflict payload returned by the resolver. */
   conflict: TConflict;
+  /** Optional mutation payload snapshot if tracked by adapter. */
   mutationPayload?: unknown;
+  /** Entity references involved in the conflict. */
   entityRefs: OfflineEntityRef[];
+  /** Conflict creation timestamp. */
   createdAt: number;
+  /** Conflict update timestamp. */
   updatedAt: number;
+  /** Optional temporary ID associated with optimistic entity flow. */
   tempId?: string;
 };
 
 /** Persisted offline mutation queue entry. */
 export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
+  /** Queue entry identifier. */
   id: string;
+  /** Session key for queue scoping. */
   sessionKey: string;
+  /** Store name where operation is defined. */
   storeName: string;
+  /** Store type for this queued operation. */
   storeType: OfflineStoreType;
+  /** Operation name registered in offline configuration. */
   operation: string;
+  /** Operation input payload persisted with the entry. */
   input: TInput;
+  /** Optional adapter-specific payload for mutation replay. */
   mutationPayload?: unknown;
+  /** Entity references tied to this mutation. */
   entityRefs: OfflineEntityRef[];
+  /** Number of execution attempts so far. */
   attempts: number;
+  /** Queue entry creation timestamp. */
   createdAt: number;
+  /** Last entry update timestamp. */
   updatedAt: number;
+  /** Timestamp of last execution attempt, if any. */
   lastAttemptAt: number | null;
+  /** Synchronization state for this entry. */
   syncState: OfflineSyncState;
+  /** Optional temporary ID for optimistic create operations. */
   tempId?: string;
+  /** Last recorded sync error if replay failed. */
   lastError?: { message: string };
+  /** Pending conflict payload when confirmation or resolution is required. */
   pendingConflict?: TConflict;
 };
 
@@ -177,7 +232,12 @@ export type OfflineMutationDescriptor<
   >,
   TName extends keyof TOperations = keyof TOperations,
 > = TName extends keyof TOperations
-  ? { operation: TName; input: OperationInput<TOperations, TName> }
+  ? {
+      /** Operation key from the offline operations registry. */
+      operation: TName;
+      /** Input resolved from the registered operation schema. */
+      input: OperationInput<TOperations, TName>;
+    }
   : never;
 
 /** Result returned from conflict handlers to requeue a replacement operation input. */
@@ -194,21 +254,32 @@ export type OfflineConfirmRemoteOutcomeResult =
 
 /** Context passed into offline mutation accumulation hooks. */
 export type OfflineAccumulationMergeContext<TInput> = {
+  /** Session key used to isolate queued mutations. */
   sessionKey: string;
+  /** Existing input already present in queue. */
   existingInput: TInput;
+  /** Incoming input for merge attempt. */
   incomingInput: TInput;
 };
 
 /** Optional in-memory accumulation strategy for queued offline mutations. */
 export type OfflineAccumulationConfig<TInput> = {
+  /** Merge function for combining existing and incoming mutation inputs. */
   mergeInput: (
     ctx: OfflineAccumulationMergeContext<TInput>,
   ) => Promise<TInput> | TInput;
 };
 
+/** Shared context passed to offline conflict detection and resolution handlers. */
 type OperationBaseContext<TInput, TMutationPayload> = {
+  /** Session identifier used for queue scoping and offline coordination. */
   sessionKey: string;
+  /** Input payload for the queued mutation currently being processed. */
   input: TInput;
+  /**
+   * Optional payload provided by the adapter during mutation execution, if
+   * available.
+   */
   mutationPayload?: TMutationPayload;
 };
 
