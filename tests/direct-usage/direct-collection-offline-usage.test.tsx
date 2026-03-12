@@ -1,59 +1,40 @@
 import { renderHook } from '@testing-library/react';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { act } from 'react';
 import { rc_boolean, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { z } from 'zod';
 import {
   createCollectionStore,
+  type DefineCollectionOfflineOperations,
+  type DefineOfflineOperation,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   localPersistentStorage,
-  type CollectionOfflineOperationDefinition,
-  type CollectionStore,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const todoSchema = rc_object({ title: rc_string, completed: rc_boolean });
+const todoPayloadSchema = rc_string;
 const todoInputSchema = rc_object({ id: rc_string, title: rc_string });
-const todoPayloadSchema = rc_object({ id: rc_string });
+const createTodoInputSchema = rc_object({ title: rc_string });
+const todoConflictSchema = rc_object({ reason: rc_string });
+const conflictResolutionSchema = z.object({ title: z.string() });
 const FETCH_DELAY_MS = 30;
-type TodoPayload = { id: string };
+
+type TodoPayload = string;
 type TodoItem = { title: string; completed: boolean };
+type RenameTodoInput = { id: string; title: string };
+type CreateTodoInput = { title: string };
+type TodoConflict = { reason: string };
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
 }
-
-type RenameTodoOperations = {
-  renameTodo: CollectionOfflineOperationDefinition<
-    TodoItem,
-    TodoPayload,
-    { id: string; title: string },
-    unknown,
-    { id: string; title: string }
-  >;
-};
-
-type TypedCollectionStore = CollectionStore<
-  TodoItem,
-  TodoPayload,
-  RenameTodoOperations
->;
-
-type CollectionOfflineOption = NonNullable<
-  Parameters<TypedCollectionStore['performMutation']>[1]['offline']
->;
-
-const validCollectionOfflineOption_: CollectionOfflineOption = {
-  operation: 'renameTodo',
-  input: { id: '1', title: 'Offline todo' },
-};
-const invalidCollectionOfflineInput_: CollectionOfflineOption | undefined =
-  // @ts-expect-error invalid collection offline input must be rejected
-  { operation: 'renameTodo', input: { title: 'x' } };
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -67,31 +48,48 @@ afterEach(() => {
   localStorage.clear();
 });
 
-test('direct collection store offline public api works and stays strongly typed', async () => {
+type DirectCollectionOfflineOperations = DefineCollectionOfflineOperations<
+  TodoItem,
+  TodoPayload,
+  {
+    renameTodo: DefineOfflineOperation<RenameTodoInput>;
+    skipSyncTodo: DefineOfflineOperation<RenameTodoInput>;
+    conflictTodo: DefineOfflineOperation<RenameTodoInput, TodoConflict>;
+    createTodo: DefineOfflineOperation<
+      CreateTodoInput,
+      unknown,
+      { id: string; title: string; completed: boolean }
+    >;
+  }
+>;
+
+test('direct collection store offline public api supports the main operation hooks in one flow', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-collection-offline-session';
   network.install();
 
+  let nextTodoId = 3;
   const todoState = new Map<string, TodoItem>([
     ['1', { title: 'Todo 1', completed: false }],
+    ['2', { title: 'Todo 2', completed: false }],
   ]);
 
   const collectionStore = createCollectionStore<
     TodoItem,
     TodoPayload,
-    RenameTodoOperations
+    DirectCollectionOfflineOperations
   >({
     id: 'direct-collection-offline',
     getSessionKey: () => sessionKey,
     fetchFn: async (payload: TodoPayload) => {
       await delay(FETCH_DELAY_MS);
-      const item = todoState.get(payload.id);
+      const item = todoState.get(payload);
       if (!item) {
-        throw new Error(`Missing todo ${payload.id}`);
+        throw new Error(`Missing todo ${payload}`);
       }
       return { ...item };
     },
-    getCollectionItemKey: (payload: TodoPayload) => payload.id,
+    getCollectionItemKey: (payload: TodoPayload) => payload,
     errorNormalizer: normalizeError,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
@@ -106,16 +104,89 @@ test('direct collection store offline public api works and stays strongly typed'
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
-            getEntityRefs: ({ input }) => [
-              { entityKey: JSON.stringify(input.id), entityKind: 'item' },
-            ],
+            getEntityRefs: ({ input }) => [input.id],
+            accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute: ({ input }) => {
               todoState.set(input.id, { title: input.title, completed: false });
-              collectionStore.updateItemState({ id: input.id }, (item) => ({
+              collectionStore.updateItemState(input.id, (item) => ({
                 ...item,
                 title: input.title,
               }));
-              return input;
+            },
+          },
+          skipSyncTodo: {
+            inputSchema: todoInputSchema,
+            getEntityRefs: ({ input }) => [input.id],
+            execute: ({ input }) => {
+              throw new Error(`dispatch failed after send ${input.title}`);
+            },
+            shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
+              expect(input).toMatchObject({ id: '1', title: 'Todo 1 skip' });
+              expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+              return true;
+            },
+          },
+          conflictTodo: {
+            inputSchema: todoInputSchema,
+            getEntityRefs: ({ input }) => [input.id],
+            conflictHandling: {
+              schema: todoConflictSchema,
+              detectConflict: ({ input, enqueuedAt, updatedAt }) => {
+                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+                if (input.title !== 'Todo 1 conflict') return false;
+                return { reason: 'server-changed' };
+              },
+              resolveConflict: ({
+                input,
+                conflict,
+                resolution,
+                enqueuedAt,
+                updatedAt,
+              }) => {
+                expect(input.id).toBe('1');
+                expect(conflict).toMatchObject({ reason: 'server-changed' });
+                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+                const parsedResolution =
+                  conflictResolutionSchema.parse(resolution);
+
+                return {
+                  requeue: {
+                    input: { id: input.id, title: parsedResolution.title },
+                  },
+                };
+              },
+            },
+            execute: ({ input }) => {
+              todoState.set(input.id, { title: input.title, completed: false });
+              collectionStore.updateItemState(input.id, (item) => ({
+                ...item,
+                title: input.title,
+              }));
+            },
+          },
+          createTodo: {
+            inputSchema: createTodoInputSchema,
+            getEntityRefs: () => [],
+            tempEntity: {
+              createTempId: (input) => `temp:${input.title}`,
+              buildPendingEntity: (input) => ({
+                title: input.title,
+                completed: false,
+              }),
+              reconcileServerEntity: (result) => ({
+                finalPayload: result.id,
+                finalData: { title: result.title, completed: result.completed },
+              }),
+            },
+            execute: ({ input }) => {
+              const id = String(nextTodoId);
+              nextTodoId += 1;
+              const result = { id, title: input.title, completed: false };
+              todoState.set(result.id, {
+                title: result.title,
+                completed: result.completed,
+              });
+              return result;
             },
           },
         },
@@ -123,13 +194,23 @@ test('direct collection store offline public api works and stays strongly typed'
     },
   });
 
-  const payload = { id: '1' };
-  const collectionHook = renderHook(() => collectionStore.useItem(payload));
+  const todoOnePayload = '1';
+  const todoTwoPayload = '2';
+  const todoOneHook = renderHook(() => collectionStore.useItem(todoOnePayload));
+  const todoTwoHook = renderHook(() => collectionStore.useItem(todoTwoPayload));
   await flushAllTimers();
 
-  expect(collectionHook.result.current.data).toMatchInlineSnapshot(`
-    completed: '❌'
-    title: 'Todo 1'
+  expect(pick(todoOneHook.result.current, ['data', 'payload', 'status']))
+    .toMatchInlineSnapshot(`
+    data: { completed: '❌', title: 'Todo 1' }
+    payload: '1'
+    status: 'success'
+  `);
+  expect(pick(todoTwoHook.result.current, ['data', 'payload', 'status']))
+    .toMatchInlineSnapshot(`
+    data: { completed: '❌', title: 'Todo 2' }
+    payload: '2'
+    status: 'success'
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
@@ -142,48 +223,137 @@ test('direct collection store offline public api works and stays strongly typed'
   await Promise.resolve();
 
   await act(async () => {
-    await collectionStore.performMutation(payload, {
-      optimisticUpdate: (itemPayload) => {
-        collectionStore.updateItemState(itemPayload, (item) => ({
+    await collectionStore.performMutation(todoOnePayload, {
+      optimisticUpdate: (payload) => {
+        collectionStore.updateItemState(payload, (item) => ({
           ...item,
-          title: 'Todo 1 offline',
+          title: 'Todo 1 first',
         }));
       },
       mutation: () =>
-        Promise.resolve({ title: 'Todo 1 offline', completed: false }),
+        Promise.resolve({ title: 'Todo 1 first', completed: false }),
       offline: {
         operation: 'renameTodo',
-        input: { id: '1', title: 'Todo 1 offline' },
+        input: { id: '1', title: 'Todo 1 first' },
       },
     });
   });
+
   await act(async () => {
-    await Promise.resolve();
+    await collectionStore.performMutation(todoOnePayload, {
+      optimisticUpdate: (payload) => {
+        collectionStore.updateItemState(payload, (item) => ({
+          ...item,
+          title: 'Todo 1 second',
+        }));
+      },
+      mutation: () =>
+        Promise.resolve({ title: 'Todo 1 second', completed: false }),
+      offline: {
+        operation: 'renameTodo',
+        input: { id: '1', title: 'Todo 1 second' },
+      },
+    });
   });
+
+  await act(async () => {
+    await collectionStore.performMutation(todoTwoPayload, {
+      optimisticUpdate: (payload) => {
+        collectionStore.updateItemState(payload, (item) => ({
+          ...item,
+          title: 'Todo 2 offline',
+        }));
+      },
+      mutation: () =>
+        Promise.resolve({ title: 'Todo 2 offline', completed: false }),
+      offline: {
+        operation: 'renameTodo',
+        input: { id: '2', title: 'Todo 2 offline' },
+      },
+    });
+  });
+
+  await act(async () => {
+    await collectionStore.performMutation(todoOnePayload, {
+      optimisticUpdate: (payload) => {
+        collectionStore.updateItemState(payload, (item) => ({
+          ...item,
+          title: 'Todo 1 skip',
+        }));
+      },
+      mutation: () =>
+        Promise.resolve({ title: 'Todo 1 skip', completed: false }),
+      offline: {
+        operation: 'skipSyncTodo',
+        input: { id: '1', title: 'Todo 1 skip' },
+      },
+    });
+  });
+
+  await act(async () => {
+    await collectionStore.performMutation(todoOnePayload, {
+      optimisticUpdate: (payload) => {
+        collectionStore.updateItemState(payload, (item) => ({
+          ...item,
+          title: 'Todo 1 conflict',
+        }));
+      },
+      mutation: () =>
+        Promise.resolve({ title: 'Todo 1 conflict', completed: false }),
+      offline: {
+        operation: 'conflictTodo',
+        input: { id: '1', title: 'Todo 1 conflict' },
+      },
+    });
+  });
+
+  await act(async () => {
+    await collectionStore.performMutation('__create__', {
+      mutation: () =>
+        Promise.resolve({ title: 'Todo 3 offline', completed: false }),
+      offline: { operation: 'createTodo', input: { title: 'Todo 3 offline' } },
+    });
+  });
+  await Promise.resolve();
 
   expect(collectionStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   await collectionStore.resolveOfflineConflict('missing', {
     resolution: 'noop',
   });
   expect(
-    pick(collectionHook.result.current, [
+    pick(todoOneHook.result.current, [
       'data',
-      'itemStateKey',
-      'payload',
       'status',
+      'isPendingOfflineSync',
     ]),
   ).toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 1 offline' }
-    itemStateKey: '"1'
-    payload: { id: '1' }
+    data: { completed: '❌', title: 'Todo 1 conflict' }
+    isPendingOfflineSync: '✅'
     status: 'success'
   `);
   expect(collectionStore.getOfflineEntities()).toMatchObject([
-    { entityKey: '"1"', pendingMutations: 1, storeType: 'collection' },
+    {
+      entityKey: getCompositeKey('1'),
+      pendingMutations: 3,
+      storeType: 'collection',
+    },
+    {
+      entityKey: getCompositeKey('2'),
+      pendingMutations: 1,
+      storeType: 'collection',
+    },
+    {
+      entityKey: 'temp:Todo 3 offline',
+      pendingMutations: 1,
+      storeType: 'collection',
+      tempId: 'temp:Todo 3 offline',
+    },
   ]);
-  expect(getGlobalOfflineEntities(sessionKey)).toMatchObject([
-    { storeName: 'direct-collection-offline' },
-  ]);
+  expect(getGlobalOfflineEntities(sessionKey)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ storeName: 'direct-collection-offline' }),
+    ]),
+  );
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'offline',
     effectiveOffline: true,
@@ -192,167 +362,92 @@ test('direct collection store offline public api works and stays strongly typed'
 
   await act(async () => {
     network.goOnline();
-    await vi.advanceTimersByTimeAsync(250);
-    await vi.runAllTimersAsync();
+    await advanceTime(250);
+    await flushAllTimers();
   });
 
+  const [conflict] = collectionStore.getOfflineConflicts();
+  expect(conflict).toMatchObject({
+    conflict: { reason: 'server-changed' },
+    input: { id: '1', title: 'Todo 1 conflict' },
+    operation: 'conflictTodo',
+    sessionKey,
+    storeName: 'direct-collection-offline',
+    storeType: 'collection',
+  });
+  expect(collectionStore.getOfflineEntities()).toMatchObject([
+    {
+      entityKey: getCompositeKey('1'),
+      hasConflict: true,
+      pendingMutations: 0,
+      storeType: 'collection',
+      syncState: 'conflict',
+    },
+  ]);
+  expect(todoTwoHook.result.current.data).toMatchInlineSnapshot(`
+    completed: '❌'
+    title: 'Todo 2 offline'
+  `);
+
+  const todoThreeHook = renderHook(() => collectionStore.useItem('3'));
+  await flushAllTimers();
+  expect(pick(todoThreeHook.result.current, ['data', 'payload', 'status']))
+    .toMatchInlineSnapshot(`
+    data: { completed: '❌', title: 'Todo 3 offline' }
+    payload: '3'
+    status: 'success'
+  `);
+
+  await act(async () => {
+    await collectionStore.resolveOfflineConflict(conflict!.id, {
+      title: 'Todo 1 resolved',
+    });
+    await flushAllTimers();
+  });
+
+  expect(collectionStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   expect(collectionStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
-  expect(collectionHook.result.current.isPendingOfflineSync).toBe(false);
+  expect(
+    pick(todoOneHook.result.current, [
+      'data',
+      'status',
+      'isPendingOfflineSync',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data: { completed: '❌', title: 'Todo 1 resolved' }
+    isPendingOfflineSync: '❌'
+    status: 'success'
+  `);
+  expect(
+    pick(todoTwoHook.result.current, [
+      'data',
+      'status',
+      'isPendingOfflineSync',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data: { completed: '❌', title: 'Todo 2 offline' }
+    isPendingOfflineSync: '❌'
+    status: 'success'
+  `);
+  expect(
+    pick(todoThreeHook.result.current, [
+      'data',
+      'status',
+      'isPendingOfflineSync',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data: { completed: '❌', title: 'Todo 3 offline' }
+    isPendingOfflineSync: '❌'
+    status: 'success'
+  `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
     effectiveOffline: false,
     network: { active: false, enabled: true },
   });
-});
 
-test('collection offline accumulation merges same-item mutations and keeps different items separate', async () => {
-  const network = createOfflineNetworkMock();
-  const sessionKey = 'direct-collection-offline-accumulation-session';
-  network.install();
-
-  const todoState = new Map<string, TodoItem>([
-    ['1', { title: 'Todo 1', completed: false }],
-    ['2', { title: 'Todo 2', completed: false }],
-  ]);
-  const execute = vi.fn(
-    ({ input }: { input: { id: string; title: string } }) => {
-      todoState.set(input.id, { title: input.title, completed: false });
-      collectionStore.updateItemState({ id: input.id }, (item) => ({
-        ...item,
-        title: input.title,
-      }));
-      return input;
-    },
-  );
-
-  const collectionStore = createCollectionStore<
-    TodoItem,
-    TodoPayload,
-    RenameTodoOperations
-  >({
-    id: 'direct-collection-offline-accumulation',
-    getSessionKey: () => sessionKey,
-    fetchFn: async (payload: TodoPayload) => {
-      await delay(FETCH_DELAY_MS);
-      const item = todoState.get(payload.id);
-      if (!item) {
-        throw new Error(`Missing todo ${payload.id}`);
-      }
-      return { ...item };
-    },
-    getCollectionItemKey: (payload: TodoPayload) => payload.id,
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 5,
-    baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
-    persistentStorage: {
-      storeName: 'direct-collection-offline-accumulation',
-      adapter: localPersistentStorage,
-      schema: todoSchema,
-      payloadSchema: todoPayloadSchema,
-      offlineMode: {
-        network: network.config,
-        operations: {
-          renameTodo: {
-            inputSchema: todoInputSchema,
-            getEntityRefs: ({ input }) => [
-              { entityKey: JSON.stringify(input.id), entityKind: 'item' },
-            ],
-            accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
-            execute,
-          },
-        },
-      },
-    },
-  });
-
-  await flushAllTimers();
-
-  act(() => {
-    network.goOffline();
-  });
-  await Promise.resolve();
-
-  await act(async () => {
-    await collectionStore.performMutation(
-      { id: '1' },
-      {
-        optimisticUpdate: (itemPayload) => {
-          collectionStore.updateItemState(itemPayload, (item) => ({
-            ...item,
-            title: 'Todo 1 first',
-          }));
-        },
-        mutation: () =>
-          Promise.resolve({ title: 'Todo 1 first', completed: false }),
-        offline: {
-          operation: 'renameTodo',
-          input: { id: '1', title: 'Todo 1 first' },
-        },
-      },
-    );
-  });
-
-  await act(async () => {
-    await collectionStore.performMutation(
-      { id: '1' },
-      {
-        optimisticUpdate: (itemPayload) => {
-          collectionStore.updateItemState(itemPayload, (item) => ({
-            ...item,
-            title: 'Todo 1 second',
-          }));
-        },
-        mutation: () =>
-          Promise.resolve({ title: 'Todo 1 second', completed: false }),
-        offline: {
-          operation: 'renameTodo',
-          input: { id: '1', title: 'Todo 1 second' },
-        },
-      },
-    );
-  });
-
-  await act(async () => {
-    await collectionStore.performMutation(
-      { id: '2' },
-      {
-        optimisticUpdate: (itemPayload) => {
-          collectionStore.updateItemState(itemPayload, (item) => ({
-            ...item,
-            title: 'Todo 2 offline',
-          }));
-        },
-        mutation: () =>
-          Promise.resolve({ title: 'Todo 2 offline', completed: false }),
-        offline: {
-          operation: 'renameTodo',
-          input: { id: '2', title: 'Todo 2 offline' },
-        },
-      },
-    );
-  });
-  await Promise.resolve();
-
-  expect(collectionStore.getOfflineEntities()).toMatchObject([
-    { entityKey: '"1"', pendingMutations: 1, storeType: 'collection' },
-    { entityKey: '"2"', pendingMutations: 1, storeType: 'collection' },
-  ]);
-
-  await act(async () => {
-    network.goOnline();
-    await vi.advanceTimersByTimeAsync(250);
-    await vi.runAllTimersAsync();
-  });
-
-  expect(execute).toHaveBeenCalledTimes(2);
-  expect(
-    execute.mock.calls
-      .map((call) => call[0].input)
-      .toSorted((left, right) => left.id.localeCompare(right.id)),
-  ).toMatchInlineSnapshot(`
-    - { id: '1', title: 'Todo 1 second' }
-    - { id: '2', title: 'Todo 2 offline' }
-  `);
+  todoOneHook.unmount();
+  todoTwoHook.unmount();
+  todoThreeHook.unmount();
 });

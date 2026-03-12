@@ -23,7 +23,8 @@ type OfflineStoreAdapter = {
   getEntityRefs?: (args: {
     operationName: string;
     input: unknown;
-  }) => OfflineEntityRef[];
+  }) => unknown[];
+  normalizeEntityRefs?: (entityRefs: unknown[]) => OfflineEntityRef[];
   getProtectedCacheKeys: (entityRefs: OfflineEntityRef[]) => string[];
   applyPendingEntity?: (args: {
     operationName: string;
@@ -583,7 +584,7 @@ export function createOfflineStoreController<
       });
     }
 
-    const entityRefs =
+    const rawEntityRefs =
       tempId !== undefined
         ? [{ entityKey: tempId, entityKind: 'item' as const }]
         : typeof operation.getEntityRefs === 'function'
@@ -592,6 +593,9 @@ export function createOfflineStoreController<
               operationName,
               input: validatedInput,
             }) ?? []);
+    const entityRefs = storeAdapter.normalizeEntityRefs
+      ? storeAdapter.normalizeEntityRefs(rawEntityRefs)
+      : __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
     const now = Date.now();
 
     if (operation.accumulation && !tempId) {
@@ -860,12 +864,14 @@ export function createOfflineStoreController<
 
     await removeConflict(conflictId, current);
 
-    if (result?.requeue) {
+    const requeue: { input: unknown } | undefined = result.requeue;
+
+    if (requeue) {
       await queueMutationWithSession(current, {
         operationName: __LEGIT_CAST__<keyof TOperations, string>(
           conflict.operation,
         ),
-        input: result.requeue.input,
+        input: requeue.input,
       });
     }
   }

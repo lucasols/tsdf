@@ -1,31 +1,39 @@
 import { renderHook } from '@testing-library/react';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { act } from 'react';
 import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { z } from 'zod';
 import {
   createListQueryStore,
+  type DefineListQueryOfflineOperations,
+  type DefineOfflineOperation,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   localPersistentStorage,
-  type ListQueryOfflineOperationDefinition,
 } from '../../src/main';
-import type { OfflineMutationDescriptor } from '../../src/persistentStorage/offline/types';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const userSchema = rc_object({ id: rc_number, name: rc_string });
 const userInputSchema = rc_object({ id: rc_number, name: rc_string });
+const createUserInputSchema = rc_object({ name: rc_string });
+const userConflictSchema = rc_object({ reason: rc_string });
+const usersQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
+const userPayloadSchema = z.union([
+  z.string(),
+  z.object({ tableId: z.literal('users'), id: z.number() }),
+]);
+const conflictResolutionSchema = z.object({ name: z.string() });
+const FETCH_DELAY_MS = 30;
+
 type UsersQueryPayload = { tableId: 'users' };
 
-const usersQueryPayloadSchema = rc_object({ tableId: rc_literals('users') });
-type UserPayload = { tableId: 'users'; id: number };
-
-const userPayloadSchema = rc_object({
-  tableId: rc_literals('users'),
-  id: rc_number,
-});
-const FETCH_DELAY_MS = 30;
+type User = { id: number; name: string };
+type RenameUserInput = { id: number; name: string };
+type CreateUserInput = { name: string };
+type UserConflict = { reason: string };
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => {
@@ -33,84 +41,14 @@ function delay(ms: number) {
   });
 }
 
-type User = { id: number; name: string };
+type UserPayload = { tableId: 'users'; id: number } | string;
 
-type RenameUserOperations = {
-  renameUser: ListQueryOfflineOperationDefinition<
-    User,
-    UsersQueryPayload,
-    UserPayload,
-    { id: number; name: string },
-    unknown,
-    { id: number; name: string }
-  >;
-};
+function getUserItemPayload(id: number): Extract<UserPayload, { id: number }> {
+  return { tableId: 'users', id };
+}
 
-const typedListQueryOperations_: RenameUserOperations = {
-  renameUser: {
-    inputSchema: userInputSchema,
-    getEntityRefs: ({ input }) => [
-      { entityKey: JSON.stringify(['users', input.id]), entityKind: 'item' },
-    ],
-    execute: ({ input }) => input,
-  },
-};
-
-const typedListQueryStore_ = createListQueryStore<
-  User,
-  UsersQueryPayload,
-  UserPayload,
-  false,
-  false,
-  RenameUserOperations
->({
-  id: 'typed-direct-offline-list-query',
-  getSessionKey: () => 'typed-direct-offline-list-query-session',
-  fetchListFn: (_payload_: UsersQueryPayload) =>
-    Promise.resolve({ items: [], hasMore: false }),
-  fetchItemFn: (payload: UserPayload) =>
-    Promise.resolve({ id: payload.id, name: 'typed' }),
-  getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
-  getItemKey: (payload: UserPayload) => ['users', payload.id],
-  errorNormalizer: normalizeError,
-  defaultQuerySize: 2,
-  lowPriorityThrottleMs: 1,
-  baseCoalescingWindowMs: 1,
-  blockWindowClose: null,
-  persistentStorage: {
-    storeName: 'typed-direct-offline-list-query',
-    adapter: localPersistentStorage,
-    schema: userSchema,
-    itemPayloadSchema: userPayloadSchema,
-    queryPayloadSchema: usersQueryPayloadSchema,
-    offlineMode: { operations: typedListQueryOperations_ },
-  },
-});
-
-const validListQueryOfflineOption_: OfflineMutationDescriptor<
-  typeof typedListQueryOperations_
-> = { operation: 'renameUser', input: { id: 1, name: 'Offline Ada' } };
-
-function assertTypedListQueryOfflineUsage_() {
-  void typedListQueryStore_.performMutation(
-    { tableId: 'users', id: 1 },
-    {
-      mutation: () => Promise.resolve({ id: 1, name: 'Ada' }),
-      offline: { operation: 'renameUser', input: { id: 1, name: 'Ada' } },
-    },
-  );
-
-  void typedListQueryStore_.performMutation(
-    { tableId: 'users', id: 1 },
-    {
-      mutation: () => Promise.resolve({ id: 1, name: 'Ada' }),
-      offline: {
-        operation: 'renameUser',
-        // @ts-expect-error invalid list-query offline input must be rejected
-        input: { id: 'x', name: 'Ada' },
-      },
-    },
-  );
+function getUserEntityKey(id: number) {
+  return JSON.stringify(['users', id]);
 }
 
 beforeEach(() => {
@@ -125,11 +63,24 @@ afterEach(() => {
   localStorage.clear();
 });
 
-test('direct list-query store offline public api works and stays strongly typed', async () => {
+type DirectListQueryOfflineOperations = DefineListQueryOfflineOperations<
+  User,
+  UsersQueryPayload,
+  UserPayload,
+  {
+    renameUser: DefineOfflineOperation<RenameUserInput>;
+    skipSyncUser: DefineOfflineOperation<RenameUserInput>;
+    conflictUser: DefineOfflineOperation<RenameUserInput, UserConflict>;
+    createUser: DefineOfflineOperation<CreateUserInput, unknown, User>;
+  }
+>;
+
+test('direct list-query store offline public api supports the main operation hooks in one flow', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-list-query-offline-session';
   network.install();
 
+  let nextUserId = 3;
   const userState = new Map<number, User>([
     [1, { id: 1, name: 'Ada' }],
     [2, { id: 2, name: 'Grace' }],
@@ -141,17 +92,17 @@ test('direct list-query store offline public api works and stays strongly typed'
     UserPayload,
     false,
     false,
-    RenameUserOperations
+    DirectListQueryOfflineOperations
   >({
     id: 'direct-list-query-offline',
     getSessionKey: () => sessionKey,
-    fetchListFn: async (_payload__: UsersQueryPayload, size: number) => {
+    fetchListFn: async (_payload_, size: number) => {
       await delay(FETCH_DELAY_MS);
       return {
         items: [...userState.values()]
           .slice(0, size)
           .map((user) => ({
-            itemPayload: { tableId: 'users' as const, id: user.id },
+            itemPayload: getUserItemPayload(user.id),
             data: { ...user },
           })),
         hasMore: userState.size > size,
@@ -159,6 +110,10 @@ test('direct list-query store offline public api works and stays strongly typed'
     },
     fetchItemFn: async (payload: UserPayload) => {
       await delay(FETCH_DELAY_MS);
+      if (typeof payload === 'string') {
+        throw new Error(`Missing user ${payload}`);
+      }
+
       const item = userState.get(payload.id);
       if (!item) {
         throw new Error(`Missing user ${payload.id}`);
@@ -166,9 +121,10 @@ test('direct list-query store offline public api works and stays strongly typed'
       return { ...item };
     },
     getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
-    getItemKey: (payload: UserPayload) => ['users', payload.id],
+    getItemKey: (payload: UserPayload) =>
+      typeof payload === 'string' ? payload : getUserEntityKey(payload.id),
     errorNormalizer: normalizeError,
-    defaultQuerySize: 2,
+    defaultQuerySize: 3,
     lowPriorityThrottleMs: 5,
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
@@ -183,19 +139,82 @@ test('direct list-query store offline public api works and stays strongly typed'
         operations: {
           renameUser: {
             inputSchema: userInputSchema,
-            getEntityRefs: ({ input }) => [
-              {
-                entityKey: JSON.stringify(['users', input.id]),
-                entityKind: 'item',
-              },
-            ],
+            getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
+            accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute: ({ input }) => {
               userState.set(input.id, { id: input.id, name: input.name });
               listQueryStore.updateItemState(
-                { tableId: 'users', id: input.id },
+                getUserItemPayload(input.id),
                 (item) => ({ ...item, name: input.name }),
               );
-              return input;
+            },
+          },
+          skipSyncUser: {
+            inputSchema: userInputSchema,
+            getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
+            execute: ({ input }) => {
+              throw new Error(`dispatch failed after send ${input.name}`);
+            },
+            shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
+              expect(input).toMatchObject({ id: 1, name: 'Ada skip' });
+              expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+              return true;
+            },
+          },
+          conflictUser: {
+            inputSchema: userInputSchema,
+            getEntityRefs: ({ input }) => [getUserItemPayload(input.id)],
+            conflictHandling: {
+              schema: userConflictSchema,
+              detectConflict: ({ input, enqueuedAt, updatedAt }) => {
+                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+                if (input.name !== 'Ada conflict') return false;
+                return { reason: 'server-changed' };
+              },
+              resolveConflict: ({
+                input,
+                conflict,
+                resolution,
+                enqueuedAt,
+                updatedAt,
+              }) => {
+                expect(input.id).toBe(1);
+                expect(conflict).toMatchObject({ reason: 'server-changed' });
+                expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+                const parsedResolution =
+                  conflictResolutionSchema.parse(resolution);
+
+                return {
+                  requeue: {
+                    input: { id: input.id, name: parsedResolution.name },
+                  },
+                };
+              },
+            },
+            execute: ({ input }) => {
+              userState.set(input.id, { id: input.id, name: input.name });
+              listQueryStore.updateItemState(
+                getUserItemPayload(input.id),
+                (item) => ({ ...item, name: input.name }),
+              );
+            },
+          },
+          createUser: {
+            inputSchema: createUserInputSchema,
+            getEntityRefs: () => [],
+            tempEntity: {
+              createTempId: (input) => `temp:${input.name}`,
+              buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+              reconcileServerEntity: (result) => ({
+                finalPayload: getUserItemPayload(result.id),
+                finalData: { ...result },
+              }),
+            },
+            execute: ({ input }) => {
+              const result = { id: nextUserId, name: input.name };
+              nextUserId += 1;
+              userState.set(result.id, result);
+              return result;
             },
           },
         },
@@ -204,23 +223,30 @@ test('direct list-query store offline public api works and stays strongly typed'
   });
 
   const queryPayload = { tableId: 'users' as const };
-  const userPayload = { tableId: 'users' as const, id: 1 };
+  const userOnePayload = getUserItemPayload(1);
+  const userTwoPayload = getUserItemPayload(2);
 
   const listHook = renderHook(() =>
     listQueryStore.useListQuery(queryPayload, {
-      loadSize: 2,
+      loadSize: 3,
       itemSelector: (item) => item.name,
     }),
   );
+  const multiHook = renderHook(() =>
+    listQueryStore.useMultipleListQueries(
+      [{ payload: queryPayload, loadSize: 3 }],
+      { itemSelector: (item) => item.name },
+    ),
+  );
   await flushAllTimers();
 
-  expect(validListQueryOfflineOption_).toMatchInlineSnapshot(`
-    input: { id: 1, name: 'Offline Ada' }
-    operation: 'renameUser'
-  `);
-  expect(assertTypedListQueryOfflineUsage_).toBeTypeOf('function');
-  expect(listHook.result.current.items).toMatchInlineSnapshot(`
-    ['Ada', 'Grace']
+  expect(
+    pick(listHook.result.current, ['items', 'payload', 'queryKey', 'status']),
+  ).toMatchInlineSnapshot(`
+    items: ['Ada', 'Grace']
+    payload: { tableId: 'users' }
+    queryKey: '["users"]'
+    status: 'success'
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
@@ -233,47 +259,135 @@ test('direct list-query store offline public api works and stays strongly typed'
   await Promise.resolve();
 
   await act(async () => {
-    await listQueryStore.performMutation(userPayload, {
+    await listQueryStore.performMutation(userOnePayload, {
       optimisticUpdate: (payload) => {
         if (Array.isArray(payload) || typeof payload === 'function') return;
         listQueryStore.updateItemState(payload, (item) => ({
           ...item,
-          name: 'Ada offline',
+          name: 'Ada first',
         }));
       },
-      mutation: () => Promise.resolve({ id: 1, name: 'Ada offline' }),
+      mutation: () => Promise.resolve({ id: 1, name: 'Ada first' }),
+      offline: { operation: 'renameUser', input: { id: 1, name: 'Ada first' } },
+    });
+  });
+
+  await act(async () => {
+    await listQueryStore.performMutation(userOnePayload, {
+      optimisticUpdate: (payload) => {
+        if (Array.isArray(payload) || typeof payload === 'function') return;
+        listQueryStore.updateItemState(payload, (item) => ({
+          ...item,
+          name: 'Ada second',
+        }));
+      },
+      mutation: () => Promise.resolve({ id: 1, name: 'Ada second' }),
       offline: {
         operation: 'renameUser',
-        input: { id: 1, name: 'Ada offline' },
+        input: { id: 1, name: 'Ada second' },
       },
     });
   });
+
   await act(async () => {
-    await Promise.resolve();
+    await listQueryStore.performMutation(userTwoPayload, {
+      optimisticUpdate: (payload) => {
+        if (Array.isArray(payload) || typeof payload === 'function') return;
+        listQueryStore.updateItemState(payload, (item) => ({
+          ...item,
+          name: 'Grace offline',
+        }));
+      },
+      mutation: () => Promise.resolve({ id: 2, name: 'Grace offline' }),
+      offline: {
+        operation: 'renameUser',
+        input: { id: 2, name: 'Grace offline' },
+      },
+    });
   });
+
+  await act(async () => {
+    await listQueryStore.performMutation(userOnePayload, {
+      optimisticUpdate: (payload) => {
+        if (Array.isArray(payload) || typeof payload === 'function') return;
+        listQueryStore.updateItemState(payload, (item) => ({
+          ...item,
+          name: 'Ada skip',
+        }));
+      },
+      mutation: () => Promise.resolve({ id: 1, name: 'Ada skip' }),
+      offline: {
+        operation: 'skipSyncUser',
+        input: { id: 1, name: 'Ada skip' },
+      },
+    });
+  });
+
+  await act(async () => {
+    await listQueryStore.performMutation(userOnePayload, {
+      optimisticUpdate: (payload) => {
+        if (Array.isArray(payload) || typeof payload === 'function') return;
+        listQueryStore.updateItemState(payload, (item) => ({
+          ...item,
+          name: 'Ada conflict',
+        }));
+      },
+      mutation: () => Promise.resolve({ id: 1, name: 'Ada conflict' }),
+      offline: {
+        operation: 'conflictUser',
+        input: { id: 1, name: 'Ada conflict' },
+      },
+    });
+  });
+
+  await act(async () => {
+    await listQueryStore.performMutation('__create__', {
+      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+    });
+  });
+  await Promise.resolve();
 
   expect(listQueryStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   await listQueryStore.resolveOfflineConflict('missing', {
     resolution: 'noop',
   });
   expect(
-    pick(listHook.result.current, ['items', 'payload', 'queryKey', 'status']),
+    pick(listHook.result.current, ['items', 'status', 'isPendingOfflineSync']),
   ).toMatchInlineSnapshot(`
-    items: ['Ada offline', 'Grace']
-    payload: { tableId: 'users' }
-    queryKey: '["users"]'
+    isPendingOfflineSync: '✅'
+    items: ['Ada conflict', 'Grace offline']
     status: 'success'
   `);
+  const firstQuery = multiHook.result.current[0];
+  expect(firstQuery).toMatchObject({
+    isPendingOfflineSync: true,
+    items: ['Ada conflict', 'Grace offline'],
+    status: 'success',
+  });
   expect(listQueryStore.getOfflineEntities()).toMatchObject([
     {
-      entityKey: listQueryStore.getItemKey(userPayload),
+      entityKey: getCompositeKey(getUserEntityKey(1)),
+      pendingMutations: 3,
+      storeType: 'listQuery',
+    },
+    {
+      entityKey: getCompositeKey(getUserEntityKey(2)),
       pendingMutations: 1,
       storeType: 'listQuery',
     },
+    {
+      entityKey: 'temp:Linus offline',
+      pendingMutations: 1,
+      storeType: 'listQuery',
+      tempId: 'temp:Linus offline',
+    },
   ]);
-  expect(getGlobalOfflineEntities(sessionKey)).toMatchObject([
-    { storeName: 'direct-list-query-offline' },
-  ]);
+  expect(getGlobalOfflineEntities(sessionKey)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ storeName: 'direct-list-query-offline' }),
+    ]),
+  );
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'offline',
     effectiveOffline: true,
@@ -282,316 +396,74 @@ test('direct list-query store offline public api works and stays strongly typed'
 
   await act(async () => {
     network.goOnline();
-    await vi.advanceTimersByTimeAsync(250);
-    await vi.runAllTimersAsync();
+    await advanceTime(250);
+    await flushAllTimers();
   });
 
+  const [conflict] = listQueryStore.getOfflineConflicts();
+  expect(conflict).toMatchObject({
+    conflict: { reason: 'server-changed' },
+    input: { id: 1, name: 'Ada conflict' },
+    operation: 'conflictUser',
+    sessionKey,
+    storeName: 'direct-list-query-offline',
+    storeType: 'listQuery',
+  });
+  expect(listQueryStore.getOfflineEntities()).toMatchObject([
+    {
+      entityKey: getCompositeKey(getUserEntityKey(1)),
+      hasConflict: true,
+      pendingMutations: 0,
+      storeType: 'listQuery',
+      syncState: 'conflict',
+    },
+  ]);
+
+  const createdUserHook = renderHook(() =>
+    listQueryStore.useItem(getUserItemPayload(3)),
+  );
+  await flushAllTimers();
+  expect(
+    pick(createdUserHook.result.current, [
+      'data',
+      'status',
+      'isPendingOfflineSync',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data: { id: 3, name: 'Linus offline' }
+    isPendingOfflineSync: '❌'
+    status: 'success'
+  `);
+
+  await act(async () => {
+    await listQueryStore.resolveOfflineConflict(conflict!.id, {
+      name: 'Ada resolved',
+    });
+    await flushAllTimers();
+  });
+
+  expect(listQueryStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   expect(listQueryStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
-  expect(listHook.result.current.isPendingOfflineSync).toBe(false);
+  expect(
+    pick(listHook.result.current, ['items', 'status', 'isPendingOfflineSync']),
+  ).toMatchInlineSnapshot(`
+    isPendingOfflineSync: '❌'
+    items: ['Ada resolved', 'Grace offline']
+    status: 'success'
+  `);
+  expect(multiHook.result.current[0]).toMatchObject({
+    isPendingOfflineSync: false,
+    items: ['Ada resolved', 'Grace offline'],
+    status: 'success',
+  });
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
     effectiveOffline: false,
     network: { active: false, enabled: true },
   });
-});
 
-test('useMultipleListQueries exposes offline pending metadata for queued mutations', async () => {
-  const network = createOfflineNetworkMock();
-  const sessionKey = 'direct-list-query-multi-offline-session';
-  network.install();
-
-  const userState = new Map<number, User>([
-    [1, { id: 1, name: 'Ada' }],
-    [2, { id: 2, name: 'Grace' }],
-  ]);
-
-  const listQueryStore = createListQueryStore<
-    User,
-    UsersQueryPayload,
-    UserPayload,
-    false,
-    false,
-    RenameUserOperations
-  >({
-    id: 'direct-list-query-multi-offline',
-    getSessionKey: () => sessionKey,
-    fetchListFn: async (_payload__: UsersQueryPayload, size: number) => {
-      await delay(FETCH_DELAY_MS);
-      return {
-        items: [...userState.values()]
-          .slice(0, size)
-          .map((user) => ({
-            itemPayload: { tableId: 'users' as const, id: user.id },
-            data: { ...user },
-          })),
-        hasMore: userState.size > size,
-      };
-    },
-    fetchItemFn: async (payload: UserPayload) => {
-      await delay(FETCH_DELAY_MS);
-      const item = userState.get(payload.id);
-      if (!item) {
-        throw new Error(`Missing user ${payload.id}`);
-      }
-      return { ...item };
-    },
-    getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
-    getItemKey: (payload: UserPayload) => ['users', payload.id],
-    errorNormalizer: normalizeError,
-    defaultQuerySize: 2,
-    lowPriorityThrottleMs: 5,
-    baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
-    persistentStorage: {
-      storeName: 'direct-list-query-multi-offline',
-      adapter: localPersistentStorage,
-      schema: userSchema,
-      itemPayloadSchema: userPayloadSchema,
-      queryPayloadSchema: usersQueryPayloadSchema,
-      offlineMode: {
-        network: network.config,
-        operations: {
-          renameUser: {
-            inputSchema: userInputSchema,
-            getEntityRefs: ({ input }) => [
-              {
-                entityKey: JSON.stringify(['users', input.id]),
-                entityKind: 'item',
-              },
-            ],
-            execute: ({ input }) => {
-              userState.set(input.id, { id: input.id, name: input.name });
-              listQueryStore.updateItemState(
-                { tableId: 'users', id: input.id },
-                (item) => ({ ...item, name: input.name }),
-              );
-              return input;
-            },
-          },
-        },
-      },
-    },
-  });
-
-  const queryPayload = { tableId: 'users' as const };
-  const userPayload = { tableId: 'users' as const, id: 1 };
-
-  const listHook = renderHook(() =>
-    listQueryStore.useMultipleListQueries(
-      [{ payload: queryPayload, loadSize: 2 }],
-      { itemSelector: (item) => item.name },
-    ),
-  );
-  await flushAllTimers();
-
-  act(() => {
-    network.goOffline();
-  });
-  await Promise.resolve();
-
-  await act(async () => {
-    await listQueryStore.performMutation(userPayload, {
-      optimisticUpdate: (payload) => {
-        if (Array.isArray(payload) || typeof payload === 'function') return;
-        listQueryStore.updateItemState(payload, (item) => ({
-          ...item,
-          name: 'Ada offline',
-        }));
-      },
-      mutation: () => Promise.resolve({ id: 1, name: 'Ada offline' }),
-      offline: {
-        operation: 'renameUser',
-        input: { id: 1, name: 'Ada offline' },
-      },
-    });
-  });
-  await Promise.resolve();
-
-  const firstQuery = listHook.result.current[0];
-  expect(firstQuery).toBeDefined();
-  if (!firstQuery) {
-    throw new Error('Expected the first query result');
-  }
-  expect(firstQuery.isPendingOfflineSync).toBe(true);
-});
-
-test('list-query offline accumulation merges same-item mutations and keeps different items separate', async () => {
-  const network = createOfflineNetworkMock();
-  const sessionKey = 'direct-list-query-offline-accumulation-session';
-  network.install();
-
-  const userState = new Map<number, User>([
-    [1, { id: 1, name: 'Ada' }],
-    [2, { id: 2, name: 'Grace' }],
-  ]);
-  const execute = vi.fn(
-    ({ input }: { input: { id: number; name: string } }) => {
-      userState.set(input.id, { id: input.id, name: input.name });
-      listQueryStore.updateItemState(
-        { tableId: 'users', id: input.id },
-        (item) => ({ ...item, name: input.name }),
-      );
-      return { id: input.id, name: input.name };
-    },
-  );
-
-  const listQueryStore = createListQueryStore<
-    User,
-    UsersQueryPayload,
-    UserPayload,
-    false,
-    false,
-    RenameUserOperations
-  >({
-    id: 'direct-list-query-offline-accumulation',
-    getSessionKey: () => sessionKey,
-    fetchListFn: async (_payload__: UsersQueryPayload, size: number) => {
-      await delay(FETCH_DELAY_MS);
-      return {
-        items: [...userState.values()]
-          .slice(0, size)
-          .map((user) => ({
-            itemPayload: { tableId: 'users' as const, id: user.id },
-            data: { ...user },
-          })),
-        hasMore: userState.size > size,
-      };
-    },
-    fetchItemFn: async (payload: UserPayload) => {
-      await delay(FETCH_DELAY_MS);
-      const item = userState.get(payload.id);
-      if (!item) {
-        throw new Error(`Missing user ${payload.id}`);
-      }
-      return { ...item };
-    },
-    getQueryKey: (_payload_: UsersQueryPayload) => ['users'],
-    getItemKey: (payload: UserPayload) => ['users', payload.id],
-    errorNormalizer: normalizeError,
-    defaultQuerySize: 2,
-    lowPriorityThrottleMs: 5,
-    baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
-    persistentStorage: {
-      storeName: 'direct-list-query-offline-accumulation',
-      adapter: localPersistentStorage,
-      schema: userSchema,
-      itemPayloadSchema: userPayloadSchema,
-      queryPayloadSchema: usersQueryPayloadSchema,
-      offlineMode: {
-        network: network.config,
-        operations: {
-          renameUser: {
-            inputSchema: userInputSchema,
-            getEntityRefs: ({ input }) => [
-              {
-                entityKey: JSON.stringify(['users', input.id]),
-                entityKind: 'item',
-              },
-            ],
-            accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
-            execute,
-          },
-        },
-      },
-    },
-  });
-
-  await flushAllTimers();
-
-  act(() => {
-    network.goOffline();
-  });
-  await Promise.resolve();
-
-  await act(async () => {
-    await listQueryStore.performMutation(
-      { tableId: 'users', id: 1 },
-      {
-        optimisticUpdate: (payload) => {
-          if (Array.isArray(payload) || typeof payload === 'function') return;
-          listQueryStore.updateItemState(payload, (item) => ({
-            ...item,
-            name: 'Ada first',
-          }));
-        },
-        mutation: () => Promise.resolve({ id: 1, name: 'Ada first' }),
-        offline: {
-          operation: 'renameUser',
-          input: { id: 1, name: 'Ada first' },
-        },
-      },
-    );
-  });
-
-  await act(async () => {
-    await listQueryStore.performMutation(
-      { tableId: 'users', id: 1 },
-      {
-        optimisticUpdate: (payload) => {
-          if (Array.isArray(payload) || typeof payload === 'function') return;
-          listQueryStore.updateItemState(payload, (item) => ({
-            ...item,
-            name: 'Ada second',
-          }));
-        },
-        mutation: () => Promise.resolve({ id: 1, name: 'Ada second' }),
-        offline: {
-          operation: 'renameUser',
-          input: { id: 1, name: 'Ada second' },
-        },
-      },
-    );
-  });
-
-  await act(async () => {
-    await listQueryStore.performMutation(
-      { tableId: 'users', id: 2 },
-      {
-        optimisticUpdate: (payload) => {
-          if (Array.isArray(payload) || typeof payload === 'function') return;
-          listQueryStore.updateItemState(payload, (item) => ({
-            ...item,
-            name: 'Grace offline',
-          }));
-        },
-        mutation: () => Promise.resolve({ id: 2, name: 'Grace offline' }),
-        offline: {
-          operation: 'renameUser',
-          input: { id: 2, name: 'Grace offline' },
-        },
-      },
-    );
-  });
-  await Promise.resolve();
-
-  expect(listQueryStore.getOfflineEntities()).toMatchObject([
-    {
-      entityKey: listQueryStore.getItemKey({ tableId: 'users', id: 1 }),
-      pendingMutations: 1,
-      storeType: 'listQuery',
-    },
-    {
-      entityKey: listQueryStore.getItemKey({ tableId: 'users', id: 2 }),
-      pendingMutations: 1,
-      storeType: 'listQuery',
-    },
-  ]);
-
-  await act(async () => {
-    network.goOnline();
-    await vi.advanceTimersByTimeAsync(250);
-    await vi.runAllTimersAsync();
-  });
-
-  expect(execute).toHaveBeenCalledTimes(2);
-  expect(
-    execute.mock.calls
-      .map((call) => call[0].input)
-      .toSorted((left, right) => left.id - right.id),
-  ).toMatchInlineSnapshot(`
-    - { id: 1, name: 'Ada second' }
-    - { id: 2, name: 'Grace offline' }
-  `);
+  listHook.unmount();
+  multiHook.unmount();
+  createdUserHook.unmount();
 });

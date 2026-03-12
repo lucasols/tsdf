@@ -422,6 +422,30 @@ export function createCollectionStore<
         adapter: persistentStorageConfig.adapter,
         offlineMode: persistentStorageConfig.offlineMode,
         storeAdapter: {
+          normalizeEntityRefs: (entityRefs) =>
+            entityRefs.map((ref) => {
+              if (
+                typeof ref === 'object' &&
+                ref !== null &&
+                'entityKey' in ref &&
+                'entityKind' in ref
+              ) {
+                return __LEGIT_CAST__<
+                  {
+                    entityKey: string;
+                    entityKind: 'document' | 'item' | 'query';
+                  },
+                  unknown
+                >(ref);
+              }
+
+              return {
+                entityKey: getItemKey(
+                  __LEGIT_CAST__<ItemPayload, unknown>(ref),
+                ),
+                entityKind: 'item' as const,
+              };
+            }),
           getProtectedCacheKeys: (entityRefs) => {
             const sessionKey = getSessionKey();
             if (sessionKey === false) return [];

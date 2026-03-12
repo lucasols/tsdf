@@ -1153,6 +1153,41 @@ export function createListQueryStore<
       adapter: persistentStorageConfig.adapter,
       offlineMode: persistentStorageConfig.offlineMode,
       storeAdapter: {
+        normalizeEntityRefs: (entityRefs) =>
+          entityRefs.map((ref) => {
+            if (
+              typeof ref === 'object' &&
+              ref !== null &&
+              'entityKey' in ref &&
+              'entityKind' in ref
+            ) {
+              return __LEGIT_CAST__<
+                {
+                  entityKey: string;
+                  entityKind: 'document' | 'item' | 'query';
+                },
+                unknown
+              >(ref);
+            }
+
+            if (
+              typeof ref === 'object' &&
+              ref !== null &&
+              'queryPayload' in ref
+            ) {
+              return {
+                entityKey: getQueryKey(
+                  __LEGIT_CAST__<QueryPayload, unknown>(ref.queryPayload),
+                ),
+                entityKind: 'query' as const,
+              };
+            }
+
+            return {
+              entityKey: getItemKey(__LEGIT_CAST__<ItemPayload, unknown>(ref)),
+              entityKind: 'item' as const,
+            };
+          }),
         getProtectedCacheKeys: (entityRefs) => {
           const sessionKey = getSessionKey();
           if (sessionKey === false) return [];

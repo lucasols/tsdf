@@ -263,9 +263,11 @@ export type OfflineMutationDescriptor<
  *
  * @typeParam TInput - Input type expected by the operation when requeued.
  */
-export type OfflineResolveConflictResult<TInput> = void | {
-  requeue?: { input: TInput };
-};
+export type OfflineResolveConflictResult<TInput> =
+  | undefined
+  | null
+  | false
+  | { requeue?: { input: TInput } };
 
 /**
  * Context passed into offline mutation accumulation hooks.
@@ -409,9 +411,7 @@ export type AnyOfflineOperationDefinition = OfflineOperationDefinition<
   __LEGIT_ANY__,
   __LEGIT_ANY__
 > & {
-  getEntityRefs?: (
-    ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
-  ) => OfflineEntityRef[];
+  getEntityRefs?: (ctx: OperationEntityRefsContext<__LEGIT_ANY__>) => unknown[];
 };
 
 /**
@@ -553,6 +553,18 @@ export type DefineDocumentOfflineOperations<
 };
 
 /**
+ * Collection offline entity reference.
+ *
+ * Collection operations may return either a pre-normalized {@link OfflineEntityRef}
+ * or the raw item payload, which will be converted to the store item key.
+ *
+ * @typeParam ItemPayload - Collection item payload type for the owning store.
+ */
+export type CollectionOfflineEntityRef<ItemPayload extends ValidPayload> =
+  | OfflineEntityRef
+  | ItemPayload;
+
+/**
  * Collection-store specific offline operation definition.
  *
  * @typeParam ItemState - Collection item state type for the owning store.
@@ -568,11 +580,87 @@ export type CollectionOfflineOperationDefinition<
   TConflict = unknown,
   TTempResult = unknown,
 > = OfflineOperationDefinition<TInput, TConflict, TTempResult> & {
-  /** Declares which collection items are affected by this queued mutation. */
+  /**
+   * Declares which collection items are affected by this queued mutation.
+   *
+   * You can return either a pre-normalized {@link OfflineEntityRef} or the raw
+   * collection payload, which will be converted with the store's item key logic.
+   */
   getEntityRefs: (
     ctx: OperationEntityRefsContext<TInput>,
-  ) => OfflineEntityRef[];
+  ) => CollectionOfflineEntityRef<ItemPayloadUnused>[];
 } & ([ItemState | ItemPayloadUnused] extends [never] ? never : unknown);
+
+/**
+ * Builds a collection offline operations map from a compact operation spec.
+ *
+ * Use this helper to define the full `offlineMode.operations` contract for a
+ * collection store while keeping each operation's type declaration short.
+ *
+ * Each operation key is described with {@link DefineOfflineOperation}, and this
+ * helper expands it into the corresponding
+ * {@link CollectionOfflineOperationDefinition}. The runtime operation object
+ * still needs to provide `getEntityRefs(...)`.
+ *
+ * @typeParam ItemState - Collection item state type for the owning store.
+ * @typeParam ItemPayload - Collection payload type for the owning store.
+ * @typeParam TOperations - Operation map where each key declares its input, optional conflict payload, and optional temp-result type.
+ *
+ * @example
+ * ```ts
+ * type Operations = DefineCollectionOfflineOperations<
+ *   TodoItem,
+ *   string,
+ *   {
+ *     renameTodo: DefineOfflineOperation<
+ *       { id: string; title: string }
+ *     >;
+ *     createTodo: DefineOfflineOperation<
+ *       { title: string },
+ *       unknown,
+ *       { id: string; title: string }
+ *     >;
+ *   }
+ * >;
+ * ```
+ */
+export type DefineCollectionOfflineOperations<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+  TOperations extends Record<string, DefineOfflineOperation>,
+> = {
+  [TName in keyof TOperations]: CollectionOfflineOperationDefinition<
+    ItemState,
+    ItemPayload,
+    DocumentOperationInput<TOperations[TName]>,
+    DocumentOperationConflict<TOperations[TName]>,
+    DocumentOperationResult<TOperations[TName]>
+  >;
+};
+
+/**
+ * Wrapper for list-query refs that target a whole query rather than a specific item.
+ *
+ * @typeParam QueryPayload - Query payload type for the owning list-query store.
+ */
+export type ListQueryOfflineQueryRef<QueryPayload extends ValidPayload> = {
+  /** Raw query payload that should be normalized to the internal query key. */
+  queryPayload: QueryPayload;
+};
+
+/**
+ * List-query offline entity reference.
+ *
+ * List-query operations may return a pre-normalized {@link OfflineEntityRef},
+ * a raw item payload, or a wrapped raw query payload.
+ *
+ * @typeParam QueryPayload - Query payload type for the owning list-query store.
+ * @typeParam ItemPayload - Item payload type for the owning list-query store.
+ */
+export type ListQueryOfflineEntityRef<
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = OfflineEntityRef | ItemPayload | ListQueryOfflineQueryRef<QueryPayload>;
 
 /**
  * List-query-store specific offline operation definition.
@@ -592,13 +680,71 @@ export type ListQueryOfflineOperationDefinition<
   TConflict = unknown,
   TTempResult = unknown,
 > = OfflineOperationDefinition<TInput, TConflict, TTempResult> & {
-  /** Declares which list-query items are affected by this queued mutation. */
+  /**
+   * Declares which list-query entities are affected by this queued mutation.
+   *
+   * You can return:
+   * - a pre-normalized {@link OfflineEntityRef}
+   * - a raw item payload, which will be converted with the store's item key logic
+   * - `{ queryPayload }`, which will be converted with the store's query key logic
+   */
   getEntityRefs: (
     ctx: OperationEntityRefsContext<TInput>,
-  ) => OfflineEntityRef[];
+  ) => ListQueryOfflineEntityRef<QueryPayload, ItemPayloadUnused>[];
 } & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
     ? never
     : unknown);
+
+/**
+ * Builds a list-query offline operations map from a compact operation spec.
+ *
+ * Use this helper to define the full `offlineMode.operations` contract for a
+ * list-query store while keeping each operation's type declaration short.
+ *
+ * Each operation key is described with {@link DefineOfflineOperation}, and this
+ * helper expands it into the corresponding
+ * {@link ListQueryOfflineOperationDefinition}. The runtime operation object
+ * still needs to provide `getEntityRefs(...)`.
+ *
+ * @typeParam ItemState - List item state type for the owning store.
+ * @typeParam QueryPayload - Query payload type used by the list store.
+ * @typeParam ItemPayload - Item payload type used by the list store.
+ * @typeParam TOperations - Operation map where each key declares its input, optional conflict payload, and optional temp-result type.
+ *
+ * @example
+ * ```ts
+ * type Operations = DefineListQueryOfflineOperations<
+ *   User,
+ *   { tableId: 'users' },
+ *   { tableId: 'users'; id: number } | string,
+ *   {
+ *     renameUser: DefineOfflineOperation<
+ *       { id: number; name: string }
+ *     >;
+ *     createUser: DefineOfflineOperation<
+ *       { name: string },
+ *       unknown,
+ *       { id: number; name: string }
+ *     >;
+ *   }
+ * >;
+ * ```
+ */
+export type DefineListQueryOfflineOperations<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+  TOperations extends Record<string, DefineOfflineOperation>,
+> = {
+  [TName in keyof TOperations]: ListQueryOfflineOperationDefinition<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    DocumentOperationInput<TOperations[TName]>,
+    DocumentOperationConflict<TOperations[TName]>,
+    DocumentOperationResult<TOperations[TName]>
+  >;
+};
 
 /**
  * Extracts operation conflict payload from a registered operation map.
