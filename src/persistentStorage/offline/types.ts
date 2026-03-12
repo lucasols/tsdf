@@ -158,7 +158,7 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   input: TInput;
   /** Conflict payload returned by the resolver. */
   conflict: TConflict;
-  /** Optional mutation payload snapshot if tracked by adapter. */
+  /** @internal */
   mutationPayload?: unknown;
   /** Entity references involved in the conflict. */
   entityRefs: OfflineEntityRef[];
@@ -184,7 +184,7 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   operation: string;
   /** Operation input payload persisted with the entry. */
   input: TInput;
-  /** Optional adapter-specific payload for mutation replay. */
+  /** @internal */
   mutationPayload?: unknown;
   /** Entity references tied to this mutation. */
   entityRefs: OfflineEntityRef[];
@@ -276,10 +276,7 @@ type OperationBaseContext<TInput, TMutationPayload> = {
   sessionKey: string;
   /** Input payload for the queued mutation currently being processed. */
   input: TInput;
-  /**
-   * Optional payload provided by the adapter during mutation execution, if
-   * available.
-   */
+  /** @internal */
   mutationPayload?: TMutationPayload;
 };
 
