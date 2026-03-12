@@ -26,7 +26,8 @@ import {
 } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
-  CollectionOfflineOperationDefinition,
+  AnyOfflineOperationDefinition,
+  CollectionOfflineEntityRef,
   OfflineMutationDescriptor,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
@@ -201,15 +202,13 @@ type InternalCollectionOfflineOperations<
   ItemPayload extends ValidPayload,
 > = Record<
   string,
-  CollectionOfflineOperationDefinition<
-    ItemState,
-    ItemPayload,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >
->;
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => CollectionOfflineEntityRef<ItemPayload>[];
+  }
+> &
+  ([ItemState | ItemPayload] extends [never] ? never : unknown);
 
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,

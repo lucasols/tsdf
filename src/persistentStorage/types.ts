@@ -3,9 +3,9 @@ import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { type RcType } from 'runcheck';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
-  CollectionOfflineOperationDefinition,
-  DocumentOfflineOperationDefinition,
-  ListQueryOfflineOperationDefinition,
+  AnyOfflineOperationDefinition,
+  CollectionOfflineEntityRef,
+  ListQueryOfflineEntityRef,
   OfflineModeConfig,
 } from './offline/types';
 
@@ -137,16 +137,9 @@ type StorePersistentStorageBaseConfig<TFinal, TStorage = unknown> = Omit<
 
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
-  DocumentOfflineOperationDefinition<
-    State,
-    {
-      input: __LEGIT_ANY__;
-      conflict: __LEGIT_ANY__;
-      result: __LEGIT_ANY__;
-      serverSnapshot: __LEGIT_ANY__;
-    }
-  >
->;
+  AnyOfflineOperationDefinition
+> &
+  ([State] extends [never] ? never : unknown);
 
 /** Persistent storage config for DocumentStore. */
 export type DocumentPersistentStorageConfig<
@@ -164,15 +157,13 @@ type InternalCollectionOfflineOperations<
   ItemPayload extends ValidPayload,
 > = Record<
   string,
-  CollectionOfflineOperationDefinition<
-    ItemState,
-    ItemPayload,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >
->;
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => CollectionOfflineEntityRef<ItemPayload>[];
+  }
+> &
+  ([ItemState | ItemPayload] extends [never] ? never : unknown);
 
 /** Persistent storage config for CollectionStore. */
 export type CollectionPersistentStorageConfig<
@@ -206,16 +197,13 @@ type InternalListQueryOfflineOperations<
   ItemPayload extends ValidPayload,
 > = Record<
   string,
-  ListQueryOfflineOperationDefinition<
-    ItemState,
-    QueryPayload,
-    ItemPayload,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >
->;
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => ListQueryOfflineEntityRef<QueryPayload, ItemPayload>[];
+  }
+> &
+  ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
 
 /** Persistent storage config for ListQueryStore. */
 export type ListQueryPersistentStorageConfig<

@@ -305,6 +305,12 @@ type OperationBaseContext<TInput> = {
   updatedAt: number;
 };
 
+type IsUnknown<T> = unknown extends T
+  ? [keyof T] extends [never]
+    ? true
+    : false
+  : false;
+
 /** Context passed to replay checks that may use a fresh server snapshot. */
 type OperationReplayCheckContext<TInput, TServerSnapshot> =
   OperationBaseContext<TInput> & {
@@ -312,7 +318,9 @@ type OperationReplayCheckContext<TInput, TServerSnapshot> =
      * Optional snapshot fetched immediately before `shouldSkipSync` and
      * `detectConflict`.
      */
-    serverSnapshot: TServerSnapshot | undefined;
+    serverSnapshot: IsUnknown<TServerSnapshot> extends true
+      ? undefined
+      : TServerSnapshot;
   };
 
 /**
@@ -348,6 +356,53 @@ export type OfflineConflictHandlingConfig<
     | OfflineResolveConflictResult<TInput>;
 };
 
+type ConflictHandlingField<TInput, TConflict, TServerSnapshot> =
+  IsUnknown<TConflict> extends true
+    ? {
+        /**
+         * Optional conflict strategy when a queued operation diverges from remote state.
+         */
+        conflictHandling?: OfflineConflictHandlingConfig<
+          TInput,
+          TConflict,
+          TServerSnapshot
+        >;
+      }
+    : {
+        /**
+         * Conflict strategy required when the operation declares a concrete
+         * conflict payload type.
+         */
+        conflictHandling: OfflineConflictHandlingConfig<
+          TInput,
+          TConflict,
+          TServerSnapshot
+        >;
+      };
+
+type ServerSnapshotField<TInput, TServerSnapshot> =
+  IsUnknown<TServerSnapshot> extends true
+    ? {
+        /**
+         * Optionally loads a fresh server-side snapshot before replay checks run.
+         * The result is passed to `shouldSkipSync` and `detectConflict` as
+         * `ctx.serverSnapshot`.
+         */
+        getServerSnapshot?: (
+          ctx: OperationBaseContext<TInput>,
+        ) => Promise<TServerSnapshot> | TServerSnapshot;
+      }
+    : {
+        /**
+         * Required when the operation declares a concrete server snapshot type.
+         * The result is passed to `shouldSkipSync` and `detectConflict` as
+         * `ctx.serverSnapshot`.
+         */
+        getServerSnapshot: (
+          ctx: OperationBaseContext<TInput>,
+        ) => Promise<TServerSnapshot> | TServerSnapshot;
+      };
+
 /**
  * Optional temp-id lifecycle for optimistic offline create flows.
  *
@@ -372,6 +427,22 @@ export type OfflineTempEntityConfig<TInput, TTempResult> = {
   ) => { finalPayload: ValidPayload; finalData?: unknown };
 };
 
+type TempEntityField<TInput, TTempResult> =
+  IsUnknown<TTempResult> extends true
+    ? {
+        /** Optional temporary-entity lifecycle for optimistic create/update operations. */
+        tempEntity?: OfflineTempEntityConfig<TInput, TTempResult>;
+      }
+    : [TTempResult] extends [void]
+      ? {
+          /** Optional temporary-entity lifecycle for optimistic create/update operations. */
+          tempEntity?: OfflineTempEntityConfig<TInput, TTempResult>;
+        }
+      : {
+          /** Required when the operation declares a concrete temp-entity replay result. */
+          tempEntity: OfflineTempEntityConfig<TInput, TTempResult>;
+        };
+
 /**
  * Shape used by `offlineMode.operations` for each operation name.
  *
@@ -388,27 +459,9 @@ export type OfflineOperationDefinition<
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
   /**
-   * Optional conflict strategy when a queued operation diverges from remote state.
-   */
-  conflictHandling?: OfflineConflictHandlingConfig<
-    TInput,
-    TConflict,
-    TServerSnapshot
-  >;
-  /**
    * Optional queue compaction for consecutive mutations with same refs.
    */
   accumulation?: OfflineAccumulationConfig<TInput>;
-  /** Optional temporary-entity lifecycle for optimistic create/update operations. */
-  tempEntity?: OfflineTempEntityConfig<TInput, TTempResult>;
-  /**
-   * Optionally loads a fresh server-side snapshot before replay checks run.
-   * The result is passed to `shouldSkipSync` and `detectConflict` as
-   * `ctx.serverSnapshot`.
-   */
-  getServerSnapshot?: (
-    ctx: OperationBaseContext<TInput>,
-  ) => Promise<TServerSnapshot> | TServerSnapshot;
   /**
    * Executes the queued mutation against the remote source during replay.
    * This may run multiple times when transient failures occur.
@@ -424,7 +477,9 @@ export type OfflineOperationDefinition<
   shouldSkipSync?: (
     ctx: OperationReplayCheckContext<TInput, TServerSnapshot>,
   ) => Promise<boolean> | boolean;
-};
+} & ConflictHandlingField<TInput, TConflict, TServerSnapshot> &
+  ServerSnapshotField<TInput, TServerSnapshot> &
+  TempEntityField<TInput, TTempResult>;
 
 /** Context used to resolve which entities a queued mutation affects. */
 type OperationEntityRefsContext<TInput> = {
@@ -433,12 +488,21 @@ type OperationEntityRefsContext<TInput> = {
 };
 
 /** Non-store-specific offline operation definition alias. */
-export type AnyOfflineOperationDefinition = OfflineOperationDefinition<
-  __LEGIT_ANY__,
-  __LEGIT_ANY__,
-  __LEGIT_ANY__,
-  __LEGIT_ANY__
-> & {
+export type AnyOfflineOperationDefinition = {
+  inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
+  conflictHandling?: OfflineConflictHandlingConfig<
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >;
+  accumulation?: OfflineAccumulationConfig<__LEGIT_ANY__>;
+  tempEntity?: OfflineTempEntityConfig<__LEGIT_ANY__, __LEGIT_ANY__>;
+  getServerSnapshot?: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
+  execute: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
+  shouldSkipSync?: (
+    ctx: OperationReplayCheckContext<__LEGIT_ANY__, __LEGIT_ANY__>,
+  ) => Promise<boolean> | boolean;
+} & {
   getEntityRefs?: (ctx: OperationEntityRefsContext<__LEGIT_ANY__>) => unknown[];
 };
 

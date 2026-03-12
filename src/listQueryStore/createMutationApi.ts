@@ -7,7 +7,8 @@ import { Store } from 't-state';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import type {
-  ListQueryOfflineOperationDefinition,
+  AnyOfflineOperationDefinition,
+  ListQueryOfflineEntityRef,
   OfflineMutationDescriptor,
   OperationInput,
 } from '../persistentStorage/offline/types';
@@ -53,16 +54,13 @@ type InternalListQueryOfflineOperations<
   ItemPayload extends ValidPayload,
 > = Record<
   string,
-  ListQueryOfflineOperationDefinition<
-    ItemState,
-    QueryPayload,
-    ItemPayload,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >
->;
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => ListQueryOfflineEntityRef<QueryPayload, ItemPayload>[];
+  }
+> &
+  ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
 
 export type CreateMutationApiOptions<
   ItemState extends ValidStoreState,

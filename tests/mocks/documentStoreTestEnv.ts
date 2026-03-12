@@ -4,7 +4,7 @@ import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
-import type { DocumentOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
+import type { AnyOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
@@ -43,16 +43,9 @@ export type DocumentStoreTestScenario<D> =
 
 type TestDocumentOfflineOperationsRegistry<D> = Record<
   string,
-  DocumentOfflineOperationDefinition<
-    { value: D },
-    {
-      input: __LEGIT_ANY__;
-      conflict: __LEGIT_ANY__;
-      result: __LEGIT_ANY__;
-      serverSnapshot: __LEGIT_ANY__;
-    }
-  >
->;
+  AnyOfflineOperationDefinition
+> &
+  ([D] extends [never] ? never : unknown);
 
 export type DocumentStoreTestEnvOptions<
   D,

@@ -13,7 +13,10 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
-import type { ListQueryOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
+import type {
+  AnyOfflineOperationDefinition,
+  ListQueryOfflineEntityRef,
+} from '../../src/persistentStorage/offline/types';
 import type {
   ListQueryPersistentStorageConfig,
   StorageAdapter,
@@ -54,16 +57,13 @@ export type Row = {
 
 type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
   string,
-  ListQueryOfflineOperationDefinition<
-    TRow,
-    ListQueryParams,
-    ListQueryItemPayload,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >
->;
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => ListQueryOfflineEntityRef<ListQueryParams, ListQueryItemPayload>[];
+  }
+> &
+  ([TRow] extends [never] ? never : unknown);
 
 type ListQuerySnapshotConfig = {
   tables?: string[];

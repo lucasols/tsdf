@@ -19,7 +19,7 @@ import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useLis
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
 import type {
-  DocumentOfflineOperationDefinition,
+  AnyOfflineOperationDefinition,
   OfflineMutationDescriptor,
 } from './persistentStorage/offline/types';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
@@ -130,16 +130,9 @@ type DocumentSnapshotMessage<State extends ValidStoreState> = Extract<
 
 type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
-  DocumentOfflineOperationDefinition<
-    State,
-    {
-      input: __LEGIT_ANY__;
-      conflict: __LEGIT_ANY__;
-      result: __LEGIT_ANY__;
-      serverSnapshot: __LEGIT_ANY__;
-    }
-  >
->;
+  AnyOfflineOperationDefinition
+> &
+  ([State] extends [never] ? never : unknown);
 
 export type DocumentStoreOptions<
   State extends ValidStoreState,

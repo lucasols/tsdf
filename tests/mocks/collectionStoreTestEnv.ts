@@ -6,7 +6,10 @@ import {
   type CollectionInitialStateItem,
   type CollectionStoreOptions,
 } from '../../src/collectionStore/collectionStore';
-import type { CollectionOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
+import type {
+  AnyOfflineOperationDefinition,
+  CollectionOfflineEntityRef,
+} from '../../src/persistentStorage/offline/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
@@ -49,15 +52,13 @@ type TestCollectionOfflineOperationsRegistry<
   D extends Record<string, unknown>,
 > = Record<
   string,
-  CollectionOfflineOperationDefinition<
-    CollectionTestItem<D>,
-    string,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >
->;
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => CollectionOfflineEntityRef<string>[];
+  }
+> &
+  ([D] extends [never] ? never : unknown);
 
 export type CollectionStoreTestEnvOptions<
   D extends Record<string, unknown>,

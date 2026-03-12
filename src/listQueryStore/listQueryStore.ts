@@ -24,7 +24,8 @@ import {
 } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
-  ListQueryOfflineOperationDefinition,
+  AnyOfflineOperationDefinition,
+  ListQueryOfflineEntityRef,
   OperationInput,
 } from '../persistentStorage/offline/types';
 import type {
@@ -112,16 +113,13 @@ type InternalListQueryOfflineOperations<
   ItemPayload extends ValidPayload,
 > = Record<
   string,
-  ListQueryOfflineOperationDefinition<
-    ItemState,
-    QueryPayload,
-    ItemPayload,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
-  >
->;
+  AnyOfflineOperationDefinition & {
+    getEntityRefs: (ctx: {
+      input: __LEGIT_ANY__;
+    }) => ListQueryOfflineEntityRef<QueryPayload, ItemPayload>[];
+  }
+> &
+  ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
 
 export type ListQueryStore<
   ItemState extends ValidStoreState,

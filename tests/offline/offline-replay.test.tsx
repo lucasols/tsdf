@@ -39,18 +39,14 @@ type CreateUserOperations = {
 type UpdateValueOperations = {
   updateValue: DocumentOfflineOperationDefinition<
     { value: number },
-    { input: { value: number }; result: { value: number } }
+    { input: { value: number } }
   >;
 };
 
 type UpdateValueConflictOperations = {
   updateValue: DocumentOfflineOperationDefinition<
     { value: number },
-    {
-      input: { value: number };
-      conflict: { reason: string };
-      result: { value: number };
-    }
+    { input: { value: number }; conflict: { reason: string } }
   >;
 };
 
@@ -60,8 +56,7 @@ type PatchUserOperations = {
     ListQueryParams,
     string,
     { itemId: string; name: string },
-    unknown,
-    { name: string }
+    unknown
   >;
 };
 
