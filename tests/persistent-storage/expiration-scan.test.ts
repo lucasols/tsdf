@@ -262,31 +262,51 @@ describe('expiration scan', () => {
     expect(localStorage.getItem(accountADoc.document.storageKey())).toBeNull();
   });
 
-  test('protected entries are preserved for dotted session keys', async () => {
+  test('protected entries are preserved for dotted session keys while sibling stale entries are cleaned', async () => {
     const staleTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';
     const protectedDoc = persistentStore.scope(
       'protected-doc',
       dottedSessionKey,
     );
+    const unprotectedDoc = persistentStore.scope(
+      'unprotected-doc',
+      dottedSessionKey,
+    );
     const triggerDoc = persistentStore.scope('trigger-doc', 'sess-trigger');
+    const protectedKeysStorageKey = `tsdf.${dottedSessionKey}.__offline__.protected`;
+    const protectedRootKey = getManagedLocalStorageRootKeyForSingle(
+      protectedKeysStorageKey,
+    );
 
+    // Seed two stale entries for the dotted session so the scan has to decide
+    // which one to keep based on the protected-keys manifest.
     protectedDoc.document.seed(
       { value: { name: 'protected', value: 1 } },
       { timestamp: staleTimestamp },
     );
-    persistentStore.storage.writeValue(
-      `tsdf.${dottedSessionKey}.__offline__.protected`,
-      {
-        data: { keys: [protectedDoc.document.storageKey()] },
-        timestamp: Date.now(),
-        version: 1,
-      },
+    unprotectedDoc.document.seed(
+      { value: { name: 'unprotected', value: 2 } },
+      { timestamp: staleTimestamp },
     );
-    triggerDoc.document.seed({ value: { name: 'trigger', value: 2 } });
+
+    persistentStore.storage.writeValue(protectedKeysStorageKey, {
+      data: { keys: [protectedDoc.document.storageKey()] },
+      timestamp: Date.now(),
+      version: 1,
+    });
+
+    // The managed metadata must keep the full dotted session key so cleanup
+    // can match protected keys back to the correct session.
+    expect(readManagedLocalStorageRoot(protectedRootKey)?.sessionKey).toBe(
+      dottedSessionKey,
+    );
+
+    // Trigger cleanup from another session to mirror a later app runtime.
+    triggerDoc.document.seed({ value: { name: 'trigger', value: 3 } });
 
     createDocumentStoreTestEnv(
-      { name: 'trigger', value: 2 },
+      { name: 'trigger', value: 3 },
       {
         getSessionKey: () => 'sess-trigger',
         persistentStorage: {
@@ -299,9 +319,18 @@ describe('expiration scan', () => {
 
     await waitForScheduledCleanup();
 
-    expect(
-      localStorage.getItem(protectedDoc.document.storageKey()),
-    ).not.toBeNull();
+    expect({
+      protectedEntryExists:
+        localStorage.getItem(protectedDoc.document.storageKey()) !== null,
+      unprotectedEntryExists:
+        localStorage.getItem(unprotectedDoc.document.storageKey()) !== null,
+      protectedRootSession:
+        readManagedLocalStorageRoot(protectedRootKey)?.sessionKey,
+    }).toMatchInlineSnapshot(`
+      protectedEntryExists: '✅'
+      protectedRootSession: 'user@example.com'
+      unprotectedEntryExists: '❌'
+    `);
   });
 
   test('scan runs for explicit injected async adapters', async () => {
