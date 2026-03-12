@@ -106,6 +106,9 @@ test('direct collection store offline public api works and stays strongly typed'
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
+            getEntityRefs: ({ input }) => [
+              { entityKey: JSON.stringify(input.id), entityKind: 'item' },
+            ],
             execute: ({ input }) => {
               todoState.set(input.id, { title: input.title, completed: false });
               collectionStore.updateItemState({ id: input.id }, (item) => ({
@@ -176,7 +179,7 @@ test('direct collection store offline public api works and stays strongly typed'
     status: 'success'
   `);
   expect(collectionStore.getOfflineEntities()).toMatchObject([
-    { entityKey: '"1', pendingMutations: 1, storeType: 'collection' },
+    { entityKey: '"1"', pendingMutations: 1, storeType: 'collection' },
   ]);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchObject([
     { storeName: 'direct-collection-offline' },
@@ -253,6 +256,9 @@ test('collection offline accumulation merges same-item mutations and keeps diffe
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
+            getEntityRefs: ({ input }) => [
+              { entityKey: JSON.stringify(input.id), entityKind: 'item' },
+            ],
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute,
           },
@@ -330,8 +336,8 @@ test('collection offline accumulation merges same-item mutations and keeps diffe
   await Promise.resolve();
 
   expect(collectionStore.getOfflineEntities()).toMatchObject([
-    { entityKey: '"1', pendingMutations: 1, storeType: 'collection' },
-    { entityKey: '"2', pendingMutations: 1, storeType: 'collection' },
+    { entityKey: '"1"', pendingMutations: 1, storeType: 'collection' },
+    { entityKey: '"2"', pendingMutations: 1, storeType: 'collection' },
   ]);
 
   await act(async () => {

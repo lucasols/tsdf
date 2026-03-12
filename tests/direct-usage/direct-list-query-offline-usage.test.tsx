@@ -47,7 +47,13 @@ type RenameUserOperations = {
 };
 
 const typedListQueryOperations_: RenameUserOperations = {
-  renameUser: { inputSchema: userInputSchema, execute: ({ input }) => input },
+  renameUser: {
+    inputSchema: userInputSchema,
+    getEntityRefs: ({ input }) => [
+      { entityKey: JSON.stringify(['users', input.id]), entityKind: 'item' },
+    ],
+    execute: ({ input }) => input,
+  },
 };
 
 const typedListQueryStore_ = createListQueryStore<
@@ -177,6 +183,12 @@ test('direct list-query store offline public api works and stays strongly typed'
         operations: {
           renameUser: {
             inputSchema: userInputSchema,
+            getEntityRefs: ({ input }) => [
+              {
+                entityKey: JSON.stringify(['users', input.id]),
+                entityKind: 'item',
+              },
+            ],
             execute: ({ input }) => {
               userState.set(input.id, { id: input.id, name: input.name });
               listQueryStore.updateItemState(
@@ -342,6 +354,12 @@ test('useMultipleListQueries exposes offline pending metadata for queued mutatio
         operations: {
           renameUser: {
             inputSchema: userInputSchema,
+            getEntityRefs: ({ input }) => [
+              {
+                entityKey: JSON.stringify(['users', input.id]),
+                entityKind: 'item',
+              },
+            ],
             execute: ({ input }) => {
               userState.set(input.id, { id: input.id, name: input.name });
               listQueryStore.updateItemState(
@@ -466,6 +484,12 @@ test('list-query offline accumulation merges same-item mutations and keeps diffe
         operations: {
           renameUser: {
             inputSchema: userInputSchema,
+            getEntityRefs: ({ input }) => [
+              {
+                entityKey: JSON.stringify(['users', input.id]),
+                entityKind: 'item',
+              },
+            ],
             accumulation: { mergeInput: ({ incomingInput }) => incomingInput },
             execute,
           },

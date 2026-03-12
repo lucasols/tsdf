@@ -19,12 +19,10 @@ import type {
 
 const NEEDS_CONFIRMATION_RETRY_MS = 250;
 
-type OfflineStoreAdapter<TMutationPayload> = {
-  getEntityRefs: (args: {
+type OfflineStoreAdapter = {
+  getEntityRefs?: (args: {
     operationName: string;
     input: unknown;
-    mutationPayload?: TMutationPayload;
-    tempId?: string;
   }) => OfflineEntityRef[];
   getProtectedCacheKeys: (entityRefs: OfflineEntityRef[]) => string[];
   applyPendingEntity?: (args: {
@@ -44,7 +42,6 @@ type OfflineStoreAdapter<TMutationPayload> = {
 
 type CreateOfflineStoreControllerOptions<
   TOperations extends Record<string, AnyOfflineOperationDefinition>,
-  TMutationPayload,
 > = {
   storeName: string;
   storeType: OfflineStoreType;
@@ -52,7 +49,7 @@ type CreateOfflineStoreControllerOptions<
   onPersistentStorageError?: (error: unknown) => void;
   adapter: StorageAdapter;
   offlineMode: OfflineModeConfig<TOperations>;
-  storeAdapter: OfflineStoreAdapter<TMutationPayload>;
+  storeAdapter: OfflineStoreAdapter;
 };
 
 type ActiveSessionState = {
@@ -114,14 +111,12 @@ function compareQueueEntries(
 
 export type OfflineStoreController<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
-  TMutationPayload = unknown,
 > = {
   hydrateIfNeeded: () => Promise<void>;
   canQueueMutation: () => boolean;
   queueMutation: <TName extends keyof TOperations>(args: {
     operationName: TName;
     input: OperationInput<TOperations, TName>;
-    mutationPayload?: TMutationPayload;
   }) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
   getOfflineConflicts: () => OfflineConflictRecord[];
@@ -153,7 +148,6 @@ export function initializeOfflineStoreController(
 
 export function createOfflineStoreController<
   TOperations extends Record<string, AnyOfflineOperationDefinition>,
-  TMutationPayload,
 >({
   storeName,
   storeType,
@@ -162,10 +156,7 @@ export function createOfflineStoreController<
   adapter,
   offlineMode,
   storeAdapter,
-}: CreateOfflineStoreControllerOptions<
-  TOperations,
-  TMutationPayload
->): OfflineStoreController<TOperations, TMutationPayload> {
+}: CreateOfflineStoreControllerOptions<TOperations>): OfflineStoreController<TOperations> {
   const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
   let activeSession: ActiveSessionState | null = null;
   let replayScheduled = false;
@@ -461,7 +452,7 @@ export function createOfflineStoreController<
       operation: entry.operation,
       input: entry.input,
       conflict,
-      mutationPayload: entry.mutationPayload,
+      enqueuedAt: entry.createdAt,
       entityRefs: entry.entityRefs,
       createdAt: now,
       updatedAt: now,
@@ -538,7 +529,7 @@ export function createOfflineStoreController<
     entry: OfflineQueueEntry;
     conflict: unknown;
     conflictHandling: NonNullable<
-      AnyOfflineOperationDefinition<TMutationPayload>['conflictHandling']
+      AnyOfflineOperationDefinition['conflictHandling']
     >;
   }): Promise<void> {
     if (
@@ -559,11 +550,7 @@ export function createOfflineStoreController<
 
   async function queueMutationWithSession<TName extends keyof TOperations>(
     current: ActiveSessionState,
-    args: {
-      operationName: TName;
-      input: unknown;
-      mutationPayload?: TMutationPayload;
-    },
+    args: { operationName: TName; input: unknown },
   ): Promise<void> {
     const operationName = String(args.operationName);
     const operation = offlineMode.operations[operationName];
@@ -596,12 +583,15 @@ export function createOfflineStoreController<
       });
     }
 
-    const entityRefs = storeAdapter.getEntityRefs({
-      operationName,
-      input: validatedInput,
-      mutationPayload: args.mutationPayload,
-      tempId,
-    });
+    const entityRefs =
+      tempId !== undefined
+        ? [{ entityKey: tempId, entityKind: 'item' as const }]
+        : typeof operation.getEntityRefs === 'function'
+          ? operation.getEntityRefs({ input: validatedInput })
+          : (storeAdapter.getEntityRefs?.({
+              operationName,
+              input: validatedInput,
+            }) ?? []);
     const now = Date.now();
 
     if (operation.accumulation && !tempId) {
@@ -644,7 +634,6 @@ export function createOfflineStoreController<
         storeType,
         operation: operationName,
         input: validatedInput,
-        mutationPayload: args.mutationPayload,
         entityRefs,
         attempts: 0,
         createdAt: now,
@@ -712,7 +701,7 @@ export function createOfflineStoreController<
         continue;
       }
 
-      const shouldConfirmBeforeRetry =
+      const shouldCheckSkipBeforeRetry =
         nextEntry.syncState === 'needs-confirmation';
       const conflictHandling = operation.conflictHandling;
       const tempEntity = operation.tempEntity;
@@ -725,62 +714,24 @@ export function createOfflineStoreController<
       await persistEntry(entryToUse, current);
 
       try {
-        const mutationPayload = __LEGIT_CAST__<
-          TMutationPayload | undefined,
-          unknown
-        >(entryToUse.mutationPayload);
-
-        if (shouldConfirmBeforeRetry && operation.confirmRemoteOutcome) {
-          const confirmed = await operation.confirmRemoteOutcome({
-            sessionKey: current.sessionKey,
+        if (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) {
+          const shouldSkip = await operation.shouldSkipSync({
             input: entryToUse.input,
-            mutationPayload,
+            enqueuedAt: entryToUse.createdAt,
+            updatedAt: entryToUse.updatedAt,
           });
 
-          if (confirmed.type === 'applied') {
+          if (shouldSkip) {
             await removeEntry(entryToUse.id, current);
             continue;
           }
-
-          if (confirmed.type === 'conflict') {
-            if (!conflictHandling) {
-              throw new Error(
-                `Operation "${entryToUse.operation}" returned a conflict without conflictHandling configured`,
-              );
-            }
-
-            await persistValidatedConflict({
-              current,
-              entry: entryToUse,
-              conflict: confirmed.conflict,
-              conflictHandling,
-            });
-            continue;
-          }
-
-          if (confirmed.type === 'unknown') {
-            entryToUse = {
-              ...entryToUse,
-              syncState: 'needs-confirmation',
-              updatedAt: Date.now(),
-            };
-            await persistEntry(entryToUse, current);
-            scheduleReplayRetry(entryToUse.id);
-            return;
-          }
         }
 
-        const result = await operation.execute({
-          sessionKey: current.sessionKey,
-          input: entryToUse.input,
-          mutationPayload,
-        });
         const conflict = conflictHandling
           ? await conflictHandling.detectConflict({
-              sessionKey: current.sessionKey,
               input: entryToUse.input,
-              mutationPayload,
-              result,
+              enqueuedAt: entryToUse.createdAt,
+              updatedAt: entryToUse.updatedAt,
             })
           : false;
 
@@ -799,6 +750,12 @@ export function createOfflineStoreController<
           });
           continue;
         }
+
+        const result = await operation.execute({
+          input: entryToUse.input,
+          enqueuedAt: entryToUse.createdAt,
+          updatedAt: entryToUse.updatedAt,
+        });
 
         if (
           entryToUse.tempId &&
@@ -825,7 +782,7 @@ export function createOfflineStoreController<
           attempts: entryToUse.attempts + 1,
           updatedAt: Date.now(),
           lastAttemptAt: Date.now(),
-          syncState: operation.confirmRemoteOutcome
+          syncState: operation.shouldSkipSync
             ? 'needs-confirmation'
             : 'pending',
           lastError: { message: toMessage(error) },
@@ -837,7 +794,7 @@ export function createOfflineStoreController<
           operationName: entryToUse.operation,
           sessionKey: current.sessionKey,
         });
-        if (operation.confirmRemoteOutcome) {
+        if (operation.shouldSkipSync) {
           scheduleReplayRetry(entryToUse.id);
         }
         return;
@@ -848,7 +805,6 @@ export function createOfflineStoreController<
   async function queueMutation<TName extends keyof TOperations>(args: {
     operationName: TName;
     input: unknown;
-    mutationPayload?: TMutationPayload;
   }): Promise<void> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
@@ -895,12 +851,10 @@ export function createOfflineStoreController<
     }
 
     const result = await operation.conflictHandling.resolveConflict({
-      sessionKey: current.sessionKey,
       input: conflict.input,
       conflict: conflict.conflict,
-      mutationPayload: __LEGIT_CAST__<TMutationPayload | undefined, unknown>(
-        conflict.mutationPayload,
-      ),
+      enqueuedAt: conflict.enqueuedAt,
+      updatedAt: conflict.updatedAt,
       resolution,
     });
 
@@ -912,9 +866,6 @@ export function createOfflineStoreController<
           conflict.operation,
         ),
         input: result.requeue.input,
-        mutationPayload: __LEGIT_CAST__<TMutationPayload | undefined, unknown>(
-          conflict.mutationPayload,
-        ),
       });
     }
   }

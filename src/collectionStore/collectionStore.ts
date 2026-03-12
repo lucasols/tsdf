@@ -26,7 +26,7 @@ import {
 } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
-  CollectionOfflineOperationsRegistry,
+  CollectionOfflineOperationDefinition,
   OfflineMutationDescriptor,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
@@ -187,13 +187,27 @@ type CollectionItemSnapshotMessage<
   { kind: 'collection-item-snapshot' }
 >;
 
+type InternalCollectionOfflineOperations<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = Record<
+  string,
+  CollectionOfflineOperationDefinition<
+    ItemState,
+    ItemPayload,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >
+>;
+
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+  TOfflineOperations extends InternalCollectionOfflineOperations<
     ItemState,
     ItemPayload
-  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
+  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -273,10 +287,10 @@ export type CollectionStoreOptions<
 export type CollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+  TOfflineOperations extends InternalCollectionOfflineOperations<
     ItemState,
     ItemPayload
-  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
+  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
 > = ReturnType<
   typeof createCollectionStore<ItemState, ItemPayload, TOfflineOperations>
 >;
@@ -290,10 +304,10 @@ const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 export function createCollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+  TOfflineOperations extends InternalCollectionOfflineOperations<
     ItemState,
     ItemPayload
-  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
+  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
   StorageState = unknown,
 >({
   debugName,
@@ -408,24 +422,6 @@ export function createCollectionStore<
         adapter: persistentStorageConfig.adapter,
         offlineMode: persistentStorageConfig.offlineMode,
         storeAdapter: {
-          getEntityRefs: ({ mutationPayload, tempId }) => {
-            if (tempId) {
-              return [{ entityKey: tempId, entityKind: 'item' }];
-            }
-
-            if (mutationPayload === undefined || mutationPayload === null) {
-              return [];
-            }
-
-            return [
-              {
-                entityKey: getItemKey(
-                  __LEGIT_CAST__<ItemPayload, unknown>(mutationPayload),
-                ),
-                entityKind: 'item',
-              },
-            ];
-          },
           getProtectedCacheKeys: (entityRefs) => {
             const sessionKey = getSessionKey();
             if (sessionKey === false) return [];
@@ -1484,7 +1480,6 @@ export function createCollectionStore<
           await offlineController.queueMutation({
             operationName: offline.operation,
             input: offline.input,
-            mutationPayload: payload,
           });
           return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
         }

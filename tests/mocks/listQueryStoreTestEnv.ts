@@ -1,5 +1,8 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  __LEGIT_CAST__,
+  type __LEGIT_ANY__,
+} from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
 import {
   createListQueryStore,
@@ -10,7 +13,7 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
-import type { ListQueryOfflineOperationsRegistry } from '../../src/persistentStorage/offline/types';
+import type { ListQueryOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
 import type {
   ListQueryPersistentStorageConfig,
   StorageAdapter,
@@ -41,6 +44,26 @@ type ListQueryItemPayload = string;
 
 export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
 
+export type Row = {
+  id: number;
+  name: string;
+  age?: number;
+  city?: string;
+  [key: string]: unknown;
+};
+
+type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
+  string,
+  ListQueryOfflineOperationDefinition<
+    TRow,
+    ListQueryParams,
+    ListQueryItemPayload,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >
+>;
+
 type ListQuerySnapshotConfig = {
   tables?: string[];
   items?: string[];
@@ -66,14 +89,6 @@ function getStoreItemKey(tableId: string, id: number): string {
   return getCompositeKey(getRawItemKey(tableId, id));
 }
 
-export type Row = {
-  id: number;
-  name: string;
-  age?: number;
-  city?: string;
-  [key: string]: unknown;
-};
-
 export type Tables<TRow extends Row = Row> = Record<string, TRow[]>;
 
 function flattenTables<TRow extends Row>(
@@ -98,15 +113,8 @@ export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
-    TRow,
-    ListQueryParams,
-    ListQueryItemPayload
-  > = ListQueryOfflineOperationsRegistry<
-    TRow,
-    ListQueryParams,
-    ListQueryItemPayload
-  >,
+  TOfflineOperations extends TestListQueryOfflineOperationsRegistry<TRow> =
+    TestListQueryOfflineOperationsRegistry<TRow>,
   StorageState = unknown,
 >(
   serverInitialData: Tables<TRow>,

@@ -1,11 +1,12 @@
 import { act } from 'react';
+import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import {
   createCollectionStore,
   type CollectionBrowserTabsMessage,
   type CollectionInitialStateItem,
   type CollectionStoreOptions,
 } from '../../src/collectionStore/collectionStore';
-import type { CollectionOfflineOperationsRegistry } from '../../src/persistentStorage/offline/types';
+import type { CollectionOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
 import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
@@ -31,8 +32,6 @@ import {
   TEST_INITIAL_TIME,
 } from './testEnvUtils';
 
-export type CollectionTestItem<D> = { value: D };
-
 export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** App just opened, no data fetched yet. */
   | 'idle'
@@ -44,12 +43,25 @@ export type CollectionStoreTestScenario<D extends Record<string, unknown>> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: Record<string, D> };
 
+export type CollectionTestItem<D> = { value: D };
+
+type TestCollectionOfflineOperationsRegistry<
+  D extends Record<string, unknown>,
+> = Record<
+  string,
+  CollectionOfflineOperationDefinition<
+    CollectionTestItem<D>,
+    string,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >
+>;
+
 export type CollectionStoreTestEnvOptions<
   D extends Record<string, unknown>,
-  TOfflineOperations extends CollectionOfflineOperationsRegistry<
-    CollectionTestItem<D>,
-    string
-  > = CollectionOfflineOperationsRegistry<CollectionTestItem<D>, string>,
+  TOfflineOperations extends TestCollectionOfflineOperationsRegistry<D> =
+    TestCollectionOfflineOperationsRegistry<D>,
   StorageState = unknown,
 > = {
   id?: string;
@@ -98,10 +110,8 @@ export type CollectionStoreTestEnvOptions<
 
 export function createCollectionStoreTestEnv<
   D extends Record<string, unknown>,
-  TOfflineOperations extends CollectionOfflineOperationsRegistry<
-    CollectionTestItem<D>,
-    string
-  > = CollectionOfflineOperationsRegistry<CollectionTestItem<D>, string>,
+  TOfflineOperations extends TestCollectionOfflineOperationsRegistry<D> =
+    TestCollectionOfflineOperationsRegistry<D>,
   StorageState = unknown,
 >(
   serverInitialData: Record<string, D>,

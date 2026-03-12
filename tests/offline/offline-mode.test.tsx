@@ -25,9 +25,7 @@ type DocState = { value: number };
 type UpdateValueOperations = {
   updateValue: DocumentOfflineOperationDefinition<
     DocState,
-    { value: number },
-    unknown,
-    { value: number }
+    { input: { value: number }; result: { value: number } }
   >;
 };
 type UpdateValueExecuteContext = Parameters<

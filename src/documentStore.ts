@@ -19,7 +19,7 @@ import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useLis
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
 import type {
-  DocumentOfflineOperationsRegistry,
+  DocumentOfflineOperationDefinition,
   OfflineMutationDescriptor,
 } from './persistentStorage/offline/types';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
@@ -128,10 +128,18 @@ type DocumentSnapshotMessage<State extends ValidStoreState> = Extract<
   { kind: 'document-snapshot' }
 >;
 
+type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
+  string,
+  DocumentOfflineOperationDefinition<
+    State,
+    { input: __LEGIT_ANY__; conflict: __LEGIT_ANY__; result: __LEGIT_ANY__ }
+  >
+>;
+
 export type DocumentStoreOptions<
   State extends ValidStoreState,
-  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
-    DocumentOfflineOperationsRegistry<State>,
+  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
+    InternalDocumentOfflineOperations<State>,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -191,8 +199,8 @@ export type DocumentStoreOptions<
 
 export type DocumentStore<
   State extends ValidStoreState,
-  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
-    DocumentOfflineOperationsRegistry<State>,
+  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
+    InternalDocumentOfflineOperations<State>,
 > = ReturnType<typeof createDocumentStore<State, TOfflineOperations>>;
 
 // Constant requestId for document store (single-item mode)
@@ -201,8 +209,8 @@ const DOC_TARGET_KEY = 'document' as const;
 
 export function createDocumentStore<
   State extends ValidStoreState,
-  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
-    DocumentOfflineOperationsRegistry<State>,
+  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
+    InternalDocumentOfflineOperations<State>,
   StorageState = unknown,
 >({
   debugName,

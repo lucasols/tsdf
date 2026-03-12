@@ -7,7 +7,7 @@ import { Store } from 't-state';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import type {
-  ListQueryOfflineOperationsRegistry,
+  ListQueryOfflineOperationDefinition,
   OfflineMutationDescriptor,
   OperationInput,
 } from '../persistentStorage/offline/types';
@@ -47,15 +47,31 @@ type InvalidateItemEvent = {
 
 type SchedulerWithMutation = { startMutation: (key: string) => () => boolean };
 
+type InternalListQueryOfflineOperations<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = Record<
+  string,
+  ListQueryOfflineOperationDefinition<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >
+>;
+
 export type CreateMutationApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+  TOfflineOperations extends InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
 > = {
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
   fetchItemFn?: (
@@ -104,7 +120,6 @@ export type CreateMutationApiOptions<
     queueMutation: <TName extends keyof TOfflineOperations>(args: {
       operationName: TName;
       input: OperationInput<TOfflineOperations, TName>;
-      mutationPayload?: ItemPayload | ItemPayload[] | undefined;
     }) => Promise<void>;
   } | null;
   runWithBroadcastConsistency: <T>(
@@ -125,11 +140,11 @@ export function createMutationApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+  TOfflineOperations extends InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
 >({
   store,
   fetchItemFn,
@@ -755,10 +770,6 @@ export function createMutationApi<
           await offlineController.queueMutation({
             operationName: offline.operation,
             input: offline.input,
-            mutationPayload:
-              Array.isArray(payloadToUse) || typeof payloadToUse !== 'function'
-                ? payloadToUse
-                : undefined,
           });
           return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
         }

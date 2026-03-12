@@ -1,9 +1,11 @@
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import { type RcType } from 'runcheck';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
-  CollectionOfflineOperationsRegistry,
-  DocumentOfflineOperationsRegistry,
-  ListQueryOfflineOperationsRegistry,
+  CollectionOfflineOperationDefinition,
+  DocumentOfflineOperationDefinition,
+  ListQueryOfflineOperationDefinition,
   OfflineModeConfig,
 } from './offline/types';
 
@@ -46,20 +48,8 @@ export type StorageAdapter = SyncStorageAdapter | AsyncStorageAdapter;
 
 // --- Schema Types ---
 
-/** Standard Schema v1 (zod, valibot, arktype, etc.) */
-export type StandardSchemaLike<T> = {
-  '~standard': {
-    validate: (
-      value: unknown,
-    ) =>
-      | { value: T; issues?: undefined }
-      | { issues: readonly { message: string }[] }
-      | Promise<
-          | { value: T; issues?: undefined }
-          | { issues: readonly { message: string }[] }
-        >;
-  };
-};
+/** Standard Schema v1 (zod, valibot, arktype, etc.). */
+export type StandardSchemaLike<T> = StandardSchemaV1<unknown, T>;
 
 /** Union of supported schema types for persistent storage validation. */
 export type PersistentStorageSchema<T> = RcType<T> | StandardSchemaLike<T>;
@@ -145,26 +135,48 @@ type StorePersistentStorageBaseConfig<TFinal, TStorage = unknown> = Omit<
   'getSessionKey'
 >;
 
+type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
+  string,
+  DocumentOfflineOperationDefinition<
+    State,
+    { input: __LEGIT_ANY__; conflict: __LEGIT_ANY__; result: __LEGIT_ANY__ }
+  >
+>;
+
 /** Persistent storage config for DocumentStore. */
 export type DocumentPersistentStorageConfig<
   State extends ValidStoreState,
   StorageState = unknown,
-  TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
-    DocumentOfflineOperationsRegistry<State>,
+  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
+    InternalDocumentOfflineOperations<State>,
 > = StorePersistentStorageBaseConfig<State, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
 };
+
+type InternalCollectionOfflineOperations<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = Record<
+  string,
+  CollectionOfflineOperationDefinition<
+    ItemState,
+    ItemPayload,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >
+>;
 
 /** Persistent storage config for CollectionStore. */
 export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload = ValidPayload,
   StorageState = unknown,
-  TOfflineOperations extends CollectionOfflineOperationsRegistry<
+  TOfflineOperations extends InternalCollectionOfflineOperations<
     ItemState,
     ItemPayload
-  > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
+  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
@@ -182,17 +194,33 @@ export type CollectionPersistentStorageConfig<
   ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
 };
 
+type InternalListQueryOfflineOperations<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = Record<
+  string,
+  ListQueryOfflineOperationDefinition<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >
+>;
+
 /** Persistent storage config for ListQueryStore. */
 export type ListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload = ValidPayload,
   ItemPayload extends ValidPayload = ValidPayload,
   StorageState = unknown,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+  TOfflineOperations extends InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
   offlineMode?: OfflineModeConfig<TOfflineOperations>;

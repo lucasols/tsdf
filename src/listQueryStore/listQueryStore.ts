@@ -3,7 +3,10 @@ import {
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  __LEGIT_CAST__,
+  type __LEGIT_ANY__,
+} from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { Store } from 't-state';
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
@@ -21,7 +24,7 @@ import {
 } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
-  ListQueryOfflineOperationsRegistry,
+  ListQueryOfflineOperationDefinition,
   OperationInput,
 } from '../persistentStorage/offline/types';
 import type {
@@ -103,17 +106,33 @@ export type ListQueryStoreEvents = {
   };
 };
 
+type InternalListQueryOfflineOperations<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = Record<
+  string,
+  ListQueryOfflineOperationDefinition<
+    ItemState,
+    QueryPayload,
+    ItemPayload,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >
+>;
+
 export type ListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+  TOfflineOperations extends InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
 > = ReturnType<
   typeof createListQueryStore<
     ItemState,
@@ -212,11 +231,11 @@ type ListQueryStoreOptionsBase<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+  TOfflineOperations extends InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -318,11 +337,11 @@ export type ListQueryStoreOptions<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+  TOfflineOperations extends InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
   StorageState = unknown,
 > = ListQueryStoreOptionsBase<
   ItemState,
@@ -352,11 +371,11 @@ export function createListQueryStore<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends ListQueryOfflineOperationsRegistry<
+  TOfflineOperations extends InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
+  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
   StorageState = unknown,
 >(
   storeOptions: ListQueryStoreOptions<
@@ -631,10 +650,8 @@ export function createListQueryStore<
     );
   }
 
-  let offlineController: OfflineStoreController<
-    TOfflineOperations,
-    ItemPayload | ItemPayload[] | undefined
-  > | null = null;
+  let offlineController: OfflineStoreController<TOfflineOperations> | null =
+    null;
   const offlineFetchController = {
     prepareForFetch: () =>
       offlineController?.prepareForFetch() ?? Promise.resolve(),
@@ -649,7 +666,6 @@ export function createListQueryStore<
     queueMutation: <TName extends keyof TOfflineOperations>(args: {
       operationName: TName;
       input: OperationInput<TOfflineOperations, TName>;
-      mutationPayload?: ItemPayload | ItemPayload[] | undefined;
     }) =>
       offlineController
         ? offlineController.queueMutation(args)
@@ -1137,24 +1153,6 @@ export function createListQueryStore<
       adapter: persistentStorageConfig.adapter,
       offlineMode: persistentStorageConfig.offlineMode,
       storeAdapter: {
-        getEntityRefs: ({ mutationPayload, tempId }) => {
-          if (tempId) {
-            return [{ entityKey: tempId, entityKind: 'item' }];
-          }
-
-          if (Array.isArray(mutationPayload)) {
-            return mutationPayload.map((payload) => ({
-              entityKey: getItemKey(payload),
-              entityKind: 'item' as const,
-            }));
-          }
-
-          if (mutationPayload === undefined) return [];
-
-          return [
-            { entityKey: getItemKey(mutationPayload), entityKind: 'item' },
-          ];
-        },
         getProtectedCacheKeys: (entityRefs) => {
           const sessionKey = getSessionKey();
           if (sessionKey === false) return [];

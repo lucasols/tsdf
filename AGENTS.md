@@ -96,6 +96,12 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 - Only introduce abstractions when they make the code simpler, more maintainable, or more readable â€” duplicating a few lines is preferable to a forced abstraction
 - Avoid unnecessary boilerplate
 
+## Alpha-stage API policy
+
+- This library is still in a major-version alpha stage and is not in production yet; prioritize a clean, coherent API over backward compatibility
+- Do not add fallback behavior, legacy code paths, compatibility shims, optional support for old shapes, or migration-oriented branching unless the user explicitly asks for it
+- When changing an API or stored data shape, prefer replacing the old behavior outright instead of preserving both the old and new forms
+
 ## Feature implementation
 
 When adding a new feature, or adjust a existing one:

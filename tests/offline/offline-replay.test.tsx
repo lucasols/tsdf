@@ -39,18 +39,18 @@ type CreateUserOperations = {
 type UpdateValueOperations = {
   updateValue: DocumentOfflineOperationDefinition<
     { value: number },
-    { value: number },
-    unknown,
-    { value: number }
+    { input: { value: number }; result: { value: number } }
   >;
 };
 
 type UpdateValueConflictOperations = {
   updateValue: DocumentOfflineOperationDefinition<
     { value: number },
-    { value: number },
-    { reason: string },
-    { value: number }
+    {
+      input: { value: number };
+      conflict: { reason: string };
+      result: { value: number };
+    }
   >;
 };
 
@@ -59,13 +59,13 @@ type PatchUserOperations = {
     { id: number; name: string },
     ListQueryParams,
     string,
-    { name: string },
+    { itemId: string; name: string },
     unknown,
     { name: string }
   >;
 };
 
-const userPatchSchema = rc_object({ name: rc_string });
+const userPatchSchema = rc_object({ itemId: rc_string, name: rc_string });
 const userRowSchema = rc_object({ id: rc_number, name: rc_string });
 
 function getLocalStorageKeys(): string[] {
@@ -120,6 +120,9 @@ describe('offline mode replay and conflict handling', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [
+                  { entityKey: `temp:${input.name}`, entityKind: 'item' },
+                ],
                 accumulation: {
                   mergeInput: ({ incomingInput }) => incomingInput,
                 },
@@ -181,24 +184,39 @@ describe('offline mode replay and conflict handling', () => {
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   });
 
-  test('needs-confirmation entries are confirmed before replay retrying the mutation', async () => {
+  test('needs-confirmation entries are skipped when shouldSkipSync returns true', async () => {
     network.setOffline();
+    let skipCheckEnqueuedAt: number | null = null;
 
     const execute = vi
       .fn<
-        ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+        ({
+          input,
+          enqueuedAt,
+        }: {
+          input: { value: number };
+          enqueuedAt: number;
+        }) => Promise<{ value: number }>
       >()
-      .mockRejectedValueOnce(new Error('dispatch failed after send'));
-    const confirmRemoteOutcome = vi
+      .mockImplementationOnce(({ input, enqueuedAt }) => {
+        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+        throw new Error(`dispatch failed after send ${input.value}`);
+      });
+    const shouldSkipSync = vi
       .fn<
         ({
           input,
+          enqueuedAt,
         }: {
           input: { value: number };
-          sessionKey: string;
-        }) => Promise<{ type: 'applied' }>
+          enqueuedAt: number;
+        }) => Promise<boolean>
       >()
-      .mockResolvedValue({ type: 'applied' });
+      .mockImplementation(({ input, enqueuedAt }) => {
+        skipCheckEnqueuedAt = enqueuedAt;
+        expect(input.value).toBe(2);
+        return Promise.resolve(true);
+      });
     const recoveryCheck = vi
       .fn<({ sessionKey }: { sessionKey: string }) => boolean>()
       .mockReturnValue(true);
@@ -228,7 +246,7 @@ describe('offline mode replay and conflict handling', () => {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
-              confirmRemoteOutcome,
+              shouldSkipSync,
             },
           },
         },
@@ -252,27 +270,44 @@ describe('offline mode replay and conflict handling', () => {
     await flushAllTimers();
 
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(1);
+    expect(shouldSkipSync).toHaveBeenCalledTimes(1);
+    expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
     expect(recoveryCheck).toHaveBeenCalledTimes(1);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   });
 
-  test('needs-confirmation entries retry while outage mode stays disabled', async () => {
+  test('needs-confirmation entries retry execute when shouldSkipSync returns false', async () => {
+    let skipCheckEnqueuedAt: number | null = null;
     const execute = vi
-      .fn<
-        ({ input }: { input: { value: number } }) => Promise<{ value: number }>
-      >()
-      .mockRejectedValueOnce(new Error('dispatch failed after send'));
-    const confirmRemoteOutcome = vi
       .fn<
         ({
           input,
+          enqueuedAt,
         }: {
           input: { value: number };
-          sessionKey: string;
-        }) => Promise<{ type: 'applied' }>
+          enqueuedAt: number;
+        }) => Promise<{ value: number }>
       >()
-      .mockResolvedValue({ type: 'applied' });
+      .mockImplementationOnce(({ input, enqueuedAt }) => {
+        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+        throw new Error(`dispatch failed after send ${input.value}`);
+      })
+      .mockResolvedValue({ value: 2 });
+    const shouldSkipSync = vi
+      .fn<
+        ({
+          input,
+          enqueuedAt,
+        }: {
+          input: { value: number };
+          enqueuedAt: number;
+        }) => Promise<boolean>
+      >()
+      .mockImplementation(({ input, enqueuedAt }) => {
+        skipCheckEnqueuedAt = enqueuedAt;
+        expect(input.value).toBe(2);
+        return Promise.resolve(false);
+      });
 
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       getSessionKey: () => 'needs-confirmation-no-outage-session',
@@ -286,7 +321,7 @@ describe('offline mode replay and conflict handling', () => {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
-              confirmRemoteOutcome,
+              shouldSkipSync,
             },
           },
         },
@@ -309,17 +344,33 @@ describe('offline mode replay and conflict handling', () => {
     await Promise.resolve();
 
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(0);
+    expect(shouldSkipSync).toHaveBeenCalledTimes(0);
 
     await advanceTime(300);
     await flushAllTimers();
 
-    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(1);
+    expect(shouldSkipSync).toHaveBeenCalledTimes(1);
+    expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
+    expect(execute).toHaveBeenCalledTimes(2);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   });
 
-  test('offline conflicts move out of the queue, surface through selectors, and can be resolved', async () => {
+  test('offline conflicts are detected before execute, surface through selectors, and can be resolved', async () => {
     network.setOffline();
+    const execute = vi.fn(
+      ({
+        input,
+        enqueuedAt,
+      }: {
+        input: { value: number };
+        enqueuedAt: number;
+      }) => {
+        expect(input.value).toBe(2);
+        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+        return input;
+      },
+    );
+    let resolveEnqueuedAt: number | null = null;
     const env = createDocumentStoreTestEnv<
       number,
       UpdateValueConflictOperations
@@ -335,11 +386,28 @@ describe('offline mode replay and conflict handling', () => {
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input }) => input,
+              execute,
               conflictHandling: {
                 schema: docConflictSchema,
-                detectConflict: () => ({ reason: 'server-changed' }),
-                resolveConflict: () => undefined,
+                detectConflict: ({ input, enqueuedAt }) => {
+                  expect(input.value).toBe(2);
+                  expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+                  return { reason: 'server-changed' };
+                },
+                resolveConflict: ({
+                  input,
+                  conflict,
+                  resolution,
+                  enqueuedAt,
+                }) => {
+                  expect(input.value).toBe(2);
+                  expect(conflict).toMatchObject({ reason: 'server-changed' });
+                  expect(resolution).toMatchObject({
+                    resolution: 'accept-local',
+                  });
+                  resolveEnqueuedAt = enqueuedAt;
+                  return undefined;
+                },
               },
             },
           },
@@ -363,6 +431,7 @@ describe('offline mode replay and conflict handling', () => {
     await Promise.resolve();
     await flushAllTimers();
 
+    expect(execute).not.toHaveBeenCalled();
     expect(env.apiStore.getOfflineEntities()).toMatchObject([
       {
         entityKey: 'document',
@@ -395,12 +464,13 @@ describe('offline mode replay and conflict handling', () => {
       });
     });
 
+    expect(resolveEnqueuedAt).toBe(TEST_INITIAL_TIME);
     expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
     hook.unmount();
   });
 
-  test('needs-confirmation entries do not accept new accumulation', async () => {
+  test('needs-confirmation entries do not accept new accumulation before shouldSkipSync runs', async () => {
     network.setOffline();
     const execute = vi
       .fn<
@@ -425,7 +495,7 @@ describe('offline mode replay and conflict handling', () => {
                 mergeInput: ({ incomingInput }) => incomingInput,
               },
               execute,
-              confirmRemoteOutcome: () => ({ type: 'unknown' }),
+              shouldSkipSync: () => false,
             },
           },
         },
@@ -467,23 +537,38 @@ describe('offline mode replay and conflict handling', () => {
     ]);
   });
 
-  test('needs-confirmation entries keep retrying confirmation while the session stays online', async () => {
+  test('needs-confirmation entries keep retrying shouldSkipSync while the session stays online', async () => {
     network.setOnline();
+    let skipCheckEnqueuedAt: number | null = null;
     const execute = vi
-      .fn<
-        ({ input }: { input: { value: number } }) => Promise<{ value: number }>
-      >()
-      .mockRejectedValueOnce(new Error('dispatch failed after send'));
-    const confirmRemoteOutcome = vi
       .fn<
         ({
           input,
+          enqueuedAt,
         }: {
           input: { value: number };
-          sessionKey: string;
-        }) => Promise<{ type: 'applied' }>
+          enqueuedAt: number;
+        }) => Promise<{ value: number }>
       >()
-      .mockResolvedValue({ type: 'applied' });
+      .mockImplementationOnce(({ input, enqueuedAt }) => {
+        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+        throw new Error(`dispatch failed after send ${input.value}`);
+      });
+    const shouldSkipSync = vi
+      .fn<
+        ({
+          input,
+          enqueuedAt,
+        }: {
+          input: { value: number };
+          enqueuedAt: number;
+        }) => Promise<boolean>
+      >()
+      .mockImplementation(({ input, enqueuedAt }) => {
+        skipCheckEnqueuedAt = enqueuedAt;
+        expect(input.value).toBe(2);
+        return Promise.resolve(true);
+      });
 
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       getSessionKey: () => 'online-needs-confirmation-retry-session',
@@ -498,7 +583,7 @@ describe('offline mode replay and conflict handling', () => {
             updateValue: {
               inputSchema: docMutationInputSchema,
               execute,
-              confirmRemoteOutcome,
+              shouldSkipSync,
             },
           },
         },
@@ -517,7 +602,7 @@ describe('offline mode replay and conflict handling', () => {
 
     await Promise.resolve();
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(0);
+    expect(shouldSkipSync).toHaveBeenCalledTimes(0);
     expect(env.apiStore.getOfflineEntities()).toMatchObject([
       {
         entityKey: 'document',
@@ -529,25 +614,23 @@ describe('offline mode replay and conflict handling', () => {
     await advanceTime(300);
     await flushAllTimers();
 
-    expect(confirmRemoteOutcome).toHaveBeenCalledTimes(1);
+    expect(shouldSkipSync).toHaveBeenCalledTimes(1);
+    expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   });
 
-  test('list-query offline replay forwards the original mutation payload', async () => {
+  test('list-query offline replay uses explicit entity refs from the offline input', async () => {
     network.setOffline();
     const execute = vi.fn(
       ({
         input,
-        mutationPayload,
+        enqueuedAt,
       }: {
-        input: { name: string };
-        mutationPayload?: string | string[];
+        input: { itemId: string; name: string };
+        enqueuedAt: number;
       }) => {
-        if (!mutationPayload || Array.isArray(mutationPayload)) {
-          throw new Error('Expected mutationPayload during offline replay');
-        }
-
-        env.apiStore.updateItemState(mutationPayload, (item) => ({
+        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+        env.apiStore.updateItemState(input.itemId, (item) => ({
           ...item,
           name: input.name,
         }));
@@ -575,7 +658,13 @@ describe('offline mode replay and conflict handling', () => {
           offlineMode: {
             network: network.config,
             operations: {
-              patchUserName: { inputSchema: userPatchSchema, execute },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [
+                  { entityKey: input.itemId, entityKind: 'item' },
+                ],
+                execute,
+              },
             },
           },
         },
@@ -584,7 +673,10 @@ describe('offline mode replay and conflict handling', () => {
 
     await env.apiStore.performMutation('users||1', {
       mutation: () => Promise.resolve({ name: 'Ada offline' }),
-      offline: { operation: 'patchUserName', input: { name: 'Ada offline' } },
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'users||1', name: 'Ada offline' },
+      },
     });
 
     act(() => {
@@ -593,7 +685,7 @@ describe('offline mode replay and conflict handling', () => {
     await flushAllTimers();
 
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(execute.mock.calls[0]?.[0]?.mutationPayload).toBe('users||1');
+    expect(execute.mock.calls[0]?.[0]?.input.itemId).toBe('users||1');
   });
 
   test('session switches do not leave replayed queue entries in the old namespace', async () => {

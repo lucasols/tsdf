@@ -140,7 +140,12 @@ export type OfflineEntityRef = {
   entityKind: OfflineEntityKind;
 };
 
-/** Persisted offline conflict payload. */
+/**
+ * Persisted offline conflict payload.
+ *
+ * @typeParam TConflict - Conflict payload stored for later resolution.
+ * @typeParam TInput - Original mutation input associated with the conflict.
+ */
 export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   /** Conflict record identifier. */
   id: string;
@@ -158,8 +163,8 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   input: TInput;
   /** Conflict payload returned by the resolver. */
   conflict: TConflict;
-  /** @internal */
-  mutationPayload?: unknown;
+  /** Timestamp when the original queued mutation was enqueued. */
+  enqueuedAt: number;
   /** Entity references involved in the conflict. */
   entityRefs: OfflineEntityRef[];
   /** Conflict creation timestamp. */
@@ -170,7 +175,12 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   tempId?: string;
 };
 
-/** Persisted offline mutation queue entry. */
+/**
+ * Persisted offline mutation queue entry.
+ *
+ * @typeParam TInput - Serialized input payload for the queued mutation.
+ * @typeParam TConflict - Conflict payload that may be attached while waiting for confirmation or resolution.
+ */
 export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   /** Queue entry identifier. */
   id: string;
@@ -184,8 +194,6 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   operation: string;
   /** Operation input payload persisted with the entry. */
   input: TInput;
-  /** @internal */
-  mutationPayload?: unknown;
   /** Entity references tied to this mutation. */
   entityRefs: OfflineEntityRef[];
   /** Number of execution attempts so far. */
@@ -214,7 +222,12 @@ export type OfflineOperationSchemaShape = {
   inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
 };
 
-/** Extracts operation input type from a schema map. */
+/**
+ * Extracts operation input type from a schema map.
+ *
+ * @typeParam TOperations - Operation registry to inspect.
+ * @typeParam TName - Operation name whose input type should be extracted.
+ */
 export type OperationInput<
   TOperations,
   TName extends keyof TOperations,
@@ -224,7 +237,12 @@ export type OperationInput<
   ? TInput
   : never;
 
-/** A typed operation descriptor for an offline mutation queue entry. */
+/**
+ * A typed operation descriptor for an offline mutation queue entry.
+ *
+ * @typeParam TOperations - Operation registry that defines valid operation names and input schemas.
+ * @typeParam TName - Operation name to describe. Defaults to all operation names in the registry.
+ */
 export type OfflineMutationDescriptor<
   TOperations extends Record<
     string,
@@ -240,19 +258,20 @@ export type OfflineMutationDescriptor<
     }
   : never;
 
-/** Result returned from conflict handlers to requeue a replacement operation input. */
+/**
+ * Result returned from conflict handlers to requeue a replacement operation input.
+ *
+ * @typeParam TInput - Input type expected by the operation when requeued.
+ */
 export type OfflineResolveConflictResult<TInput> = void | {
   requeue?: { input: TInput };
 };
 
-/** Outcome for confirming whether a previously executed mutation was already applied. */
-export type OfflineConfirmRemoteOutcomeResult =
-  | { type: 'applied' }
-  | { type: 'not-applied' }
-  | { type: 'conflict'; conflict: unknown }
-  | { type: 'unknown' };
-
-/** Context passed into offline mutation accumulation hooks. */
+/**
+ * Context passed into offline mutation accumulation hooks.
+ *
+ * @typeParam TInput - Input type shared by the existing and incoming queued mutations.
+ */
 export type OfflineAccumulationMergeContext<TInput> = {
   /** Session key used to isolate queued mutations. */
   sessionKey: string;
@@ -262,7 +281,11 @@ export type OfflineAccumulationMergeContext<TInput> = {
   incomingInput: TInput;
 };
 
-/** Optional in-memory accumulation strategy for queued offline mutations. */
+/**
+ * Optional in-memory accumulation strategy for queued offline mutations.
+ *
+ * @typeParam TInput - Input type that will be merged and revalidated before persisting.
+ */
 export type OfflineAccumulationConfig<TInput> = {
   /** Merge function for combining existing and incoming mutation inputs. */
   mergeInput: (
@@ -270,39 +293,37 @@ export type OfflineAccumulationConfig<TInput> = {
   ) => Promise<TInput> | TInput;
 };
 
-/** Shared context passed to offline conflict detection and resolution handlers. */
-type OperationBaseContext<TInput, TMutationPayload> = {
-  /** Session identifier used for queue scoping and offline coordination. */
-  sessionKey: string;
+/** Shared context passed to offline replay lifecycle hooks. */
+type OperationBaseContext<TInput> = {
   /** Input payload for the queued mutation currently being processed. */
   input: TInput;
-  /** @internal */
-  mutationPayload?: TMutationPayload;
+  /** Timestamp when the operation was originally enqueued. */
+  enqueuedAt: number;
+  /** Timestamp when the queued entry or conflict record was last updated. */
+  updatedAt: number;
 };
 
 /**
  * Conflict hook configuration for a queued offline operation.
+ *
+ * @typeParam TInput - Input type of the queued operation being checked and potentially requeued.
+ * @typeParam TConflict - Conflict payload produced by detection and consumed during resolution.
  */
-export type OfflineConflictHandlingConfig<
-  TInput,
-  TConflict,
-  TResult,
-  TMutationPayload = unknown,
-> = {
+export type OfflineConflictHandlingConfig<TInput, TConflict> = {
   /** Optional schema to validate and sanitize stored conflict payloads. */
   schema?: PersistentStorageSchema<TConflict>;
   /**
-   * Analyze an operation result and return conflict payload when local replay does
-   * not match remote state.
+   * Inspect remote state before replaying the mutation and return conflict payload
+   * when the queued mutation can no longer be applied safely.
    */
   detectConflict: (
-    ctx: OperationBaseContext<TInput, TMutationPayload> & { result: TResult },
+    ctx: OperationBaseContext<TInput>,
   ) => Promise<TConflict | false | null> | TConflict | false | null;
   /**
    * Resolve persisted conflict data and optionally requeue an adjusted operation.
    */
   resolveConflict: (
-    ctx: OperationBaseContext<TInput, TMutationPayload> & {
+    ctx: OperationBaseContext<TInput> & {
       conflict: TConflict;
       resolution: unknown;
     },
@@ -311,8 +332,13 @@ export type OfflineConflictHandlingConfig<
     | OfflineResolveConflictResult<TInput>;
 };
 
-/** Optional temp-id lifecycle for optimistic offline create flows. */
-export type OfflineTempEntityConfig<TInput, TResult> = {
+/**
+ * Optional temp-id lifecycle for optimistic offline create flows.
+ *
+ * @typeParam TInput - Input type used to derive the temporary entity and identifier.
+ * @typeParam TTempResult - Result returned by `execute`, used only by `tempEntity.reconcileServerEntity(...)`.
+ */
+export type OfflineTempEntityConfig<TInput, TTempResult> = {
   /**
    * Creates a temporary identifier to reference optimistic local entities.
    */
@@ -325,137 +351,278 @@ export type OfflineTempEntityConfig<TInput, TResult> = {
    * Reconciles temp entities with the successful server response.
    */
   reconcileServerEntity: (
-    result: TResult,
+    result: TTempResult,
     tempId: string,
   ) => { finalPayload: ValidPayload; finalData?: unknown };
 };
 
 /**
  * Shape used by `offlineMode.operations` for each operation name.
+ *
+ * @typeParam TInput - The persisted input payload for the queued offline operation.
+ * @typeParam TConflict - The conflict payload produced by pre-execution conflict detection.
+ * @typeParam TTempResult - Result returned by `execute`, used only when `tempEntity` needs to reconcile the final server entity. Defaults to `void`.
  */
 export type OfflineOperationDefinition<
   TInput,
   TConflict,
-  TResult,
-  TMutationPayload = unknown,
+  TTempResult = void,
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
   /**
    * Optional conflict strategy when a queued operation diverges from remote state.
    */
-  conflictHandling?: OfflineConflictHandlingConfig<
-    TInput,
-    TConflict,
-    TResult,
-    TMutationPayload
-  >;
+  conflictHandling?: OfflineConflictHandlingConfig<TInput, TConflict>;
   /**
    * Optional queue compaction for consecutive mutations with same refs.
    */
   accumulation?: OfflineAccumulationConfig<TInput>;
   /** Optional temporary-entity lifecycle for optimistic create/update operations. */
-  tempEntity?: OfflineTempEntityConfig<TInput, TResult>;
+  tempEntity?: OfflineTempEntityConfig<TInput, TTempResult>;
   /**
    * Executes the queued mutation against the remote source during replay.
    * This may run multiple times when transient failures occur.
    */
   execute: (
-    ctx: OperationBaseContext<TInput, TMutationPayload> & {
-      signal?: AbortSignal;
-    },
-  ) => Promise<TResult> | TResult;
+    ctx: OperationBaseContext<TInput>,
+  ) => Promise<TTempResult> | TTempResult;
   /**
-   * Optional remote-confirmation check for entries awaiting confirmation.
+   * Optional check executed before retrying a previously failed sync attempt.
+   * Return `true` to drop the queued entry because the remote side already reflects it.
+   * Return `false` to continue with normal replay.
    */
-  confirmRemoteOutcome?: (
-    ctx: OperationBaseContext<TInput, TMutationPayload>,
-  ) =>
-    | Promise<OfflineConfirmRemoteOutcomeResult>
-    | OfflineConfirmRemoteOutcomeResult;
+  shouldSkipSync?: (
+    ctx: OperationBaseContext<TInput>,
+  ) => Promise<boolean> | boolean;
+};
+
+/** Context used to resolve which entities a queued mutation affects. */
+type OperationEntityRefsContext<TInput> = {
+  /** Input payload for the queued mutation. */
+  input: TInput;
 };
 
 /** Non-store-specific offline operation definition alias. */
-export type AnyOfflineOperationDefinition<TMutationPayload = __LEGIT_ANY__> =
-  OfflineOperationDefinition<
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__,
-    TMutationPayload
-  >;
+export type AnyOfflineOperationDefinition = OfflineOperationDefinition<
+  __LEGIT_ANY__,
+  __LEGIT_ANY__,
+  __LEGIT_ANY__
+> & {
+  getEntityRefs?: (
+    ctx: OperationEntityRefsContext<__LEGIT_ANY__>,
+  ) => OfflineEntityRef[];
+};
 
-/** Document-store specific offline operation definition. */
+/**
+ * Compact type-spec helper for a single offline operation.
+ *
+ * Use this helper with {@link DefineDocumentOfflineOperations} to describe each
+ * operation using generic parameters instead of inline object literals.
+ *
+ * The generic order is `input`, `conflict`, then `temp result`.
+ *
+ * @typeParam TInput - Input payload accepted by the operation.
+ * @typeParam TConflict - Conflict payload produced by optional conflict handling.
+ * @typeParam TTempResult - Result returned by `execute`, used only when `tempEntity` reconciliation needs it.
+ *
+ * @example
+ * ```ts
+ * type UpdateName = DefineOfflineOperation<
+ *   { name: string },
+ *   { remoteName: string },
+ *   { name: string }
+ * >;
+ * ```
+ */
+export type DefineOfflineOperation<
+  TInput = unknown,
+  TConflict = unknown,
+  TTempResult = unknown,
+> = {
+  /** Input type accepted by the operation. */
+  input?: TInput;
+  /** Conflict payload type produced by the optional conflict handler. */
+  conflict?: TConflict;
+  /** Result returned by `execute`, used only for `tempEntity` reconciliation. */
+  result?: TTempResult;
+};
+
+type DocumentOperationInput<TOptions extends DefineOfflineOperation> =
+  TOptions extends { input?: infer TInput } ? TInput : unknown;
+
+type DocumentOperationConflict<TOptions extends DefineOfflineOperation> =
+  TOptions extends { conflict?: infer TConflict } ? TConflict : unknown;
+
+type DocumentOperationResult<TOptions extends DefineOfflineOperation> =
+  TOptions extends { result?: infer TTempResult } ? TTempResult : unknown;
+
+/**
+ * Document-store specific offline operation definition.
+ *
+ * Prefer this alias when manually typing a single operation inside
+ * `persistentStorage.offlineMode.operations` for a document store.
+ *
+ * `TOptions` is usually provided with {@link DefineOfflineOperation}, which lets
+ * callers specify the queued `input`, replay `result`, and optional `conflict`
+ * payload concisely.
+ *
+ * Omitted properties default to `unknown`.
+ *
+ * @typeParam State - Document state type for the owning store.
+ * @typeParam TOptions - Operation typing options, usually created with {@link DefineOfflineOperation}.
+ *
+ * @example
+ * ```ts
+ * type RenameOperation = DocumentOfflineOperationDefinition<
+ *   UserDoc,
+ *   DefineOfflineOperation<
+ *     { name: string },
+ *     { remoteName: string },
+ *     { name: string }
+ *   >
+ * >;
+ * ```
+ */
 export type DocumentOfflineOperationDefinition<
   State extends ValidStoreState,
-  TInput = __LEGIT_ANY__,
-  TConflict = __LEGIT_ANY__,
-  TResult = __LEGIT_ANY__,
-  TMutationPayload = unknown,
-> = OfflineOperationDefinition<TInput, TConflict, TResult, TMutationPayload> &
+  TOptions extends DefineOfflineOperation = DefineOfflineOperation,
+> = OfflineOperationDefinition<
+  DocumentOperationInput<TOptions>,
+  DocumentOperationConflict<TOptions>,
+  DocumentOperationResult<TOptions>
+> &
   ([State] extends [never] ? never : unknown);
 
-/** Document-store offline operations registry keyed by mutation name. */
-export type DocumentOfflineOperationsRegistry<State extends ValidStoreState> =
-  Record<string, DocumentOfflineOperationDefinition<State>>;
+/**
+ * Builds a document offline operations map from a compact operation spec.
+ *
+ * This is the recommended way to type a document store's full offline operation map.
+ * Each operation key is typically described with {@link DefineOfflineOperation},
+ * and this helper expands that into the full
+ * {@link DocumentOfflineOperationDefinition} map expected by the store.
+ *
+ * @typeParam State - Document state type for the owning store.
+ * @typeParam TOperations - Operation map where each key declares its input, replay result, and optional conflict payload.
+ *
+ * @example
+ * ```ts
+ * type Operations = DefineDocumentOfflineOperations<
+ *   UserDoc,
+ *   {
+ *     updateName: DefineOfflineOperation<
+ *       { name: string },
+ *       unknown,
+ *       { name: string }
+ *     >;
+ *     archive: DefineOfflineOperation<
+ *       { reason: string },
+ *       { code: string }
+ *     >;
+ *   }
+ * >;
+ * ```
+ *
+ * Then use the resulting type as the `operations` object contract:
+ *
+ * ```ts
+ * const operations: Operations = {
+ *   updateName: {
+ *     inputSchema: z.object({ name: z.string() }),
+ *     execute: ({ input }) => ({ name: input.name }),
+ *   },
+ *   archive: {
+ *     inputSchema: z.object({ reason: z.string() }),
+ *     conflictHandling: {
+ *       detectConflict: () => false,
+ *       resolveConflict: () => undefined,
+ *     },
+ *     execute: () => undefined,
+ *   },
+ * };
+ * ```
+ */
+export type DefineDocumentOfflineOperations<
+  State extends ValidStoreState,
+  TOperations extends Record<string, DefineOfflineOperation>,
+> = {
+  [TName in keyof TOperations]: DocumentOfflineOperationDefinition<
+    State,
+    TOperations[TName]
+  >;
+};
 
-/** Collection-store specific offline operation definition. */
+/**
+ * Collection-store specific offline operation definition.
+ *
+ * @typeParam ItemState - Collection item state type for the owning store.
+ * @typeParam ItemPayloadUnused - Collection payload type used to anchor the operation to the owning store type.
+ * @typeParam TInput - Input type accepted by the offline operation.
+ * @typeParam TConflict - Conflict payload type produced by the optional conflict handler.
+ * @typeParam TTempResult - Result returned by `execute`.
+ */
 export type CollectionOfflineOperationDefinition<
   ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload,
-  TInput = __LEGIT_ANY__,
-  TConflict = __LEGIT_ANY__,
-  TResult = __LEGIT_ANY__,
-  TMutationPayload = ItemPayload,
-> = OfflineOperationDefinition<TInput, TConflict, TResult, TMutationPayload> &
-  ([ItemState] extends [never] ? never : unknown);
+  ItemPayloadUnused extends ValidPayload,
+  TInput = unknown,
+  TConflict = unknown,
+  TTempResult = unknown,
+> = OfflineOperationDefinition<TInput, TConflict, TTempResult> & {
+  /** Declares which collection items are affected by this queued mutation. */
+  getEntityRefs: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => OfflineEntityRef[];
+} & ([ItemState | ItemPayloadUnused] extends [never] ? never : unknown);
 
-/** Collection-store offline operations registry keyed by mutation name. */
-export type CollectionOfflineOperationsRegistry<
-  ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload,
-> = Record<
-  string,
-  CollectionOfflineOperationDefinition<ItemState, ItemPayload>
->;
-
-/** List-query-store specific offline operation definition. */
+/**
+ * List-query-store specific offline operation definition.
+ *
+ * @typeParam ItemState - List item state type for the owning store.
+ * @typeParam QueryPayload - Query payload type used by the list store.
+ * @typeParam ItemPayloadUnused - Item payload type used to anchor the operation to the owning store type.
+ * @typeParam TInput - Input type accepted by the offline operation.
+ * @typeParam TConflict - Conflict payload type produced by the optional conflict handler.
+ * @typeParam TTempResult - Result returned by `execute`.
+ */
 export type ListQueryOfflineOperationDefinition<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-  TInput = __LEGIT_ANY__,
-  TConflict = __LEGIT_ANY__,
-  TResult = __LEGIT_ANY__,
-  TMutationPayload = ItemPayload | ItemPayload[] | undefined,
-> = OfflineOperationDefinition<TInput, TConflict, TResult, TMutationPayload> &
-  ([ItemState | QueryPayload] extends [never] ? never : unknown);
+  ItemPayloadUnused extends ValidPayload,
+  TInput = unknown,
+  TConflict = unknown,
+  TTempResult = unknown,
+> = OfflineOperationDefinition<TInput, TConflict, TTempResult> & {
+  /** Declares which list-query items are affected by this queued mutation. */
+  getEntityRefs: (
+    ctx: OperationEntityRefsContext<TInput>,
+  ) => OfflineEntityRef[];
+} & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
+    ? never
+    : unknown);
 
-/** List-query-store offline operations registry keyed by mutation name. */
-export type ListQueryOfflineOperationsRegistry<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = Record<
-  string,
-  ListQueryOfflineOperationDefinition<ItemState, QueryPayload, ItemPayload>
->;
-
-/** Extracts operation conflict payload from a registered operation map. */
+/**
+ * Extracts operation conflict payload from a registered operation map.
+ *
+ * @typeParam TOperations - Operation registry to inspect.
+ * @typeParam TName - Operation name whose conflict payload should be extracted.
+ */
 export type OperationConflict<
   TOperations,
   TName extends keyof TOperations,
 > = TOperations[TName] extends {
   conflictHandling?: OfflineConflictHandlingConfig<
     __LEGIT_ANY__,
-    infer TConflict,
-    __LEGIT_ANY__,
-    __LEGIT_ANY__
+    infer TConflict
   >;
 }
   ? TConflict
   : never;
 
-/** Root offline configuration passed in store persistentStorage options. */
+/**
+ * Root offline configuration passed in store persistentStorage options.
+ *
+ * @typeParam TOperations - Operation registry exposed by the store.
+ */
 export type OfflineModeConfig<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {

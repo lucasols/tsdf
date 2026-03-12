@@ -1,9 +1,10 @@
 import { act } from 'react';
+import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,
 } from '../../src/documentStore';
-import type { DocumentOfflineOperationsRegistry } from '../../src/persistentStorage/offline/types';
+import type { DocumentOfflineOperationDefinition } from '../../src/persistentStorage/offline/types';
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
@@ -40,10 +41,18 @@ export type DocumentStoreTestScenario<D> =
   /** Data was loaded previously but is now outdated (server has newer data). */
   | { loadedWithStaleData: D };
 
+type TestDocumentOfflineOperationsRegistry<D> = Record<
+  string,
+  DocumentOfflineOperationDefinition<
+    { value: D },
+    { input: __LEGIT_ANY__; conflict: __LEGIT_ANY__; result: __LEGIT_ANY__ }
+  >
+>;
+
 export type DocumentStoreTestEnvOptions<
   D,
-  TOfflineOperations extends DocumentOfflineOperationsRegistry<{ value: D }> =
-    DocumentOfflineOperationsRegistry<{ value: D }>,
+  TOfflineOperations extends TestDocumentOfflineOperationsRegistry<D> =
+    TestDocumentOfflineOperationsRegistry<D>,
   StorageState = unknown,
 > = {
   id?: string;
@@ -80,8 +89,8 @@ export type DocumentStoreTestEnvOptions<
 
 export function createDocumentStoreTestEnv<
   D,
-  TOfflineOperations extends DocumentOfflineOperationsRegistry<{ value: D }> =
-    DocumentOfflineOperationsRegistry<{ value: D }>,
+  TOfflineOperations extends TestDocumentOfflineOperationsRegistry<D> =
+    TestDocumentOfflineOperationsRegistry<D>,
   StorageState = unknown,
 >(
   serverInitialData: D,
