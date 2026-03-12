@@ -2,37 +2,39 @@ import {
   isWindowFocused,
   onWindowFocus as onWindowFocusDefault,
 } from '@ls-stack/browser-utils/window';
+import { notNullish } from '@ls-stack/utils/assertions';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import {
   __LEGIT_CAST__,
   type __LEGIT_ANY__,
 } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
+import { rc_literals, rc_object, rc_string } from 'runcheck';
 import { Store } from 't-state';
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
 import { createIdleThrottledScheduler } from '../cacheLimits/scheduleIdleThrottled';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import {
+  createOfflineEntityLookup,
+  getIsPendingOfflineSync,
+  getOfflineEntitiesMetadata,
+} from '../persistentStorage/offline/entityMetadata';
+import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
+import {
   createOfflineStoreController,
   initializeOfflineStoreController,
   type OfflineStoreController,
 } from '../persistentStorage/offline/storeController';
-import {
-  createOfflineEntityLookup,
-  getOfflineEntitiesMetadata,
-  getIsPendingOfflineSync,
-} from '../persistentStorage/offline/entityMetadata';
-import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
   OperationInput,
 } from '../persistentStorage/offline/types';
+import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   ListQueryPersistentStorageConfig,
   PersistentStoragePreloadResult,
 } from '../persistentStorage/types';
-import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import {
   FetchType,
   RequestSchedulerEvents,
@@ -63,8 +65,8 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { createFetchApi } from './createFetchApi';
-import { createListQueryCacheLimits } from './listQueryCacheLimits';
 import { createMutationApi } from './createMutationApi';
+import { createListQueryCacheLimits } from './listQueryCacheLimits';
 import {
   type FetchListFnReturn,
   type FieldsInput,
@@ -106,6 +108,10 @@ export type ListQueryStoreEvents = {
     invalidateFields?: string[];
   };
 };
+const offlineItemEntityRefSchema = rc_object({
+  entityKey: rc_string,
+  entityKind: rc_literals('item'),
+});
 
 type InternalListQueryOfflineOperations<
   ItemState extends ValidStoreState,
@@ -116,7 +122,7 @@ type InternalListQueryOfflineOperations<
   AnyOfflineOperationDefinition & {
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
-    }) => ListQueryOfflineEntityRef<QueryPayload, ItemPayload>[];
+    }) => ListQueryOfflineEntityRef<ItemPayload>[];
   }
 > &
   ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
@@ -1154,33 +1160,11 @@ export function createListQueryStore<
       storeAdapter: {
         normalizeEntityRefs: (entityRefs) =>
           entityRefs.map((ref) => {
-            if (
-              typeof ref === 'object' &&
-              ref !== null &&
-              'entityKey' in ref &&
-              'entityKind' in ref
-            ) {
-              return __LEGIT_CAST__<
-                {
-                  entityKey: string;
-                  entityKind: 'document' | 'item' | 'query';
-                },
-                unknown
-              >(ref);
-            }
-
-            if (
-              typeof ref === 'object' &&
-              ref !== null &&
-              'queryPayload' in ref
-            ) {
-              return {
-                entityKey: getQueryKey(
-                  __LEGIT_CAST__<QueryPayload, unknown>(ref.queryPayload),
-                ),
-                entityKind: 'query' as const,
-              };
-            }
+            // Temp entities are queued internally as normalized refs.
+            const normalizedRef = offlineItemEntityRefSchema
+              .parse(ref)
+              .unwrapOrNull();
+            if (normalizedRef !== null) return normalizedRef;
 
             return {
               entityKey: getItemKey(__LEGIT_CAST__<ItemPayload, unknown>(ref)),
@@ -1207,21 +1191,54 @@ export function createListQueryStore<
           );
         },
         reconcileTempEntity: ({ tempId, reconciliation }) => {
-          const currentItem = getItemState(
-            __LEGIT_CAST__<ItemPayload, string>(tempId),
-          );
+          const tempPayload = __LEGIT_CAST__<ItemPayload, string>(tempId);
+          const tempItemKey = getItemKey(tempPayload);
+          const currentItem = getItemState(tempPayload);
           const finalData =
             reconciliation.finalData !== undefined
               ? __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
               : (currentItem ?? undefined);
           if (finalData === undefined) return;
-          deleteItemState(__LEGIT_CAST__<ItemPayload, string>(tempId));
-          addItemToState(
-            __LEGIT_CAST__<ItemPayload, ValidPayload>(
-              reconciliation.finalPayload,
-            ),
-            finalData,
+
+          const finalPayload = __LEGIT_CAST__<ItemPayload, ValidPayload>(
+            reconciliation.finalPayload,
           );
+          const finalItemKey = getItemKey(finalPayload);
+          const queryMemberships = Object.entries(store.state.queries)
+            .map(([queryKey, query]) => ({
+              queryKey,
+              index: query.items.indexOf(tempItemKey),
+            }))
+            .filter(({ index }) => index !== -1);
+
+          deleteItemState(tempPayload);
+          addItemToState(finalPayload, finalData);
+
+          if (queryMemberships.length === 0) return;
+
+          store.produceState(
+            (draft) => {
+              for (const { queryKey, index } of queryMemberships) {
+                const query = notNullish(draft.queries[queryKey]);
+                const existingIndex = query.items.indexOf(finalItemKey);
+                if (existingIndex !== -1) {
+                  query.items.splice(existingIndex, 1);
+                }
+
+                query.items.splice(
+                  Math.min(index, query.items.length),
+                  0,
+                  finalItemKey,
+                );
+              }
+            },
+            { action: 'offline-reconcile-temp-item' },
+          );
+
+          touchQueries(queryMemberships.map(({ queryKey }) => queryKey));
+          for (const { queryKey } of queryMemberships) {
+            publishQuerySnapshot(queryKey);
+          }
         },
       },
     });

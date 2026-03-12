@@ -57,7 +57,7 @@ type InternalListQueryOfflineOperations<
   AnyOfflineOperationDefinition & {
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
-    }) => ListQueryOfflineEntityRef<QueryPayload, ItemPayload>[];
+    }) => ListQueryOfflineEntityRef<ItemPayload>[];
   }
 > &
   ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);

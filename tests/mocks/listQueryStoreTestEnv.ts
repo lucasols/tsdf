@@ -45,8 +45,6 @@ import {
 
 type ListQueryItemPayload = string;
 
-export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
-
 export type Row = {
   id: number;
   name: string;
@@ -60,10 +58,12 @@ type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
   AnyOfflineOperationDefinition & {
     getEntityRefs: (ctx: {
       input: __LEGIT_ANY__;
-    }) => ListQueryOfflineEntityRef<ListQueryParams, ListQueryItemPayload>[];
+    }) => ListQueryOfflineEntityRef<ListQueryItemPayload>[];
   }
 > &
   ([TRow] extends [never] ? never : unknown);
+
+export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
 
 type ListQuerySnapshotConfig = {
   tables?: string[];

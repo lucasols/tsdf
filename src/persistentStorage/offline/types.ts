@@ -132,14 +132,6 @@ export type GlobalOfflineEntity = {
   tempId?: string;
 };
 
-/** Lightweight entity reference used to merge and protect related offline queue entries. */
-export type OfflineEntityRef = {
-  /** Entity key referenced by the relation. */
-  entityKey: string;
-  /** Entity kind of the relation reference. */
-  entityKind: OfflineEntityKind;
-};
-
 /**
  * Persisted offline conflict payload.
  *
@@ -165,8 +157,11 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   conflict: TConflict;
   /** Timestamp when the original queued mutation was enqueued. */
   enqueuedAt: number;
-  /** Entity references involved in the conflict. */
-  entityRefs: OfflineEntityRef[];
+  /** Entity references involved in the conflict, each shaped as `{ entityKey, entityKind }`. */
+  entityRefs: {
+    entityKey: string;
+    entityKind: 'document' | 'item' | 'query';
+  }[];
   /** Conflict creation timestamp. */
   createdAt: number;
   /** Conflict update timestamp. */
@@ -194,8 +189,11 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   operation: string;
   /** Operation input payload persisted with the entry. */
   input: TInput;
-  /** Entity references tied to this mutation. */
-  entityRefs: OfflineEntityRef[];
+  /** Entity references tied to this mutation, each shaped as `{ entityKey, entityKind }`. */
+  entityRefs: {
+    entityKey: string;
+    entityKind: 'document' | 'item' | 'query';
+  }[];
   /** Number of execution attempts so far. */
   attempts: number;
   /** Queue entry creation timestamp. */
@@ -656,14 +654,13 @@ export type DefineDocumentOfflineOperations<
 /**
  * Collection offline entity reference.
  *
- * Collection operations may return either a pre-normalized {@link OfflineEntityRef}
- * or the raw item payload, which will be converted to the store item key.
+ * Collection operations return raw item payloads, which are normalized to the
+ * internal item key by the store.
  *
  * @typeParam ItemPayload - Collection item payload type for the owning store.
  */
 export type CollectionOfflineEntityRef<ItemPayload extends ValidPayload> =
-  | OfflineEntityRef
-  | ItemPayload;
+  ItemPayload;
 
 /**
  * Collection-store specific offline operation definition.
@@ -690,8 +687,8 @@ export type CollectionOfflineOperationDefinition<
   /**
    * Declares which collection items are affected by this queued mutation.
    *
-   * You can return either a pre-normalized {@link OfflineEntityRef} or the raw
-   * collection payload, which will be converted with the store's item key logic.
+   * Return the raw collection payloads for the affected items. The store will
+   * convert each payload with the configured item key logic.
    */
   getEntityRefs: (
     ctx: OperationEntityRefsContext<TInput>,
@@ -747,28 +744,15 @@ export type DefineCollectionOfflineOperations<
 };
 
 /**
- * Wrapper for list-query refs that target a whole query rather than a specific item.
- *
- * @typeParam QueryPayload - Query payload type for the owning list-query store.
- */
-export type ListQueryOfflineQueryRef<QueryPayload extends ValidPayload> = {
-  /** Raw query payload that should be normalized to the internal query key. */
-  queryPayload: QueryPayload;
-};
-
-/**
  * List-query offline entity reference.
  *
- * List-query operations may return a pre-normalized {@link OfflineEntityRef},
- * a raw item payload, or a wrapped raw query payload.
+ * List-query operations return raw item payloads, which are normalized to the
+ * internal item key by the store.
  *
- * @typeParam QueryPayload - Query payload type for the owning list-query store.
  * @typeParam ItemPayload - Item payload type for the owning list-query store.
  */
-export type ListQueryOfflineEntityRef<
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = OfflineEntityRef | ItemPayload | ListQueryOfflineQueryRef<QueryPayload>;
+export type ListQueryOfflineEntityRef<ItemPayload extends ValidPayload> =
+  ItemPayload;
 
 /**
  * List-query-store specific offline operation definition.
@@ -797,14 +781,12 @@ export type ListQueryOfflineOperationDefinition<
   /**
    * Declares which list-query entities are affected by this queued mutation.
    *
-   * You can return:
-   * - a pre-normalized {@link OfflineEntityRef}
-   * - a raw item payload, which will be converted with the store's item key logic
-   * - `{ queryPayload }`, which will be converted with the store's query key logic
+   * Return the raw item payloads for the affected items. The store will
+   * convert each payload with the configured item key logic.
    */
   getEntityRefs: (
     ctx: OperationEntityRefsContext<TInput>,
-  ) => ListQueryOfflineEntityRef<QueryPayload, ItemPayloadUnused>[];
+  ) => ListQueryOfflineEntityRef<ItemPayloadUnused>[];
 } & ([ItemState | QueryPayload | ItemPayloadUnused] extends [never]
     ? never
     : unknown);

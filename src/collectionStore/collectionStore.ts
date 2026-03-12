@@ -7,6 +7,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
+import { rc_literals, rc_object, rc_string } from 'runcheck';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
@@ -209,6 +210,11 @@ type InternalCollectionOfflineOperations<
   }
 > &
   ([ItemState | ItemPayload] extends [never] ? never : unknown);
+
+const offlineItemEntityRefSchema = rc_object({
+  entityKey: rc_string,
+  entityKind: rc_literals('item'),
+});
 
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
@@ -433,20 +439,11 @@ export function createCollectionStore<
         storeAdapter: {
           normalizeEntityRefs: (entityRefs) =>
             entityRefs.map((ref) => {
-              if (
-                typeof ref === 'object' &&
-                ref !== null &&
-                'entityKey' in ref &&
-                'entityKind' in ref
-              ) {
-                return __LEGIT_CAST__<
-                  {
-                    entityKey: string;
-                    entityKind: 'document' | 'item' | 'query';
-                  },
-                  unknown
-                >(ref);
-              }
+              // Temp entities are queued internally as normalized refs.
+              const normalizedRef = offlineItemEntityRefSchema
+                .parse(ref)
+                .unwrapOrNull();
+              if (normalizedRef !== null) return normalizedRef;
 
               return {
                 entityKey: getItemKey(

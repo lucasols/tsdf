@@ -60,6 +60,17 @@ type PatchUserOperations = {
   >;
 };
 
+type CreateListQueryUserOperations = {
+  createUser: ListQueryOfflineOperationDefinition<
+    { id: number; name: string },
+    ListQueryParams,
+    string,
+    { name: string },
+    unknown,
+    { id: number; name: string }
+  >;
+};
+
 const userPatchSchema = rc_object({ itemId: rc_string, name: rc_string });
 const userRowSchema = rc_object({ id: rc_number, name: rc_string });
 
@@ -115,9 +126,7 @@ describe('offline mode replay and conflict handling', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
-                getEntityRefs: ({ input }) => [
-                  { entityKey: `temp:${input.name}`, entityKind: 'item' },
-                ],
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 accumulation: {
                   mergeInput: ({ incomingInput }) => incomingInput,
                 },
@@ -655,9 +664,7 @@ describe('offline mode replay and conflict handling', () => {
             operations: {
               patchUserName: {
                 inputSchema: userPatchSchema,
-                getEntityRefs: ({ input }) => [
-                  { entityKey: input.itemId, entityKind: 'item' },
-                ],
+                getEntityRefs: ({ input }) => [input.itemId],
                 execute,
               },
             },
@@ -681,6 +688,104 @@ describe('offline mode replay and conflict handling', () => {
 
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute.mock.calls[0]?.[0]?.input.itemId).toBe('users||1');
+  });
+
+  test('list-query temp creates keep manually inserted query items after replay', async () => {
+    network.setOffline();
+    let nextUserId = 3;
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateListQueryUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        getSessionKey: () => 'offline-replay-temp-list-query-session',
+        testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
+        persistentStorage: {
+          storeName: 'offline-replay-temp-list-query',
+          adapter: localPersistentStorage,
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: () => [],
+                tempEntity: {
+                  createTempId: (input) => `temp:${input.name}`,
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: ({ input }) => {
+                  const result = { id: nextUserId, name: input.name };
+                  nextUserId += 1;
+                  return result;
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() =>
+      env.apiStore.useListQuery(
+        { tableId: 'users' },
+        { itemSelector: (item) => item.name },
+      ),
+    );
+    await flushAllTimers();
+
+    await act(async () => {
+      await env.apiStore.performMutation(null, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Linus offline',
+            { id: -1, name: 'Linus offline' },
+            {
+              addItemToQueries: {
+                queries: [{ tableId: 'users' }],
+                appendTo: 'end',
+              },
+            },
+          );
+        },
+        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+      });
+    });
+
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      ['Ada', 'Grace', 'Linus offline']
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      ['Ada', 'Grace', 'Linus offline']
+    `);
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus offline'
+    `);
+
+    hook.unmount();
   });
 
   test('session switches do not leave replayed queue entries in the old namespace', async () => {

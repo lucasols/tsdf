@@ -85,7 +85,6 @@ export type {
   GlobalOfflineEntity,
   GlobalOfflineStatus,
   ListQueryOfflineEntityRef,
-  ListQueryOfflineQueryRef,
   ListQueryOfflineOperationDefinition,
   OfflineConflictRecord,
   OfflineMutationDescriptor,

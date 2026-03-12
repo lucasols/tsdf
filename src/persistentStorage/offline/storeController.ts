@@ -9,7 +9,6 @@ import type {
   AnyOfflineOperationDefinition,
   GlobalOfflineEntity,
   OfflineConflictRecord,
-  OfflineEntityRef,
   OfflineModeConfig,
   OfflineOperationSchemaShape,
   OfflineQueueEntry,
@@ -19,6 +18,11 @@ import type {
 } from './types';
 
 const NEEDS_CONFIRMATION_RETRY_MS = 250;
+
+type OfflineEntityRef = {
+  entityKey: string;
+  entityKind: 'document' | 'item' | 'query';
+};
 
 type OfflineStoreAdapter = {
   getEntityRefs?: (args: {
