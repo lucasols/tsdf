@@ -127,17 +127,27 @@ type InternalListQueryOfflineOperations<
 > &
   ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
 
+type ListQueryOfflineOperationsConfig<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = InternalListQueryOfflineOperations<
+  ItemState,
+  QueryPayload,
+  ItemPayload
+> | null;
+
 export type ListQueryStore<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends InternalListQueryOfflineOperations<
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
+  > = null,
 > = ReturnType<
   typeof createListQueryStore<
     ItemState,
@@ -236,11 +246,11 @@ type ListQueryStoreOptionsBase<
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
-  TOfflineOperations extends InternalListQueryOfflineOperations<
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
+  > = null,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -342,11 +352,11 @@ export type ListQueryStoreOptions<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends InternalListQueryOfflineOperations<
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
+  > = null,
   StorageState = unknown,
 > = ListQueryStoreOptionsBase<
   ItemState,
@@ -376,11 +386,11 @@ export function createListQueryStore<
   ItemPayload extends ValidPayload,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends InternalListQueryOfflineOperations<
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
+  > = null,
   StorageState = unknown,
 >(
   storeOptions: ListQueryStoreOptions<
@@ -655,8 +665,9 @@ export function createListQueryStore<
     );
   }
 
-  let offlineController: OfflineStoreController<TOfflineOperations> | null =
-    null;
+  let offlineController: OfflineStoreController<
+    Exclude<TOfflineOperations, null>
+  > | null = null;
   const offlineFetchController = {
     prepareForFetch: () =>
       offlineController?.prepareForFetch() ?? Promise.resolve(),
@@ -668,9 +679,11 @@ export function createListQueryStore<
   };
   const offlineMutationController = {
     canQueueMutation: () => offlineController?.canQueueMutation() ?? false,
-    queueMutation: <TName extends keyof TOfflineOperations>(args: {
+    queueMutation: <
+      TName extends keyof Exclude<TOfflineOperations, null>,
+    >(args: {
       operationName: TName;
-      input: OperationInput<TOfflineOperations, TName>;
+      input: OperationInput<Exclude<TOfflineOperations, null>, TName>;
     }) =>
       offlineController
         ? offlineController.queueMutation(args)

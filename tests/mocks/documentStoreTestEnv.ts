@@ -47,10 +47,12 @@ type TestDocumentOfflineOperationsRegistry<D> = Record<
 > &
   ([D] extends [never] ? never : unknown);
 
+type TestDocumentOfflineOperationsConfig<D> =
+  TestDocumentOfflineOperationsRegistry<D> | null;
+
 export type DocumentStoreTestEnvOptions<
   D,
-  TOfflineOperations extends TestDocumentOfflineOperationsRegistry<D> =
-    TestDocumentOfflineOperationsRegistry<D>,
+  TOfflineOperations extends TestDocumentOfflineOperationsConfig<D> = null,
   StorageState = unknown,
 > = {
   id?: string;
@@ -87,8 +89,7 @@ export type DocumentStoreTestEnvOptions<
 
 export function createDocumentStoreTestEnv<
   D,
-  TOfflineOperations extends TestDocumentOfflineOperationsRegistry<D> =
-    TestDocumentOfflineOperationsRegistry<D>,
+  TOfflineOperations extends TestDocumentOfflineOperationsConfig<D> = null,
   StorageState = unknown,
 >(
   serverInitialData: D,

@@ -134,10 +134,12 @@ type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
 > &
   ([State] extends [never] ? never : unknown);
 
+type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
+  InternalDocumentOfflineOperations<State> | null;
+
 export type DocumentStoreOptions<
   State extends ValidStoreState,
-  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
-    InternalDocumentOfflineOperations<State>,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -197,8 +199,7 @@ export type DocumentStoreOptions<
 
 export type DocumentStore<
   State extends ValidStoreState,
-  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
-    InternalDocumentOfflineOperations<State>,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
 > = ReturnType<typeof createDocumentStore<State, TOfflineOperations>>;
 
 // Constant requestId for document store (single-item mode)
@@ -207,8 +208,7 @@ const DOC_TARGET_KEY = 'document' as const;
 
 export function createDocumentStore<
   State extends ValidStoreState,
-  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
-    InternalDocumentOfflineOperations<State>,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
   StorageState = unknown,
 >({
   debugName,
@@ -782,7 +782,9 @@ export function createDocumentStore<
      * When provided, the mutation is durably queued and replayed by the offline
      * sync controller. The immediate result only reflects queue persistence.
      */
-    offline?: OfflineMutationDescriptor<TOfflineOperations>;
+    offline?: TOfflineOperations extends null
+      ? never
+      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
   }): Promise<ResultType<Awaited<T>, StoreError | true>> {
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(offlineSessionUnavailableError);

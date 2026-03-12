@@ -62,15 +62,25 @@ type InternalListQueryOfflineOperations<
 > &
   ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
 
+type ListQueryOfflineOperationsConfig<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = InternalListQueryOfflineOperations<
+  ItemState,
+  QueryPayload,
+  ItemPayload
+> | null;
+
 export type CreateMutationApiOptions<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends InternalListQueryOfflineOperations<
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
+  > = null,
 > = {
   store: Store<TSFDListQueryState<ItemState, QueryPayload, ItemPayload>>;
   fetchItemFn?: (
@@ -116,9 +126,11 @@ export type CreateMutationApiOptions<
   blockWindowClose: BlockWindowCloseHandler | null;
   offlineController?: {
     canQueueMutation: () => boolean;
-    queueMutation: <TName extends keyof TOfflineOperations>(args: {
+    queueMutation: <
+      TName extends keyof Exclude<TOfflineOperations, null>,
+    >(args: {
       operationName: TName;
-      input: OperationInput<TOfflineOperations, TName>;
+      input: OperationInput<Exclude<TOfflineOperations, null>, TName>;
     }) => Promise<void>;
   } | null;
   runWithBroadcastConsistency: <T>(
@@ -139,11 +151,11 @@ export function createMutationApi<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends InternalListQueryOfflineOperations<
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
+  > = null,
 >({
   store,
   fetchItemFn,
@@ -739,7 +751,9 @@ export function createMutationApi<
        * offline sync controller. The immediate result only reflects queue
        * persistence.
        */
-      offline?: OfflineMutationDescriptor<TOfflineOperations>;
+      offline?: TOfflineOperations extends null
+        ? never
+        : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
     },
   ): Promise<ResultType<Awaited<T>, StoreError | true>> {
     const matchAllItems: FilterItem = () => true;

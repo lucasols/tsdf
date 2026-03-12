@@ -1,10 +1,15 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
   TSFDCollectionItem,
   TSFDCollectionState,
 } from '../collectionStore/collectionStore';
+import type {
+  AnyOfflineOperationDefinition,
+  CollectionOfflineEntityRef,
+} from './offline/types';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   convertStoreDataForPersistence,
@@ -39,6 +44,21 @@ import type {
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
+
+type CollectionPersistenceOfflineOperations<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> =
+  | (Record<
+      string,
+      AnyOfflineOperationDefinition & {
+        getEntityRefs: (ctx: {
+          input: __LEGIT_ANY__;
+        }) => CollectionOfflineEntityRef<ItemPayload>[];
+      }
+    > &
+      ([ItemState | ItemPayload] extends [never] ? never : unknown))
+  | null;
 
 function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
   ignoreItems:
@@ -180,12 +200,17 @@ export type CollectionPersistenceSetup<
 export function setupCollectionPersistence<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends CollectionPersistenceOfflineOperations<
+    ItemState,
+    ItemPayload
+  > = null,
   StorageState = unknown,
 >(
   config: CollectionPersistentStorageConfig<
     ItemState,
     ItemPayload,
-    StorageState
+    StorageState,
+    TOfflineOperations
   > & { getSessionKey: () => string | false },
   options: { getItemKey?: (payload: ItemPayload) => string } = {},
 ): CollectionPersistenceSetup<ItemState, ItemPayload> {

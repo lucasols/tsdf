@@ -1,5 +1,6 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_array,
   rc_boolean,
@@ -13,6 +14,10 @@ import type {
   TSFDListQuery,
   TSFDListQueryState,
 } from '../listQueryStore/types';
+import type {
+  AnyOfflineOperationDefinition,
+  ListQueryOfflineEntityRef,
+} from './offline/types';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   convertStoreDataForPersistence,
@@ -51,6 +56,24 @@ const DEFAULT_MAX_ITEMS = 500;
 const DEFAULT_MAX_QUERIES = 100;
 const DEFAULT_MAX_QUERY_SIZE = 100;
 const SAVE_DEBOUNCE_MS = 1000;
+
+type ListQueryPersistenceOfflineOperations<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> =
+  | (Record<
+      string,
+      AnyOfflineOperationDefinition & {
+        getEntityRefs: (ctx: {
+          input: __LEGIT_ANY__;
+        }) => ListQueryOfflineEntityRef<ItemPayload>[];
+      }
+    > &
+      ([ItemState | QueryPayload | ItemPayload] extends [never]
+        ? never
+        : unknown))
+  | null;
 
 const listQueryQueryManifestMetaSchema = rc_object({
   payload: rc_unknown.optionalKey(),
@@ -405,13 +428,19 @@ export function setupListQueryPersistence<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
+  TOfflineOperations extends ListQueryPersistenceOfflineOperations<
+    ItemState,
+    QueryPayload,
+    ItemPayload
+  > = null,
   StorageState = unknown,
 >(
   config: ListQueryPersistentStorageConfig<
     ItemState,
     QueryPayload,
     ItemPayload,
-    StorageState
+    StorageState,
+    TOfflineOperations
   > & { getSessionKey: () => string | false },
   options: {
     getItemKey?: (payload: ItemPayload) => string;

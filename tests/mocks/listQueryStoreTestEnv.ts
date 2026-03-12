@@ -63,6 +63,9 @@ type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
 > &
   ([TRow] extends [never] ? never : unknown);
 
+type TestListQueryOfflineOperationsConfig<TRow extends Row> =
+  TestListQueryOfflineOperationsRegistry<TRow> | null;
+
 export type ListQueryParams = { tableId: string; filters?: FilterOperator[] };
 
 type ListQuerySnapshotConfig = {
@@ -114,8 +117,7 @@ export function createListQueryStoreTestEnv<
   TRow extends Row = Row,
   TPartialResources extends boolean = false,
   TOffsetPagination extends boolean = false,
-  TOfflineOperations extends TestListQueryOfflineOperationsRegistry<TRow> =
-    TestListQueryOfflineOperationsRegistry<TRow>,
+  TOfflineOperations extends TestListQueryOfflineOperationsConfig<TRow> = null,
   StorageState = unknown,
 >(
   serverInitialData: Tables<TRow>,

@@ -60,10 +60,12 @@ type TestCollectionOfflineOperationsRegistry<
 > &
   ([D] extends [never] ? never : unknown);
 
+type TestCollectionOfflineOperationsConfig<D extends Record<string, unknown>> =
+  TestCollectionOfflineOperationsRegistry<D> | null;
+
 export type CollectionStoreTestEnvOptions<
   D extends Record<string, unknown>,
-  TOfflineOperations extends TestCollectionOfflineOperationsRegistry<D> =
-    TestCollectionOfflineOperationsRegistry<D>,
+  TOfflineOperations extends TestCollectionOfflineOperationsConfig<D> = null,
   StorageState = unknown,
 > = {
   id?: string;
@@ -112,8 +114,7 @@ export type CollectionStoreTestEnvOptions<
 
 export function createCollectionStoreTestEnv<
   D extends Record<string, unknown>,
-  TOfflineOperations extends TestCollectionOfflineOperationsRegistry<D> =
-    TestCollectionOfflineOperationsRegistry<D>,
+  TOfflineOperations extends TestCollectionOfflineOperationsConfig<D> = null,
   StorageState = unknown,
 >(
   serverInitialData: Record<string, D>,

@@ -102,6 +102,39 @@ describe('offline replay list-query behavior', () => {
     expect(execute.mock.calls[0]?.[0]?.input.itemId).toBe('users||1');
   });
 
+  test('type safety: list-query test env requires explicit offline operation typing', () => {
+    const initialTables = { users: [{ id: 1, name: 'Ada' }] };
+    const plainEnv = createListQueryStoreTestEnv(initialTables);
+    const typedEnv = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      PatchUserOperations
+    >(initialTables);
+
+    function typeCheck_() {
+      void plainEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ name: 'Ada offline' }),
+        // @ts-expect-error - offline mutations should not be available by default
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Ada offline' },
+        },
+      });
+
+      void typedEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ name: 'Ada offline' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'users||1', name: 'Ada offline' },
+        },
+      });
+    }
+
+    void typeCheck_;
+    expect(true).toBe(true);
+  });
+
   test('list-query temp creates keep manually inserted query items after replay', async () => {
     network.setOffline();
     let nextUserId = 3;

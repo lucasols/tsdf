@@ -141,15 +141,19 @@ type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
 > &
   ([State] extends [never] ? never : unknown);
 
+type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
+  InternalDocumentOfflineOperations<State> | null;
+
 /** Persistent storage config for DocumentStore. */
 export type DocumentPersistentStorageConfig<
   State extends ValidStoreState,
   StorageState = unknown,
-  TOfflineOperations extends InternalDocumentOfflineOperations<State> =
-    InternalDocumentOfflineOperations<State>,
+  TOfflineOperations extends DocumentOfflineOperationsConfig<State> = null,
 > = StorePersistentStorageBaseConfig<State, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
-  offlineMode?: OfflineModeConfig<TOfflineOperations>;
+  offlineMode?: TOfflineOperations extends null
+    ? never
+    : OfflineModeConfig<Exclude<TOfflineOperations, null>>;
 };
 
 type InternalCollectionOfflineOperations<
@@ -165,18 +169,25 @@ type InternalCollectionOfflineOperations<
 > &
   ([ItemState | ItemPayload] extends [never] ? never : unknown);
 
+type CollectionOfflineOperationsConfig<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
+
 /** Persistent storage config for CollectionStore. */
 export type CollectionPersistentStorageConfig<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload = ValidPayload,
   StorageState = unknown,
-  TOfflineOperations extends InternalCollectionOfflineOperations<
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
     ItemState,
     ItemPayload
-  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
+  > = null,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
-  offlineMode?: OfflineModeConfig<TOfflineOperations>;
+  offlineMode?: TOfflineOperations extends null
+    ? never
+    : OfflineModeConfig<Exclude<TOfflineOperations, null>>;
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Maximum number of items to persist. Items are evicted via LRU. Defaults to 50. */
@@ -205,20 +216,32 @@ type InternalListQueryOfflineOperations<
 > &
   ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
 
+type ListQueryOfflineOperationsConfig<
+  ItemState extends ValidStoreState,
+  QueryPayload extends ValidPayload,
+  ItemPayload extends ValidPayload,
+> = InternalListQueryOfflineOperations<
+  ItemState,
+  QueryPayload,
+  ItemPayload
+> | null;
+
 /** Persistent storage config for ListQueryStore. */
 export type ListQueryPersistentStorageConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload = ValidPayload,
   ItemPayload extends ValidPayload = ValidPayload,
   StorageState = unknown,
-  TOfflineOperations extends InternalListQueryOfflineOperations<
+  TOfflineOperations extends ListQueryOfflineOperationsConfig<
     ItemState,
     QueryPayload,
     ItemPayload
-  > = InternalListQueryOfflineOperations<ItemState, QueryPayload, ItemPayload>,
+  > = null,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
   /** Optional offline sync/replay configuration for mutations. */
-  offlineMode?: OfflineModeConfig<TOfflineOperations>;
+  offlineMode?: TOfflineOperations extends null
+    ? never
+    : OfflineModeConfig<Exclude<TOfflineOperations, null>>;
   /** Schema used to validate cached item payloads on load. */
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;
   /** Schema used to validate cached query payloads on load. */

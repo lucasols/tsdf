@@ -7,7 +7,10 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
+import { vi } from 'vitest';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 import type { ListQueryParams } from '../mocks/listQueryStoreTestEnv';
 import type { FilterOperator } from '../mocks/serverTableMock';
 
@@ -78,4 +81,15 @@ export function parsePersistedObject(raw: string): Record<string, unknown> {
     JSON.parse(raw),
     'Expected persisted storage entry to be an object',
   );
+}
+
+export function setupOfflineTestRuntime() {
+  vi.useFakeTimers();
+  vi.setSystemTime(TEST_INITIAL_TIME);
+  localStorage.clear();
+
+  const network = createOfflineNetworkMock();
+  network.install();
+
+  return { network };
 }

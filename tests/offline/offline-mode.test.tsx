@@ -3,6 +3,7 @@ import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
+  type CollectionOfflineOperationDefinition,
   type DocumentOfflineOperationDefinition,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
@@ -32,6 +33,13 @@ type UpdateValueOperations = {
 type UpdateValueExecuteContext = Parameters<
   UpdateValueOperations['updateValue']['execute']
 >[0];
+type RenameCollectionItemOperations = {
+  renameItem: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { name: string }
+  >;
+};
 
 function getOfflineQueueEntries(
   sessionKey: string,
@@ -118,6 +126,55 @@ describe('offline mode network and session', () => {
       outage: { active: '❌', enabled: '❌' }
       sessionKey: 'offline-opt-in-required'
     `);
+  });
+
+  test('type safety: document test env requires explicit offline operation typing', () => {
+    const plainEnv = createDocumentStoreTestEnv(1);
+    const typedEnv = createDocumentStoreTestEnv<number, UpdateValueOperations>(
+      1,
+    );
+
+    // Type-only assertions: the function is never executed.
+    function typeCheck_() {
+      void plainEnv.apiStore.performMutation({
+        mutation: () => Promise.resolve(2),
+        // @ts-expect-error - offline mutations should not be available by default
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      });
+
+      void typedEnv.apiStore.performMutation({
+        mutation: () => Promise.resolve(2),
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      });
+    }
+
+    void typeCheck_;
+    expect(true).toBe(true);
+  });
+
+  test('type safety: collection test env requires explicit offline operation typing', () => {
+    const initialCollectionData = { 'users||1': { name: 'Ada' } };
+    const plainEnv = createCollectionStoreTestEnv(initialCollectionData);
+    const typedEnv = createCollectionStoreTestEnv<
+      { name: string },
+      RenameCollectionItemOperations
+    >(initialCollectionData);
+
+    function typeCheck_() {
+      void plainEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
+        // @ts-expect-error - offline mutations should not be available by default
+        offline: { operation: 'renameItem', input: { name: 'Grace' } },
+      });
+
+      void typedEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
+        offline: { operation: 'renameItem', input: { name: 'Grace' } },
+      });
+    }
+
+    void typeCheck_;
+    expect(true).toBe(true);
   });
 
   test('document offline mutations are queued durably and replay when the browser comes back online', async () => {

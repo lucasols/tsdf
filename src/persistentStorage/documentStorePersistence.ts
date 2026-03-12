@@ -1,5 +1,6 @@
 import type { Store } from 't-state';
 import type { DocumentStoreState } from '../documentStore';
+import type { AnyOfflineOperationDefinition } from './offline/types';
 import type { ValidStoreState } from '../utils/storeShared';
 import {
   convertStoreDataForPersistence,
@@ -18,6 +19,11 @@ import type {
   DocumentPersistentStorageConfig,
   PersistedDocumentData,
 } from './types';
+
+type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
+  | (Record<string, AnyOfflineOperationDefinition> &
+      ([State] extends [never] ? never : unknown))
+  | null;
 
 function readDocumentFromLocalStorageSync(
   key: string,
@@ -47,11 +53,14 @@ export type DocumentPersistenceSetup<State extends ValidStoreState> = {
 
 export function setupDocumentPersistence<
   State extends ValidStoreState,
+  TOfflineOperations extends DocumentPersistenceOfflineOperations<State> = null,
   StorageState = unknown,
 >(
-  config: DocumentPersistentStorageConfig<State, StorageState> & {
-    getSessionKey: () => string | false;
-  },
+  config: DocumentPersistentStorageConfig<
+    State,
+    StorageState,
+    TOfflineOperations
+  > & { getSessionKey: () => string | false },
 ): DocumentPersistenceSetup<State> {
   const version = config.version ?? 1;
   const storageAdapter = config.adapter;

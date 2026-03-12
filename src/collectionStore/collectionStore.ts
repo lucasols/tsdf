@@ -211,6 +211,11 @@ type InternalCollectionOfflineOperations<
 > &
   ([ItemState | ItemPayload] extends [never] ? never : unknown);
 
+type CollectionOfflineOperationsConfig<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
+
 const offlineItemEntityRefSchema = rc_object({
   entityKey: rc_string,
   entityKind: rc_literals('item'),
@@ -219,10 +224,10 @@ const offlineItemEntityRefSchema = rc_object({
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends InternalCollectionOfflineOperations<
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
     ItemState,
     ItemPayload
-  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
+  > = null,
   StorageState = unknown,
 > = {
   debugName?: string;
@@ -302,10 +307,10 @@ export type CollectionStoreOptions<
 export type CollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends InternalCollectionOfflineOperations<
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
     ItemState,
     ItemPayload
-  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
+  > = null,
 > = ReturnType<
   typeof createCollectionStore<ItemState, ItemPayload, TOfflineOperations>
 >;
@@ -319,10 +324,10 @@ const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 export function createCollectionStore<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  TOfflineOperations extends InternalCollectionOfflineOperations<
+  TOfflineOperations extends CollectionOfflineOperationsConfig<
     ItemState,
     ItemPayload
-  > = InternalCollectionOfflineOperations<ItemState, ItemPayload>,
+  > = null,
   StorageState = unknown,
 >({
   debugName,
@@ -1489,7 +1494,9 @@ export function createCollectionStore<
        * offline sync controller. The immediate result only reflects queue
        * persistence.
        */
-      offline?: OfflineMutationDescriptor<TOfflineOperations>;
+      offline?: TOfflineOperations extends null
+        ? never
+        : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
     },
   ): Promise<ResultType<Awaited<T>, StoreError | true>> {
     if (offline && offlineController && !offlineController.canQueueMutation()) {

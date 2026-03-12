@@ -76,7 +76,7 @@ describe('offline mode outage and recovery', () => {
         offlineMode: {
           outage: {
             enabled: true,
-            classifyFailure: () => 'outage',
+            classifyFailure: () => 'outage' as const,
             recoveryCheck,
             recoveryProbe: {
               intervalMs: 100,
