@@ -61,3 +61,21 @@ export const listQueryQueryPayloadSchema: PersistentStorageSchema<ListQueryParam
     tableId: rc_string,
     filters: rc_array(filterOperatorSchema).optionalKey(),
   });
+
+export function toRecord(
+  value: unknown,
+  errorMessage: string,
+): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(errorMessage);
+  }
+
+  return Object.fromEntries(Object.entries(value));
+}
+
+export function parsePersistedObject(raw: string): Record<string, unknown> {
+  return toRecord(
+    JSON.parse(raw),
+    'Expected persisted storage entry to be an object',
+  );
+}

@@ -19,6 +19,7 @@ import {
   collectionSchema,
   docMutationInputSchema,
   docSchema,
+  parsePersistedObject,
 } from './offlineTestShared';
 
 type DocState = { value: number };
@@ -31,6 +32,29 @@ type UpdateValueOperations = {
 type UpdateValueExecuteContext = Parameters<
   UpdateValueOperations['updateValue']['execute']
 >[0];
+
+function getOfflineQueueEntries(
+  sessionKey: string,
+  storeName: string,
+): Array<Record<string, unknown>> {
+  const entries: Array<Record<string, unknown>> = [];
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(`tsdf.${sessionKey}.${storeName}.offline.queue.`)) {
+      continue;
+    }
+
+    const rawEntry = localStorage.getItem(key);
+    if (!rawEntry) {
+      throw new Error(`Missing persisted offline queue entry for "${key}"`);
+    }
+
+    entries.push(parsePersistedObject(rawEntry));
+  }
+
+  return entries;
+}
 
 describe('offline mode network and session', () => {
   let network = createOfflineNetworkMock();
@@ -125,19 +149,33 @@ describe('offline mode network and session', () => {
       },
     });
 
-    await Promise.resolve();
-
-    const mutationResult = await env.apiStore.performMutation({
-      optimisticUpdate: () => {
-        env.apiStore.updateState((draft) => {
-          draft.value = 2;
-        });
-      },
-      mutation: () => Promise.resolve(2),
-      offline: { operation: 'updateValue', input: { value: 2 } },
+    const hook = renderHook(() => {
+      const doc = env.apiStore.useDocument();
+      env.trackUIChanges(
+        `value:${doc.data?.value ?? 'null'} pending:${doc.isPendingOfflineSync ? 'yes' : 'no'}`,
+      );
+      return doc;
     });
 
-    expect(mutationResult.ok).toBe(true);
+    await Promise.resolve();
+
+    // Queue an optimistic document mutation while the browser is offline.
+    let mutationResult:
+      | Awaited<ReturnType<typeof env.apiStore.performMutation>>
+      | undefined;
+    await act(async () => {
+      mutationResult = await env.apiStore.performMutation({
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value = 2;
+          });
+        },
+        mutation: () => Promise.resolve(2),
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      });
+    });
+
+    expect(mutationResult?.ok).toBe(true);
     expect(env.store.state.data).toMatchInlineSnapshot(`
       value: 2
     `);
@@ -152,8 +190,9 @@ describe('offline mode network and session', () => {
         storeType: 'document',
       },
     ]);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
 
-    const hook = renderHook(() => env.apiStore.useDocument());
+    // The optimistic value should stay visible while replay is still pending.
     expect(hook.result.current).toMatchInlineSnapshot(`
       data: { value: 2 }
       error: null
@@ -161,8 +200,8 @@ describe('offline mode network and session', () => {
       isPendingOfflineSync: '✅'
       status: 'success'
     `);
-    hook.unmount();
 
+    // Once connectivity returns, replay should clear the queue and settle back onto the last confirmed server data.
     act(() => {
       network.goOnline();
     });
@@ -170,6 +209,29 @@ describe('offline mode network and session', () => {
     await flushAllTimers();
 
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+      isLoading: '❌'
+      isPendingOfflineSync: '❌'
+      status: 'success'
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | ui                    |
+      0     | "value:1 pending:no"  | ui-initialized
+      .     | "value:2 pending:no"  | ui-changed
+      .     | "value:2 pending:yes" | ui-changed
+      .     | "value:2 pending:no"  | ui-changed
+      10ms  | "value:2 pending:no"  | 🔴 >fetch-started
+      810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
+      .     | "value:1 pending:no"  | ui-changed
+      "
+    `);
+    hook.unmount();
   });
 
   test('plain stores do not inherit offline state from other stores in the same session', async () => {

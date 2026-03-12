@@ -1,91 +1,27 @@
-import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_number, rc_object, rc_string } from 'runcheck';
+import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import {
-  type CollectionOfflineOperationDefinition,
-  type DocumentOfflineOperationDefinition,
-  type ListQueryOfflineOperationDefinition,
-  localPersistentStorage,
-} from '../../src/main';
+import { localPersistentStorage } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import {
-  createListQueryStoreTestEnv,
-  type ListQueryParams,
-} from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   collectionCreateInputSchema,
   collectionSchema,
-  docConflictSchema,
   docMutationInputSchema,
   docSchema,
-  listQueryQueryPayloadSchema,
 } from './offlineTestShared';
+import {
+  type CreateUserOperations,
+  getLocalStorageKeys,
+  getOfflineQueueEntries,
+  getOfflineQueueEntryData,
+  type UpdateValueOperations,
+} from './offlineReplayTestShared';
 
-type CreateUserOperations = {
-  createUser: CollectionOfflineOperationDefinition<
-    { value: { name: string } },
-    string,
-    { name: string },
-    unknown,
-    { id: string; name: string }
-  >;
-};
-
-type UpdateValueOperations = {
-  updateValue: DocumentOfflineOperationDefinition<
-    { value: number },
-    { input: { value: number } }
-  >;
-};
-
-type UpdateValueConflictOperations = {
-  updateValue: DocumentOfflineOperationDefinition<
-    { value: number },
-    { input: { value: number }; conflict: { reason: string } }
-  >;
-};
-
-type PatchUserOperations = {
-  patchUserName: ListQueryOfflineOperationDefinition<
-    { id: number; name: string },
-    ListQueryParams,
-    string,
-    { itemId: string; name: string },
-    unknown
-  >;
-};
-
-type CreateListQueryUserOperations = {
-  createUser: ListQueryOfflineOperationDefinition<
-    { id: number; name: string },
-    ListQueryParams,
-    string,
-    { name: string },
-    unknown,
-    { id: number; name: string }
-  >;
-};
-
-const userPatchSchema = rc_object({ itemId: rc_string, name: rc_string });
-const userRowSchema = rc_object({ id: rc_number, name: rc_string });
-
-function getLocalStorageKeys(): string[] {
-  const keys: string[] = [];
-
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    if (key) keys.push(key);
-  }
-
-  return keys.sort();
-}
-
-describe('offline mode replay and conflict handling', () => {
+describe('offline replay queueing and retry behavior', () => {
   let network = createOfflineNetworkMock();
 
   beforeEach(() => {
@@ -174,7 +110,7 @@ describe('offline mode replay and conflict handling', () => {
     act(() => {
       network.goOnline();
     });
-    for (let i = 0; i < 4 && resolveCreates.length === 0; i += 1) {
+    for (let index = 0; index < 4 && resolveCreates.length === 0; index += 1) {
       await Promise.resolve();
     }
     expect(resolveCreates).toHaveLength(1);
@@ -186,6 +122,142 @@ describe('offline mode replay and conflict handling', () => {
     await flushAllTimers();
 
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('document offline accumulation keeps a single persisted queue entry and replays only the merged input', async () => {
+    network.setOffline();
+    const sessionKey = 'offline-accumulation-session';
+    const storeName = 'offline-accumulation-doc';
+    const execute = vi
+      .fn<
+        ({
+          input,
+          enqueuedAt,
+        }: {
+          input: { value: number };
+          enqueuedAt: number;
+        }) => { value: number }
+      >()
+      .mockImplementation(({ input, enqueuedAt }) => {
+        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
+        env.apiStore.updateState((draft) => {
+          draft.value = input.value;
+        });
+
+        return input;
+      });
+
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        storeName,
+        adapter: localPersistentStorage,
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute,
+            },
+          },
+        },
+      },
+    });
+
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: () => Promise.resolve(2),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    await advanceTime(50);
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 3;
+        });
+      },
+      mutation: () => Promise.resolve(3),
+      offline: { operation: 'updateValue', input: { value: 3 } },
+    });
+
+    expect(env.store.state.data).toMatchInlineSnapshot(`
+      value: 3
+    `);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
+      - createdAt: 1735689600000
+        entityKey: 'document'
+        entityKind: 'document'
+        hasConflict: '❌'
+        id: 'offline-accumulation-session:offline-accumulation-doc:document'
+        pendingMutations: 1
+        sessionKey: 'offline-accumulation-session'
+        storeName: 'offline-accumulation-doc'
+        storeType: 'document'
+        syncState: 'pending'
+        updatedAt: 1735689600050
+    `);
+    expect(
+      getOfflineQueueEntries(sessionKey, storeName).map((entry) => {
+        const data = getOfflineQueueEntryData(entry);
+
+        return {
+          timestamp: entry.timestamp,
+          version: entry.version,
+          data: {
+            attempts: data.attempts,
+            createdAt: data.createdAt,
+            entityRefs: data.entityRefs,
+            input: data.input,
+            lastAttemptAt: data.lastAttemptAt,
+            operation: data.operation,
+            sessionKey: data.sessionKey,
+            storeName: data.storeName,
+            storeType: data.storeType,
+            syncState: data.syncState,
+            updatedAt: data.updatedAt,
+          },
+        };
+      }),
+    ).toMatchInlineSnapshot(`
+      - data:
+          attempts: 0
+          createdAt: 1735689600000
+          entityRefs:
+            - { entityKey: 'document', entityKind: 'document' }
+          input: { value: 3 }
+          lastAttemptAt: null
+          operation: 'updateValue'
+          sessionKey: 'offline-accumulation-session'
+          storeName: 'offline-accumulation-doc'
+          storeType: 'document'
+          syncState: 'pending'
+          updatedAt: 1735689600050
+        timestamp: 1735689600050
+        version: 1
+    `);
+
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
+      - value: 3
+    `);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
   });
 
   test('needs-confirmation entries are skipped when shouldSkipSync returns true', async () => {
@@ -359,121 +431,6 @@ describe('offline mode replay and conflict handling', () => {
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   });
 
-  test('offline conflicts are detected before execute, surface through selectors, and can be resolved', async () => {
-    network.setOffline();
-    const execute = vi.fn(
-      ({
-        input,
-        enqueuedAt,
-      }: {
-        input: { value: number };
-        enqueuedAt: number;
-      }) => {
-        expect(input.value).toBe(2);
-        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-        return input;
-      },
-    );
-    let resolveEnqueuedAt: number | null = null;
-    const env = createDocumentStoreTestEnv<
-      number,
-      UpdateValueConflictOperations
-    >(1, {
-      getSessionKey: () => 'offline-conflict-session',
-      testScenario: 'loaded',
-      persistentStorage: {
-        storeName: 'offline-conflict-doc',
-        adapter: localPersistentStorage,
-        schema: docSchema,
-        offlineMode: {
-          network: { enabled: true },
-          operations: {
-            updateValue: {
-              inputSchema: docMutationInputSchema,
-              execute,
-              conflictHandling: {
-                schema: docConflictSchema,
-                detectConflict: ({ input, enqueuedAt }) => {
-                  expect(input.value).toBe(2);
-                  expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-                  return { reason: 'server-changed' };
-                },
-                resolveConflict: ({
-                  input,
-                  conflict,
-                  resolution,
-                  enqueuedAt,
-                }) => {
-                  expect(input.value).toBe(2);
-                  expect(conflict).toMatchObject({ reason: 'server-changed' });
-                  expect(resolution).toMatchObject({
-                    resolution: 'accept-local',
-                  });
-                  resolveEnqueuedAt = enqueuedAt;
-                  return undefined;
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    await env.apiStore.performMutation({
-      optimisticUpdate: () => {
-        env.apiStore.updateState((draft) => {
-          draft.value = 2;
-        });
-      },
-      mutation: () => Promise.resolve(2),
-      offline: { operation: 'updateValue', input: { value: 2 } },
-    });
-
-    act(() => {
-      network.goOnline();
-    });
-    await Promise.resolve();
-    await flushAllTimers();
-
-    expect(execute).not.toHaveBeenCalled();
-    expect(env.apiStore.getOfflineEntities()).toMatchObject([
-      {
-        entityKey: 'document',
-        hasConflict: true,
-        pendingMutations: 0,
-        syncState: 'conflict',
-      },
-    ]);
-    expect(env.apiStore.getOfflineConflicts()).toMatchObject([
-      { conflict: { reason: 'server-changed' }, operation: 'updateValue' },
-    ]);
-
-    const hook = renderHook(() => env.apiStore.useDocument());
-    expect(hook.result.current).toMatchInlineSnapshot(`
-      data: { value: 2 }
-      error: null
-      isLoading: '❌'
-      isPendingOfflineSync: '❌'
-      status: 'success'
-    `);
-
-    const [conflict] = env.apiStore.getOfflineConflicts();
-    expect(conflict).toBeDefined();
-    if (!conflict) {
-      throw new Error('Expected a persisted offline conflict');
-    }
-    await act(async () => {
-      await env.apiStore.resolveOfflineConflict(conflict.id, {
-        resolution: 'accept-local',
-      });
-    });
-
-    expect(resolveEnqueuedAt).toBe(TEST_INITIAL_TIME);
-    expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
-    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-    hook.unmount();
-  });
-
   test('needs-confirmation entries do not accept new accumulation before shouldSkipSync runs', async () => {
     network.setOffline();
     const execute = vi
@@ -621,171 +578,6 @@ describe('offline mode replay and conflict handling', () => {
     expect(shouldSkipSync).toHaveBeenCalledTimes(1);
     expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-  });
-
-  test('list-query offline replay uses explicit entity refs from the offline input', async () => {
-    network.setOffline();
-    const execute = vi.fn(
-      ({
-        input,
-        enqueuedAt,
-      }: {
-        input: { itemId: string; name: string };
-        enqueuedAt: number;
-      }) => {
-        expect(enqueuedAt).toBe(TEST_INITIAL_TIME);
-        env.apiStore.updateItemState(input.itemId, (item) => ({
-          ...item,
-          name: input.name,
-        }));
-
-        return { name: input.name };
-      },
-    );
-
-    const env = createListQueryStoreTestEnv<
-      { id: number; name: string },
-      false,
-      false,
-      PatchUserOperations
-    >(
-      { users: [{ id: 1, name: 'Ada' }] },
-      {
-        getSessionKey: () => 'offline-replay-mutation-payload-session',
-        testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
-        persistentStorage: {
-          storeName: 'offline-replay-mutation-payload',
-          adapter: localPersistentStorage,
-          schema: userRowSchema,
-          itemPayloadSchema: rc_string,
-          queryPayloadSchema: listQueryQueryPayloadSchema,
-          offlineMode: {
-            network: network.config,
-            operations: {
-              patchUserName: {
-                inputSchema: userPatchSchema,
-                getEntityRefs: ({ input }) => [input.itemId],
-                execute,
-              },
-            },
-          },
-        },
-      },
-    );
-
-    await env.apiStore.performMutation('users||1', {
-      mutation: () => Promise.resolve({ name: 'Ada offline' }),
-      offline: {
-        operation: 'patchUserName',
-        input: { itemId: 'users||1', name: 'Ada offline' },
-      },
-    });
-
-    act(() => {
-      network.goOnline();
-    });
-    await flushAllTimers();
-
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect(execute.mock.calls[0]?.[0]?.input.itemId).toBe('users||1');
-  });
-
-  test('list-query temp creates keep manually inserted query items after replay', async () => {
-    network.setOffline();
-    let nextUserId = 3;
-
-    const env = createListQueryStoreTestEnv<
-      { id: number; name: string },
-      false,
-      false,
-      CreateListQueryUserOperations
-    >(
-      {
-        users: [
-          { id: 1, name: 'Ada' },
-          { id: 2, name: 'Grace' },
-        ],
-      },
-      {
-        getSessionKey: () => 'offline-replay-temp-list-query-session',
-        testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
-        persistentStorage: {
-          storeName: 'offline-replay-temp-list-query',
-          adapter: localPersistentStorage,
-          schema: userRowSchema,
-          itemPayloadSchema: rc_string,
-          queryPayloadSchema: listQueryQueryPayloadSchema,
-          offlineMode: {
-            network: network.config,
-            operations: {
-              createUser: {
-                inputSchema: collectionCreateInputSchema,
-                getEntityRefs: () => [],
-                tempEntity: {
-                  createTempId: (input) => `temp:${input.name}`,
-                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
-                  reconcileServerEntity: (result) => ({
-                    finalPayload: `users||${result.id}`,
-                    finalData: result,
-                  }),
-                },
-                execute: ({ input }) => {
-                  const result = { id: nextUserId, name: input.name };
-                  nextUserId += 1;
-                  return result;
-                },
-              },
-            },
-          },
-        },
-      },
-    );
-
-    const hook = renderHook(() =>
-      env.apiStore.useListQuery(
-        { tableId: 'users' },
-        { itemSelector: (item) => item.name },
-      ),
-    );
-    await flushAllTimers();
-
-    await act(async () => {
-      await env.apiStore.performMutation(null, {
-        optimisticUpdate: () => {
-          env.apiStore.addItemToState(
-            'temp:Linus offline',
-            { id: -1, name: 'Linus offline' },
-            {
-              addItemToQueries: {
-                queries: [{ tableId: 'users' }],
-                appendTo: 'end',
-              },
-            },
-          );
-        },
-        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
-        offline: { operation: 'createUser', input: { name: 'Linus offline' } },
-      });
-    });
-
-    expect(hook.result.current.items).toMatchInlineSnapshot(`
-      ['Ada', 'Grace', 'Linus offline']
-    `);
-
-    act(() => {
-      network.goOnline();
-    });
-    await flushAllTimers();
-
-    expect(hook.result.current.items).toMatchInlineSnapshot(`
-      ['Ada', 'Grace', 'Linus offline']
-    `);
-    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
-      id: 3
-      name: 'Linus offline'
-    `);
-
-    hook.unmount();
   });
 
   test('session switches do not leave replayed queue entries in the old namespace', async () => {
