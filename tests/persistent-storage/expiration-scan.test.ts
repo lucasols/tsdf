@@ -390,7 +390,6 @@ describe('expiration scan', () => {
     createDocumentStoreTestEnv(
       { name: 'trigger', value: 2 },
       {
-        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'throttle-trigger',
@@ -432,7 +431,6 @@ describe('expiration scan', () => {
     createDocumentStoreTestEnv(
       { name: 'trigger', value: 2 },
       {
-        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'throttle-trigger',
