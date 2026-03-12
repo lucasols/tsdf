@@ -1,5 +1,5 @@
-import { renderHook } from '@testing-library/react';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_boolean, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -202,16 +202,16 @@ test('direct collection store offline public api supports the main operation hoo
 
   expect(pick(todoOneHook.result.current, ['data', 'payload', 'status']))
     .toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 1' }
-    payload: '1'
-    status: 'success'
-  `);
+      data: { completed: '❌', title: 'Todo 1' }
+      payload: '1'
+      status: 'success'
+    `);
   expect(pick(todoTwoHook.result.current, ['data', 'payload', 'status']))
     .toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 2' }
-    payload: '2'
-    status: 'success'
-  `);
+      data: { completed: '❌', title: 'Todo 2' }
+      payload: '2'
+      status: 'success'
+    `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
     effectiveOffline: false,
@@ -308,7 +308,7 @@ test('direct collection store offline public api supports the main operation hoo
   });
 
   await act(async () => {
-    await collectionStore.performMutation('__create__', {
+    await collectionStore.performMutation(null, {
       mutation: () =>
         Promise.resolve({ title: 'Todo 3 offline', completed: false }),
       offline: { operation: 'createTodo', input: { title: 'Todo 3 offline' } },
@@ -393,10 +393,10 @@ test('direct collection store offline public api supports the main operation hoo
   await flushAllTimers();
   expect(pick(todoThreeHook.result.current, ['data', 'payload', 'status']))
     .toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 3 offline' }
-    payload: '3'
-    status: 'success'
-  `);
+      data: { completed: '❌', title: 'Todo 3 offline' }
+      payload: '3'
+      status: 'success'
+    `);
 
   await act(async () => {
     await collectionStore.resolveOfflineConflict(conflict!.id, {

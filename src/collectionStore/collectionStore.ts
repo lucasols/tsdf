@@ -141,11 +141,20 @@ export type CollectionInitialStateItem<
   ItemState extends ValidStoreState,
 > = { payload: ItemPayload; data: ItemState };
 
+type CollectionMutationTouchedItem<ItemPayload extends ValidPayload> =
+  | { payload: ItemPayload }
+  | { payload?: undefined };
+
 export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   /** Emitted when a mutation begins executing */
-  mutationStart: { mutationId: number; payload: ItemPayload };
+  mutationStart: {
+    mutationId: number;
+  } & CollectionMutationTouchedItem<ItemPayload>;
   /** Emitted when a mutation completes or fails */
-  mutationEnd: { mutationId: number; payload: ItemPayload; success: boolean };
+  mutationEnd: {
+    mutationId: number;
+    success: boolean;
+  } & CollectionMutationTouchedItem<ItemPayload>;
 };
 
 export type CollectionStateCleanup<ItemPayload extends ValidPayload> = {
@@ -1458,8 +1467,11 @@ export function createCollectionStore<
     return someItemWasUpdated;
   }
 
-  async function performMutation<T>(
-    payload: ItemPayload,
+  async function performMutation<
+    T,
+    TMutationPayload extends ItemPayload | undefined | null,
+  >(
+    payload: TMutationPayload,
     {
       optimisticUpdate,
       mutation,
@@ -1469,9 +1481,9 @@ export function createCollectionStore<
       debounce: _debounce,
       offline,
     }: {
-      optimisticUpdate?: (payload: ItemPayload) => void | boolean;
-      mutation: (payload: ItemPayload) => Promise<T>;
-      onSuccess?: (response: Awaited<T>, payload: ItemPayload) => void;
+      optimisticUpdate?: (payload: TMutationPayload) => void | boolean;
+      mutation: (payload: TMutationPayload) => Promise<T>;
+      onSuccess?: (response: Awaited<T>, payload: TMutationPayload) => void;
       revalidateOnSuccess?: boolean;
       silentErrors?: boolean;
       debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
@@ -1487,10 +1499,15 @@ export function createCollectionStore<
       return Result.err(offlineSessionUnavailableError);
     }
 
+    const hasPayload = payload != null;
     const mutationId = getAutoIncrementId();
-    storeEvents.emit('mutationStart', { mutationId, payload });
+    storeEvents.emit(
+      'mutationStart',
+      hasPayload ? { mutationId, payload } : { mutationId },
+    );
     const result = await performMutationWithLifecycle({
-      startMutation: () => startMutation(payload),
+      startMutation: () =>
+        hasPayload ? startMutation(payload) : () => undefined,
       optimisticUpdate: optimisticUpdate
         ? () =>
             runWithBroadcastConsistency('optimistic', () =>
@@ -1511,7 +1528,7 @@ export function createCollectionStore<
         return mutation(payload);
       },
       onSuccess: (result) => {
-        if (revalidateOnSuccess && !offline) {
+        if (hasPayload && revalidateOnSuccess && !offline) {
           invalidateItem(payload);
         }
 
@@ -1526,17 +1543,20 @@ export function createCollectionStore<
           onMutationError(exception, { silentErrors });
         }
 
-        invalidateItem(payload);
+        if (hasPayload) {
+          invalidateItem(payload);
+        }
 
         return error;
       },
     });
 
-    storeEvents.emit('mutationEnd', {
-      mutationId,
-      payload,
-      success: result.ok,
-    });
+    storeEvents.emit(
+      'mutationEnd',
+      hasPayload
+        ? { mutationId, payload, success: result.ok }
+        : { mutationId, success: result.ok },
+    );
 
     return result;
   }

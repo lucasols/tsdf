@@ -170,6 +170,27 @@ describe('collectionStore storeEvents', () => {
         type: 'mutationEnd'
     `);
   });
+
+  test('emits events without payload when no existing item is touched', async () => {
+    const env = createCollectionStoreTestEnv({ 'item-1': { name: 'Item 1' } });
+    const events: unknown[] = [];
+
+    env.apiStore.storeEvents.on('*', (event) => {
+      events.push(event);
+    });
+
+    const result = await env.apiStore.performMutation(null, {
+      mutation: () => Promise.resolve('ok'),
+    });
+
+    assert(result.ok);
+    expect(events).toMatchInlineSnapshot(`
+      - payload: { mutationId: 9 }
+        type: 'mutationStart'
+      - payload: { mutationId: 9, success: '✅' }
+        type: 'mutationEnd'
+    `);
+  });
 });
 
 describe('listQueryStore storeEvents', () => {
@@ -191,11 +212,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 9
+          mutationId: 10
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 9
+          mutationId: 10
           success: '✅'
         type: 'mutationEnd'
     `);
@@ -223,11 +244,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1', 'users||2']
-          mutationId: 10
+          mutationId: 11
         type: 'mutationStart'
       - payload:
           items: ['users||1', 'users||2']
-          mutationId: 10
+          mutationId: 11
           success: '✅'
         type: 'mutationEnd'
     `);
@@ -251,11 +272,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 11
+          mutationId: 12
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 11
+          mutationId: 12
           success: '❌'
         type: 'mutationEnd'
     `);
@@ -285,20 +306,20 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: ['users||1']
-          mutationId: 12
+          mutationId: 13
         type: 'mutationStart'
       - payload:
           items: ['users||1']
-          mutationId: 12
+          mutationId: 13
           success: '✅'
         type: 'mutationEnd'
       - payload:
           items: ['users||2']
-          mutationId: 13
+          mutationId: 14
         type: 'mutationStart'
       - payload:
           items: ['users||2']
-          mutationId: 13
+          mutationId: 14
           success: '✅'
         type: 'mutationEnd'
     `);
@@ -322,11 +343,11 @@ describe('listQueryStore storeEvents', () => {
     expect(events).toMatchInlineSnapshot(`
       - payload:
           items: []
-          mutationId: 14
+          mutationId: 15
         type: 'mutationStart'
       - payload:
           items: []
-          mutationId: 14
+          mutationId: 15
           success: '✅'
         type: 'mutationEnd'
     `);
