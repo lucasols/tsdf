@@ -11,10 +11,11 @@ import type {
   OfflineConflictRecord,
   OfflineEntityRef,
   OfflineModeConfig,
-  OperationInput,
   OfflineOperationSchemaShape,
   OfflineQueueEntry,
+  OfflineResolveConflictResult,
   OfflineStoreType,
+  OperationInput,
 } from './types';
 
 const NEEDS_CONFIRMATION_RETRY_MS = 250;
@@ -864,7 +865,10 @@ export function createOfflineStoreController<
 
     await removeConflict(conflictId, current);
 
-    const requeue: { input: unknown } | undefined = result.requeue;
+    const typedResult: OfflineResolveConflictResult<unknown> = result;
+    if (!typedResult) return;
+
+    const requeue = typedResult.requeue;
 
     if (requeue) {
       await queueMutationWithSession(current, {
