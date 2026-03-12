@@ -1,6 +1,6 @@
 ---
 name: improve-tests
-description: Improve automated tests by default: strengthen coverage, readability, determinism, and failure signals in Vitest/TypeScript suites. Only switch to review-only mode when the user explicitly asks for a review or audit.
+description: Improve tests feature coverage, readability, determinism, and failure signals in Vitest/TypeScript suites
 ---
 
 # Improve Tests
