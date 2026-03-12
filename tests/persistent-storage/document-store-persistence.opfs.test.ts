@@ -10,11 +10,11 @@ import {
   test,
   vi,
 } from 'vitest';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -102,10 +102,11 @@ describe('opfs: document store persistence', () => {
 
     await advanceTime(2100);
     await flushAllTimers();
-    mockAdapter.clearReadRequests();
 
     expect(mockAdapter.has(key)).toBe(true);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
+      `['tsdf.sess1.opfs-version-mismatch']`,
+    );
 
     await env.apiStore.preloadPersistentStorage();
     await advanceTime(2100);
@@ -129,9 +130,10 @@ describe('opfs: document store persistence', () => {
 
     await advanceTime(2100);
     await flushAllTimers();
-    mockAdapter.clearReadRequests();
 
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-cleanup']`,
+    );
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
     await advanceTime(50);
@@ -156,7 +158,6 @@ describe('opfs: document store persistence', () => {
 
     await advanceTime(2100);
     await flushAllTimers();
-    mockAdapter.clearReadRequests();
 
     const renders = createLoggerStore();
 
@@ -166,7 +167,9 @@ describe('opfs: document store persistence', () => {
       refetchOnMount: '❌'
       status: 'idle'
     `);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
+      `['tsdf.session1.opfs-doc']`,
+    );
 
     renderHook(() => {
       const { data, status } = env.apiStore.useDocument({
