@@ -1,10 +1,9 @@
 import { test, expect } from 'vitest';
 import {
-  createDocumentStore,
   type DocumentOfflineOperationDefinition,
-  localPersistentStorage,
+  type DocumentStore,
 } from '../../src/main';
-import { docMutationInputSchema, docSchema } from './offlineTestShared';
+import { docMutationInputSchema } from './offlineTestShared';
 
 type DocState = { value: number };
 type UpdateValueOperations = {
@@ -16,40 +15,7 @@ type UpdateValueOperations = {
   >;
 };
 
-const typedDocumentStore_ = createDocumentStore<
-  DocState,
-  UpdateValueOperations
->({
-  id: 'offline-typing-doc',
-  getSessionKey: () => 'offline-typing-session',
-  fetchFn: () => Promise.resolve({ value: 1 }),
-  errorNormalizer: (exception) => ({
-    code: 500,
-    id: 'fetch-error',
-    message: exception.message,
-  }),
-  lowPriorityThrottleMs: 1,
-  baseCoalescingWindowMs: 1,
-  blockWindowClose: null,
-  persistentStorage: {
-    storeName: 'offline-typing-doc',
-    adapter: localPersistentStorage,
-    schema: docSchema,
-    offlineMode: {
-      operations: {
-        updateValue: {
-          inputSchema: docMutationInputSchema,
-          accumulation: {
-            mergeInput: ({ existingInput, incomingInput }) => ({
-              value: existingInput.value + incomingInput.value,
-            }),
-          },
-          execute: ({ input }) => input,
-        },
-      },
-    },
-  },
-});
+type TypedDocumentStore = DocumentStore<DocState, UpdateValueOperations>;
 
 const invalidPartialConflictHandling_: DocumentOfflineOperationDefinition<
   DocState,
@@ -76,10 +42,10 @@ const invalidPartialTempEntity_: DocumentOfflineOperationDefinition<
 };
 
 type DocumentMutationOptions = Parameters<
-  typeof typedDocumentStore_.performMutation
+  TypedDocumentStore['performMutation']
 >[0];
 
-const validOfflineDescriptor: NonNullable<DocumentMutationOptions['offline']> =
+const validOfflineDescriptor_: NonNullable<DocumentMutationOptions['offline']> =
   { operation: 'updateValue', input: { value: 3 } };
 
 const invalidOfflineInput_: NonNullable<DocumentMutationOptions['offline']> = {
@@ -97,11 +63,5 @@ const invalidOfflineOperation_: NonNullable<
 };
 
 test('offline mutation descriptors stay strongly typed', () => {
-  expect(validOfflineDescriptor.operation).toBe('updateValue');
-  expect(validOfflineDescriptor.input).toMatchInlineSnapshot(`
-    value: 3
-  `);
-  expect(invalidPartialConflictHandling_).toBeDefined();
-  expect(invalidPartialTempEntity_).toBeDefined();
   expect(true).toBe(true);
 });

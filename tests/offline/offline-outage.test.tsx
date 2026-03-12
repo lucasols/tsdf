@@ -3,19 +3,14 @@ import { getGlobalOfflineStatus, localPersistentStorage } from '../../src/main';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 import { docSchema } from './offlineTestShared';
 
 describe('offline mode outage and recovery', () => {
-  let online = true;
-
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(TEST_INITIAL_TIME);
-    online = true;
-    Object.defineProperty(window.navigator, 'onLine', {
-      configurable: true,
-      get: () => online,
-    });
+    createOfflineNetworkMock().install();
     localStorage.clear();
   });
 

@@ -2,51 +2,81 @@ import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { PersistentStorageSchema } from '../types';
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 
+/** Store kinds supported by offline replay and sync state tracking. */
 export type OfflineStoreType = 'document' | 'collection' | 'listQuery';
+/** Phase where a failure occurred during offline-enabled operation flow. */
 export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync';
-
+/** High-level classification used by outage detection. */
 export type OfflineFailureClassification = 'outage' | 'ignore';
-
+/** Kinds of entities participating in offline conflict/sync tracking. */
 export type OfflineEntityKind = 'document' | 'item' | 'query';
 
+/** Error shape emitted when runtime is operating in offline mode. */
 export type OfflineConnectivityError = {
   code: 0;
   id: 'offline';
   message: 'Offline';
 };
 
+/** Context passed into offline failure classification hooks. */
 export type OfflineFailureContext = {
+  /** Phase in which the failure was detected. */
   phase: OfflineFailurePhase;
+  /** Store type affected by the failure. */
   storeType: OfflineStoreType;
+  /** Optional operation name associated with the failure. */
   operationName?: string;
+  /** Session key used by browser tab and persistence scoping. */
   sessionKey: string;
 };
 
+/** Re-check strategy when outage recovery is enabled. */
 export type OfflineRecoveryProbeConfig = {
+  /** Initial recovery check delay, in milliseconds. */
   intervalMs?: number;
+  /** Maximum recovery probe delay, in milliseconds. */
   maxIntervalMs?: number;
+  /** Multiplicative backoff between recovery probes. */
   backoffMultiplier?: number;
+  /** Jitter ratio (0-1) applied to the recovery probe delay. */
   jitterRatio?: number;
 };
 
+/** Network availability mode configuration for offline controls. */
 export type OfflineNetworkModeConfig = {
+  /** Enable network outage checks and tracking. */
   enabled: boolean;
+  /** If true, subscribe to browser `online` / `offline` events. */
   listenToBrowserEvents?: boolean;
+  /**
+   * Optional override for network connectivity checks.
+   * Return `true` when network should be considered offline.
+   */
   getIsOffline?: () => boolean | Promise<boolean>;
 };
 
+/** Server outage detection and recovery configuration. */
 export type OfflineOutageModeConfig = {
+  /** Enable outage mode logic and confirmation retry flow. */
   enabled: boolean;
+  /**
+   * Classify a remote failure as `outage` or `ignore`.
+   * `outage` activates offline recovery behavior.
+   */
   classifyFailure: (
     error: unknown,
     ctx: OfflineFailureContext,
   ) => Promise<OfflineFailureClassification> | OfflineFailureClassification;
+  /** Probe the remote service to confirm outage recovery. */
   recoveryCheck: (ctx: { sessionKey: string }) => Promise<boolean> | boolean;
+  /** Optional probe config to tune recovery behavior. */
   recoveryProbe?: OfflineRecoveryProbeConfig;
 };
 
+/** Effective network/offline state computed by offline coordination. */
 export type OfflineConnectivityState = 'online' | 'offline';
 
+/** Per-session offline status snapshot shared across tabs. */
 export type GlobalOfflineStatus = {
   sessionKey: string;
   network: { enabled: boolean; active: boolean };
@@ -59,8 +89,10 @@ export type GlobalOfflineStatus = {
   lastRecoveryCheckAt: number | null;
 };
 
+/** Queue state of an offline mutation entry. */
 export type OfflineSyncState = 'pending' | 'syncing' | 'needs-confirmation';
 
+/** Aggregated offline status for a tracked document/item/query entity. */
 export type GlobalOfflineEntity = {
   id: string;
   sessionKey: string;
@@ -76,11 +108,13 @@ export type GlobalOfflineEntity = {
   tempId?: string;
 };
 
+/** Lightweight entity reference used to merge and protect related offline queue entries. */
 export type OfflineEntityRef = {
   entityKey: string;
   entityKind: OfflineEntityKind;
 };
 
+/** Persisted offline conflict payload. */
 export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   id: string;
   entryId: string;
@@ -97,6 +131,7 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   tempId?: string;
 };
 
+/** Persisted offline mutation queue entry. */
 export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   id: string;
   sessionKey: string;
@@ -116,10 +151,15 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   pendingConflict?: TConflict;
 };
 
+/**
+ * Base shape for each offline operation entry in `offlineMode.operations`.
+ * The `inputSchema` is used for both validation and queue serialization.
+ */
 export type OfflineOperationSchemaShape = {
   inputSchema: PersistentStorageSchema<__LEGIT_ANY__>;
 };
 
+/** Extracts operation input type from a schema map. */
 export type OperationInput<
   TOperations,
   TName extends keyof TOperations,
@@ -129,6 +169,7 @@ export type OperationInput<
   ? TInput
   : never;
 
+/** A typed operation descriptor for an offline mutation queue entry. */
 export type OfflineMutationDescriptor<
   TOperations extends Record<
     string,
@@ -139,67 +180,61 @@ export type OfflineMutationDescriptor<
   ? { operation: TName; input: OperationInput<TOperations, TName> }
   : never;
 
+/** Result returned from conflict handlers to requeue a replacement operation input. */
 export type OfflineResolveConflictResult<TInput> = void | {
   requeue?: { input: TInput };
 };
 
+/** Outcome for confirming whether a previously executed mutation was already applied. */
 export type OfflineConfirmRemoteOutcomeResult =
   | { type: 'applied' }
   | { type: 'not-applied' }
   | { type: 'conflict'; conflict: unknown }
   | { type: 'unknown' };
 
-export type OfflineAccumulationMergeContext<THelpers, TInput> = {
+/** Context passed into offline mutation accumulation hooks. */
+export type OfflineAccumulationMergeContext<TInput> = {
   sessionKey: string;
-  helpers: THelpers;
   existingInput: TInput;
   incomingInput: TInput;
 };
 
-export type OfflineAccumulationConfig<THelpers, TInput> = {
+/** Optional in-memory accumulation strategy for queued offline mutations. */
+export type OfflineAccumulationConfig<TInput> = {
   mergeInput: (
-    ctx: OfflineAccumulationMergeContext<THelpers, TInput>,
+    ctx: OfflineAccumulationMergeContext<TInput>,
   ) => Promise<TInput> | TInput;
 };
 
-type OperationBaseContext<THelpers, TInput, TMutationPayload> = {
+type OperationBaseContext<TInput, TMutationPayload> = {
   sessionKey: string;
-  helpers: THelpers;
   input: TInput;
   mutationPayload?: TMutationPayload;
 };
 
+/**
+ * Conflict hook configuration for a queued offline operation.
+ */
 export type OfflineConflictHandlingConfig<
-  THelpers,
   TInput,
   TConflict,
   TResult,
   TMutationPayload = unknown,
 > = {
-  /**
-   * Optional schema used to validate conflict payloads before they are written
-   * to offline conflict storage.
-   */
+  /** Optional schema to validate and sanitize stored conflict payloads. */
   schema?: PersistentStorageSchema<TConflict>;
   /**
-   * Inspects a successful `execute` result and returns a conflict payload when
-   * the queued mutation cannot be applied cleanly.
-   *
-   * Return `false` or `null` when the mutation should be considered synced.
+   * Analyze an operation result and return conflict payload when local replay does
+   * not match remote state.
    */
   detectConflict: (
-    ctx: OperationBaseContext<THelpers, TInput, TMutationPayload> & {
-      result: TResult;
-    },
+    ctx: OperationBaseContext<TInput, TMutationPayload> & { result: TResult },
   ) => Promise<TConflict | false | null> | TConflict | false | null;
   /**
-   * Resolves a persisted offline conflict.
-   *
-   * Return `requeue` to enqueue the same operation again with replacement
-   * input.
+   * Resolve persisted conflict data and optionally requeue an adjusted operation.
    */
   resolveConflict: (
-    ctx: OperationBaseContext<THelpers, TInput, TMutationPayload> & {
+    ctx: OperationBaseContext<TInput, TMutationPayload> & {
       conflict: TConflict;
       resolution: unknown;
     },
@@ -208,21 +243,18 @@ export type OfflineConflictHandlingConfig<
     | OfflineResolveConflictResult<TInput>;
 };
 
+/** Optional temp-id lifecycle for optimistic offline create flows. */
 export type OfflineTempEntityConfig<TInput, TResult> = {
   /**
-   * Creates a temporary entity id for optimistic offline-created records.
-   *
-   * When provided, accumulation is skipped for that queued mutation.
+   * Creates a temporary identifier to reference optimistic local entities.
    */
   createTempId: (input: TInput) => string;
   /**
-   * Builds the optimistic entity state inserted into the local store for a new
-   * temporary id, when the store adapter supports pending entities.
+   * Builds a temporary optimistic entity inserted into local state.
    */
   buildPendingEntity: (input: TInput, tempId: string) => unknown;
   /**
-   * Maps the successful server result for a temp-id mutation into the final
-   * store payload and optional data used to replace the optimistic entity.
+   * Reconciles temp entities with the successful server response.
    */
   reconcileServerEntity: (
     result: TResult,
@@ -230,112 +262,75 @@ export type OfflineTempEntityConfig<TInput, TResult> = {
   ) => { finalPayload: ValidPayload; finalData?: unknown };
 };
 
+/**
+ * Shape used by `offlineMode.operations` for each operation name.
+ */
 export type OfflineOperationDefinition<
-  THelpers,
   TInput,
   TConflict,
   TResult,
   TMutationPayload = unknown,
 > = {
-  /** Schema used to validate the queued operation input. */
+  /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
   /**
-   * Optional conflict handling. When omitted, the operation cannot surface
-   * persisted offline conflicts.
+   * Optional conflict strategy when a queued operation diverges from remote state.
    */
   conflictHandling?: OfflineConflictHandlingConfig<
-    THelpers,
     TInput,
     TConflict,
     TResult,
     TMutationPayload
   >;
   /**
-   * Opt-in queue compaction for pending offline mutations targeting the same
-   * operation and entity refs. When provided, a new pending mutation may merge
-   * into an existing pending queue entry instead of creating a second entry.
+   * Optional queue compaction for consecutive mutations with same refs.
    */
-  accumulation?: OfflineAccumulationConfig<THelpers, TInput>;
-  /**
-   * Optional temp-entity lifecycle for optimistic offline-created records.
-   * When omitted, the operation does not create temporary ids.
-   */
+  accumulation?: OfflineAccumulationConfig<TInput>;
+  /** Optional temporary-entity lifecycle for optimistic create/update operations. */
   tempEntity?: OfflineTempEntityConfig<TInput, TResult>;
   /**
-   * Replays the queued mutation against the remote source during offline sync.
-   *
-   * This may be retried after transient failures. `signal` is provided when the
-   * caller can cancel the in-flight request.
+   * Executes the queued mutation against the remote source during replay.
+   * This may run multiple times when transient failures occur.
    */
   execute: (
-    ctx: OperationBaseContext<THelpers, TInput, TMutationPayload> & {
+    ctx: OperationBaseContext<TInput, TMutationPayload> & {
       signal?: AbortSignal;
     },
   ) => Promise<TResult> | TResult;
   /**
-   * Verifies whether a previously failed sync attempt may already have been
-   * applied remotely.
-   *
-   * This hook is called before retrying entries in `needs-confirmation`. Return
-   * `applied` to drop the entry, `not-applied` to retry `execute`, `conflict`
-   * to persist a conflict, or `unknown` to keep waiting for confirmation.
+   * Optional remote-confirmation check for entries awaiting confirmation.
    */
   confirmRemoteOutcome?: (
-    ctx: OperationBaseContext<THelpers, TInput, TMutationPayload>,
+    ctx: OperationBaseContext<TInput, TMutationPayload>,
   ) =>
     | Promise<OfflineConfirmRemoteOutcomeResult>
     | OfflineConfirmRemoteOutcomeResult;
 };
 
-export type AnyOfflineOperationDefinition<
-  THelpers = __LEGIT_ANY__,
-  TMutationPayload = __LEGIT_ANY__,
-> = OfflineOperationDefinition<
-  THelpers,
-  __LEGIT_ANY__,
-  __LEGIT_ANY__,
-  __LEGIT_ANY__,
-  TMutationPayload
->;
+/** Non-store-specific offline operation definition alias. */
+export type AnyOfflineOperationDefinition<TMutationPayload = __LEGIT_ANY__> =
+  OfflineOperationDefinition<
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    TMutationPayload
+  >;
 
-export type DocumentOfflineHelpers<State extends ValidStoreState> = {
-  getState: () => State | null;
-  updateState: (updater: (draft: State) => void) => boolean;
-  invalidateData: () => void;
-};
-
+/** Document-store specific offline operation definition. */
 export type DocumentOfflineOperationDefinition<
   State extends ValidStoreState,
   TInput = __LEGIT_ANY__,
   TConflict = __LEGIT_ANY__,
   TResult = __LEGIT_ANY__,
   TMutationPayload = unknown,
-> = OfflineOperationDefinition<
-  DocumentOfflineHelpers<State>,
-  TInput,
-  TConflict,
-  TResult,
-  TMutationPayload
->;
+> = OfflineOperationDefinition<TInput, TConflict, TResult, TMutationPayload> &
+  ([State] extends [never] ? never : unknown);
 
+/** Document-store offline operations registry keyed by mutation name. */
 export type DocumentOfflineOperationsRegistry<State extends ValidStoreState> =
   Record<string, DocumentOfflineOperationDefinition<State>>;
 
-export type CollectionOfflineHelpers<
-  ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload,
-> = {
-  getItemState: (payload: ItemPayload) => ItemState | null;
-  updateItemState: (
-    payload: ItemPayload | ItemPayload[],
-    updater: (item: ItemState) => ItemState | undefined,
-  ) => boolean;
-  addItemToState: (payload: ItemPayload, data: ItemState) => void;
-  deleteItemState: (payload: ItemPayload | ItemPayload[]) => void;
-  invalidateItem: (payload: ItemPayload) => void;
-  getItemKey: (payload: ItemPayload) => string;
-};
-
+/** Collection-store specific offline operation definition. */
 export type CollectionOfflineOperationDefinition<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -343,14 +338,10 @@ export type CollectionOfflineOperationDefinition<
   TConflict = __LEGIT_ANY__,
   TResult = __LEGIT_ANY__,
   TMutationPayload = ItemPayload,
-> = OfflineOperationDefinition<
-  CollectionOfflineHelpers<ItemState, ItemPayload>,
-  TInput,
-  TConflict,
-  TResult,
-  TMutationPayload
->;
+> = OfflineOperationDefinition<TInput, TConflict, TResult, TMutationPayload> &
+  ([ItemState] extends [never] ? never : unknown);
 
+/** Collection-store offline operations registry keyed by mutation name. */
 export type CollectionOfflineOperationsRegistry<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -359,35 +350,7 @@ export type CollectionOfflineOperationsRegistry<
   CollectionOfflineOperationDefinition<ItemState, ItemPayload>
 >;
 
-export type ListQueryOfflineHelpers<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = {
-  getItemState: (payload: ItemPayload) => ItemState | null;
-  updateItemState: (
-    payload: ItemPayload | ItemPayload[],
-    updater: (item: ItemState) => ItemState | undefined,
-  ) => boolean;
-  addItemToState: (payload: ItemPayload, data: ItemState) => void;
-  deleteItemState: (payload: ItemPayload | ItemPayload[]) => void;
-  invalidateItem: (payload: ItemPayload) => void;
-  invalidateQueryAndItems: (args: {
-    itemPayload:
-      | ItemPayload
-      | ItemPayload[]
-      | ((item: ItemPayload) => boolean)
-      | false;
-    queryPayload:
-      | QueryPayload
-      | QueryPayload[]
-      | ((query: QueryPayload) => boolean)
-      | false;
-  }) => void;
-  getItemKey: (payload: ItemPayload) => string;
-  getQueryKey: (payload: QueryPayload) => string;
-};
-
+/** List-query-store specific offline operation definition. */
 export type ListQueryOfflineOperationDefinition<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -396,14 +359,10 @@ export type ListQueryOfflineOperationDefinition<
   TConflict = __LEGIT_ANY__,
   TResult = __LEGIT_ANY__,
   TMutationPayload = ItemPayload | ItemPayload[] | undefined,
-> = OfflineOperationDefinition<
-  ListQueryOfflineHelpers<ItemState, QueryPayload, ItemPayload>,
-  TInput,
-  TConflict,
-  TResult,
-  TMutationPayload
->;
+> = OfflineOperationDefinition<TInput, TConflict, TResult, TMutationPayload> &
+  ([ItemState | QueryPayload] extends [never] ? never : unknown);
 
+/** List-query-store offline operations registry keyed by mutation name. */
 export type ListQueryOfflineOperationsRegistry<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
@@ -413,12 +372,12 @@ export type ListQueryOfflineOperationsRegistry<
   ListQueryOfflineOperationDefinition<ItemState, QueryPayload, ItemPayload>
 >;
 
+/** Extracts operation conflict payload from a registered operation map. */
 export type OperationConflict<
   TOperations,
   TName extends keyof TOperations,
 > = TOperations[TName] extends {
   conflictHandling?: OfflineConflictHandlingConfig<
-    __LEGIT_ANY__,
     __LEGIT_ANY__,
     infer TConflict,
     __LEGIT_ANY__,
@@ -428,10 +387,14 @@ export type OperationConflict<
   ? TConflict
   : never;
 
+/** Root offline configuration passed in store persistentStorage options. */
 export type OfflineModeConfig<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {
+  /** Network detection strategy and browser integration. */
   network?: OfflineNetworkModeConfig;
+  /** Outage detection and recovery strategy for remote failures. */
   outage?: OfflineOutageModeConfig;
+  /** Mutation operation definitions keyed by operation name. */
   operations: TOperations;
 };

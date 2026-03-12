@@ -5,12 +5,14 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   createDocumentStore,
   type DocumentOfflineOperationDefinition,
+  type DocumentStore,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
   localPersistentStorage,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const docSchema = rc_object({ value: rc_number, label: rc_string });
 const docInputSchema = rc_object({ value: rc_number });
@@ -37,35 +39,10 @@ type SetValueDocumentOperations = {
   >;
 };
 
-function createTypedDocumentStore_() {
-  return createDocumentStore<DocState, SetValueDocumentOperations>({
-    id: 'typed-direct-offline-document',
-    getSessionKey: () => 'typed-direct-offline-document-session',
-    fetchFn: () => Promise.resolve({ value: 1, label: 'typed' }),
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 1,
-    baseCoalescingWindowMs: 1,
-    blockWindowClose: null,
-    persistentStorage: {
-      storeName: 'typed-direct-offline-document',
-      adapter: localPersistentStorage,
-      schema: docSchema,
-      offlineMode: {
-        operations: {
-          setValue: {
-            inputSchema: docInputSchema,
-            execute: ({ input }) => input,
-          },
-        },
-      },
-    },
-  });
-}
+type TypedDocumentStore = DocumentStore<DocState, SetValueDocumentOperations>;
 
 type DocumentOfflineOption = NonNullable<
-  Parameters<
-    ReturnType<typeof createTypedDocumentStore_>['performMutation']
-  >[0]['offline']
+  Parameters<TypedDocumentStore['performMutation']>[0]['offline']
 >;
 
 const validDocumentOfflineOption_: DocumentOfflineOption = {
@@ -89,12 +66,9 @@ afterEach(() => {
 });
 
 test('direct document store offline public api works and stays strongly typed', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   let documentState: DocState = { value: 1, label: 'server' };
   const documentStore = createDocumentStore<
@@ -116,16 +90,16 @@ test('direct document store offline public api works and stays strongly typed', 
       adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           setValue: {
             inputSchema: docInputSchema,
-            execute: ({ input, helpers }) => {
+            execute: ({ input }) => {
               documentState = {
                 value: input.value,
                 label: `doc:${input.value}`,
               };
-              helpers.updateState((draft) => {
+              documentStore.updateState((draft) => {
                 draft.value = input.value;
                 draft.label = `doc:${input.value}`;
               });
@@ -140,11 +114,6 @@ test('direct document store offline public api works and stays strongly typed', 
   const documentHook = renderHook(() => documentStore.useDocument());
   await flushAllTimers();
 
-  expect(validDocumentOfflineOption_).toMatchInlineSnapshot(`
-    input: { value: 2 }
-    operation: 'setValue'
-  `);
-  expect(invalidDocumentOfflineInput_).toBeDefined();
   expect(documentHook.result.current.data).toMatchInlineSnapshot(`
     label: 'server'
     value: 1
@@ -154,9 +123,8 @@ test('direct document store offline public api works and stays strongly typed', 
     effectiveOffline: false,
   });
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -196,8 +164,7 @@ test('direct document store offline public api works and stays strongly typed', 
   });
 
   await act(async () => {
-    online = true;
-    window.dispatchEvent(new Event('online'));
+    network.goOnline();
     await vi.advanceTimersByTimeAsync(250);
     await vi.runAllTimersAsync();
   });
@@ -224,41 +191,26 @@ type PatchDocumentOperations = {
 };
 
 test('document offline accumulation merges pending mutations into a single queued operation', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-accumulation-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   let documentState: DocState = { value: 1, label: 'server' };
-  const execute = vi.fn(
-    ({
-      input,
-      helpers,
-    }: {
-      input: PatchDocInput;
-      helpers: {
-        getState: () => DocState | null;
-        updateState: (updater: (draft: DocState) => void) => boolean;
-        invalidateData: () => void;
-      };
-    }) => {
-      documentState = {
-        value: input.value ?? documentState.value,
-        label: input.label ?? documentState.label,
-      };
-      helpers.updateState((draft) => {
-        if (input.value !== undefined) {
-          draft.value = input.value;
-        }
-        if (input.label !== undefined) {
-          draft.label = input.label;
-        }
-      });
-      return { ...documentState };
-    },
-  );
+  const execute = vi.fn(({ input }: { input: PatchDocInput }) => {
+    documentState = {
+      value: input.value ?? documentState.value,
+      label: input.label ?? documentState.label,
+    };
+    documentStore.updateState((draft) => {
+      if (input.value !== undefined) {
+        draft.value = input.value;
+      }
+      if (input.label !== undefined) {
+        draft.label = input.label;
+      }
+    });
+    return { ...documentState };
+  });
 
   const documentStore = createDocumentStore<DocState, PatchDocumentOperations>({
     id: 'direct-document-offline-accumulation',
@@ -276,7 +228,7 @@ test('document offline accumulation merges pending mutations into a single queue
       adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           patchDoc: {
             inputSchema: docPatchInputSchema,
@@ -296,9 +248,8 @@ test('document offline accumulation merges pending mutations into a single queue
   const documentHook = renderHook(() => documentStore.useDocument());
   await flushAllTimers();
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -335,8 +286,7 @@ test('document offline accumulation merges pending mutations into a single queue
   ]);
 
   await act(async () => {
-    online = true;
-    window.dispatchEvent(new Event('online'));
+    network.goOnline();
     await vi.advanceTimersByTimeAsync(250);
     await vi.runAllTimersAsync();
   });
@@ -354,12 +304,9 @@ test('document offline accumulation merges pending mutations into a single queue
 });
 
 test('document offline accumulation rejects invalid merged input without corrupting the queued entry', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-invalid-accumulation-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   let documentState: DocState = { value: 1, label: 'server' };
   const invalidAccumulationSchema = {
@@ -386,33 +333,21 @@ test('document offline accumulation rejects invalid merged input without corrupt
       },
     },
   };
-  const execute = vi.fn(
-    ({
-      input,
-      helpers,
-    }: {
-      input: PatchDocInput;
-      helpers: {
-        getState: () => DocState | null;
-        updateState: (updater: (draft: DocState) => void) => boolean;
-        invalidateData: () => void;
-      };
-    }) => {
-      documentState = {
-        value: input.value ?? documentState.value,
-        label: input.label ?? documentState.label,
-      };
-      helpers.updateState((draft) => {
-        if (input.value !== undefined) {
-          draft.value = input.value;
-        }
-        if (input.label !== undefined) {
-          draft.label = input.label;
-        }
-      });
-      return { ...documentState };
-    },
-  );
+  const execute = vi.fn(({ input }: { input: PatchDocInput }) => {
+    documentState = {
+      value: input.value ?? documentState.value,
+      label: input.label ?? documentState.label,
+    };
+    documentStore.updateState((draft) => {
+      if (input.value !== undefined) {
+        draft.value = input.value;
+      }
+      if (input.label !== undefined) {
+        draft.label = input.label;
+      }
+    });
+    return { ...documentState };
+  });
 
   const documentStore = createDocumentStore<DocState, PatchDocumentOperations>({
     id: 'direct-document-offline-invalid-accumulation',
@@ -430,7 +365,7 @@ test('document offline accumulation rejects invalid merged input without corrupt
       adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           patchDoc: {
             inputSchema: invalidAccumulationSchema,
@@ -450,9 +385,8 @@ test('document offline accumulation rejects invalid merged input without corrupt
   const documentHook = renderHook(() => documentStore.useDocument());
   await flushAllTimers();
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -474,8 +408,7 @@ test('document offline accumulation rejects invalid merged input without corrupt
   ]);
 
   await act(async () => {
-    online = true;
-    window.dispatchEvent(new Event('online'));
+    network.goOnline();
     await vi.advanceTimersByTimeAsync(250);
     await vi.runAllTimersAsync();
   });
@@ -488,12 +421,9 @@ test('document offline accumulation rejects invalid merged input without corrupt
 });
 
 test('document offline mutations without accumulation stay as separate queued operations', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-no-accumulation-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   let documentState: DocState = { value: 1, label: 'server' };
   const documentStore = createDocumentStore<
@@ -515,16 +445,16 @@ test('document offline mutations without accumulation stay as separate queued op
       adapter: localPersistentStorage,
       schema: docSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           setValue: {
             inputSchema: docInputSchema,
-            execute: ({ input, helpers }) => {
+            execute: ({ input }) => {
               documentState = {
                 value: input.value,
                 label: `doc:${input.value}`,
               };
-              helpers.updateState((draft) => {
+              documentStore.updateState((draft) => {
                 draft.value = input.value;
                 draft.label = `doc:${input.value}`;
               });
@@ -539,9 +469,8 @@ test('document offline mutations without accumulation stay as separate queued op
   renderHook(() => documentStore.useDocument());
   await flushAllTimers();
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 

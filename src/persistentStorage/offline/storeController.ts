@@ -19,8 +19,7 @@ import type {
 
 const NEEDS_CONFIRMATION_RETRY_MS = 250;
 
-type OfflineStoreAdapter<THelpers, TMutationPayload> = {
-  getHelpers: () => THelpers;
+type OfflineStoreAdapter<TMutationPayload> = {
   getEntityRefs: (args: {
     operationName: string;
     input: unknown;
@@ -45,7 +44,6 @@ type OfflineStoreAdapter<THelpers, TMutationPayload> = {
 
 type CreateOfflineStoreControllerOptions<
   TOperations extends Record<string, AnyOfflineOperationDefinition>,
-  THelpers,
   TMutationPayload,
 > = {
   storeName: string;
@@ -54,7 +52,7 @@ type CreateOfflineStoreControllerOptions<
   onPersistentStorageError?: (error: unknown) => void;
   adapter: StorageAdapter;
   offlineMode: OfflineModeConfig<TOperations>;
-  storeAdapter: OfflineStoreAdapter<THelpers, TMutationPayload>;
+  storeAdapter: OfflineStoreAdapter<TMutationPayload>;
 };
 
 type ActiveSessionState = {
@@ -155,7 +153,6 @@ export function initializeOfflineStoreController(
 
 export function createOfflineStoreController<
   TOperations extends Record<string, AnyOfflineOperationDefinition>,
-  THelpers,
   TMutationPayload,
 >({
   storeName,
@@ -167,7 +164,6 @@ export function createOfflineStoreController<
   storeAdapter,
 }: CreateOfflineStoreControllerOptions<
   TOperations,
-  THelpers,
   TMutationPayload
 >): OfflineStoreController<TOperations, TMutationPayload> {
   const replayQueue = createAsyncQueue({ concurrency: 1, autoStart: true });
@@ -542,10 +538,7 @@ export function createOfflineStoreController<
     entry: OfflineQueueEntry;
     conflict: unknown;
     conflictHandling: NonNullable<
-      AnyOfflineOperationDefinition<
-        THelpers,
-        TMutationPayload
-      >['conflictHandling']
+      AnyOfflineOperationDefinition<TMutationPayload>['conflictHandling']
     >;
   }): Promise<void> {
     if (
@@ -573,7 +566,6 @@ export function createOfflineStoreController<
     },
   ): Promise<void> {
     const operationName = String(args.operationName);
-    const helpers = storeAdapter.getHelpers();
     const operation = offlineMode.operations[operationName];
     if (!operation) {
       throw new Error(
@@ -621,7 +613,6 @@ export function createOfflineStoreController<
       if (existingEntry) {
         const mergedInput = await operation.accumulation.mergeInput({
           sessionKey: current.sessionKey,
-          helpers,
           existingInput: existingEntry.input,
           incomingInput: validatedInput,
         });
@@ -723,7 +714,6 @@ export function createOfflineStoreController<
 
       const shouldConfirmBeforeRetry =
         nextEntry.syncState === 'needs-confirmation';
-      const helpers = storeAdapter.getHelpers();
       const conflictHandling = operation.conflictHandling;
       const tempEntity = operation.tempEntity;
       let entryToUse: OfflineQueueEntry = {
@@ -743,7 +733,6 @@ export function createOfflineStoreController<
         if (shouldConfirmBeforeRetry && operation.confirmRemoteOutcome) {
           const confirmed = await operation.confirmRemoteOutcome({
             sessionKey: current.sessionKey,
-            helpers,
             input: entryToUse.input,
             mutationPayload,
           });
@@ -783,14 +772,12 @@ export function createOfflineStoreController<
 
         const result = await operation.execute({
           sessionKey: current.sessionKey,
-          helpers,
           input: entryToUse.input,
           mutationPayload,
         });
         const conflict = conflictHandling
           ? await conflictHandling.detectConflict({
               sessionKey: current.sessionKey,
-              helpers,
               input: entryToUse.input,
               mutationPayload,
               result,
@@ -909,7 +896,6 @@ export function createOfflineStoreController<
 
     const result = await operation.conflictHandling.resolveConflict({
       sessionKey: current.sessionKey,
-      helpers: storeAdapter.getHelpers(),
       input: conflict.input,
       conflict: conflict.conflict,
       mutationPayload: __LEGIT_CAST__<TMutationPayload | undefined, unknown>(

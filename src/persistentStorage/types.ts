@@ -11,21 +11,33 @@ import type {
 
 /** Sync adapter used when storage can be read during store initialization. */
 export type SyncStorageAdapter = {
+  /** Adapter mode marker used by persistence internals to pick sync behavior. */
   kind: 'sync';
+  /** Read an entry immediately from storage. */
   read<T>(key: string): T | null;
+  /** Persist an entry immediately to storage. */
   write<T>(key: string, value: T): void;
+  /** Remove a single key from storage. */
   remove(key: string): void;
+  /** Remove all keys that start with a prefix. */
   removeByPrefix(prefix: string): void;
+  /** Return all matching keys in storage. */
   listKeys(prefix: string): string[];
 };
 
 /** Async adapter used when storage access requires asynchronous I/O. */
 export type AsyncStorageAdapter = {
+  /** Adapter mode marker used by persistence internals to pick async behavior. */
   kind: 'async';
+  /** Read an entry using async storage APIs. */
   read<T>(key: string): Promise<T | null>;
+  /** Persist an entry using async storage APIs. */
   write<T>(key: string, value: T): Promise<void>;
+  /** Remove a single key using async storage APIs. */
   remove(key: string): Promise<void>;
+  /** Remove all keys that start with a prefix using async storage APIs. */
   removeByPrefix(prefix: string): Promise<void>;
+  /** Return all matching keys in async storage. */
   listKeys(prefix: string): Promise<string[]>;
 };
 
@@ -78,8 +90,11 @@ export type PersistentStorageDataSchema<TFinal, TStorage = unknown> =
 // --- Cache Entry ---
 
 export type StorageCacheEntry<T> = {
+  /** Cached payload persisted for this key. */
   data: T;
+  /** Epoch timestamp used for age-based maintenance. */
   timestamp: number;
+  /** Persisted schema version for migration-safe hydration. */
   version: number;
 };
 
@@ -132,6 +147,7 @@ export type DocumentPersistentStorageConfig<
   TOfflineOperations extends DocumentOfflineOperationsRegistry<State> =
     DocumentOfflineOperationsRegistry<State>,
 > = StorePersistentStorageBaseConfig<State, StorageState> & {
+  /** Optional offline sync/replay configuration for mutations. */
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
 };
 
@@ -145,6 +161,7 @@ export type CollectionPersistentStorageConfig<
     ItemPayload
   > = CollectionOfflineOperationsRegistry<ItemState, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
+  /** Optional offline sync/replay configuration for mutations. */
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
   /** Schema used to validate cached item payloads on load. */
   payloadSchema: PersistentStorageSchema<ItemPayload>;
@@ -172,6 +189,7 @@ export type ListQueryPersistentStorageConfig<
     ItemPayload
   > = ListQueryOfflineOperationsRegistry<ItemState, QueryPayload, ItemPayload>,
 > = StorePersistentStorageBaseConfig<ItemState, StorageState> & {
+  /** Optional offline sync/replay configuration for mutations. */
   offlineMode?: OfflineModeConfig<TOfflineOperations>;
   /** Schema used to validate cached item payloads on load. */
   itemPayloadSchema: PersistentStorageSchema<ItemPayload>;

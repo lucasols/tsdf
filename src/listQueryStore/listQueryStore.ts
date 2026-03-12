@@ -1137,40 +1137,6 @@ export function createListQueryStore<
       adapter: persistentStorageConfig.adapter,
       offlineMode: persistentStorageConfig.offlineMode,
       storeAdapter: {
-        getHelpers: () => ({
-          getItemState: (payload: ItemPayload) => getItemState(payload) ?? null,
-          updateItemState: (
-            payload: ItemPayload | ItemPayload[],
-            updater: (item: ItemState) => ItemState | undefined,
-          ) => updateItemState(payload, (draft) => updater(draft)),
-          addItemToState,
-          deleteItemState,
-          invalidateItem: (payload: ItemPayload) => invalidateItem(payload),
-          invalidateQueryAndItems: (args: {
-            itemPayload:
-              | ItemPayload
-              | ItemPayload[]
-              | ((item: ItemPayload) => boolean)
-              | false;
-            queryPayload:
-              | QueryPayload
-              | QueryPayload[]
-              | ((query: QueryPayload) => boolean)
-              | false;
-          }) =>
-            invalidateQueryAndItems({
-              itemPayload: __LEGIT_CAST__<
-                Parameters<typeof invalidateQueryAndItems>[0]['itemPayload'],
-                unknown
-              >(args.itemPayload),
-              queryPayload: __LEGIT_CAST__<
-                Parameters<typeof invalidateQueryAndItems>[0]['queryPayload'],
-                unknown
-              >(args.queryPayload),
-            }),
-          getItemKey,
-          getQueryKey,
-        }),
         getEntityRefs: ({ mutationPayload, tempId }) => {
           if (tempId) {
             return [{ entityKey: tempId, entityKind: 'item' }];

@@ -267,11 +267,6 @@ export function createDocumentStore<
         adapter: persistentStorageConfig.adapter,
         offlineMode: persistentStorageConfig.offlineMode,
         storeAdapter: {
-          getHelpers: () => ({
-            getState: () => store.state.data,
-            updateState,
-            invalidateData: () => invalidateData(),
-          }),
           getEntityRefs: () => [
             { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
           ],

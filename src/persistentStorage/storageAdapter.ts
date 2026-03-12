@@ -10,7 +10,12 @@ import {
 import type { AsyncStorageAdapter, SyncStorageAdapter } from './types';
 
 export const localPersistentStorage: SyncStorageAdapter = {
+  /** Identifier for adapter type and sync runtime behavior. */
   kind: 'sync',
+  /**
+   * Reads a value from `localStorage` for this exact key.
+   * Returns `null` when the key does not exist or parsing fails.
+   */
   read<T>(key: string): T | null {
     try {
       const raw = localStorage.getItem(key);
@@ -21,14 +26,23 @@ export const localPersistentStorage: SyncStorageAdapter = {
     }
   },
 
+  /**
+   * Stores a value in `localStorage` using `JSON.stringify` for persistence.
+   */
   write<T>(key: string, value: T): void {
     localStorage.setItem(key, JSON.stringify(value));
   },
 
+  /**
+   * Removes a single cache entry from `localStorage`.
+   */
   remove(key: string): void {
     localStorage.removeItem(key);
   },
 
+  /**
+   * Removes all keys beginning with the provided prefix from `localStorage`.
+   */
   removeByPrefix(prefix: string): void {
     const keysToRemove: string[] = [];
 
@@ -44,6 +58,9 @@ export const localPersistentStorage: SyncStorageAdapter = {
     }
   },
 
+  /**
+   * Returns all keys in `localStorage` that start with the provided prefix.
+   */
   listKeys(prefix: string): string[] {
     const keys: string[] = [];
 
@@ -111,8 +128,12 @@ async function writeOpfsBucket(
 }
 
 export const opfsPersistentStorage: AsyncStorageAdapter = {
+  /** Identifier for adapter type and async runtime behavior. */
   kind: 'async',
 
+  /**
+   * Reads a typed value from OPFS bucket storage. Returns `null` when missing.
+   */
   async read<T>(key: string): Promise<T | null> {
     try {
       const dir = await getOpfsCacheDir();
@@ -126,6 +147,9 @@ export const opfsPersistentStorage: AsyncStorageAdapter = {
     }
   },
 
+  /**
+   * Writes a typed value into OPFS bucket storage, creating files as needed.
+   */
   async write<T>(key: string, value: T): Promise<void> {
     const dir = await getOpfsCacheDir();
     const bucket = (await readOpfsBucket(dir, key)) ?? { entries: [] };
@@ -141,6 +165,9 @@ export const opfsPersistentStorage: AsyncStorageAdapter = {
     await writeOpfsBucket(dir, key, bucket);
   },
 
+  /**
+   * Removes a cached OPFS bucket entry by exact key.
+   */
   async remove(key: string): Promise<void> {
     try {
       const dir = await getOpfsCacheDir();
@@ -161,6 +188,9 @@ export const opfsPersistentStorage: AsyncStorageAdapter = {
     }
   },
 
+  /**
+   * Removes all OPFS entries whose keys match the provided prefix.
+   */
   async removeByPrefix(prefix: string): Promise<void> {
     try {
       const dir = await getOpfsCacheDir();
@@ -196,6 +226,9 @@ export const opfsPersistentStorage: AsyncStorageAdapter = {
     }
   },
 
+  /**
+   * Returns all keys in OPFS storage matching the provided prefix.
+   */
   async listKeys(prefix: string): Promise<string[]> {
     try {
       const dir = await getOpfsCacheDir();

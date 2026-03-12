@@ -14,6 +14,7 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   collectionSchema,
   docMutationInputSchema,
@@ -34,16 +35,13 @@ type UpdateValueExecuteContext = Parameters<
 >[0];
 
 describe('offline mode network and session', () => {
-  let online = true;
+  let network = createOfflineNetworkMock();
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(TEST_INITIAL_TIME);
-    online = true;
-    Object.defineProperty(window.navigator, 'onLine', {
-      configurable: true,
-      get: () => online,
-    });
+    network = createOfflineNetworkMock();
+    network.install();
     localStorage.clear();
   });
 
@@ -54,7 +52,7 @@ describe('offline mode network and session', () => {
   });
 
   test('persistent storage without offlineMode keeps the existing online flow even when the browser reports offline', async () => {
-    online = false;
+    network.setOffline();
 
     const sessionKey = 'offline-opt-in-required';
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
@@ -101,7 +99,7 @@ describe('offline mode network and session', () => {
   });
 
   test('document offline mutations are queued durably and replay when the browser comes back online', async () => {
-    online = false;
+    network.setOffline();
 
     const sessionKey = 'offline-doc-session';
     const storeName = 'offline-doc-store';
@@ -113,12 +111,12 @@ describe('offline mode network and session', () => {
         adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
-          network: { enabled: true, getIsOffline: () => !online },
+          network: network.config,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input, helpers }: UpdateValueExecuteContext) => {
-                helpers.updateState((draft) => {
+              execute: ({ input }: UpdateValueExecuteContext) => {
+                env.apiStore.updateState((draft) => {
                   draft.value = input.value;
                 });
                 return input;
@@ -167,9 +165,8 @@ describe('offline mode network and session', () => {
     `);
     hook.unmount();
 
-    online = true;
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      network.goOnline();
     });
     await advanceTime(250);
     await flushAllTimers();
@@ -178,7 +175,7 @@ describe('offline mode network and session', () => {
   });
 
   test('plain stores do not inherit offline state from other stores in the same session', async () => {
-    online = false;
+    network.setOffline();
     const sessionKey = 'offline-entity-scope-session';
 
     const offlineEnv = createDocumentStoreTestEnv<
@@ -192,12 +189,12 @@ describe('offline mode network and session', () => {
         adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
-          network: { enabled: true, getIsOffline: () => !online },
+          network: network.config,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input, helpers }: UpdateValueExecuteContext) => {
-                helpers.updateState((draft) => {
+              execute: ({ input }: UpdateValueExecuteContext) => {
+                offlineEnv.apiStore.updateState((draft) => {
                   draft.value = input.value;
                 });
                 return input;
@@ -247,7 +244,7 @@ describe('offline mode network and session', () => {
   });
 
   test('offline mutations fail fast when no session key is available', async () => {
-    online = false;
+    network.setOffline();
     const sessionKey: string | false = false;
 
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
@@ -258,12 +255,12 @@ describe('offline mode network and session', () => {
         adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
-          network: { enabled: true, getIsOffline: () => !online },
+          network: network.config,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
-              execute: ({ input, helpers }: UpdateValueExecuteContext) => {
-                helpers.updateState((draft) => {
+              execute: ({ input }: UpdateValueExecuteContext) => {
+                env.apiStore.updateState((draft) => {
                   draft.value = input.value;
                 });
                 return input;
@@ -298,7 +295,7 @@ describe('offline mode network and session', () => {
   });
 
   test('global offline hooks can mount before a localStorage-backed store', async () => {
-    online = false;
+    network.setOffline();
     const sessionKey = 'offline-global-hook-session';
 
     const globalHook = renderHook(() => useGlobalOfflineStatus(sessionKey));
@@ -317,12 +314,12 @@ describe('offline mode network and session', () => {
           adapter: localPersistentStorage,
           schema: docSchema,
           offlineMode: {
-            network: { enabled: true, getIsOffline: () => !online },
+            network: network.config,
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
-                execute: ({ input, helpers }: UpdateValueExecuteContext) => {
-                  helpers.updateState((draft) => {
+                execute: ({ input }: UpdateValueExecuteContext) => {
+                  env.apiStore.updateState((draft) => {
                     draft.value = input.value;
                   });
                   return input;
@@ -359,7 +356,7 @@ describe('offline mode network and session', () => {
   });
 
   test('offline fetches short-circuit to cached data without clearing the last successful snapshot', async () => {
-    online = false;
+    network.setOffline();
 
     const env = createDocumentStoreTestEnv(1, {
       getSessionKey: () => 'offline-read-cache-session',
@@ -368,16 +365,13 @@ describe('offline mode network and session', () => {
         storeName: 'offline-read-cache-doc',
         adapter: localPersistentStorage,
         schema: docSchema,
-        offlineMode: {
-          network: { enabled: true, getIsOffline: () => !online },
-          operations: {},
-        },
+        offlineMode: { network: network.config, operations: {} },
       },
     });
 
     await Promise.resolve();
     act(() => {
-      window.dispatchEvent(new Event('offline'));
+      network.goOffline();
     });
     await Promise.resolve();
 
@@ -393,7 +387,7 @@ describe('offline mode network and session', () => {
   });
 
   test('offline fetches without cached data return the normalized connectivity error', async () => {
-    online = false;
+    network.setOffline();
 
     const env = createDocumentStoreTestEnv(1, {
       getSessionKey: () => 'offline-read-empty-session',
@@ -402,16 +396,13 @@ describe('offline mode network and session', () => {
         storeName: 'offline-read-empty-doc',
         adapter: localPersistentStorage,
         schema: docSchema,
-        offlineMode: {
-          network: { enabled: true, getIsOffline: () => !online },
-          operations: {},
-        },
+        offlineMode: { network: network.config, operations: {} },
       },
     });
 
     await Promise.resolve();
     act(() => {
-      window.dispatchEvent(new Event('offline'));
+      network.goOffline();
     });
     await Promise.resolve();
 
@@ -427,7 +418,7 @@ describe('offline mode network and session', () => {
   });
 
   test('global offline status is shared across stores in the same session', async () => {
-    online = false;
+    network.setOffline();
     const sessionKey = 'shared-offline-session';
 
     createDocumentStoreTestEnv(1, {
@@ -474,13 +465,12 @@ describe('offline mode network and session', () => {
   });
 
   test('global and per-store offline entity selectors aggregate queued work across stores in the same session', async () => {
-    online = false;
+    network.setOffline();
     const sessionKey = 'shared-offline-entities';
-    const getIsOffline = () => !online;
     const pendingReplay = new Promise<{ value: number }>(() => {});
 
-    const createEnv = (storeName: string) =>
-      createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    function createEnv(storeName: string) {
+      const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
@@ -488,12 +478,12 @@ describe('offline mode network and session', () => {
           adapter: localPersistentStorage,
           schema: docSchema,
           offlineMode: {
-            network: { enabled: true, getIsOffline },
+            network: network.config,
             operations: {
               updateValue: {
                 inputSchema: docMutationInputSchema,
-                execute: ({ input, helpers }: UpdateValueExecuteContext) => {
-                  helpers.updateState((draft) => {
+                execute: ({ input }: UpdateValueExecuteContext) => {
+                  env.apiStore.updateState((draft) => {
                     draft.value = input.value;
                   });
                   return pendingReplay;
@@ -503,12 +493,14 @@ describe('offline mode network and session', () => {
           },
         },
       });
+      return env;
+    }
 
     const envA = createEnv('offline-doc-a');
     const envB = createEnv('offline-doc-b');
     await Promise.resolve();
     act(() => {
-      window.dispatchEvent(new Event('offline'));
+      network.goOffline();
     });
     await Promise.resolve();
 

@@ -8,9 +8,11 @@ import {
   getGlobalOfflineStatus,
   localPersistentStorage,
   type CollectionOfflineOperationDefinition,
+  type CollectionStore,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const todoSchema = rc_object({ title: rc_string, completed: rc_boolean });
 const todoInputSchema = rc_object({ id: rc_string, title: rc_string });
@@ -35,38 +37,14 @@ type RenameTodoOperations = {
   >;
 };
 
-function createTypedCollectionStore_() {
-  return createCollectionStore<TodoItem, TodoPayload, RenameTodoOperations>({
-    id: 'typed-direct-offline-collection',
-    getSessionKey: () => 'typed-direct-offline-collection-session',
-    fetchFn: (_payload_: TodoPayload) =>
-      Promise.resolve({ title: 'typed', completed: false }),
-    getCollectionItemKey: (payload: TodoPayload) => payload.id,
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 1,
-    baseCoalescingWindowMs: 1,
-    blockWindowClose: null,
-    persistentStorage: {
-      storeName: 'typed-direct-offline-collection',
-      adapter: localPersistentStorage,
-      schema: todoSchema,
-      payloadSchema: todoPayloadSchema,
-      offlineMode: {
-        operations: {
-          renameTodo: {
-            inputSchema: todoInputSchema,
-            execute: ({ input }) => input,
-          },
-        },
-      },
-    },
-  });
-}
+type TypedCollectionStore = CollectionStore<
+  TodoItem,
+  TodoPayload,
+  RenameTodoOperations
+>;
 
 type CollectionOfflineOption = NonNullable<
-  Parameters<
-    ReturnType<typeof createTypedCollectionStore_>['performMutation']
-  >[1]['offline']
+  Parameters<TypedCollectionStore['performMutation']>[1]['offline']
 >;
 
 const validCollectionOfflineOption_: CollectionOfflineOption = {
@@ -90,12 +68,9 @@ afterEach(() => {
 });
 
 test('direct collection store offline public api works and stays strongly typed', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-collection-offline-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   const todoState = new Map<string, TodoItem>([
     ['1', { title: 'Todo 1', completed: false }],
@@ -127,13 +102,13 @@ test('direct collection store offline public api works and stays strongly typed'
       schema: todoSchema,
       payloadSchema: todoPayloadSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
-            execute: ({ input, helpers }) => {
+            execute: ({ input }) => {
               todoState.set(input.id, { title: input.title, completed: false });
-              helpers.updateItemState({ id: input.id }, (item) => ({
+              collectionStore.updateItemState({ id: input.id }, (item) => ({
                 ...item,
                 title: input.title,
               }));
@@ -149,11 +124,6 @@ test('direct collection store offline public api works and stays strongly typed'
   const collectionHook = renderHook(() => collectionStore.useItem(payload));
   await flushAllTimers();
 
-  expect(validCollectionOfflineOption_).toMatchInlineSnapshot(`
-    input: { id: '1', title: 'Offline todo' }
-    operation: 'renameTodo'
-  `);
-  expect(invalidCollectionOfflineInput_).toBeDefined();
   expect(collectionHook.result.current.data).toMatchInlineSnapshot(`
     completed: '❌'
     title: 'Todo 1'
@@ -163,9 +133,8 @@ test('direct collection store offline public api works and stays strongly typed'
     effectiveOffline: false,
   });
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -219,8 +188,7 @@ test('direct collection store offline public api works and stays strongly typed'
   });
 
   await act(async () => {
-    online = true;
-    window.dispatchEvent(new Event('online'));
+    network.goOnline();
     await vi.advanceTimersByTimeAsync(250);
     await vi.runAllTimersAsync();
   });
@@ -236,37 +204,18 @@ test('direct collection store offline public api works and stays strongly typed'
 });
 
 test('collection offline accumulation merges same-item mutations and keeps different items separate', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-collection-offline-accumulation-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   const todoState = new Map<string, TodoItem>([
     ['1', { title: 'Todo 1', completed: false }],
     ['2', { title: 'Todo 2', completed: false }],
   ]);
   const execute = vi.fn(
-    ({
-      input,
-      helpers,
-    }: {
-      input: { id: string; title: string };
-      helpers: {
-        getItemState: (payload: TodoPayload) => TodoItem | null;
-        updateItemState: (
-          payload: TodoPayload | TodoPayload[],
-          updater: (item: TodoItem) => TodoItem | undefined,
-        ) => boolean;
-        addItemToState: (payload: TodoPayload, data: TodoItem) => void;
-        deleteItemState: (payload: TodoPayload | TodoPayload[]) => void;
-        invalidateItem: (payload: TodoPayload) => void;
-        getItemKey: (payload: TodoPayload) => string;
-      };
-    }) => {
+    ({ input }: { input: { id: string; title: string } }) => {
       todoState.set(input.id, { title: input.title, completed: false });
-      helpers.updateItemState({ id: input.id }, (item) => ({
+      collectionStore.updateItemState({ id: input.id }, (item) => ({
         ...item,
         title: input.title,
       }));
@@ -300,7 +249,7 @@ test('collection offline accumulation merges same-item mutations and keeps diffe
       schema: todoSchema,
       payloadSchema: todoPayloadSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           renameTodo: {
             inputSchema: todoInputSchema,
@@ -314,9 +263,8 @@ test('collection offline accumulation merges same-item mutations and keeps diffe
 
   await flushAllTimers();
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -387,8 +335,7 @@ test('collection offline accumulation merges same-item mutations and keeps diffe
   ]);
 
   await act(async () => {
-    online = true;
-    window.dispatchEvent(new Event('online'));
+    network.goOnline();
     await vi.advanceTimersByTimeAsync(250);
     await vi.runAllTimersAsync();
   });

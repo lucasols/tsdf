@@ -73,17 +73,14 @@ export type {
 } from './persistentStorage/types';
 
 export type {
-  CollectionOfflineHelpers,
   OfflineAccumulationConfig,
   OfflineAccumulationMergeContext,
   CollectionOfflineOperationDefinition,
   CollectionOfflineOperationsRegistry,
-  DocumentOfflineHelpers,
   DocumentOfflineOperationDefinition,
   DocumentOfflineOperationsRegistry,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
-  ListQueryOfflineHelpers,
   ListQueryOfflineOperationDefinition,
   ListQueryOfflineOperationsRegistry,
   OfflineConflictRecord,

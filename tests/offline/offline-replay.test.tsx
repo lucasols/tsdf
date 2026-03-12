@@ -8,7 +8,6 @@ import {
   type ListQueryOfflineOperationDefinition,
   localPersistentStorage,
 } from '../../src/main';
-import type { DocumentOfflineHelpers } from '../../src/persistentStorage/offline/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
@@ -17,6 +16,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   collectionCreateInputSchema,
   collectionSchema,
@@ -80,16 +80,13 @@ function getLocalStorageKeys(): string[] {
 }
 
 describe('offline mode replay and conflict handling', () => {
-  let online = true;
+  let network = createOfflineNetworkMock();
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(TEST_INITIAL_TIME);
-    online = true;
-    Object.defineProperty(window.navigator, 'onLine', {
-      configurable: true,
-      get: () => online,
-    });
+    network = createOfflineNetworkMock();
+    network.install();
     localStorage.clear();
   });
 
@@ -100,8 +97,7 @@ describe('offline mode replay and conflict handling', () => {
   });
 
   test('collection offline creates keep durable temp-id metadata and clear after replay finishes', async () => {
-    online = false;
-    const getIsOffline = () => !online;
+    network.setOffline();
     const resolveCreates: Array<
       (result: { id: string; name: string }) => void
     > = [];
@@ -120,7 +116,7 @@ describe('offline mode replay and conflict handling', () => {
           schema: collectionSchema,
           payloadSchema: rc_string,
           offlineMode: {
-            network: { enabled: true, getIsOffline },
+            network: network.config,
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
@@ -150,7 +146,7 @@ describe('offline mode replay and conflict handling', () => {
 
     await Promise.resolve();
     act(() => {
-      window.dispatchEvent(new Event('offline'));
+      network.goOffline();
     });
     await Promise.resolve();
 
@@ -168,9 +164,8 @@ describe('offline mode replay and conflict handling', () => {
       { entityKey: 'temp:Ada', pendingMutations: 2, tempId: 'temp:Ada' },
     ]);
 
-    online = true;
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      network.goOnline();
     });
     for (let i = 0; i < 4 && resolveCreates.length === 0; i += 1) {
       await Promise.resolve();
@@ -187,7 +182,7 @@ describe('offline mode replay and conflict handling', () => {
   });
 
   test('needs-confirmation entries are confirmed before replay retrying the mutation', async () => {
-    online = false;
+    network.setOffline();
 
     const execute = vi
       .fn<
@@ -201,7 +196,6 @@ describe('offline mode replay and conflict handling', () => {
         }: {
           input: { value: number };
           sessionKey: string;
-          helpers: DocumentOfflineHelpers<{ value: number }>;
         }) => Promise<{ type: 'applied' }>
       >()
       .mockResolvedValue({ type: 'applied' });
@@ -251,9 +245,8 @@ describe('offline mode replay and conflict handling', () => {
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
-    online = true;
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      network.goOnline();
     });
     await advanceTime(60);
     await flushAllTimers();
@@ -277,7 +270,6 @@ describe('offline mode replay and conflict handling', () => {
         }: {
           input: { value: number };
           sessionKey: string;
-          helpers: DocumentOfflineHelpers<{ value: number }>;
         }) => Promise<{ type: 'applied' }>
       >()
       .mockResolvedValue({ type: 'applied' });
@@ -327,7 +319,7 @@ describe('offline mode replay and conflict handling', () => {
   });
 
   test('offline conflicts move out of the queue, surface through selectors, and can be resolved', async () => {
-    online = false;
+    network.setOffline();
     const env = createDocumentStoreTestEnv<
       number,
       UpdateValueConflictOperations
@@ -365,9 +357,8 @@ describe('offline mode replay and conflict handling', () => {
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
-    online = true;
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      network.goOnline();
     });
     await Promise.resolve();
     await flushAllTimers();
@@ -410,7 +401,7 @@ describe('offline mode replay and conflict handling', () => {
   });
 
   test('needs-confirmation entries do not accept new accumulation', async () => {
-    online = false;
+    network.setOffline();
     const execute = vi
       .fn<
         ({ input }: { input: { value: number } }) => Promise<{ value: number }>
@@ -447,9 +438,8 @@ describe('offline mode replay and conflict handling', () => {
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
-    online = true;
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      network.goOnline();
     });
     await advanceTime(1);
     await Promise.resolve();
@@ -462,9 +452,8 @@ describe('offline mode replay and conflict handling', () => {
       },
     ]);
 
-    online = false;
     act(() => {
-      window.dispatchEvent(new Event('offline'));
+      network.goOffline();
     });
     await Promise.resolve();
 
@@ -479,7 +468,7 @@ describe('offline mode replay and conflict handling', () => {
   });
 
   test('needs-confirmation entries keep retrying confirmation while the session stays online', async () => {
-    online = true;
+    network.setOnline();
     const execute = vi
       .fn<
         ({ input }: { input: { value: number } }) => Promise<{ value: number }>
@@ -492,7 +481,6 @@ describe('offline mode replay and conflict handling', () => {
         }: {
           input: { value: number };
           sessionKey: string;
-          helpers: DocumentOfflineHelpers<{ value: number }>;
         }) => Promise<{ type: 'applied' }>
       >()
       .mockResolvedValue({ type: 'applied' });
@@ -505,7 +493,7 @@ describe('offline mode replay and conflict handling', () => {
         adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
-          network: { enabled: true, getIsOffline: () => !online },
+          network: network.config,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -546,30 +534,20 @@ describe('offline mode replay and conflict handling', () => {
   });
 
   test('list-query offline replay forwards the original mutation payload', async () => {
-    online = false;
+    network.setOffline();
     const execute = vi.fn(
       ({
         input,
         mutationPayload,
-        helpers,
       }: {
         input: { name: string };
         mutationPayload?: string | string[];
-        helpers: {
-          updateItemState: (
-            payload: string | string[],
-            updater: (item: {
-              id: number;
-              name: string;
-            }) => { id: number; name: string } | undefined,
-          ) => boolean;
-        };
       }) => {
         if (!mutationPayload || Array.isArray(mutationPayload)) {
           throw new Error('Expected mutationPayload during offline replay');
         }
 
-        helpers.updateItemState(mutationPayload, (item) => ({
+        env.apiStore.updateItemState(mutationPayload, (item) => ({
           ...item,
           name: input.name,
         }));
@@ -595,7 +573,7 @@ describe('offline mode replay and conflict handling', () => {
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
           offlineMode: {
-            network: { enabled: true, getIsOffline: () => !online },
+            network: network.config,
             operations: {
               patchUserName: { inputSchema: userPatchSchema, execute },
             },
@@ -609,9 +587,8 @@ describe('offline mode replay and conflict handling', () => {
       offline: { operation: 'patchUserName', input: { name: 'Ada offline' } },
     });
 
-    online = true;
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      network.goOnline();
     });
     await flushAllTimers();
 
@@ -620,7 +597,7 @@ describe('offline mode replay and conflict handling', () => {
   });
 
   test('session switches do not leave replayed queue entries in the old namespace', async () => {
-    online = false;
+    network.setOffline();
     let sessionKey: string | false = 'replay-session-a';
     let resolveReplay: ((result: { value: number }) => void) | undefined;
 
@@ -632,7 +609,7 @@ describe('offline mode replay and conflict handling', () => {
         adapter: localPersistentStorage,
         schema: docSchema,
         offlineMode: {
-          network: { enabled: true, getIsOffline: () => !online },
+          network: network.config,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -659,9 +636,8 @@ describe('offline mode replay and conflict handling', () => {
       ),
     ).toHaveLength(1);
 
-    online = true;
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      network.goOnline();
     });
     for (let index = 0; index < 4 && !resolveReplay; index += 1) {
       await Promise.resolve();

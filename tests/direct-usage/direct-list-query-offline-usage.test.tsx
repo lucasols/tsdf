@@ -12,6 +12,7 @@ import {
 import type { OfflineMutationDescriptor } from '../../src/persistentStorage/offline/types';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers, pick } from '../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../utils/networkMock';
 
 const userSchema = rc_object({ id: rc_number, name: rc_string });
 const userInputSchema = rc_object({ id: rc_number, name: rc_string });
@@ -119,12 +120,9 @@ afterEach(() => {
 });
 
 test('direct list-query store offline public api works and stays strongly typed', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-list-query-offline-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   const userState = new Map<number, User>([
     [1, { id: 1, name: 'Ada' }],
@@ -175,13 +173,13 @@ test('direct list-query store offline public api works and stays strongly typed'
       itemPayloadSchema: userPayloadSchema,
       queryPayloadSchema: usersQueryPayloadSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           renameUser: {
             inputSchema: userInputSchema,
-            execute: ({ input, helpers }) => {
+            execute: ({ input }) => {
               userState.set(input.id, { id: input.id, name: input.name });
-              helpers.updateItemState(
+              listQueryStore.updateItemState(
                 { tableId: 'users', id: input.id },
                 (item) => ({ ...item, name: input.name }),
               );
@@ -217,9 +215,8 @@ test('direct list-query store offline public api works and stays strongly typed'
     effectiveOffline: false,
   });
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -272,8 +269,7 @@ test('direct list-query store offline public api works and stays strongly typed'
   });
 
   await act(async () => {
-    online = true;
-    window.dispatchEvent(new Event('online'));
+    network.goOnline();
     await vi.advanceTimersByTimeAsync(250);
     await vi.runAllTimersAsync();
   });
@@ -289,12 +285,9 @@ test('direct list-query store offline public api works and stays strongly typed'
 });
 
 test('useMultipleListQueries exposes offline pending metadata for queued mutations', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-list-query-multi-offline-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   const userState = new Map<number, User>([
     [1, { id: 1, name: 'Ada' }],
@@ -345,13 +338,13 @@ test('useMultipleListQueries exposes offline pending metadata for queued mutatio
       itemPayloadSchema: userPayloadSchema,
       queryPayloadSchema: usersQueryPayloadSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           renameUser: {
             inputSchema: userInputSchema,
-            execute: ({ input, helpers }) => {
+            execute: ({ input }) => {
               userState.set(input.id, { id: input.id, name: input.name });
-              helpers.updateItemState(
+              listQueryStore.updateItemState(
                 { tableId: 'users', id: input.id },
                 (item) => ({ ...item, name: input.name }),
               );
@@ -374,9 +367,8 @@ test('useMultipleListQueries exposes offline pending metadata for queued mutatio
   );
   await flushAllTimers();
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -407,53 +399,21 @@ test('useMultipleListQueries exposes offline pending metadata for queued mutatio
 });
 
 test('list-query offline accumulation merges same-item mutations and keeps different items separate', async () => {
-  let online = true;
+  const network = createOfflineNetworkMock();
   const sessionKey = 'direct-list-query-offline-accumulation-session';
-  Object.defineProperty(window.navigator, 'onLine', {
-    configurable: true,
-    get: () => online,
-  });
+  network.install();
 
   const userState = new Map<number, User>([
     [1, { id: 1, name: 'Ada' }],
     [2, { id: 2, name: 'Grace' }],
   ]);
   const execute = vi.fn(
-    ({
-      input,
-      helpers,
-    }: {
-      input: { id: number; name: string };
-      helpers: {
-        getItemState: (payload: UserPayload) => User | null;
-        updateItemState: (
-          payload: UserPayload | UserPayload[],
-          updater: (item: User) => User | undefined,
-        ) => boolean;
-        addItemToState: (payload: UserPayload, data: User) => void;
-        deleteItemState: (payload: UserPayload | UserPayload[]) => void;
-        invalidateItem: (payload: UserPayload) => void;
-        invalidateQueryAndItems: (args: {
-          itemPayload:
-            | UserPayload
-            | UserPayload[]
-            | ((item: UserPayload) => boolean)
-            | false;
-          queryPayload:
-            | UsersQueryPayload
-            | UsersQueryPayload[]
-            | ((query: UsersQueryPayload) => boolean)
-            | false;
-        }) => void;
-        getItemKey: (payload: UserPayload) => string;
-        getQueryKey: (payload: UsersQueryPayload) => string;
-      };
-    }) => {
+    ({ input }: { input: { id: number; name: string } }) => {
       userState.set(input.id, { id: input.id, name: input.name });
-      helpers.updateItemState({ tableId: 'users', id: input.id }, (item) => ({
-        ...item,
-        name: input.name,
-      }));
+      listQueryStore.updateItemState(
+        { tableId: 'users', id: input.id },
+        (item) => ({ ...item, name: input.name }),
+      );
       return { id: input.id, name: input.name };
     },
   );
@@ -502,7 +462,7 @@ test('list-query offline accumulation merges same-item mutations and keeps diffe
       itemPayloadSchema: userPayloadSchema,
       queryPayloadSchema: usersQueryPayloadSchema,
       offlineMode: {
-        network: { enabled: true, getIsOffline: () => !online },
+        network: network.config,
         operations: {
           renameUser: {
             inputSchema: userInputSchema,
@@ -516,9 +476,8 @@ test('list-query offline accumulation merges same-item mutations and keeps diffe
 
   await flushAllTimers();
 
-  online = false;
   act(() => {
-    window.dispatchEvent(new Event('offline'));
+    network.goOffline();
   });
   await Promise.resolve();
 
@@ -597,8 +556,7 @@ test('list-query offline accumulation merges same-item mutations and keeps diffe
   ]);
 
   await act(async () => {
-    online = true;
-    window.dispatchEvent(new Event('online'));
+    network.goOnline();
     await vi.advanceTimersByTimeAsync(250);
     await vi.runAllTimersAsync();
   });

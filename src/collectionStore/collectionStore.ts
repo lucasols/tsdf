@@ -408,18 +408,6 @@ export function createCollectionStore<
         adapter: persistentStorageConfig.adapter,
         offlineMode: persistentStorageConfig.offlineMode,
         storeAdapter: {
-          getHelpers: () => ({
-            getItemState: (payload: ItemPayload) =>
-              getItemState(payload)?.data ?? null,
-            updateItemState: (
-              payload: ItemPayload | ItemPayload[],
-              updater: (item: ItemState) => ItemState | undefined,
-            ) => updateItemState(payload, (draft) => updater(draft)),
-            addItemToState,
-            deleteItemState,
-            invalidateItem: (payload: ItemPayload) => invalidateItem(payload),
-            getItemKey,
-          }),
           getEntityRefs: ({ mutationPayload, tempId }) => {
             if (tempId) {
               return [{ entityKey: tempId, entityKind: 'item' }];

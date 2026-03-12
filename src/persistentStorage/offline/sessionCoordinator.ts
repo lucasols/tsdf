@@ -211,6 +211,13 @@ function createSessionPersistenceHandles(args: {
   };
 }
 
+/**
+ * Internal coordinator that tracks offline/network state, queue health and conflict
+ * aggregation for a session.
+ *
+ * Instances are shared per session key and reused through `getOrCreateSessionOfflineCoordinator`.
+ * @internal
+ */
 export class SessionOfflineCoordinator {
   readonly sessionKey: string;
   readonly store: Store<SessionStoreState>;
@@ -746,6 +753,10 @@ export class SessionOfflineCoordinator {
   }
 }
 
+/**
+ * Returns a session-scoped offline coordinator, creating it if needed.
+ * Existing coordinators are reconfigured when adapter/configuration changes.
+ */
 export function getOrCreateSessionOfflineCoordinator(
   sessionKey: string,
   options: Omit<SessionCoordinatorOptions, 'sessionKey'> = {},
@@ -770,6 +781,10 @@ export function getOrCreateSessionOfflineCoordinator(
   return created;
 }
 
+/**
+ * Returns the latest offline status for a session. If the session has not been
+ * initialized yet, this returns a default "online" status with empty recovery data.
+ */
 export function getGlobalOfflineStatus(
   sessionKey: string,
 ): GlobalOfflineStatus {
@@ -778,6 +793,10 @@ export function getGlobalOfflineStatus(
   );
 }
 
+/**
+ * Returns the latest list of offline entities for a session.
+ * Useful to render pending sync state badges or pending-item indicators.
+ */
 export function getGlobalOfflineEntities(
   sessionKey: string,
 ): GlobalOfflineEntity[] {
@@ -795,6 +814,9 @@ function useSessionOfflineCoordinator(
   );
 }
 
+/**
+ * React hook that subscribes to the offline status stream for a session.
+ */
 export function useGlobalOfflineStatus(
   sessionKey: string,
 ): GlobalOfflineStatus {
@@ -803,6 +825,9 @@ export function useGlobalOfflineStatus(
   return coordinator.store.useSelectorRC((state) => state.status);
 }
 
+/**
+ * React hook that subscribes to the offline entities stream for a session.
+ */
 export function useGlobalOfflineEntities(
   sessionKey: string,
 ): GlobalOfflineEntity[] {
@@ -813,6 +838,9 @@ export function useGlobalOfflineEntities(
   );
 }
 
+/**
+ * React hook returning offline entities for a specific store in a session.
+ */
 export function useOfflineStoreEntities(args: {
   sessionKey: string | false;
   inactiveScope: string;
