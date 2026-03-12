@@ -139,7 +139,12 @@ type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
   DocumentOfflineOperationDefinition<
     State,
-    { input: __LEGIT_ANY__; conflict: __LEGIT_ANY__; result: __LEGIT_ANY__ }
+    {
+      input: __LEGIT_ANY__;
+      conflict: __LEGIT_ANY__;
+      result: __LEGIT_ANY__;
+      serverSnapshot: __LEGIT_ANY__;
+    }
   >
 >;
 
@@ -162,6 +167,7 @@ type InternalCollectionOfflineOperations<
   CollectionOfflineOperationDefinition<
     ItemState,
     ItemPayload,
+    __LEGIT_ANY__,
     __LEGIT_ANY__,
     __LEGIT_ANY__,
     __LEGIT_ANY__
@@ -204,6 +210,7 @@ type InternalListQueryOfflineOperations<
     ItemState,
     QueryPayload,
     ItemPayload,
+    __LEGIT_ANY__,
     __LEGIT_ANY__,
     __LEGIT_ANY__,
     __LEGIT_ANY__

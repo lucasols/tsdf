@@ -132,7 +132,12 @@ type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
   string,
   DocumentOfflineOperationDefinition<
     State,
-    { input: __LEGIT_ANY__; conflict: __LEGIT_ANY__; result: __LEGIT_ANY__ }
+    {
+      input: __LEGIT_ANY__;
+      conflict: __LEGIT_ANY__;
+      result: __LEGIT_ANY__;
+      serverSnapshot: __LEGIT_ANY__;
+    }
   >
 >;
 

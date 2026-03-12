@@ -45,7 +45,12 @@ type TestDocumentOfflineOperationsRegistry<D> = Record<
   string,
   DocumentOfflineOperationDefinition<
     { value: D },
-    { input: __LEGIT_ANY__; conflict: __LEGIT_ANY__; result: __LEGIT_ANY__ }
+    {
+      input: __LEGIT_ANY__;
+      conflict: __LEGIT_ANY__;
+      result: __LEGIT_ANY__;
+      serverSnapshot: __LEGIT_ANY__;
+    }
   >
 >;
 

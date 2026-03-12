@@ -60,6 +60,7 @@ type TestListQueryOfflineOperationsRegistry<TRow extends Row> = Record<
     ListQueryItemPayload,
     __LEGIT_ANY__,
     __LEGIT_ANY__,
+    __LEGIT_ANY__,
     __LEGIT_ANY__
   >
 >;

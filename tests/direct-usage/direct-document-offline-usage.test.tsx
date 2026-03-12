@@ -59,8 +59,18 @@ type DirectDocumentOfflineOperations = DefineDocumentOfflineOperations<
   {
     setValue: DefineOfflineOperation<ValueInput>;
     patchDoc: DefineOfflineOperation<PatchDocInput>;
-    skipSyncValue: DefineOfflineOperation<ValueInput>;
-    conflictValue: DefineOfflineOperation<ValueInput, ConflictData>;
+    skipSyncValue: DefineOfflineOperation<
+      ValueInput,
+      unknown,
+      unknown,
+      DocState
+    >;
+    conflictValue: DefineOfflineOperation<
+      ValueInput,
+      ConflictData,
+      unknown,
+      DocState
+    >;
   }
 >;
 
@@ -70,6 +80,8 @@ test('direct document store offline public api supports the main operation hooks
   network.install();
 
   let documentState: DocState = { value: 1, label: 'server' };
+  const skipSyncReplayOrder: string[] = [];
+  const conflictReplayOrder: string[] = [];
 
   const documentStore = createDocumentStore<
     DocState,
@@ -118,22 +130,44 @@ test('direct document store offline public api supports the main operation hooks
           },
           skipSyncValue: {
             inputSchema: setValueInputSchema,
+            getServerSnapshot: () => {
+              skipSyncReplayOrder.push('getServerSnapshot');
+              return { ...documentState };
+            },
             execute: ({ input }) => {
               throw new Error(`dispatch failed after send ${input.value}`);
             },
-            shouldSkipSync: ({ input, enqueuedAt, updatedAt }) => {
+            shouldSkipSync: ({
+              input,
+              enqueuedAt,
+              updatedAt,
+              serverSnapshot,
+            }) => {
+              skipSyncReplayOrder.push('shouldSkipSync');
               expect(input.value).toBe(5);
               expect(typeof input.value).toBe('number');
               expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+              expect(serverSnapshot).toEqual(documentState);
               return true;
             },
           },
           conflictValue: {
             inputSchema: setValueInputSchema,
+            getServerSnapshot: () => {
+              conflictReplayOrder.push('getServerSnapshot');
+              return { ...documentState };
+            },
             conflictHandling: {
               schema: docConflictSchema,
-              detectConflict: ({ input, enqueuedAt, updatedAt }) => {
+              detectConflict: ({
+                input,
+                enqueuedAt,
+                updatedAt,
+                serverSnapshot,
+              }) => {
+                conflictReplayOrder.push('detectConflict');
                 expect(updatedAt).toBeGreaterThanOrEqual(enqueuedAt);
+                expect(serverSnapshot).toEqual(documentState);
                 if (input.value !== 6) return false;
 
                 return { reason: 'stale-server-value' };
@@ -336,6 +370,12 @@ test('direct document store offline public api supports the main operation hooks
       syncState: 'conflict',
     },
   ]);
+  expect(skipSyncReplayOrder).toMatchInlineSnapshot(
+    `['getServerSnapshot', 'shouldSkipSync']`,
+  );
+  expect(conflictReplayOrder).toMatchInlineSnapshot(
+    `['getServerSnapshot', 'detectConflict']`,
+  );
 
   await act(async () => {
     await documentStore.resolveOfflineConflict(conflict!.id, { value: 7 });

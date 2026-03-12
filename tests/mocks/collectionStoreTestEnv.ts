@@ -54,6 +54,7 @@ type TestCollectionOfflineOperationsRegistry<
     string,
     __LEGIT_ANY__,
     __LEGIT_ANY__,
+    __LEGIT_ANY__,
     __LEGIT_ANY__
   >
 >;

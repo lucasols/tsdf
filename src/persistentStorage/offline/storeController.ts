@@ -710,6 +710,11 @@ export function createOfflineStoreController<
         nextEntry.syncState === 'needs-confirmation';
       const conflictHandling = operation.conflictHandling;
       const tempEntity = operation.tempEntity;
+      const replayCheckBaseCtx = {
+        input: nextEntry.input,
+        enqueuedAt: nextEntry.createdAt,
+        updatedAt: nextEntry.updatedAt,
+      };
       let entryToUse: OfflineQueueEntry = {
         ...nextEntry,
         syncState: 'syncing',
@@ -719,12 +724,24 @@ export function createOfflineStoreController<
       await persistEntry(entryToUse, current);
 
       try {
+        const shouldPrepareReplayCheckCtx = Boolean(
+          (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) ||
+          conflictHandling,
+        );
+        const replayCheckCtx = shouldPrepareReplayCheckCtx
+          ? {
+              ...replayCheckBaseCtx,
+              serverSnapshot: operation.getServerSnapshot
+                ? await operation.getServerSnapshot(replayCheckBaseCtx)
+                : undefined,
+            }
+          : null;
+
         if (shouldCheckSkipBeforeRetry && operation.shouldSkipSync) {
-          const shouldSkip = await operation.shouldSkipSync({
-            input: entryToUse.input,
-            enqueuedAt: entryToUse.createdAt,
-            updatedAt: entryToUse.updatedAt,
-          });
+          if (!replayCheckCtx) {
+            throw new Error('Replay check context was not prepared');
+          }
+          const shouldSkip = await operation.shouldSkipSync(replayCheckCtx);
 
           if (shouldSkip) {
             await removeEntry(entryToUse.id, current);
@@ -733,11 +750,10 @@ export function createOfflineStoreController<
         }
 
         const conflict = conflictHandling
-          ? await conflictHandling.detectConflict({
-              input: entryToUse.input,
-              enqueuedAt: entryToUse.createdAt,
-              updatedAt: entryToUse.updatedAt,
-            })
+          ? await conflictHandling.detectConflict(
+              replayCheckCtx ??
+                ({ ...replayCheckBaseCtx, serverSnapshot: undefined } as const),
+            )
           : false;
 
         if (conflict) {

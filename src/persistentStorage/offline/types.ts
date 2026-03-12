@@ -305,13 +305,27 @@ type OperationBaseContext<TInput> = {
   updatedAt: number;
 };
 
+/** Context passed to replay checks that may use a fresh server snapshot. */
+type OperationReplayCheckContext<TInput, TServerSnapshot> =
+  OperationBaseContext<TInput> & {
+    /**
+     * Optional snapshot fetched immediately before `shouldSkipSync` and
+     * `detectConflict`.
+     */
+    serverSnapshot: TServerSnapshot | undefined;
+  };
+
 /**
  * Conflict hook configuration for a queued offline operation.
  *
  * @typeParam TInput - Input type of the queued operation being checked and potentially requeued.
  * @typeParam TConflict - Conflict payload produced by detection and consumed during resolution.
  */
-export type OfflineConflictHandlingConfig<TInput, TConflict> = {
+export type OfflineConflictHandlingConfig<
+  TInput,
+  TConflict,
+  TServerSnapshot = unknown,
+> = {
   /** Optional schema to validate and sanitize stored conflict payloads. */
   schema?: PersistentStorageSchema<TConflict>;
   /**
@@ -319,7 +333,7 @@ export type OfflineConflictHandlingConfig<TInput, TConflict> = {
    * when the queued mutation can no longer be applied safely.
    */
   detectConflict: (
-    ctx: OperationBaseContext<TInput>,
+    ctx: OperationReplayCheckContext<TInput, TServerSnapshot>,
   ) => Promise<TConflict | false | null> | TConflict | false | null;
   /**
    * Resolve persisted conflict data and optionally requeue an adjusted operation.
@@ -369,19 +383,32 @@ export type OfflineOperationDefinition<
   TInput,
   TConflict,
   TTempResult = void,
+  TServerSnapshot = unknown,
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
   /**
    * Optional conflict strategy when a queued operation diverges from remote state.
    */
-  conflictHandling?: OfflineConflictHandlingConfig<TInput, TConflict>;
+  conflictHandling?: OfflineConflictHandlingConfig<
+    TInput,
+    TConflict,
+    TServerSnapshot
+  >;
   /**
    * Optional queue compaction for consecutive mutations with same refs.
    */
   accumulation?: OfflineAccumulationConfig<TInput>;
   /** Optional temporary-entity lifecycle for optimistic create/update operations. */
   tempEntity?: OfflineTempEntityConfig<TInput, TTempResult>;
+  /**
+   * Optionally loads a fresh server-side snapshot before replay checks run.
+   * The result is passed to `shouldSkipSync` and `detectConflict` as
+   * `ctx.serverSnapshot`.
+   */
+  getServerSnapshot?: (
+    ctx: OperationBaseContext<TInput>,
+  ) => Promise<TServerSnapshot> | TServerSnapshot;
   /**
    * Executes the queued mutation against the remote source during replay.
    * This may run multiple times when transient failures occur.
@@ -395,7 +422,7 @@ export type OfflineOperationDefinition<
    * Return `false` to continue with normal replay.
    */
   shouldSkipSync?: (
-    ctx: OperationBaseContext<TInput>,
+    ctx: OperationReplayCheckContext<TInput, TServerSnapshot>,
   ) => Promise<boolean> | boolean;
 };
 
@@ -409,6 +436,7 @@ type OperationEntityRefsContext<TInput> = {
 export type AnyOfflineOperationDefinition = OfflineOperationDefinition<
   __LEGIT_ANY__,
   __LEGIT_ANY__,
+  __LEGIT_ANY__,
   __LEGIT_ANY__
 > & {
   getEntityRefs?: (ctx: OperationEntityRefsContext<__LEGIT_ANY__>) => unknown[];
@@ -420,7 +448,7 @@ export type AnyOfflineOperationDefinition = OfflineOperationDefinition<
  * Use this helper with {@link DefineDocumentOfflineOperations} to describe each
  * operation using generic parameters instead of inline object literals.
  *
- * The generic order is `input`, `conflict`, then `temp result`.
+ * The generic order is `input`, `conflict`, `temp result`, then `server snapshot`.
  *
  * @typeParam TInput - Input payload accepted by the operation.
  * @typeParam TConflict - Conflict payload produced by optional conflict handling.
@@ -439,6 +467,7 @@ export type DefineOfflineOperation<
   TInput = unknown,
   TConflict = unknown,
   TTempResult = unknown,
+  TServerSnapshot = unknown,
 > = {
   /** Input type accepted by the operation. */
   input?: TInput;
@@ -446,6 +475,8 @@ export type DefineOfflineOperation<
   conflict?: TConflict;
   /** Result returned by `execute`, used only for `tempEntity` reconciliation. */
   result?: TTempResult;
+  /** Snapshot type returned by `getServerSnapshot` and exposed to replay checks. */
+  serverSnapshot?: TServerSnapshot;
 };
 
 type DocumentOperationInput<TOptions extends DefineOfflineOperation> =
@@ -456,6 +487,11 @@ type DocumentOperationConflict<TOptions extends DefineOfflineOperation> =
 
 type DocumentOperationResult<TOptions extends DefineOfflineOperation> =
   TOptions extends { result?: infer TTempResult } ? TTempResult : unknown;
+
+type DocumentOperationServerSnapshot<TOptions extends DefineOfflineOperation> =
+  TOptions extends { serverSnapshot?: infer TServerSnapshot }
+    ? TServerSnapshot
+    : unknown;
 
 /**
  * Document-store specific offline operation definition.
@@ -490,7 +526,8 @@ export type DocumentOfflineOperationDefinition<
 > = OfflineOperationDefinition<
   DocumentOperationInput<TOptions>,
   DocumentOperationConflict<TOptions>,
-  DocumentOperationResult<TOptions>
+  DocumentOperationResult<TOptions>,
+  DocumentOperationServerSnapshot<TOptions>
 > &
   ([State] extends [never] ? never : unknown);
 
@@ -579,7 +616,13 @@ export type CollectionOfflineOperationDefinition<
   TInput = unknown,
   TConflict = unknown,
   TTempResult = unknown,
-> = OfflineOperationDefinition<TInput, TConflict, TTempResult> & {
+  TServerSnapshot = unknown,
+> = OfflineOperationDefinition<
+  TInput,
+  TConflict,
+  TTempResult,
+  TServerSnapshot
+> & {
   /**
    * Declares which collection items are affected by this queued mutation.
    *
@@ -634,7 +677,8 @@ export type DefineCollectionOfflineOperations<
     ItemPayload,
     DocumentOperationInput<TOperations[TName]>,
     DocumentOperationConflict<TOperations[TName]>,
-    DocumentOperationResult<TOperations[TName]>
+    DocumentOperationResult<TOperations[TName]>,
+    DocumentOperationServerSnapshot<TOperations[TName]>
   >;
 };
 
@@ -679,7 +723,13 @@ export type ListQueryOfflineOperationDefinition<
   TInput = unknown,
   TConflict = unknown,
   TTempResult = unknown,
-> = OfflineOperationDefinition<TInput, TConflict, TTempResult> & {
+  TServerSnapshot = unknown,
+> = OfflineOperationDefinition<
+  TInput,
+  TConflict,
+  TTempResult,
+  TServerSnapshot
+> & {
   /**
    * Declares which list-query entities are affected by this queued mutation.
    *
@@ -742,7 +792,8 @@ export type DefineListQueryOfflineOperations<
     ItemPayload,
     DocumentOperationInput<TOperations[TName]>,
     DocumentOperationConflict<TOperations[TName]>,
-    DocumentOperationResult<TOperations[TName]>
+    DocumentOperationResult<TOperations[TName]>,
+    DocumentOperationServerSnapshot<TOperations[TName]>
   >;
 };
 
