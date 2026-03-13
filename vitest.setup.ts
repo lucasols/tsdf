@@ -2,6 +2,8 @@ import { compactSnapshot } from '@ls-stack/utils/testUtils';
 import { format } from 'node:util';
 import { afterEach, beforeEach, expect, vi } from 'vitest';
 
+process.env.NODE_ENV = 'development';
+
 expect.addSnapshotSerializer({
   test: (val) => typeof val !== 'string',
   serialize: (val) =>

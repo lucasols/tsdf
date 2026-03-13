@@ -36,8 +36,8 @@ importers:
         specifier: ^0.6.1
         version: 0.6.1
       t-state:
-        specifier: ^9.8.1
-        version: 9.8.1(react@19.2.3)
+        specifier: ^9.8.2
+        version: 9.8.2(react@19.2.3)
     devDependencies:
       '@ls-stack/eslint-cfg':
         specifier: ^0.7.0
@@ -1791,8 +1791,8 @@ packages:
     resolution: {integrity: sha512-a1aZsIAFYpjb0J51tZfrS93xxpTp4WY70EhZBCKcHylh/y/tF4uWXIyJUoDQKcg88lDdPlAcwuzE5JAC/4MVZg==}
     engines: {node: '>=23.0.0'}
 
-  t-state@9.8.1:
-    resolution: {integrity: sha512-HiNxMHA/Gx3nZ/s+t44ChqqwxOVDYW+5gfE5DzZHFq8LiUjm940400+O8QJg1OVwMPba11eQxhQEn/zM55iYFA==}
+  t-state@9.8.2:
+    resolution: {integrity: sha512-mp1usCyYtCnB5ZderW1cxurls8HI3oTmaIQjbX1v9G3qbwQD2YXMcbpr139CPDRPwbJELW8YRfRHDoO6yu1Kfg==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -3575,7 +3575,7 @@ snapshots:
 
   t-result@0.6.1: {}
 
-  t-state@9.8.1(react@19.2.3):
+  t-state@9.8.2(react@19.2.3):
     dependencies:
       immer: 10.2.0
       nanoid: 5.1.6

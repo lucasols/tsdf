@@ -1,3 +1,5 @@
+import { murmur3 } from '@ls-stack/utils/hash';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -7,16 +9,14 @@ import {
   test,
   vi,
 } from 'vitest';
-import { murmur3 } from '@ls-stack/utils/hash';
-import { rc_number, rc_object, rc_string } from 'runcheck';
-import {
-  localPersistentStorage,
-  opfsPersistentStorage,
-} from '../../src/persistentStorage/storageAdapter';
 import {
   resetManagedLocalStorageState,
   upsertManagedLocalStorageNamespaceEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
+import {
+  localPersistentStorage,
+  opfsPersistentStorage,
+} from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { startPersistentStorageOperationCapture } from '../utils/persistentStorageOptimizationTestUtils';
