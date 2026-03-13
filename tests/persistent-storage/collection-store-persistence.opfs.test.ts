@@ -95,20 +95,12 @@ afterEach(() => {
 describe('opfs: collection store persistence', () => {
   test('first hook read hydrates only the requested cached item and refetches', async () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
-    const hotKey = setCachedCollectionItem(
-      mockAdapter,
-      'col-opfs-hook',
-      'sess1',
-      '1',
-      { value: { id: '1', name: 'Cached' } },
-    );
-    const coldKey = setCachedCollectionItem(
-      mockAdapter,
-      'col-opfs-hook',
-      'sess1',
-      '2',
-      { value: { id: '2', name: 'Cold' } },
-    );
+    setCachedCollectionItem(mockAdapter, 'col-opfs-hook', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
+    setCachedCollectionItem(mockAdapter, 'col-opfs-hook', 'sess1', '2', {
+      value: { id: '2', name: 'Cold' },
+    });
 
     const env = createEnv({
       storeName: 'col-opfs-hook',

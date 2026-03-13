@@ -411,8 +411,11 @@ describe('localStorage: collection store persistence', () => {
     ]);
   });
 
-  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+  test('preload hydrates cached local items without reporting an error', async () => {
     const onPersistentStorageError = vi.fn();
+    setCachedCollectionItem('col-preload-local', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
     const env = createEnv({
       storeName: 'col-preload-local',
       sessionKey: 'sess1',
@@ -421,13 +424,20 @@ describe('localStorage: collection store persistence', () => {
 
     await expect(env.apiStore.preloadItemFromStorage('1')).resolves
       .toMatchInlineSnapshot(`
-      - { payload: '1', preloaded: '❌' }
+      - { payload: '1', preloaded: '✅' }
     `);
 
-    expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
+      data:
+        value: { id: '1', name: 'Cached' }
+
+      error: null
+      payload: '1'
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(onPersistentStorageError).not.toHaveBeenCalled();
   });
 
   test('invalid cached entries are cleaned up only after the item is read', async () => {

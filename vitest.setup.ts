@@ -24,13 +24,25 @@ expect.addSnapshotSerializer({
 
 const originalConsoleError = console.error;
 
+declare global {
+  var __SUPPRESS_ACT_ERROR__: boolean;
+}
+
+globalThis.__SUPPRESS_ACT_ERROR__ = false;
+
 console.error = (...args) => {
   if (args.length > 0 && typeof args[0] === 'string') {
     const errorMsg = args[0];
     if (
-      errorMsg.includes('was not wrapped in act') ||
-      errorMsg.includes('Maximum update depth exceeded')
+      errorMsg.includes('was not wrapped in act') &&
+      !globalThis.__SUPPRESS_ACT_ERROR__
     ) {
+      throw new Error(
+        `${format(...args)} If the warning not comes from tests with missing act, use globalThis.__SUPPRESS_ACT_ERROR__ = true; to ignore it.`,
+      );
+    }
+
+    if (errorMsg.includes('Maximum update depth exceeded')) {
       throw new Error(format(...args));
     }
   }

@@ -1104,11 +1104,11 @@ describe('localStorage: list query store persistence', () => {
     expect(localStorage.getItem('tsdf.sess1.lq-evict')).toBeNull();
 
     expect(listStoredKeys('tsdf.sess1.lq-evict.lq.')).toMatchInlineSnapshot(`
-        ['{tableId:"second"}']
-      `);
+      ['{tableId:"second"}']
+    `);
     expect(listStoredKeys('tsdf.sess1.lq-evict.li.')).toMatchInlineSnapshot(`
-        ['"second||1']
-      `);
+      ['"second||1']
+    `);
   });
 
   test('pinned items survive eviction even when their query is evicted', async () => {
@@ -1253,8 +1253,8 @@ describe('localStorage: list query store persistence', () => {
     await flushAllTimers();
 
     expect(listStoredKeys('tsdf.sess1.lq-ignore.li.')).toMatchInlineSnapshot(`
-        ['"users||1']
-      `);
+      ['"users||1']
+    `);
     expect(getStoredQueryItemKeys('lq-ignore', 'sess1', usersQuery))
       .toMatchInlineSnapshot(`
         ['"users||1']
@@ -1290,8 +1290,15 @@ describe('localStorage: list query store persistence', () => {
     expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
   });
 
-  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+  test('preload hydrates cached local queries and items without reporting an error', async () => {
     const onPersistentStorageError = vi.fn();
+    setCachedItem('lq-preload-local', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Cached',
+    });
+    setCachedQuery('lq-preload-local', 'sess1', { tableId: 'users' }, [
+      storeItemKey('users', 1),
+    ]);
     const env = createEnv({
       storeName: 'lq-preload-local',
       sessionKey: 'sess1',
@@ -1301,20 +1308,28 @@ describe('localStorage: list query store persistence', () => {
     await expect(env.apiStore.preloadQueryFromStorage({ tableId: 'users' }))
       .resolves.toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
-        preloaded: '❌'
+        preloaded: '✅'
     `);
     await expect(env.apiStore.preloadItemFromStorage('users||1')).resolves
       .toMatchInlineSnapshot(`
-      - { payload: 'users||1', preloaded: '❌' }
+      - { payload: 'users||1', preloaded: '✅' }
     `);
 
-    expect(onPersistentStorageError).toHaveBeenCalledTimes(2);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
-    expect(onPersistentStorageError.mock.calls[1]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(env.apiStore.getQueryState({ tableId: 'users' }))
+      .toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Cached'
+    `);
+    expect(onPersistentStorageError).not.toHaveBeenCalled();
   });
 
   test('invalid cached query entries are cleaned up only after a direct read', async () => {
