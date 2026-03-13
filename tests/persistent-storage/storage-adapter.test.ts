@@ -135,6 +135,47 @@ describe('localStorage adapter', () => {
     warnSpy.mockRestore();
   });
 
+  test('namespace metadata is stored without redundant root and payload keys', () => {
+    const prefix = 'tsdf.sess1.compact-metadata.collection.item.';
+    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+
+    upsertManagedLocalStorageNamespaceEntry({
+      sessionKey: 'sess1',
+      storeName: 'compact-metadata',
+      storagePrefix: prefix,
+      entryKey: '"a',
+      payloadKey: `${prefix}"a`,
+      maxAgeMs: 60_000,
+      lastAccessAt: 1,
+    });
+
+    expect(rootKey).toMatchInlineSnapshot(
+      `"tsdf._m.r.n:sess1.compact-metadata.ci"`,
+    );
+    expect(JSON.parse(localStorage.getItem('tsdf._m.c') ?? 'null'))
+      .toMatchInlineSnapshot(`
+        roots:
+          - cleanupIntervalMs: 86400000
+            lastCleanupAt: null
+            maxAgeMs: 60000
+            mode: 'namespace'
+            needsMaintenance: '❌'
+            sessionKey: 'sess1'
+            storageKey: null
+            storagePrefix: 'tsdf.sess1.compact-metadata.collection.item.'
+            storeName: 'compact-metadata'
+            version: 1
+        version: 1
+      `);
+    expect(JSON.parse(localStorage.getItem(`${rootKey}.m`) ?? 'null'))
+      .toMatchInlineSnapshot(`
+        entries:
+          - entryKey: '"a'
+            lastAccessAt: 1
+        version: 1
+      `);
+  });
+
   test('unlocked metadata reads pick up external manifest updates instead of serving stale cached data', () => {
     const prefix = 'tsdf.sess1.external-sync.collection.item.';
     const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
@@ -164,9 +205,7 @@ describe('localStorage adapter', () => {
       manifestKey,
       JSON.stringify({
         version: 1,
-        entries: [
-          { entryKey: '"b', payloadKey: `${prefix}"b`, lastAccessAt: 2 },
-        ],
+        entries: [{ entryKey: '"b', lastAccessAt: 2 }],
       }),
     );
 
@@ -208,9 +247,7 @@ describe('localStorage adapter', () => {
         manifestKey,
         JSON.stringify({
           version: 1,
-          entries: [
-            { entryKey: '"b', payloadKey: `${prefix}"b`, lastAccessAt: 2 },
-          ],
+          entries: [{ entryKey: '"b', lastAccessAt: 2 }],
         }),
       );
 

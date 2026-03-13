@@ -69,26 +69,20 @@ const managedLocalStorageRootSchema = rc_discriminated_union('mode', {
   },
 });
 
-const managedLocalStorageCatalogRootEntrySchema = rc_object({
-  rootKey: rc_string,
-  root: managedLocalStorageRootSchema,
-});
-
 const managedLocalStorageCatalogSchema = rc_object({
   version: rc_literals(METADATA_VERSION),
-  roots: rc_array(managedLocalStorageCatalogRootEntrySchema),
+  roots: rc_array(managedLocalStorageRootSchema),
 });
 
-const managedLocalStorageManifestEntrySchema = rc_object({
+const managedLocalStorageStoredManifestEntrySchema = rc_object({
   entryKey: rc_string,
-  payloadKey: rc_string,
   lastAccessAt: rc_number,
   meta: rc_unknown.optionalKey(),
 });
 
 const managedLocalStorageManifestShardSchema = rc_object({
   version: rc_literals(METADATA_VERSION),
-  entries: rc_array(managedLocalStorageManifestEntrySchema),
+  entries: rc_array(managedLocalStorageStoredManifestEntrySchema),
 });
 
 const protectedKeysMetaSchema = rc_object({
@@ -124,6 +118,27 @@ function normalizeRootIdentityValue(value: string): string {
   return value.startsWith('tsdf.') ? value.slice('tsdf.'.length) : value;
 }
 
+const COMPRESSED_NAMESPACE_ROOT_SUFFIXES = [
+  ['.collection.item.', '.ci'],
+  ['.listQuery.item.', '.li'],
+  ['.listQuery.query.', '.lq'],
+  ['.offline.queue.', '.oq'],
+  ['.offline.conflict.', '.oc'],
+  ['.offline.entity.', '.oe'],
+] as const;
+
+function compactNamespaceRootIdentityValue(storagePrefix: string): string {
+  const normalized = normalizeRootIdentityValue(storagePrefix);
+
+  for (const [suffix, compactSuffix] of COMPRESSED_NAMESPACE_ROOT_SUFFIXES) {
+    if (normalized.endsWith(suffix)) {
+      return `${normalized.slice(0, -suffix.length)}${compactSuffix}`;
+    }
+  }
+
+  return normalized.endsWith('.') ? normalized.slice(0, -1) : normalized;
+}
+
 type RootParams = {
   sessionKey: string;
   storeName: string;
@@ -137,7 +152,7 @@ type RootParams = {
 function getRootIdentity(params: RootParams): string {
   return params.mode === 'single'
     ? `s:${normalizeRootIdentityValue(params.storageKey)}`
-    : `n:${normalizeRootIdentityValue(params.storagePrefix)}`;
+    : `n:${compactNamespaceRootIdentityValue(params.storagePrefix)}`;
 }
 
 export function getManagedLocalStorageRootKeyForSingle(
@@ -212,12 +227,22 @@ function findCatalogRootIndex(
   catalog: ManagedLocalStorageCatalog,
   rootKey: string,
 ): number {
-  return catalog.roots.findIndex((entry) => entry.rootKey === rootKey);
+  return catalog.roots.findIndex(
+    (root) => getManagedLocalStorageRootKeyFromRoot(root) === rootKey,
+  );
 }
 
 export type ManagedLocalStorageRoot = RcInferType<
   typeof managedLocalStorageRootSchema
 >;
+
+function getManagedLocalStorageRootKeyFromRoot(
+  root: ManagedLocalStorageRoot,
+): string {
+  return root.mode === 'single'
+    ? getManagedLocalStorageRootKeyForSingle(root.storageKey)
+    : getManagedLocalStorageRootKeyForPrefix(root.storagePrefix);
+}
 
 function upsertCatalogRoot(
   catalog: ManagedLocalStorageCatalog,
@@ -226,11 +251,11 @@ function upsertCatalogRoot(
 ): void {
   const index = findCatalogRootIndex(catalog, rootKey);
   if (index === -1) {
-    catalog.roots.push({ rootKey, root });
+    catalog.roots.push(root);
     return;
   }
 
-  catalog.roots[index] = { rootKey, root };
+  catalog.roots[index] = root;
 }
 
 function removeRootKeyFromCatalog(
@@ -238,7 +263,9 @@ function removeRootKeyFromCatalog(
   io: ManagedLocalStorageIo,
 ): void {
   const catalog = readCatalog(io);
-  const nextRoots = catalog.roots.filter((entry) => entry.rootKey !== rootKey);
+  const nextRoots = catalog.roots.filter(
+    (root) => getManagedLocalStorageRootKeyFromRoot(root) !== rootKey,
+  );
   if (nextRoots.length === catalog.roots.length) return;
 
   writeCatalog({ version: METADATA_VERSION, roots: nextRoots }, io);
@@ -249,8 +276,9 @@ export function readManagedLocalStorageRoot(
   io: ManagedLocalStorageIo = directManagedLocalStorageIo,
 ): ManagedLocalStorageRoot | null {
   return (
-    readCatalog(io).roots.find((entry) => entry.rootKey === rootKey)?.root ??
-    null
+    readCatalog(io).roots.find(
+      (root) => getManagedLocalStorageRootKeyFromRoot(root) === rootKey,
+    ) ?? null
   );
 }
 
@@ -269,10 +297,19 @@ type ManagedLocalStorageCatalogRootEntry = {
   rootKey: string;
 };
 
+function getCatalogRootEntries(
+  catalog: ManagedLocalStorageCatalog,
+): ManagedLocalStorageCatalogRootEntry[] {
+  return catalog.roots.map((root) => ({
+    root,
+    rootKey: getManagedLocalStorageRootKeyFromRoot(root),
+  }));
+}
+
 function readCatalogRoots(
   io: ManagedLocalStorageIo,
 ): ManagedLocalStorageCatalogRootEntry[] {
-  return readCatalog(io).roots;
+  return getCatalogRootEntries(readCatalog(io));
 }
 
 type ManagedLocalStorageRootBase = Omit<
@@ -290,8 +327,8 @@ function ensureRoot(
     params.cleanupIntervalMs,
   );
   const current = catalog.roots.find(
-    (entry) => entry.rootKey === rootKey,
-  )?.root;
+    (root) => getManagedLocalStorageRootKeyFromRoot(root) === rootKey,
+  );
 
   const rootBase: ManagedLocalStorageRootBase = {
     version: METADATA_VERSION,
@@ -362,16 +399,40 @@ export type ManagedLocalStorageManifestEntry<TMeta = unknown> = {
   meta?: TMeta;
 };
 
+type StoredManagedLocalStorageManifestEntry = RcInferType<
+  typeof managedLocalStorageStoredManifestEntrySchema
+>;
+
+function getPayloadKeyForManifestEntry(
+  root: ManagedLocalStorageRoot,
+  entryKey: string,
+): string {
+  return root.mode === 'single'
+    ? root.storageKey
+    : `${root.storagePrefix}${entryKey}`;
+}
+
+function toManagedLocalStorageManifestEntry(
+  root: ManagedLocalStorageRoot,
+  entry: StoredManagedLocalStorageManifestEntry,
+): ManagedLocalStorageManifestEntry {
+  return {
+    ...entry,
+    payloadKey: getPayloadKeyForManifestEntry(root, entry.entryKey),
+  };
+}
+
 function readManifestEntry(
   rootKey: string,
+  root: ManagedLocalStorageRoot,
   entryKey: string,
   io: ManagedLocalStorageIo,
 ): ManagedLocalStorageManifestEntry | null {
-  return (
+  const entry =
     readManifest(rootKey, io).entries.find(
-      (entry) => entry.entryKey === entryKey,
-    ) ?? null
-  );
+      (candidate) => candidate.entryKey === entryKey,
+    ) ?? null;
+  return entry ? toManagedLocalStorageManifestEntry(root, entry) : null;
 }
 
 function upsertManifestEntry(
@@ -385,9 +446,17 @@ function upsertManifestEntry(
   );
 
   if (existingIndex === -1) {
-    manifest.entries.push(entry);
+    manifest.entries.push({
+      entryKey: entry.entryKey,
+      lastAccessAt: entry.lastAccessAt,
+      meta: entry.meta,
+    });
   } else {
-    manifest.entries[existingIndex] = entry;
+    manifest.entries[existingIndex] = {
+      entryKey: entry.entryKey,
+      lastAccessAt: entry.lastAccessAt,
+      meta: entry.meta,
+    };
   }
 
   writeManifest(rootKey, manifest, io);
@@ -414,9 +483,12 @@ function removeManifestEntry(
 
 function listManifestEntries(
   rootKey: string,
+  root: ManagedLocalStorageRoot,
   io: ManagedLocalStorageIo,
 ): ManagedLocalStorageManifestEntry[] {
-  return readManifest(rootKey, io).entries;
+  return readManifest(rootKey, io).entries.map((entry) =>
+    toManagedLocalStorageManifestEntry(root, entry),
+  );
 }
 
 type PayloadLocation = {
@@ -460,7 +532,9 @@ export function listManagedLocalStorageKeysSync(
   const root = readManagedLocalStorageRoot(rootKey, io);
   if (!root || root.mode !== 'namespace') return null;
 
-  return listManifestEntries(rootKey, io).map((entry) => entry.payloadKey);
+  return listManifestEntries(rootKey, root, io).map(
+    (entry) => entry.payloadKey,
+  );
 }
 
 export function readManagedLocalStorageManifestEntriesByPrefix(
@@ -471,7 +545,7 @@ export function readManagedLocalStorageManifestEntriesByPrefix(
   const root = readManagedLocalStorageRoot(rootKey, io);
   if (!root || root.mode !== 'namespace') return [];
 
-  return listManifestEntries(rootKey, io);
+  return listManifestEntries(rootKey, root, io);
 }
 
 export function readManagedLocalStorageEntryByPayload(
@@ -481,7 +555,12 @@ export function readManagedLocalStorageEntryByPayload(
   const location = findPayloadLocation(payloadKey, io);
   if (!location) return null;
 
-  return readManifestEntry(location.rootKey, location.entryKey, io);
+  return readManifestEntry(
+    location.rootKey,
+    location.root,
+    location.entryKey,
+    io,
+  );
 }
 
 type UpsertSingleEntryParams = {
@@ -581,7 +660,12 @@ export function touchManagedLocalStoragePayload(
   const location = findPayloadLocation(payloadKey, io);
   if (!location) return false;
 
-  const current = readManifestEntry(location.rootKey, location.entryKey, io);
+  const current = readManifestEntry(
+    location.rootKey,
+    location.root,
+    location.entryKey,
+    io,
+  );
   if (!current) return false;
 
   upsertManifestEntry(
@@ -614,7 +698,7 @@ export function clearManagedLocalStorageRoot(
     return;
   }
 
-  for (const entry of listManifestEntries(rootKey, io)) {
+  for (const entry of listManifestEntries(rootKey, root, io)) {
     io.removeItem(entry.payloadKey);
   }
 
@@ -708,18 +792,19 @@ function runGenericCleanupForRoot(
   if (offlineRoot) return;
 
   const manifest = readManifest(rootKey, io);
-  const nextEntries: ManagedLocalStorageManifestEntry[] = [];
+  const nextEntries: StoredManagedLocalStorageManifestEntry[] = [];
 
   for (const entry of manifest.entries) {
+    const payloadKey = getPayloadKeyForManifestEntry(root, entry.entryKey);
     if (
-      protectedKeys.has(entry.payloadKey) ||
+      protectedKeys.has(payloadKey) ||
       now - entry.lastAccessAt <= root.maxAgeMs
     ) {
       nextEntries.push(entry);
       continue;
     }
 
-    io.removeItem(entry.payloadKey);
+    io.removeItem(payloadKey);
   }
 
   if (nextEntries.length === manifest.entries.length) return;
@@ -751,7 +836,7 @@ export async function runManagedLocalStorageMaintenance(
   maintenanceScheduleVersion++;
 
   const catalog = readCatalog(io);
-  const catalogRoots = catalog.roots;
+  const catalogRoots = getCatalogRootEntries(catalog);
   const protectedKeysBySession = readProtectedKeysBySession(catalogRoots);
   const invokedCallbacks = new Set<() => Promise<void>>();
   let catalogChanged = false;
@@ -774,7 +859,10 @@ export async function runManagedLocalStorageMaintenance(
       }
 
       const latestRoot =
-        catalog.roots.find((entry) => entry.rootKey === rootKey)?.root ?? root;
+        catalog.roots.find(
+          (candidate) =>
+            getManagedLocalStorageRootKeyFromRoot(candidate) === rootKey,
+        ) ?? root;
       latestRoot.lastCleanupAt = Date.now();
       latestRoot.needsMaintenance = false;
       upsertCatalogRoot(catalog, rootKey, latestRoot);
