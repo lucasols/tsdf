@@ -1,6 +1,6 @@
 import { compactSnapshot } from '@ls-stack/utils/testUtils';
 import { format } from 'node:util';
-import { expect } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
 
 expect.addSnapshotSerializer({
   test: (val) => typeof val !== 'string',
@@ -32,3 +32,27 @@ console.error = (...args) => {
   }
   originalConsoleError(...args);
 };
+
+const defaultNavigatorLocks = {
+  request: vi.fn(
+    async <T>(_name: string, callback: () => T | Promise<T>) =>
+      await callback(),
+  ),
+};
+
+beforeEach(() => {
+  Object.defineProperty(globalThis.navigator, 'locks', {
+    value: defaultNavigatorLocks,
+    writable: true,
+    configurable: true,
+  });
+  defaultNavigatorLocks.request.mockClear();
+});
+
+afterEach(() => {
+  Object.defineProperty(globalThis.navigator, 'locks', {
+    value: defaultNavigatorLocks,
+    writable: true,
+    configurable: true,
+  });
+});

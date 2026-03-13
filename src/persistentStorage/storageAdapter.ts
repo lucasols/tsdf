@@ -7,18 +7,81 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
+import {
+  clearManagedLocalStorageRoot,
+  clearManagedLocalStorageSession,
+  getManagedLocalStorageRootKeyForPrefix,
+  getManagedLocalStorageRootKeyForSingle,
+  listManagedLocalStorageKeysSync,
+  readManagedLocalStorageEntryByPayload,
+  readManagedLocalStorageManifestEntriesByPrefix,
+  readManagedLocalStorageProtectedKeys,
+  registerManagedLocalStorageMaintenanceCallback,
+  removeManagedLocalStoragePayload,
+  runManagedLocalStorageMaintenance,
+  setManagedLocalStorageRootNeedsMaintenance,
+  touchManagedLocalStoragePayload,
+  unregisterManagedLocalStorageMaintenanceCallback,
+  upsertManagedLocalStorageNamespaceEntry,
+  upsertManagedLocalStorageSingleEntry,
+} from './localStorageMetadata';
 import type { AsyncStorageAdapter, SyncStorageAdapter } from './types';
+
+const MANAGED_LOCAL_STORAGE_LOCK_NAME = 'tsdf-local-storage-metadata';
+const MANAGED_LOCAL_STORAGE_LOCK_WARNING =
+  '[TSDF] navigator.locks is unavailable; localPersistentStorage is using unlocked localStorage coordination.';
+let warnedManagedLocalStorageLockUnavailable = false;
+
+function getManagedLocalStorageLockManager(): LockManager | null {
+  const globalNavigator = __LEGIT_CAST__<Navigator | null | undefined, unknown>(
+    globalThis.navigator,
+  );
+  return (
+    __LEGIT_CAST__<LockManager | null | undefined, unknown>(
+      globalNavigator?.locks,
+    ) ?? null
+  );
+}
+
+function warnIfManagedLocalStorageLockUnavailable(): void {
+  if (getManagedLocalStorageLockManager() !== null) return;
+
+  if (!warnedManagedLocalStorageLockUnavailable) {
+    warnedManagedLocalStorageLockUnavailable = true;
+    console.warn(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
+  }
+}
+
+async function runWithManagedLocalStorageLock<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const lockManager = getManagedLocalStorageLockManager();
+
+  if (lockManager == null) {
+    warnIfManagedLocalStorageLockUnavailable();
+    return await callback();
+  }
+
+  return lockManager.request(MANAGED_LOCAL_STORAGE_LOCK_NAME, callback);
+}
 
 export const localPersistentStorage: SyncStorageAdapter = {
   /** Identifier for adapter type and sync runtime behavior. */
   kind: 'sync',
+  runLocked<T>(callback: () => T | Promise<T>): Promise<T> {
+    return runWithManagedLocalStorageLock(callback);
+  },
+  readRaw(key: string): string | null {
+    warnIfManagedLocalStorageLockUnavailable();
+    return localStorage.getItem(key);
+  },
   /**
    * Reads a value from `localStorage` for this exact key.
    * Returns `null` when the key does not exist or parsing fails.
    */
   read<T>(key: string): T | null {
     try {
-      const raw = localStorage.getItem(key);
+      const raw = localPersistentStorage.readRaw(key);
       if (raw === null) return null;
       return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
     } catch {
@@ -30,6 +93,7 @@ export const localPersistentStorage: SyncStorageAdapter = {
    * Stores a value in `localStorage` using `JSON.stringify` for persistence.
    */
   write<T>(key: string, value: T): void {
+    warnIfManagedLocalStorageLockUnavailable();
     localStorage.setItem(key, JSON.stringify(value));
   },
 
@@ -37,13 +101,16 @@ export const localPersistentStorage: SyncStorageAdapter = {
    * Removes a single cache entry from `localStorage`.
    */
   remove(key: string): void {
+    warnIfManagedLocalStorageLockUnavailable();
     localStorage.removeItem(key);
+    removeManagedLocalStoragePayload(key);
   },
 
   /**
    * Removes all keys beginning with the provided prefix from `localStorage`.
    */
   removeByPrefix(prefix: string): void {
+    warnIfManagedLocalStorageLockUnavailable();
     const keysToRemove: string[] = [];
 
     for (let i = 0; i < localStorage.length; i++) {
@@ -54,7 +121,7 @@ export const localPersistentStorage: SyncStorageAdapter = {
     }
 
     for (const key of keysToRemove) {
-      localStorage.removeItem(key);
+      localPersistentStorage.remove(key);
     }
   },
 
@@ -62,6 +129,10 @@ export const localPersistentStorage: SyncStorageAdapter = {
    * Returns all keys in `localStorage` that start with the provided prefix.
    */
   listKeys(prefix: string): string[] {
+    warnIfManagedLocalStorageLockUnavailable();
+    const managedKeys = listManagedLocalStorageKeysSync(prefix);
+    if (managedKeys !== null) return managedKeys;
+
     const keys: string[] = [];
 
     for (let i = 0; i < localStorage.length; i++) {
@@ -72,6 +143,67 @@ export const localPersistentStorage: SyncStorageAdapter = {
     }
 
     return keys;
+  },
+  getRootKeyForSingle(storageKey: string): string {
+    return getManagedLocalStorageRootKeyForSingle(storageKey);
+  },
+  getRootKeyForPrefix(storagePrefix: string): string {
+    return getManagedLocalStorageRootKeyForPrefix(storagePrefix);
+  },
+  readEntryMetadataByPayload(payloadKey) {
+    warnIfManagedLocalStorageLockUnavailable();
+    return readManagedLocalStorageEntryByPayload(payloadKey);
+  },
+  listEntryMetadata(prefix) {
+    warnIfManagedLocalStorageLockUnavailable();
+    return readManagedLocalStorageManifestEntriesByPrefix(prefix);
+  },
+  upsertSingleEntry(args): string {
+    warnIfManagedLocalStorageLockUnavailable();
+    return upsertManagedLocalStorageSingleEntry(args);
+  },
+  upsertNamespaceEntry(args): string {
+    warnIfManagedLocalStorageLockUnavailable();
+    return upsertManagedLocalStorageNamespaceEntry(args);
+  },
+  touchEntry(payloadKey: string): boolean {
+    warnIfManagedLocalStorageLockUnavailable();
+    return touchManagedLocalStoragePayload(payloadKey);
+  },
+  removeEntryMetadata(payloadKey: string): boolean {
+    warnIfManagedLocalStorageLockUnavailable();
+    return removeManagedLocalStoragePayload(payloadKey);
+  },
+  clearRoot(rootKey: string): void {
+    warnIfManagedLocalStorageLockUnavailable();
+    clearManagedLocalStorageRoot(rootKey);
+  },
+  clearSession(sessionKey: string): void {
+    warnIfManagedLocalStorageLockUnavailable();
+    clearManagedLocalStorageSession(sessionKey);
+  },
+  setRootNeedsMaintenance(rootKey: string, needsMaintenance: boolean): void {
+    warnIfManagedLocalStorageLockUnavailable();
+    setManagedLocalStorageRootNeedsMaintenance(rootKey, needsMaintenance);
+  },
+  registerMaintenanceCallback(
+    rootKey: string,
+    callback: () => Promise<void>,
+  ): void {
+    warnIfManagedLocalStorageLockUnavailable();
+    registerManagedLocalStorageMaintenanceCallback(rootKey, callback);
+  },
+  unregisterMaintenanceCallback(rootKey: string): void {
+    warnIfManagedLocalStorageLockUnavailable();
+    unregisterManagedLocalStorageMaintenanceCallback(rootKey);
+  },
+  runMaintenance(): Promise<void> {
+    warnIfManagedLocalStorageLockUnavailable();
+    return runManagedLocalStorageMaintenance();
+  },
+  readProtectedStorageKeys(sessionKey: string): Set<string> {
+    warnIfManagedLocalStorageLockUnavailable();
+    return readManagedLocalStorageProtectedKeys(sessionKey);
   },
 };
 

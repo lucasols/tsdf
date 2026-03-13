@@ -11,13 +11,14 @@ import {
 import {
   createPersistentStorageHandle,
   getStorageKeyForStore,
-  readStorageEntryFromLocalStorageSync,
-  refreshLocalStorageTimestamp,
+  readStorageEntryFromSyncStorageSync,
+  refreshSyncStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   DocumentPersistentStorageConfig,
   PersistedDocumentData,
+  SyncStorageAdapter,
 } from './types';
 
 type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
@@ -26,17 +27,17 @@ type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
   | null;
 
 function readDocumentFromLocalStorageSync(
+  adapter: SyncStorageAdapter,
   key: string,
   version: number,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
-  const foundEntry = localStorage.getItem(key) !== null;
-  const entry = readStorageEntryFromLocalStorageSync<
+  const entry = readStorageEntryFromSyncStorageSync<
     PersistedDocumentData<unknown>
-  >(key, version);
-  if (!entry) return { persisted: null, foundEntry };
+  >(adapter, key, version);
+  if (!entry) return { persisted: null, foundEntry: false };
 
   const persisted = parsePersistedDocumentData(entry.data);
-  return { persisted, foundEntry };
+  return { persisted, foundEntry: true };
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {
@@ -76,6 +77,7 @@ export function setupDocumentPersistence<
 
   function hydrateFromLocalStorage(): void {
     if (!storeRef) return;
+    if (storageAdapter.kind !== 'sync') return;
 
     const currentState = storeRef.state;
     if (currentState.status !== 'idle' || currentState.data !== null) return;
@@ -85,6 +87,7 @@ export function setupDocumentPersistence<
 
     const key = getStorageKeyForStore(sessionKey, config.storeName);
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
+      storageAdapter,
       key,
       version,
     );
@@ -102,7 +105,7 @@ export function setupDocumentPersistence<
       return;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    scheduleIdleCleanup(() => refreshSyncStorageTimestamp(storageAdapter, key));
 
     storeRef.setPartialState(
       { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
@@ -128,6 +131,7 @@ export function setupDocumentPersistence<
 
     const key = getStorageKeyForStore(sessionKey, config.storeName);
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
+      storageAdapter,
       key,
       version,
     );
@@ -145,7 +149,7 @@ export function setupDocumentPersistence<
       return baseState;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    scheduleIdleCleanup(() => refreshSyncStorageTimestamp(storageAdapter, key));
 
     return {
       ...baseState,

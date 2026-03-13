@@ -1,12 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, renderHook } from '@testing-library/react';
-import {
-  rc_number,
-  rc_object,
-  rc_string,
-  rc_to_standard,
-} from 'runcheck';
+import { rc_number, rc_object, rc_string, rc_to_standard } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -21,6 +16,7 @@ import {
   readManagedLocalStorageEntryByPayload,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
+import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedDocumentData,
@@ -67,10 +63,11 @@ function setCachedDocumentData(
   sessionKey: string,
   data: TestData,
   version = 1,
+  timestamp = Date.now(),
 ) {
   persistentStore
     .scope(storeName, sessionKey)
-    .document.seed({ value: data }, { version });
+    .document.seed({ value: data }, { version, timestamp });
 }
 
 function getStoredEntryTimestamp(key: string): number {
@@ -476,12 +473,15 @@ describe('localStorage: document store persistence', () => {
   });
 
   test('disableRefetchOnMount keeps cached data without refetching', async () => {
-    setCachedDocumentData('doc-revalidation-no-refetch', 'sess1', {
-      name: 'stale',
-      value: 1,
-    });
+    const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
+    setCachedDocumentData(
+      'doc-revalidation-no-refetch',
+      'sess1',
+      { name: 'stale', value: 1 },
+      1,
+      originalTimestamp,
+    );
     const key = documentStorageKey('doc-revalidation-no-refetch', 'sess1');
-    const originalTimestamp = getStoredEntryTimestamp(key);
 
     const env = createDocPersistenceEnv({
       storeName: 'doc-revalidation-no-refetch',
@@ -626,6 +626,32 @@ describe('localStorage: invalid data cleanup', () => {
     await advanceTime(2100);
 
     expect(getStoredEntryTimestamp(key)).toBeGreaterThan(originalTimestamp);
+  });
+
+  test('timestamp refresh is throttled for recent localStorage reads', async () => {
+    const originalTimestamp = Date.now();
+    const key = documentStorageKey('ts-refresh-throttled', 'sess1');
+    const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
+      {
+        data: { data: { value: { name: 'cached', value: 1 } } },
+        timestamp: originalTimestamp,
+        version: 1,
+      };
+    localStorage.setItem(key, JSON.stringify(entry));
+    registerManagedDocumentKey(
+      'ts-refresh-throttled',
+      'sess1',
+      entry.timestamp,
+    );
+
+    createDocPersistenceEnv({
+      storeName: 'ts-refresh-throttled',
+      sessionKey: 'sess1',
+    });
+
+    await advanceTime(2100);
+
+    expect(getStoredEntryTimestamp(key)).toBe(originalTimestamp);
   });
 });
 

@@ -6,21 +6,7 @@ import {
   rc_parse_json,
   rc_unknown,
 } from 'runcheck';
-import {
-  clearManagedLocalStorageRoot,
-  clearManagedLocalStorageSession,
-  getManagedLocalStorageRootKeyForPrefix,
-  getManagedLocalStorageRootKeyForSingle,
-  listManagedLocalStorageKeysSync,
-  readManagedLocalStorageEntryByPayload,
-  registerManagedLocalStorageRoot,
-  removeManagedLocalStoragePayload,
-  resetManagedLocalStorageState,
-  runManagedLocalStorageMaintenance,
-  touchManagedLocalStoragePayload,
-  upsertManagedLocalStorageNamespaceEntry,
-  upsertManagedLocalStorageSingleEntry,
-} from './localStorageMetadata';
+import { resetManagedLocalStorageState } from './localStorageMetadata';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
@@ -29,12 +15,14 @@ import {
 import type {
   PersistentStorageBaseConfig,
   PersistentStorageSchema,
+  SyncStorageAdapter,
   StorageAdapter,
   StorageCacheEntry,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
 const DEBOUNCE_MS = 1000;
+export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
 
 const LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 const ASYNC_ADAPTER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -54,9 +42,98 @@ const cacheEntrySchema = rc_object({
 const timestampSchema = rc_object({ timestamp: rc_number });
 
 let scannedAdapters = new WeakSet<StorageAdapter>();
+let syncStorageTouchTimestamps = new WeakMap<
+  SyncStorageAdapter,
+  Map<string, number>
+>();
 
 function getStorageKey(sessionKey: string, storeName: string): string {
   return `tsdf.${sessionKey}.${storeName}`;
+}
+
+function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
+  if (scannedAdapters.has(adapter)) return;
+
+  scannedAdapters.add(adapter);
+  scheduleIdleCleanup(() => {
+    void runExpirationScan(adapter, getMaxAgeForAdapter(adapter));
+  });
+}
+
+async function runSyncStorageMutation<T>(
+  adapter: SyncStorageAdapter,
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  if (adapter.runLocked) {
+    return adapter.runLocked(callback);
+  }
+
+  return await callback();
+}
+
+function getSyncStorageTouchTimestampMap(
+  adapter: SyncStorageAdapter,
+): Map<string, number> {
+  let timestamps = syncStorageTouchTimestamps.get(adapter);
+  if (!timestamps) {
+    timestamps = new Map<string, number>();
+    syncStorageTouchTimestamps.set(adapter, timestamps);
+  }
+
+  return timestamps;
+}
+
+function recordSyncStorageTouch(
+  adapter: SyncStorageAdapter,
+  key: string,
+  timestamp: number,
+): void {
+  getSyncStorageTouchTimestampMap(adapter).set(key, timestamp);
+}
+
+function shouldThrottleSyncStorageTouch(
+  adapter: SyncStorageAdapter,
+  key: string,
+  timestamp: number,
+): boolean {
+  const previousTimestamp = getSyncStorageTouchTimestampMap(adapter).get(key);
+  return (
+    previousTimestamp !== undefined &&
+    timestamp - previousTimestamp < SYNC_STORAGE_TOUCH_THROTTLE_MS
+  );
+}
+
+export function scheduleSyncStorageRemoval(
+  adapter: SyncStorageAdapter,
+  key: string,
+): void {
+  scheduleIdleCleanup(() => {
+    void runSyncStorageMutation(adapter, () => {
+      adapter.remove(key);
+    });
+  });
+}
+
+function refreshSyncStorageTimestampUnlocked(
+  adapter: SyncStorageAdapter,
+  key: string,
+): void {
+  const now = Date.now();
+  if (shouldThrottleSyncStorageTouch(adapter, key, now)) return;
+
+  if (adapter.touchEntry(key)) {
+    recordSyncStorageTouch(adapter, key, now);
+    return;
+  }
+
+  const raw = adapter.readRaw(key);
+  if (raw === null) return;
+
+  const result = rc_parse_json(raw, cacheEntrySchema);
+  if (!result.ok) return;
+
+  adapter.write(key, { ...result.value, timestamp: now });
+  recordSyncStorageTouch(adapter, key, now);
 }
 
 export type PersistentStorageHandle<T> = {
@@ -87,40 +164,15 @@ export function createPersistentStorageHandle<T>(
   const version = config.version ?? 1;
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
-  const usesManagedLocalStorage = adapter === localPersistentStorage;
+  const syncAdapter = adapter.kind === 'sync' ? adapter : null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function registerManagedRoot(key: string): void {
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false || !usesManagedLocalStorage) return;
-
-    registerManagedLocalStorageRoot({
-      sessionKey,
-      storeName: config.storeName,
-      mode: 'single',
-      storageKey: key,
-      cleanupIntervalMs: config.cleanupIntervalMs,
-      maxAgeMs: getMaxAgeForAdapter(adapter),
-    });
-  }
-
-  if (!usesManagedLocalStorage && !scannedAdapters.has(adapter)) {
-    scannedAdapters.add(adapter);
-    scheduleIdleCleanup(() => {
-      void runExpirationScan(adapter, getMaxAgeForAdapter(adapter));
-    });
-  }
+  scheduleAdapterExpirationScan(adapter);
 
   function getKey(): string | false {
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return false;
-    const key = getStorageKey(sessionKey, config.storeName);
-    registerManagedRoot(key);
-    return key;
-  }
-
-  if (usesManagedLocalStorage) {
-    void getKey();
+    return getStorageKey(sessionKey, config.storeName);
   }
 
   function clearTimer() {
@@ -134,26 +186,29 @@ export function createPersistentStorageHandle<T>(
     const key = getKey();
     if (key === false) return null;
     try {
-      if (
-        usesManagedLocalStorage &&
-        readManagedLocalStorageEntryByPayload(key) === null
-      ) {
-        return null;
+      if (syncAdapter !== null) {
+        const entry = readStorageEntryFromSyncStorageSync<T>(
+          syncAdapter,
+          key,
+          version,
+        );
+        if (!entry) return null;
+
+        scheduleIdleCleanup(() =>
+          refreshSyncStorageTimestamp(syncAdapter, key),
+        );
+        return entry.data;
       }
 
       const entry = await adapter.read<StorageCacheEntry<T>>(key);
-
       if (!entry) return null;
 
       if (entry.version !== version) {
         scheduleIdleCleanup(() => {
           void adapter.remove(key);
-          removeManagedLocalStoragePayload(key);
         });
         return null;
       }
-
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
 
       return entry.data;
     } catch (error) {
@@ -173,21 +228,27 @@ export function createPersistentStorageHandle<T>(
     };
 
     try {
-      await adapter.write(key, entry);
-      if (usesManagedLocalStorage) {
-        const sessionKey = config.getSessionKey();
-        if (sessionKey !== false) {
-          upsertManagedLocalStorageSingleEntry({
+      if (syncAdapter !== null) {
+        await runSyncStorageMutation(syncAdapter, () => {
+          syncAdapter.write(key, entry);
+          const sessionKey = config.getSessionKey();
+          if (sessionKey === false) return;
+
+          syncAdapter.upsertSingleEntry({
             sessionKey,
             storeName: config.storeName,
             storageKey: key,
             cleanupIntervalMs: config.cleanupIntervalMs,
-            maxAgeMs: getMaxAgeForAdapter(adapter),
+            maxAgeMs: getMaxAgeForAdapter(syncAdapter),
             lastAccessAt: entry.timestamp,
             meta: getManifestMeta?.(data),
           });
-        }
+          recordSyncStorageTouch(syncAdapter, key, entry.timestamp);
+        });
+        return;
       }
+
+      await adapter.write(key, entry);
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -218,11 +279,12 @@ export function createPersistentStorageHandle<T>(
     if (key === false) return;
 
     try {
-      await adapter.remove(key);
-      if (usesManagedLocalStorage) {
-        clearManagedLocalStorageRoot(
-          getManagedLocalStorageRootKeyForSingle(key),
-        );
+      if (syncAdapter !== null) {
+        await runSyncStorageMutation(syncAdapter, () => {
+          syncAdapter.clearRoot(syncAdapter.getRootKeyForSingle(key));
+        });
+      } else {
+        await adapter.remove(key);
       }
     } catch (error) {
       onPersistentStorageError?.(error);
@@ -257,40 +319,14 @@ export function createPersistentStorageNamespaceHandle<T>(
   const version = config.version ?? 1;
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
-  const usesManagedLocalStorage = adapter === localPersistentStorage;
-
-  function registerManagedRoot(prefix: string): void {
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false || !usesManagedLocalStorage) return;
-
-    registerManagedLocalStorageRoot({
-      sessionKey,
-      storeName: config.storeName,
-      mode: 'namespace',
-      storagePrefix: prefix,
-      cleanupIntervalMs: config.cleanupIntervalMs,
-      maxAgeMs: getMaxAgeForAdapter(adapter),
-    });
-  }
-
-  if (!usesManagedLocalStorage && !scannedAdapters.has(adapter)) {
-    scannedAdapters.add(adapter);
-    scheduleIdleCleanup(() => {
-      void runExpirationScan(adapter, getMaxAgeForAdapter(adapter));
-    });
-  }
+  const syncAdapter = adapter.kind === 'sync' ? adapter : null;
+  scheduleAdapterExpirationScan(adapter);
 
   function getPrefix(): string | false {
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return false;
 
-    const prefix = `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
-    registerManagedRoot(prefix);
-    return prefix;
-  }
-
-  if (usesManagedLocalStorage) {
-    void getPrefix();
+    return `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
   }
 
   function getKey(entryKey: string): string | false {
@@ -305,11 +341,12 @@ export function createPersistentStorageNamespaceHandle<T>(
     const key = getKey(entryKey);
     if (key === false) return null;
     try {
-      if (
-        usesManagedLocalStorage &&
-        readManagedLocalStorageEntryByPayload(key) === null
-      ) {
-        return null;
+      if (syncAdapter !== null) {
+        return readStorageEntryFromSyncStorageSync<T>(
+          syncAdapter,
+          key,
+          version,
+        );
       }
 
       const entry = await adapter.read<StorageCacheEntry<T>>(key);
@@ -318,7 +355,6 @@ export function createPersistentStorageNamespaceHandle<T>(
       if (entry.version !== version) {
         scheduleIdleCleanup(() => {
           void adapter.remove(key);
-          removeManagedLocalStoragePayload(key);
         });
         return null;
       }
@@ -335,7 +371,9 @@ export function createPersistentStorageNamespaceHandle<T>(
     const entry = await readEntry(entryKey);
     if (!key || !entry) return null;
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    if (syncAdapter !== null) {
+      scheduleIdleCleanup(() => refreshSyncStorageTimestamp(syncAdapter, key));
+    }
 
     return entry.data;
   }
@@ -351,24 +389,30 @@ export function createPersistentStorageNamespaceHandle<T>(
     };
 
     try {
-      await adapter.write(key, entry);
-      if (usesManagedLocalStorage) {
-        const sessionKey = config.getSessionKey();
-        const prefix = getPrefix();
-        if (sessionKey !== false && prefix !== false) {
-          upsertManagedLocalStorageNamespaceEntry({
+      if (syncAdapter !== null) {
+        await runSyncStorageMutation(syncAdapter, () => {
+          syncAdapter.write(key, entry);
+          const sessionKey = config.getSessionKey();
+          const prefix = getPrefix();
+          if (sessionKey === false || prefix === false) return;
+
+          syncAdapter.upsertNamespaceEntry({
             sessionKey,
             storeName: config.storeName,
             storagePrefix: prefix,
             entryKey,
             payloadKey: key,
             cleanupIntervalMs: config.cleanupIntervalMs,
-            maxAgeMs: getMaxAgeForAdapter(adapter),
+            maxAgeMs: getMaxAgeForAdapter(syncAdapter),
             lastAccessAt: entry.timestamp,
             meta: getManifestMeta?.(data, entryKey),
           });
-        }
+          recordSyncStorageTouch(syncAdapter, key, entry.timestamp);
+        });
+        return;
       }
+
+      await adapter.write(key, entry);
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -379,10 +423,14 @@ export function createPersistentStorageNamespaceHandle<T>(
     if (key === false) return;
 
     try {
-      await adapter.remove(key);
-      if (usesManagedLocalStorage) {
-        removeManagedLocalStoragePayload(key);
+      if (syncAdapter !== null) {
+        await runSyncStorageMutation(syncAdapter, () => {
+          syncAdapter.remove(key);
+        });
+        return;
       }
+
+      await adapter.remove(key);
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -393,11 +441,6 @@ export function createPersistentStorageNamespaceHandle<T>(
     if (prefix === false) return [];
 
     try {
-      if (usesManagedLocalStorage) {
-        const managedKeys = listManagedLocalStorageKeysSync(prefix);
-        return (managedKeys ?? []).map((key) => key.slice(prefix.length));
-      }
-
       const keys = await adapter.listKeys(prefix);
       return keys.map((key) => key.slice(prefix.length));
     } catch (error) {
@@ -411,14 +454,13 @@ export function createPersistentStorageNamespaceHandle<T>(
     if (prefix === false) return;
 
     try {
-      if (usesManagedLocalStorage) {
-        clearManagedLocalStorageRoot(
-          getManagedLocalStorageRootKeyForPrefix(prefix),
-        );
-        return;
+      if (syncAdapter !== null) {
+        await runSyncStorageMutation(syncAdapter, () => {
+          syncAdapter.clearRoot(syncAdapter.getRootKeyForPrefix(prefix));
+        });
+      } else {
+        await adapter.removeByPrefix(prefix);
       }
-
-      await adapter.removeByPrefix(prefix);
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -432,82 +474,59 @@ export function createPersistentStorageNamespaceHandle<T>(
 }
 
 /**
- * Synchronously reads from localStorage for initial state hydration.
- * Only works with sync adapters backed by localStorage-compatible storage. Returns null if data is not found,
+ * Synchronously reads from a sync storage adapter for initial state hydration.
+ * Returns null if data is not found,
  * version mismatches, or schema validation fails.
  */
-export function readFromLocalStorageSync<T>(
+export function readFromSyncStorageSync<T>(
+  adapter: SyncStorageAdapter,
   key: string,
   version: number,
   schema: PersistentStorageSchema<T>,
 ): T | null {
-  if (readManagedLocalStorageEntryByPayload(key) === null) {
-    return null;
+  const entry = readStorageEntryFromSyncStorageSync<T>(adapter, key, version);
+  if (!entry) return null;
+
+  const validated = validateWithSchema(schema, entry.data);
+
+  if (validated !== null) {
+    scheduleIdleCleanup(() => refreshSyncStorageTimestamp(adapter, key));
+  } else {
+    scheduleSyncStorageRemoval(adapter, key);
   }
 
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
-
-    const entryResult = rc_parse_json(raw, cacheEntrySchema);
-    if (!entryResult.ok) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
-      return null;
-    }
-    const entry = entryResult.value;
-
-    if (entry.version !== version) {
-      scheduleIdleCleanup(() => {
-        localStorage.removeItem(key);
-        removeManagedLocalStoragePayload(key);
-      });
-      return null;
-    }
-
-    // Validate as a single item
-    const validated = validateWithSchema(schema, entry.data);
-
-    if (validated !== null) {
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
-    } else {
-      scheduleIdleCleanup(() => {
-        localStorage.removeItem(key);
-        removeManagedLocalStoragePayload(key);
-      });
-    }
-
-    return validated;
-  } catch {
-    scheduleIdleCleanup(() => {
-      localStorage.removeItem(key);
-      removeManagedLocalStoragePayload(key);
-    });
-    return null;
-  }
+  return validated;
 }
 
-export function readStorageEntryFromLocalStorageSync<T = unknown>(
+export function readStorageEntryFromSyncStorageSync<T = unknown>(
+  adapter: SyncStorageAdapter,
   key: string,
   version: number,
 ): StorageCacheEntry<T> | null {
-  if (readManagedLocalStorageEntryByPayload(key) === null) {
+  const metadata = adapter.readEntryMetadataByPayload(key);
+  const raw = adapter.readRaw(key);
+
+  if (metadata === null) {
+    if (raw !== null) {
+      scheduleSyncStorageRemoval(adapter, key);
+    }
     return null;
   }
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
 
+  if (raw === null) {
+    scheduleSyncStorageRemoval(adapter, key);
+    return null;
+  }
+
+  try {
     const result = rc_parse_json(raw, cacheEntrySchema);
     if (!result.ok) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
+      scheduleSyncStorageRemoval(adapter, key);
       return null;
     }
     const entry = result.value;
     if (entry.version !== version) {
-      scheduleIdleCleanup(() => {
-        localStorage.removeItem(key);
-        removeManagedLocalStoragePayload(key);
-      });
+      scheduleSyncStorageRemoval(adapter, key);
       return null;
     }
 
@@ -515,10 +534,7 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
       entry,
     );
   } catch {
-    scheduleIdleCleanup(() => {
-      localStorage.removeItem(key);
-      removeManagedLocalStoragePayload(key);
-    });
+    scheduleSyncStorageRemoval(adapter, key);
     return null;
   }
 }
@@ -559,9 +575,12 @@ export function createProtectedStorageKey(args: {
   )}${args.key}`;
 }
 
-export function listLocalStorageKeysSync(prefix: string): string[] {
-  const managedKeys = listManagedLocalStorageKeysSync(prefix);
-  return managedKeys ?? [];
+export function readManifestPayloadMeta(meta: unknown): unknown {
+  if (typeof meta !== 'object' || meta === null || !('payload' in meta)) {
+    return undefined;
+  }
+
+  return meta.payload;
 }
 
 /** Clears all persistent storage entries for a given session key and adapter. */
@@ -569,8 +588,8 @@ export async function clearSessionStorage(
   sessionKey: string,
   adapter: StorageAdapter,
 ): Promise<void> {
-  if (adapter === localPersistentStorage) {
-    clearManagedLocalStorageSession(sessionKey);
+  if (adapter.kind === 'sync') {
+    adapter.clearSession(sessionKey);
     return;
   }
 
@@ -588,30 +607,29 @@ export async function clearAllSessionStorage(
 }
 
 /**
- * Refreshes the timestamp of a localStorage cache entry to track last access time.
+ * Refreshes the timestamp of a sync cache entry to track last access time.
  * Used by store persistence setup functions after successful sync reads.
  */
-export function refreshLocalStorageTimestamp(key: string): void {
-  if (touchManagedLocalStoragePayload(key)) return;
+export function refreshSyncStorageTimestamp(
+  adapter: SyncStorageAdapter,
+  key: string,
+): void {
+  if (adapter.runLocked) {
+    void adapter.runLocked(() => {
+      refreshSyncStorageTimestampUnlocked(adapter, key);
+    });
+    return;
+  }
 
-  const raw = localStorage.getItem(key);
-  if (raw === null) return;
-
-  const result = rc_parse_json(raw, cacheEntrySchema);
-  if (!result.ok) return;
-
-  localStorage.setItem(
-    key,
-    JSON.stringify({ ...result.value, timestamp: Date.now() }),
-  );
+  refreshSyncStorageTimestampUnlocked(adapter, key);
 }
 
 async function runExpirationScan(
   adapter: StorageAdapter,
   maxAgeMs: number,
 ): Promise<void> {
-  if (adapter === localPersistentStorage) {
-    await runManagedLocalStorageMaintenance();
+  if (adapter.kind === 'sync') {
+    await adapter.runMaintenance();
     return;
   }
 
@@ -651,6 +669,10 @@ async function runExpirationScan(
 /** Resets expiration scan tracking. Exported for test cleanup. */
 export function resetExpirationScanTracking(): void {
   scannedAdapters = new WeakSet<StorageAdapter>();
+  syncStorageTouchTimestamps = new WeakMap<
+    SyncStorageAdapter,
+    Map<string, number>
+  >();
   resetManagedLocalStorageState();
 }
 
@@ -658,6 +680,10 @@ export async function readProtectedStorageKeys(
   adapter: StorageAdapter,
   sessionKey: string,
 ): Promise<Set<string>> {
+  if (adapter.kind === 'sync') {
+    return adapter.readProtectedStorageKeys(sessionKey);
+  }
+
   const entry = await adapter.read<StorageCacheEntry<{ keys: string[] }>>(
     `tsdf.${sessionKey}.__offline__.protected`,
   );

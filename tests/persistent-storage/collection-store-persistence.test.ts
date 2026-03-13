@@ -16,6 +16,7 @@ import type {
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -54,10 +55,11 @@ function setCachedCollectionItem(
   payload: string,
   data: PersistedItemState,
   version = 1,
+  timestamp = Date.now(),
 ): string {
   return persistentStore
     .scope(storeName, sessionKey)
-    .collection.seedItem(payload, data, { version });
+    .collection.seedItem(payload, data, { version, timestamp });
 }
 
 function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
@@ -234,10 +236,15 @@ describe('localStorage: collection store persistence', () => {
   });
 
   test('disableRefetchOnMount keeps cached data without refetching', async () => {
-    const key = setCachedCollectionItem('col-hook-no-refetch', 'sess1', '1', {
-      value: { id: '1', name: 'Cached' },
-    });
-    const originalTimestamp = getStoredCollectionItemTimestamp(key);
+    const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
+    const key = setCachedCollectionItem(
+      'col-hook-no-refetch',
+      'sess1',
+      '1',
+      { value: { id: '1', name: 'Cached' } },
+      1,
+      originalTimestamp,
+    );
 
     const env = createEnv({
       storeName: 'col-hook-no-refetch',

@@ -11,10 +11,21 @@ import type {
 
 // --- Storage Adapter ---
 
+export type SyncStorageManifestEntry<TMeta = unknown> = {
+  entryKey: string;
+  payloadKey: string;
+  lastAccessAt: number;
+  meta?: TMeta;
+};
+
 /** Sync adapter used when storage can be read during store initialization. */
 export type SyncStorageAdapter = {
   /** Adapter mode marker used by persistence internals to pick sync behavior. */
   kind: 'sync';
+  /** Optionally serialize cross-tab sync mutations using a lock. */
+  runLocked?<T>(callback: () => T | Promise<T>): Promise<T>;
+  /** Read the raw serialized payload for a key. */
+  readRaw(key: string): string | null;
   /** Read an entry immediately from storage. */
   read<T>(key: string): T | null;
   /** Persist an entry immediately to storage. */
@@ -25,6 +36,59 @@ export type SyncStorageAdapter = {
   removeByPrefix(prefix: string): void;
   /** Return all matching keys in storage. */
   listKeys(prefix: string): string[];
+  /** Return the stable metadata root key for a single payload. */
+  getRootKeyForSingle(storageKey: string): string;
+  /** Return the stable metadata root key for a namespaced payload prefix. */
+  getRootKeyForPrefix(storagePrefix: string): string;
+  /** Read manifest metadata for a payload key. */
+  readEntryMetadataByPayload(
+    payloadKey: string,
+  ): SyncStorageManifestEntry | null;
+  /** List manifest metadata for all payloads under a prefix. */
+  listEntryMetadata(prefix: string): SyncStorageManifestEntry[];
+  /** Upsert metadata for a single payload entry. */
+  upsertSingleEntry(args: {
+    sessionKey: string;
+    storeName: string;
+    storageKey: string;
+    maxAgeMs: number;
+    cleanupIntervalMs?: number;
+    lastAccessAt?: number;
+    meta?: unknown;
+  }): string;
+  /** Upsert metadata for a namespaced payload entry. */
+  upsertNamespaceEntry(args: {
+    sessionKey: string;
+    storeName: string;
+    storagePrefix: string;
+    entryKey: string;
+    payloadKey: string;
+    maxAgeMs: number;
+    cleanupIntervalMs?: number;
+    lastAccessAt?: number;
+    meta?: unknown;
+  }): string;
+  /** Refresh last access time for a payload entry. */
+  touchEntry(payloadKey: string): boolean;
+  /** Remove manifest metadata for a payload entry. */
+  removeEntryMetadata(payloadKey: string): boolean;
+  /** Clear a registered metadata root and every payload tracked by it. */
+  clearRoot(rootKey: string): void;
+  /** Clear every indexed payload and metadata root for a session. */
+  clearSession(sessionKey: string): void;
+  /** Mark whether a metadata root requires maintenance. */
+  setRootNeedsMaintenance(rootKey: string, needsMaintenance: boolean): void;
+  /** Register an extra maintenance callback for a metadata root. */
+  registerMaintenanceCallback(
+    rootKey: string,
+    callback: () => Promise<void>,
+  ): void;
+  /** Unregister an extra maintenance callback for a metadata root. */
+  unregisterMaintenanceCallback(rootKey: string): void;
+  /** Run periodic maintenance using metadata only. */
+  runMaintenance(): Promise<void>;
+  /** Read the protected storage keys for a session from metadata. */
+  readProtectedStorageKeys(sessionKey: string): Set<string>;
 };
 
 /** Async adapter used when storage access requires asynchronous I/O. */

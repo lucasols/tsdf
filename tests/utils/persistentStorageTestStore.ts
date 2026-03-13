@@ -330,11 +330,22 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
           'tsdf.'.length,
           -'.__offline__.protected'.length,
         );
+        const protectedKeys =
+          typeof value === 'object' &&
+          value !== null &&
+          'data' in value &&
+          typeof value.data === 'object' &&
+          value.data !== null &&
+          'keys' in value.data &&
+          Array.isArray(value.data.keys)
+            ? value.data.keys
+            : [];
         upsertManagedLocalStorageSingleEntry({
           sessionKey,
           storeName: '__offline__.protected',
           storageKey: key,
           maxAgeMs: TEST_MAX_AGE_MS,
+          meta: { keys: protectedKeys },
         });
       }
     },

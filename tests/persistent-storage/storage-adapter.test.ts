@@ -103,6 +103,29 @@ describe('localStorage adapter', () => {
 
     setItemSpy.mockRestore();
   });
+
+  test('missing navigator.locks falls back to unlocked local storage coordination and warns once', async () => {
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      value: null,
+      writable: true,
+      configurable: true,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await adapter.write('disabled-key', { name: 'Alice' });
+    const firstRead = await adapter.read('disabled-key');
+    const keys = await adapter.listKeys('disabled');
+    await adapter.remove('disabled-key');
+
+    expect(firstRead).toMatchInlineSnapshot(`name: 'Alice'`);
+    expect(keys).toMatchInlineSnapshot(`['disabled-key']`);
+    expect(localStorage.getItem('disabled-key')).toBeNull();
+    expect(warnSpy.mock.calls).toMatchInlineSnapshot(`
+      - - '[TSDF] navigator.locks is unavailable; localPersistentStorage is using unlocked localStorage coordination.'
+    `);
+
+    warnSpy.mockRestore();
+  });
 });
 
 describe('opfs adapter', () => {

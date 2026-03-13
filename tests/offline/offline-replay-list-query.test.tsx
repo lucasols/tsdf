@@ -240,7 +240,7 @@ describe('offline replay list-query behavior', () => {
       time | query-items               | query-status |
       0    | Ada, Grace                | success      | [query-status, query-items] ui-initialized
       10ms | Ada, Grace                | error        | [query-status] ui-changed
-      4s   | Ada, Grace, Linus offline | error        | [query-items] ui-changed
+      2s   | Ada, Grace, Linus offline | error        | [query-items] ui-changed
       "
     `);
 

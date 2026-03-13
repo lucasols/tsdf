@@ -202,12 +202,15 @@ function createSessionPersistenceHandles(args: {
       getSessionKey: () => args.sessionKey,
       onPersistentStorageError: args.onPersistentStorageError,
     }),
-    protectedKeysHandle: createPersistentStorageHandle<{ keys: string[] }>({
-      storeName: '__offline__.protected',
-      adapter,
-      getSessionKey: () => args.sessionKey,
-      onPersistentStorageError: args.onPersistentStorageError,
-    }),
+    protectedKeysHandle: createPersistentStorageHandle<{ keys: string[] }>(
+      {
+        storeName: '__offline__.protected',
+        adapter,
+        getSessionKey: () => args.sessionKey,
+        onPersistentStorageError: args.onPersistentStorageError,
+      },
+      { getManifestMeta: (data) => ({ keys: data.keys }) },
+    ),
   };
 }
 

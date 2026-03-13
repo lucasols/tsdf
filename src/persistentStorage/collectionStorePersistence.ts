@@ -20,27 +20,21 @@ import {
   type ParsedPersistedCollectionItemData,
 } from './parsePersistedData';
 import {
-  getManagedLocalStorageRootKeyForPrefix,
-  readManagedLocalStorageManifestEntriesByPrefix,
-  registerManagedLocalStorageMaintenanceCallback,
-  runManagedLocalStorageMaintenance,
-  setManagedLocalStorageRootNeedsMaintenance,
-  unregisterManagedLocalStorageMaintenanceCallback,
-} from './localStorageMetadata';
-import {
   createPersistentStorageNamespaceHandle,
   getStoragePrefixForStoreNamespace,
-  listLocalStorageKeysSync,
+  readManifestPayloadMeta,
   readProtectedStorageKeys,
-  readStorageEntryFromLocalStorageSync,
-  refreshLocalStorageTimestamp,
+  scheduleSyncStorageRemoval,
+  readStorageEntryFromSyncStorageSync,
+  refreshSyncStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import { localPersistentStorage } from './storageAdapter';
 import type {
   CollectionPersistentStorageConfig,
   PersistedCollectionItemData,
+  SyncStorageAdapter,
 } from './types';
+import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
@@ -102,6 +96,7 @@ function defineLazyLocalStorageItem<
   ItemPayload extends ValidPayload,
   StorageState = unknown,
 >(
+  storageAdapter: SyncStorageAdapter,
   state: TSFDCollectionState<ItemState, ItemPayload>,
   itemKey: string,
   storageKey: string,
@@ -121,9 +116,9 @@ function defineLazyLocalStorageItem<
     configurable: true,
     enumerable: false,
     get() {
-      const cacheEntry = readStorageEntryFromLocalStorageSync<
+      const cacheEntry = readStorageEntryFromSyncStorageSync<
         PersistedCollectionItemData<unknown>
-      >(storageKey, version);
+      >(storageAdapter, storageKey, version);
 
       if (!cacheEntry) {
         Object.defineProperty(state, itemKey, {
@@ -140,7 +135,7 @@ function defineLazyLocalStorageItem<
         payloadSchema,
       );
       if (!persisted) {
-        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        scheduleSyncStorageRemoval(storageAdapter, storageKey);
         Object.defineProperty(state, itemKey, {
           configurable: true,
           enumerable: false,
@@ -157,7 +152,7 @@ function defineLazyLocalStorageItem<
       );
 
       if (!item) {
-        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        scheduleSyncStorageRemoval(storageAdapter, storageKey);
         Object.defineProperty(state, itemKey, {
           configurable: true,
           enumerable: false,
@@ -167,7 +162,9 @@ function defineLazyLocalStorageItem<
         return undefined;
       }
 
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+      scheduleIdleCleanup(() =>
+        refreshSyncStorageTimestamp(storageAdapter, storageKey),
+      );
       onHydrated(itemKey, cacheEntry.data);
 
       Object.defineProperty(state, itemKey, {
@@ -227,7 +224,8 @@ export function setupCollectionPersistence<
   );
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = config.adapter;
-  const usesManagedLocalStorage = storageAdapter === localPersistentStorage;
+  const syncStorageAdapter =
+    storageAdapter.kind === 'sync' ? storageAdapter : null;
   const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
 
@@ -268,24 +266,22 @@ export function setupCollectionPersistence<
   }
 
   function syncMaintenanceRegistration(): void {
-    if (!usesManagedLocalStorage) return;
+    if (syncStorageAdapter === null) return;
 
     const prefix = getCollectionPrefix();
     if (prefix === false) return;
 
-    const nextRootKey = getManagedLocalStorageRootKeyForPrefix(prefix);
+    const nextRootKey = syncStorageAdapter.getRootKeyForPrefix(prefix);
     if (maintenanceRootKey === nextRootKey) return;
 
     if (maintenanceRootKey !== null) {
-      unregisterManagedLocalStorageMaintenanceCallback(maintenanceRootKey);
+      syncStorageAdapter.unregisterMaintenanceCallback(maintenanceRootKey);
     }
 
     maintenanceRootKey = nextRootKey;
-    registerManagedLocalStorageMaintenanceCallback(
+    syncStorageAdapter.registerMaintenanceCallback(
       maintenanceRootKey,
-      async () => {
-        await evictStoredItems();
-      },
+      evictStoredItems,
     );
   }
 
@@ -310,11 +306,12 @@ export function setupCollectionPersistence<
 
     const initialState = { ...baseState };
 
-    for (const storageKey of listLocalStorageKeysSync(prefix)) {
+    for (const storageKey of storageAdapter.listKeys(prefix)) {
       const itemKey = storageKey.slice(prefix.length);
       if (itemKey in initialState) continue;
 
       defineLazyLocalStorageItem(
+        storageAdapter,
         initialState,
         itemKey,
         storageKey,
@@ -349,9 +346,9 @@ export function setupCollectionPersistence<
         config.storeName,
         'collection.item',
       )}${itemKey}`;
-      const cacheEntry = readStorageEntryFromLocalStorageSync<
+      const cacheEntry = readStorageEntryFromSyncStorageSync<
         PersistedCollectionItemData<unknown>
-      >(storageKey, version);
+      >(storageAdapter, storageKey, version);
 
       if (!cacheEntry) return false;
 
@@ -360,7 +357,7 @@ export function setupCollectionPersistence<
         config.payloadSchema,
       );
       if (!persisted) {
-        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        scheduleSyncStorageRemoval(storageAdapter, storageKey);
         return false;
       }
 
@@ -371,11 +368,13 @@ export function setupCollectionPersistence<
       );
 
       if (!validated) {
-        scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
+        scheduleSyncStorageRemoval(storageAdapter, storageKey);
         return false;
       }
 
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+      scheduleIdleCleanup(() =>
+        refreshSyncStorageTimestamp(storageAdapter, storageKey),
+      );
       hydratedPersistedKeys.add(itemKey);
       persistedSnapshotByKey.set(itemKey, JSON.stringify(cacheEntry.data));
 
@@ -461,8 +460,6 @@ export function setupCollectionPersistence<
 
   async function evictStoredItems(): Promise<void> {
     syncMaintenanceRegistration();
-    const keys = await namespace.listKeys();
-    if (keys.length === 0) return;
     const sessionKey = config.getSessionKey();
     const prefix = getCollectionPrefix();
     if (sessionKey === false || prefix === false) return;
@@ -475,6 +472,110 @@ export function setupCollectionPersistence<
         .filter((key) => key.startsWith(prefix))
         .map((key) => key.slice(prefix.length)),
     );
+
+    if (syncStorageAdapter !== null) {
+      const metadataEntries = syncStorageAdapter.listEntryMetadata(prefix);
+      if (metadataEntries.length === 0) return;
+
+      if (
+        !hasIgnoreItemFilter &&
+        metadataEntries.filter(
+          (entry) => !protectedItemKeys.has(entry.entryKey),
+        ).length <= maxItems
+      ) {
+        return;
+      }
+
+      const metadataEntriesWithPayload = metadataEntries.map((entry) => ({
+        itemKey: entry.entryKey,
+        lastAccessAt: entry.lastAccessAt,
+        payload: validateWithSchema(
+          config.payloadSchema,
+          readManifestPayloadMeta(entry.meta),
+        ),
+      }));
+
+      const invalidEntries = filterAndMap(
+        metadataEntriesWithPayload,
+        ({ itemKey, payload }) => (payload === null ? { itemKey } : false),
+      );
+      if (invalidEntries.length > 0) {
+        await Promise.all(
+          invalidEntries.map(({ itemKey }) => namespace.remove(itemKey)),
+        );
+      }
+
+      const persistedEntries = filterAndMap(
+        metadataEntriesWithPayload,
+        ({ itemKey, lastAccessAt, payload }) =>
+          payload === null ? false : { itemKey, lastAccessAt, payload },
+      );
+
+      const filteredEntries = persistedEntries.filter(
+        ({ payload }) => !shouldIgnoreItem(payload),
+      );
+
+      const ignoredEntries = persistedEntries.filter(({ payload }) =>
+        shouldIgnoreItem(payload),
+      );
+
+      if (ignoredEntries.length > 0) {
+        await Promise.all(
+          ignoredEntries.map(({ itemKey }) => namespace.remove(itemKey)),
+        );
+        for (const { itemKey } of ignoredEntries) {
+          persistedSnapshotByKey.delete(itemKey);
+        }
+      }
+
+      if (filteredEntries.length <= maxItems) {
+        knownPersistedKeys = new Set(
+          filteredEntries.map(({ itemKey }) => itemKey),
+        );
+        return;
+      }
+
+      filteredEntries.sort((a, b) => {
+        const aProtected = protectedItemKeys.has(a.itemKey);
+        const bProtected = protectedItemKeys.has(b.itemKey);
+
+        if (aProtected && !bProtected) return -1;
+        if (!aProtected && bProtected) return 1;
+
+        const aPinned = pinnedItemKeys.has(a.itemKey);
+        const bPinned = pinnedItemKeys.has(b.itemKey);
+
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+
+        return b.lastAccessAt - a.lastAccessAt;
+      });
+
+      const keptKeys = new Set(
+        filteredEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+      );
+
+      await Promise.all(
+        filteredEntries
+          .filter(({ itemKey }) => !keptKeys.has(itemKey))
+          .map(({ itemKey }) => namespace.remove(itemKey)),
+      );
+      for (const { itemKey } of filteredEntries) {
+        if (!keptKeys.has(itemKey)) {
+          persistedSnapshotByKey.delete(itemKey);
+        }
+      }
+
+      knownPersistedKeys = new Set(
+        filteredEntries
+          .filter(({ itemKey }) => keptKeys.has(itemKey))
+          .map(({ itemKey }) => itemKey),
+      );
+      return;
+    }
+
+    const keys = await namespace.listKeys();
+    if (keys.length === 0) return;
     if (
       !hasIgnoreItemFilter &&
       keys.filter((key) => !protectedItemKeys.has(key)).length <= maxItems
@@ -482,19 +583,11 @@ export function setupCollectionPersistence<
       return;
     }
 
-    const managedEntriesByKey = usesManagedLocalStorage
-      ? new Map(
-          readManagedLocalStorageManifestEntriesByPrefix(prefix).map(
-            (entry) => [entry.entryKey, entry],
-          ),
-        )
-      : null;
-
     const entries = await Promise.all(
       keys.map(async (itemKey) => ({
         itemKey,
         entry: await namespace.readEntry(itemKey),
-        lastAccessAt: managedEntriesByKey?.get(itemKey)?.lastAccessAt,
+        lastAccessAt: undefined,
       })),
     );
 
@@ -529,13 +622,7 @@ export function setupCollectionPersistence<
       if (!persisted) return false;
 
       return parsePersistedStoreData(persisted.data, dataSchema)
-        ? {
-            itemKey,
-            lastAccessAt:
-              managedEntriesByKey?.get(itemKey)?.lastAccessAt ??
-              entry.timestamp,
-            persisted,
-          }
+        ? { itemKey, lastAccessAt: entry.timestamp, persisted }
         : false;
     });
 
@@ -676,15 +763,15 @@ export function setupCollectionPersistence<
       knownPersistedKeys.add(itemKey);
     }
 
-    if (usesManagedLocalStorage && maintenanceRootKey !== null) {
+    if (syncStorageAdapter !== null && maintenanceRootKey !== null) {
       const needsMaintenance =
         hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
-      setManagedLocalStorageRootNeedsMaintenance(
+      syncStorageAdapter.setRootNeedsMaintenance(
         maintenanceRootKey,
         needsMaintenance,
       );
       if (needsMaintenance) {
-        await runManagedLocalStorageMaintenance();
+        await syncStorageAdapter.runMaintenance();
       }
       return;
     }
@@ -719,8 +806,8 @@ export function setupCollectionPersistence<
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
-    if (maintenanceRootKey !== null) {
-      unregisterManagedLocalStorageMaintenanceCallback(maintenanceRootKey);
+    if (syncStorageAdapter !== null && maintenanceRootKey !== null) {
+      syncStorageAdapter.unregisterMaintenanceCallback(maintenanceRootKey);
       maintenanceRootKey = null;
     }
     namespace.dispose();

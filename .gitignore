@@ -18,3 +18,4 @@ dist
 .vscode/settings.json
 test-results/.last-run.json
 notes
+.vscode/review-state.json

@@ -13,6 +13,7 @@ import {
   vi,
 } from 'vitest';
 import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   OffsetPaginationConfig,
@@ -96,10 +97,11 @@ function setCachedItem(
   id: number,
   data: Row,
   version = 1,
+  timestamp = Date.now(),
 ): string {
   return persistentStore
     .scope(storeName, sessionKey)
-    .listQuery.seedItem(tableId, id, data, { version }).storageKey;
+    .listQuery.seedItem(tableId, id, data, { version, timestamp }).storageKey;
 }
 
 function setCachedQuery(
@@ -109,10 +111,11 @@ function setCachedQuery(
   items: string[],
   hasMore = false,
   version = 1,
+  timestamp = Date.now(),
 ): string {
   return persistentStore
     .scope(storeName, sessionKey)
-    .listQuery.seedQuery(params, items, { hasMore, version });
+    .listQuery.seedQuery(params, items, { hasMore, version, timestamp });
 }
 
 function listStoredKeys(prefix: string): string[] {
@@ -364,15 +367,24 @@ describe('localStorage: list query store persistence', () => {
 
   test('disableRefetchOnMount keeps cached query data without refetching and refreshes stored timestamps', async () => {
     const usersQuery = { tableId: 'users' };
-    const usersItem = setCachedItem('lq-hook-no-refetch', 'sess1', 'users', 1, {
-      id: 1,
-      name: 'Cached',
-    });
+    const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
+    const usersItem = setCachedItem(
+      'lq-hook-no-refetch',
+      'sess1',
+      'users',
+      1,
+      { id: 1, name: 'Cached' },
+      1,
+      originalTimestamp,
+    );
     const usersQueryKey = setCachedQuery(
       'lq-hook-no-refetch',
       'sess1',
       usersQuery,
       [storeItemKey('users', 1)],
+      false,
+      1,
+      originalTimestamp,
     );
     const originalItemTimestamp = getStoredEntryTimestamp(usersItem);
     const originalQueryTimestamp = getStoredEntryTimestamp(usersQueryKey);
@@ -1062,10 +1074,9 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`))
-      .toMatchInlineSnapshot(`
-        ['"users||1', '"users||3']
-      `);
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`),
+    ).toMatchInlineSnapshot(`['"users||1', '"users||3']`);
   });
 
   test('items and queries are saved per entry and pinned entries survive eviction', async () => {

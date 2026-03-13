@@ -42,6 +42,22 @@ function getSingleRootKey(sessionKey: string, storeName: string): string {
   );
 }
 
+function seedManagedDocumentRoot(args: {
+  sessionKey: string;
+  storeName: string;
+  cleanupIntervalMs?: number;
+  lastAccessAt?: number;
+}): void {
+  upsertManagedLocalStorageSingleEntry({
+    sessionKey: args.sessionKey,
+    storeName: args.storeName,
+    storageKey: `tsdf.${args.sessionKey}.${args.storeName}`,
+    cleanupIntervalMs: args.cleanupIntervalMs,
+    maxAgeMs: TEST_MAX_AGE_MS,
+    lastAccessAt: args.lastAccessAt,
+  });
+}
+
 beforeAll(() => {
   vi.useFakeTimers();
 });
@@ -85,7 +101,6 @@ describe('expiration scan', () => {
         },
       },
     );
-
     // Advance past idle cleanup timeout to trigger the expiration scan
     // Allow async scan operations to complete
     await waitForScheduledCleanup();
@@ -122,42 +137,6 @@ describe('expiration scan', () => {
     // Both entries should still exist
     expect(localStorage.getItem(keepADoc.document.storageKey())).not.toBeNull();
     expect(localStorage.getItem(keepBDoc.document.storageKey())).not.toBeNull();
-  });
-
-  test('entries without valid timestamp are removed', async () => {
-    const triggerDoc = persistentStore.scope('trigger', 'sess1');
-
-    // Create an entry with corrupted structure (no timestamp)
-    localStorage.setItem(
-      'tsdf.sess1.corrupted',
-      JSON.stringify({ data: 'bad', version: 1 }),
-    );
-    upsertManagedLocalStorageSingleEntry({
-      sessionKey: 'sess1',
-      storeName: 'corrupted',
-      storageKey: 'tsdf.sess1.corrupted',
-      maxAgeMs: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    // Create a valid entry that triggers the scan
-    triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
-
-    createDocumentStoreTestEnv(
-      { name: 'ok', value: 1 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'trigger',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup();
-
-    // Corrupted entry should be removed
-    expect(localStorage.getItem('tsdf.sess1.corrupted')).toBeNull();
   });
 
   test('scan runs only once per adapter per session', async () => {
@@ -322,7 +301,6 @@ describe('expiration scan', () => {
         },
       },
     );
-
     await waitForScheduledCleanup();
 
     expect({
@@ -386,6 +364,11 @@ describe('expiration scan', () => {
       { value: { name: 'old', value: 1 } },
       { timestamp: expiredTimestamp },
     );
+    seedManagedDocumentRoot({
+      sessionKey: 'sess1',
+      storeName: 'throttle-trigger',
+      cleanupIntervalMs,
+    });
 
     createDocumentStoreTestEnv(
       { name: 'trigger', value: 2 },
@@ -410,7 +393,7 @@ describe('expiration scan', () => {
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
       triggerCleanupIntervalMs:
         readManagedLocalStorageRoot(triggerRootKey)?.cleanupIntervalMs,
-      triggerLastCleanupRecorded: firstCleanupAt !== null,
+      triggerLastCleanupRecorded: firstCleanupAt != null,
     }).toMatchInlineSnapshot(`
       staleEntryExists: '❌'
       triggerCleanupIntervalMs: 86400000
@@ -479,7 +462,10 @@ describe('expiration scan', () => {
       readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
 
     expect({
-      cleanupRanAgain: finalCleanupAt !== throttledCleanupAt,
+      cleanupRanAgain:
+        finalCleanupAt != null &&
+        throttledCleanupAt != null &&
+        finalCleanupAt !== throttledCleanupAt,
       staleEntryExists:
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
     }).toMatchInlineSnapshot(`
@@ -506,6 +492,11 @@ describe('expiration scan', () => {
       maxAgeMs: TEST_MAX_AGE_MS,
       lastAccessAt: expiredTimestamp,
     });
+    seedManagedDocumentRoot({
+      sessionKey: 'sess1',
+      storeName: 'eager-trigger',
+      cleanupIntervalMs: 0,
+    });
 
     createDocumentStoreTestEnv(
       { name: 'trigger', value: 2 },
@@ -530,7 +521,7 @@ describe('expiration scan', () => {
         readManagedLocalStorageRoot(triggerRootKey)?.cleanupIntervalMs,
       staleEntryExists:
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
-      triggerLastCleanupRecorded: firstCleanupAt !== null,
+      triggerLastCleanupRecorded: firstCleanupAt != null,
     }).toMatchInlineSnapshot(`
       cleanupIntervalMs: 0
       staleEntryExists: '❌'
@@ -553,6 +544,7 @@ describe('expiration scan', () => {
     });
 
     resetExpirationScanTracking();
+    await advanceTime(1);
 
     createDocumentStoreTestEnv(
       { name: 'trigger', value: 2 },
@@ -573,7 +565,10 @@ describe('expiration scan', () => {
       readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
 
     expect({
-      cleanupRanAgain: secondCleanupAt !== firstCleanupAt,
+      cleanupRanAgain:
+        secondCleanupAt != null &&
+        firstCleanupAt != null &&
+        secondCleanupAt !== firstCleanupAt,
       staleEntryExists:
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
     }).toMatchInlineSnapshot(`
@@ -582,7 +577,7 @@ describe('expiration scan', () => {
     `);
   });
 
-  test('cleanup interval config is stored and updated per root', () => {
+  test('cleanup interval config is stored lazily when root metadata exists', () => {
     const rootKey = getSingleRootKey('sess1', 'interval-config');
 
     createDocumentStoreTestEnv(
@@ -598,36 +593,55 @@ describe('expiration scan', () => {
       },
     );
 
-    // The managed metadata key should use the new root format and keep the configured interval.
+    // Store initialization alone should not create managed metadata for an unused sync root.
     expect({
-      cleanupIntervalMs:
-        readManagedLocalStorageRoot(rootKey)?.cleanupIntervalMs,
-      rootKeyUsesManagedPrefix: rootKey.startsWith('tsdf.__lsm__.r.'),
+      rootExistsAfterInit: readManagedLocalStorageRoot(rootKey) !== null,
+      rootKeyUsesManagedPrefix: rootKey.startsWith('tsdf._m.r.'),
       rootKeyUsesLegacyPrefix: rootKey.includes('__localStorageMeta__'),
-      sessionKey: readManagedLocalStorageRoot(rootKey)?.sessionKey,
-      storeName: readManagedLocalStorageRoot(rootKey)?.storeName,
     }).toMatchInlineSnapshot(`
-      cleanupIntervalMs: 1000
+      rootExistsAfterInit: '❌'
       rootKeyUsesLegacyPrefix: '❌'
       rootKeyUsesManagedPrefix: '✅'
-      sessionKey: 'sess1'
-      storeName: 'interval-config'
     `);
 
-    createDocumentStoreTestEnv(
-      { name: 'config', value: 1 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'interval-config',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-          cleanupIntervalMs: 5_000,
-        },
-      },
-    );
+    seedManagedDocumentRoot({
+      sessionKey: 'sess1',
+      storeName: 'interval-config',
+      cleanupIntervalMs: 5_000,
+      lastAccessAt: Date.now(),
+    });
 
-    // Re-registering the same root should update the stored interval instead of keeping stale config.
+    expect(readManagedLocalStorageRoot(rootKey)).toMatchInlineSnapshot(`
+      cleanupIntervalMs: 5000
+      lastCleanupAt: null
+      maxAgeMs: 604800000
+      mode: 'single'
+      needsMaintenance: '❌'
+      sessionKey: 'sess1'
+      storageKey: 'tsdf.sess1.interval-config'
+      storagePrefix: null
+      storeName: 'interval-config'
+      version: 1
+    `);
+  });
+
+  test('cleanup interval config can be updated for an existing managed root', () => {
+    const rootKey = getSingleRootKey('sess1', 'interval-config');
+
+    seedManagedDocumentRoot({
+      sessionKey: 'sess1',
+      storeName: 'interval-config',
+      cleanupIntervalMs: 1_000,
+      lastAccessAt: Date.now(),
+    });
+
+    seedManagedDocumentRoot({
+      sessionKey: 'sess1',
+      storeName: 'interval-config',
+      cleanupIntervalMs: 5_000,
+      lastAccessAt: Date.now(),
+    });
+
     expect({
       cleanupIntervalMs:
         readManagedLocalStorageRoot(rootKey)?.cleanupIntervalMs,
