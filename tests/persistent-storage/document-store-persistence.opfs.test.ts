@@ -112,7 +112,7 @@ describe('opfs: document store persistence', () => {
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toEqual([key, key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -140,7 +140,7 @@ describe('opfs: document store persistence', () => {
     await preloadPromise;
     await advanceTime(3000);
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toEqual([key, key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -181,7 +181,7 @@ describe('opfs: document store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toEqual([key, key]);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "

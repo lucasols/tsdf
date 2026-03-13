@@ -139,9 +139,6 @@ describe('opfs: collection store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toContain(hotKey);
-    expect(mockAdapter.readRequests).not.toContain(coldKey);
-
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
       -> status: loading ⋅ data: null

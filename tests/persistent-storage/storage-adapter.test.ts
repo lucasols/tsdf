@@ -8,11 +8,18 @@ import {
   vi,
 } from 'vitest';
 import { murmur3 } from '@ls-stack/utils/hash';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   localPersistentStorage,
   opfsPersistentStorage,
 } from '../../src/persistentStorage/storageAdapter';
-import type { StorageAdapter } from '../../src/persistentStorage/types';
+import {
+  resetManagedLocalStorageState,
+  upsertManagedLocalStorageNamespaceEntry,
+} from '../../src/persistentStorage/localStorageMetadata';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -21,23 +28,24 @@ beforeAll(() => {
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetManagedLocalStorageState();
 });
 
 describe('localStorage adapter', () => {
-  let adapter: StorageAdapter;
+  const adapter = localPersistentStorage;
 
   beforeEach(() => {
-    adapter = localPersistentStorage;
+    vi.setSystemTime(TEST_INITIAL_TIME);
   });
 
-  test('read returns null for missing key', async () => {
-    const result = await adapter.read('nonexistent');
+  test('read returns null for missing key', () => {
+    const result = adapter.read('nonexistent');
     expect(result).toBeNull();
   });
 
-  test('write and read roundtrip', async () => {
-    await adapter.write('test-key', { name: 'Alice', age: 30 });
-    const result = await adapter.read('test-key');
+  test('write and read roundtrip', () => {
+    adapter.write('test-key', { name: 'Alice', age: 30 });
+    const result = adapter.read('test-key');
 
     expect(result).toMatchInlineSnapshot(`
       age: 30
@@ -45,44 +53,44 @@ describe('localStorage adapter', () => {
     `);
   });
 
-  test('remove deletes key', async () => {
-    await adapter.write('to-remove', { value: 42 });
-    await adapter.remove('to-remove');
+  test('remove deletes key', () => {
+    adapter.write('to-remove', { value: 42 });
+    adapter.remove('to-remove');
 
-    const result = await adapter.read('to-remove');
+    const result = adapter.read('to-remove');
     expect(result).toBeNull();
   });
 
-  test('removeByPrefix removes all matching keys', async () => {
-    await adapter.write('tsdf.session1.store1', { a: 1 });
-    await adapter.write('tsdf.session1.store2', { b: 2 });
-    await adapter.write('tsdf.session2.store1', { c: 3 });
+  test('removeByPrefix removes all matching keys', () => {
+    adapter.write('tsdf.session1.store1', { a: 1 });
+    adapter.write('tsdf.session1.store2', { b: 2 });
+    adapter.write('tsdf.session2.store1', { c: 3 });
 
-    await adapter.removeByPrefix('tsdf.session1.');
+    adapter.removeByPrefix('tsdf.session1.');
 
-    const result1 = await adapter.read('tsdf.session1.store1');
-    const result2 = await adapter.read('tsdf.session1.store2');
-    const result3 = await adapter.read('tsdf.session2.store1');
+    const result1 = adapter.read('tsdf.session1.store1');
+    const result2 = adapter.read('tsdf.session1.store2');
+    const result3 = adapter.read('tsdf.session2.store1');
 
     expect(result1).toBeNull();
     expect(result2).toBeNull();
     expect(result3).toMatchInlineSnapshot(`c: 3`);
   });
 
-  test('listKeys returns matching keys', async () => {
-    await adapter.write('tsdf.s1.a', 1);
-    await adapter.write('tsdf.s1.b', 2);
-    await adapter.write('tsdf.s2.a', 3);
+  test('listKeys returns matching keys', () => {
+    adapter.write('tsdf.s1.a', 1);
+    adapter.write('tsdf.s1.b', 2);
+    adapter.write('tsdf.s2.a', 3);
 
-    const keys = await adapter.listKeys('tsdf.s1.');
+    const keys = adapter.listKeys('tsdf.s1.');
 
     expect(keys.sort()).toMatchInlineSnapshot(`['tsdf.s1.a', 'tsdf.s1.b']`);
   });
 
-  test('read handles invalid JSON gracefully', async () => {
+  test('read handles invalid JSON gracefully', () => {
     localStorage.setItem('bad-json', '{invalid');
 
-    const result = await adapter.read('bad-json');
+    const result = adapter.read('bad-json');
     expect(result).toBeNull();
   });
 
@@ -104,7 +112,7 @@ describe('localStorage adapter', () => {
     setItemSpy.mockRestore();
   });
 
-  test('missing navigator.locks falls back to unlocked local storage coordination and warns once', async () => {
+  test('missing navigator.locks falls back to unlocked local storage coordination and warns once', () => {
     Object.defineProperty(globalThis.navigator, 'locks', {
       value: null,
       writable: true,
@@ -112,10 +120,10 @@ describe('localStorage adapter', () => {
     });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    await adapter.write('disabled-key', { name: 'Alice' });
-    const firstRead = await adapter.read('disabled-key');
-    const keys = await adapter.listKeys('disabled');
-    await adapter.remove('disabled-key');
+    adapter.write('disabled-key', { name: 'Alice' });
+    const firstRead = adapter.read('disabled-key');
+    const keys = adapter.listKeys('disabled');
+    adapter.remove('disabled-key');
 
     expect(firstRead).toMatchInlineSnapshot(`name: 'Alice'`);
     expect(keys).toMatchInlineSnapshot(`['disabled-key']`);
@@ -125,6 +133,172 @@ describe('localStorage adapter', () => {
     `);
 
     warnSpy.mockRestore();
+  });
+
+  test('unlocked metadata reads pick up external manifest updates instead of serving stale cached data', () => {
+    const prefix = 'tsdf.sess1.external-sync.collection.item.';
+    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+    const manifestKey = `${rootKey}.m`;
+
+    // Prime metadata using the normal managed-local-storage write path.
+    upsertManagedLocalStorageNamespaceEntry({
+      sessionKey: 'sess1',
+      storeName: 'external-sync',
+      storagePrefix: prefix,
+      entryKey: '"a',
+      payloadKey: `${prefix}"a`,
+      maxAgeMs: 60_000,
+      lastAccessAt: 1,
+    });
+
+    // First read warms the current runtime's metadata path.
+    expect(localPersistentStorage.listEntryMetadata(prefix))
+      .toMatchInlineSnapshot(`
+        - entryKey: '"a'
+          lastAccessAt: 1
+          payloadKey: 'tsdf.sess1.external-sync.collection.item."a'
+      `);
+
+    // Simulate another tab rewriting the manifest directly in localStorage.
+    localStorage.setItem(
+      manifestKey,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { entryKey: '"b', payloadKey: `${prefix}"b`, lastAccessAt: 2 },
+        ],
+      }),
+    );
+
+    expect(localPersistentStorage.listEntryMetadata(prefix))
+      .toMatchInlineSnapshot(`
+        - entryKey: '"b'
+          lastAccessAt: 2
+          payloadKey: 'tsdf.sess1.external-sync.collection.item."b'
+      `);
+  });
+
+  test('locked metadata cache stays coherent across awaits until the lock is released', async () => {
+    const prefix = 'tsdf.sess1.awaited-lock.collection.item.';
+    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+    const manifestKey = `${rootKey}.m`;
+
+    upsertManagedLocalStorageNamespaceEntry({
+      sessionKey: 'sess1',
+      storeName: 'awaited-lock',
+      storagePrefix: prefix,
+      entryKey: '"a',
+      payloadKey: `${prefix}"a`,
+      maxAgeMs: 60_000,
+      lastAccessAt: 1,
+    });
+
+    await localPersistentStorage.runLocked(async () => {
+      expect(localPersistentStorage.listEntryMetadata(prefix))
+        .toMatchInlineSnapshot(`
+          - entryKey: '"a'
+            lastAccessAt: 1
+            payloadKey: 'tsdf.sess1.awaited-lock.collection.item."a'
+        `);
+
+      await Promise.resolve();
+
+      // Simulate a non-coordinated external write while this tab still holds the lock.
+      localStorage.setItem(
+        manifestKey,
+        JSON.stringify({
+          version: 1,
+          entries: [
+            { entryKey: '"b', payloadKey: `${prefix}"b`, lastAccessAt: 2 },
+          ],
+        }),
+      );
+
+      expect(localPersistentStorage.listEntryMetadata(prefix))
+        .toMatchInlineSnapshot(`
+          - entryKey: '"a'
+            lastAccessAt: 1
+            payloadKey: 'tsdf.sess1.awaited-lock.collection.item."a'
+        `);
+    });
+
+    expect(localPersistentStorage.listEntryMetadata(prefix))
+      .toMatchInlineSnapshot(`
+        - entryKey: '"b'
+          lastAccessAt: 2
+          payloadKey: 'tsdf.sess1.awaited-lock.collection.item."b'
+      `);
+  });
+
+  test('locked metadata cache invalidates a cleared root before recreating it', async () => {
+    const prefix = 'tsdf.sess1.clear-recreate.collection.item.';
+    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+
+    upsertManagedLocalStorageNamespaceEntry({
+      sessionKey: 'sess1',
+      storeName: 'clear-recreate',
+      storagePrefix: prefix,
+      entryKey: '"a',
+      payloadKey: `${prefix}"a`,
+      maxAgeMs: 60_000,
+      lastAccessAt: 1,
+    });
+
+    await localPersistentStorage.runLocked(() => {
+      // Warm the lock-scoped metadata path, then clear and recreate the root.
+      expect(localPersistentStorage.listEntryMetadata(prefix))
+        .toMatchInlineSnapshot(`
+          - entryKey: '"a'
+            lastAccessAt: 1
+            payloadKey: 'tsdf.sess1.clear-recreate.collection.item."a'
+        `);
+
+      localPersistentStorage.clearRoot(rootKey);
+      localPersistentStorage.upsertNamespaceEntry({
+        sessionKey: 'sess1',
+        storeName: 'clear-recreate',
+        storagePrefix: prefix,
+        entryKey: '"b',
+        payloadKey: `${prefix}"b`,
+        maxAgeMs: 60_000,
+        lastAccessAt: 2,
+      });
+
+      expect(localPersistentStorage.listEntryMetadata(prefix))
+        .toMatchInlineSnapshot(`
+          - entryKey: '"b'
+            lastAccessAt: 2
+            payloadKey: 'tsdf.sess1.clear-recreate.collection.item."b'
+        `);
+    });
+  });
+
+  test('persistent storage config accepts the local-sync adapter sentinel', () => {
+    createLocalStoragePersistentTestStore()
+      .scope('custom-sync', 'test-session')
+      .document.seed({ value: { name: 'cached', value: 1 } });
+
+    const env = createDocumentStoreTestEnv(
+      { name: 'server', value: 2 },
+      {
+        persistentStorage: {
+          storeName: 'custom-sync',
+          adapter: 'local-sync',
+          schema: rc_object({
+            value: rc_object({ name: rc_string, value: rc_number }),
+          }),
+        },
+      },
+    );
+
+    expect(env.store.state).toMatchInlineSnapshot(`
+      data:
+        value: { name: 'cached', value: 1 }
+
+      error: null
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+    `);
   });
 });
 
