@@ -102,6 +102,14 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 - Do not add fallback behavior, legacy code paths, compatibility shims, optional support for old shapes, or migration-oriented branching unless the user explicitly asks for it
 - When changing an API or stored data shape, prefer replacing the old behavior outright instead of preserving both the old and new forms
 
+### Major rewrite mode
+
+This codebase is undergoing a major rewrite. Assume the current implementation is wrong until proven otherwise â€” read the tests to understand intended behavior, not the code.
+
+- **Tests are the source of truth.** Write the simplest code that satisfies them. If a test encodes a bad design, flag it instead of working around it.
+- **Be suspicious of existing code.** Actively look for unnecessary complexity, dead paths, poor naming, and over-engineering. Call out issues even outside your immediate task scope. Consider that current code is suboptimal until proven otherwise.
+- **Rewrite freely.** Large diffs are expected. Don't preserve patterns for consistency with bad code.
+
 ## Feature implementation
 
 When adding a new feature, or adjust a existing one:
