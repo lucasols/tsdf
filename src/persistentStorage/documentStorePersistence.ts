@@ -32,7 +32,7 @@ function readDocumentFromLocalStorageSync(
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
   const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
-  >(key, version);
+  >(key, version, { metadataMode: 'single' });
   if (!entry) return { persisted: null, foundEntry: false };
 
   const persisted = parsePersistedDocumentData(entry.data);
@@ -104,7 +104,9 @@ export function setupDocumentPersistence<
       return;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(key, { metadataMode: 'single' }),
+    );
 
     storeRef.setPartialState(
       { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
@@ -147,7 +149,9 @@ export function setupDocumentPersistence<
       return baseState;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(key, { metadataMode: 'single' }),
+    );
 
     return {
       ...baseState,

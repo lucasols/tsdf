@@ -534,7 +534,10 @@ export function setupListQueryPersistence<
     const storageKey = `${prefix}${itemKey}`;
     const cacheEntry = readStorageEntryFromLocalStorageSync<
       PersistedListQueryItemData<unknown>
-    >(storageKey, version);
+    >(storageKey, version, {
+      metadataMode: 'namespace',
+      metadataNamespacePrefix: prefix,
+    });
 
     if (!cacheEntry) {
       forgetPersistedItem(itemKey);
@@ -558,7 +561,12 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(storageKey, {
+        metadataMode: 'namespace',
+        metadataNamespacePrefix: prefix,
+      }),
+    );
     rememberHydratedItem(itemKey, cacheEntry.data);
     return itemState;
   }
@@ -619,6 +627,7 @@ export function setupListQueryPersistence<
       readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
         storageKey,
         version,
+        { metadataMode: 'namespace', metadataNamespacePrefix: prefix },
       );
 
     if (!cacheEntry) {
@@ -636,7 +645,12 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(storageKey, {
+        metadataMode: 'namespace',
+        metadataNamespacePrefix: prefix,
+      }),
+    );
     rememberHydratedQuery(queryKey, cacheEntry.data);
     return persistedQuery;
   }

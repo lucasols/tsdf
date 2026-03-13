@@ -281,7 +281,10 @@ export function setupCollectionPersistence<
     const storageKey = `${prefix}${itemKey}`;
     const cacheEntry = readStorageEntryFromLocalStorageSync<
       PersistedCollectionItemData<unknown>
-    >(storageKey, version);
+    >(storageKey, version, {
+      metadataMode: 'namespace',
+      metadataNamespacePrefix: prefix,
+    });
 
     if (!cacheEntry) {
       forgetPersistedItem(itemKey);
@@ -305,7 +308,12 @@ export function setupCollectionPersistence<
       return undefined;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(storageKey, {
+        metadataMode: 'namespace',
+        metadataNamespacePrefix: prefix,
+      }),
+    );
     rememberHydratedItem(itemKey, cacheEntry.data);
     return item;
   }

@@ -57,42 +57,23 @@ const listQueryParamsSchema = rc_object({ tableId: rc_string });
 
 const persistentStore = createLocalStoragePersistentTestStore();
 
-function readManagedRoot(rootKey: string) {
-  return readManagedLocalStorageRoot(rootKey);
-}
-
 async function waitForScheduledCleanup(delayMs = 2100): Promise<void> {
   await advanceTime(delayMs);
   await flushAllTimers();
-}
-
-async function settleStartupBackgroundScan(): Promise<void> {
-  // Creating a local-sync persistence handle schedules the one-off global scan.
-  // Drain it before capturing operation-specific traces so snapshots stay focused.
-  await waitForScheduledCleanup();
-}
-
-function findCapturedOperations(
-  operations: string[],
-  fragments: string[],
-): string[] {
-  return operations.filter((operation) =>
-    fragments.some((fragment) => operation.includes(fragment)),
-  );
 }
 
 async function captureHookRemount<Result>(render: () => Result) {
   const firstMountCapture = startPersistentStorageOperationCapture();
   const firstHook = renderHook(render);
   await flushAllTimers();
-  const firstMountOperations = firstMountCapture.finish();
+  const firstMountOperations = firstMountCapture.finish().timelineString;
 
   firstHook.unmount();
 
   const remountCapture = startPersistentStorageOperationCapture();
   const secondHook = renderHook(render);
   await flushAllTimers();
-  const remountOperations = remountCapture.finish();
+  const remountOperations = remountCapture.finish().timelineString;
 
   return { secondHook, firstMountOperations, remountOperations };
 }
@@ -299,23 +280,27 @@ describe('persistent storage efficiency', () => {
         },
       },
     );
-    const startupOperationsBreakdown = startupReadCapture.finish();
+    const startupOperationsBreakdown =
+      startupReadCapture.finish().timelineString;
 
-    expect(startupOperationsBreakdown).toMatchInlineSnapshot(`[]`);
+    expect(startupOperationsBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(localStorage.getItem(expiredDoc.document.storageKey())).toBeNull();
     expect(localStorage.getItem(freshDoc.document.storageKey())).not.toBeNull();
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.85 kb'
-      - '📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.14 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.expired-doc (entry)'
-      - '🗑️ ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)'
-      - '📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.14 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.85 kb -> 0.88 kb'
+      "
+      time |
+      2s   | 📖 ✅ tsdf._m.c (catalog) | 0.85 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.11 kb
+      .    | 🗑️ ✅->❌ tsdf.sess1.expired-doc (entry)
+      .    | 🗑️ ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
+      .    | 📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.c (catalog) | 0.85 kb -> 0.88 kb
+      "
     `);
   });
 
@@ -349,14 +334,40 @@ describe('persistent storage efficiency', () => {
 
     const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(localStorage.getItem('tsdf.sess1.corrupted')).not.toBeNull();
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.83 kb'
-      - '📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.14 kb'
-      - '📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.14 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.83 kb -> 0.87 kb'
+      "
+      time |
+      2s   | 📖 ✅ tsdf._m.c (catalog) | 0.83 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.11 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.c (catalog) | 0.83 kb -> 0.87 kb
+      "
+    `);
+
+    expect(triggerDoc.storage.getCatalogRaw()).toMatchInlineSnapshot(`
+      roots:
+        - cleanupIntervalMs: 86400000
+          lastCleanupAt: 1735689602000
+          maxAgeMs: 604800000
+          mode: 'single'
+          sessionKey: 'sess1'
+          storageKey: 'tsdf.sess1.corrupted'
+          storagePrefix: null
+          storeName: 'corrupted'
+          version: 1
+        - cleanupIntervalMs: 86400000
+          lastCleanupAt: 1735689602000
+          maxAgeMs: 604800000
+          mode: 'single'
+          sessionKey: 'sess1'
+          storageKey: 'tsdf.sess1.trigger'
+          storagePrefix: null
+          storeName: 'trigger'
+          version: 1
+      version: 1
     `);
   });
 
@@ -406,27 +417,73 @@ describe('persistent storage efficiency', () => {
 
     const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
       protectedEntryExists:
         localStorage.getItem(protectedDoc.document.storageKey()) !== null,
       unprotectedEntryExists:
         localStorage.getItem(unprotectedDoc.document.storageKey()) !== null,
-      protectedRootSession: readManagedRoot(protectedRootKey)?.sessionKey,
+      protectedRootSession:
+        readManagedLocalStorageRoot(protectedRootKey)?.sessionKey,
     }).toMatchInlineSnapshot(`
       protectedEntryExists: '✅'
       protectedRootSession: 'user@example.com'
       unprotectedEntryExists: '❌'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 1.99 kb'
-      - '📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.14 kb'
-      - '📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.14 kb'
-      - '🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)'
-      - '🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)'
-      - '📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.14 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.99 kb -> 2.06 kb'
+      "
+      time |
+      2s   | 📖 ✅ tsdf._m.c (catalog) | 1.99 kb
+      .    | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.11 kb
+      .    | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.11 kb
+      .    | 🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)
+      .    | 🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
+      .    | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.c (catalog) | 1.99 kb -> 2.06 kb
+      "
+    `);
+
+    expect(protectedDoc.storage.getCatalogRaw()).toMatchInlineSnapshot(`
+      roots:
+        - cleanupIntervalMs: 86400000
+          lastCleanupAt: 1735689602000
+          maxAgeMs: 604800000
+          mode: 'single'
+          sessionKey: 'user@example.com'
+          storageKey: 'tsdf.user@example.com.protected-doc'
+          storagePrefix: null
+          storeName: 'protected-doc'
+          version: 1
+        - cleanupIntervalMs: 86400000
+          lastCleanupAt: 1735689602000
+          maxAgeMs: 604800000
+          mode: 'single'
+          sessionKey: 'user@example.com'
+          storageKey: 'tsdf.user@example.com.unprotected-doc'
+          storagePrefix: null
+          storeName: 'unprotected-doc'
+          version: 1
+        - cleanupIntervalMs: 86400000
+          lastCleanupAt: 1735689602000
+          maxAgeMs: 604800000
+          mode: 'single'
+          protectedKeys: ['tsdf.user@example.com.protected-doc']
+          sessionKey: 'user@example.com'
+          storageKey: 'tsdf.user@example.com.__offline__.protected'
+          storagePrefix: null
+          storeName: '__offline__.protected'
+          version: 1
+        - cleanupIntervalMs: 86400000
+          lastCleanupAt: 1735689602000
+          maxAgeMs: 604800000
+          mode: 'single'
+          sessionKey: 'sess-trigger'
+          storageKey: 'tsdf.sess-trigger.trigger-doc'
+          storagePrefix: null
+          storeName: 'trigger-doc'
+          version: 1
+      version: 1
     `);
   });
 });
@@ -436,6 +493,8 @@ describe('document store', () => {
     const storeName = 'doc-remount-flow';
     const sessionKey = 'sess1';
 
+    const storageScope = persistentStore.scope(storeName, sessionKey);
+
     setCachedDocumentData(storeName, sessionKey, {
       name: 'Cached document',
       value: 7,
@@ -444,7 +503,7 @@ describe('document store', () => {
     const env = createDocumentEnv({ storeName, sessionKey });
 
     // Drain the startup scan so this capture focuses only on hook mount behavior.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     // Document local-sync hydration happens during store initialization, so mount should not hit storage.
     const { secondHook, firstMountOperations, remountOperations } =
@@ -459,14 +518,34 @@ describe('document store', () => {
       `value: { name: 'Cached document', value: 7 }`,
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
-      - '📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.14 kb'
-      - '📖 ✅ tsdf.sess1.doc-remount-flow (entry) | 0.20 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
-      - '📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.14 kb'
-      - '✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.14 kb -> 0.14 kb'
+      "
+      time |
+      0    | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb
+      .    | 📖 ✅ tsdf.sess1.doc-remount-flow (entry) | 0.20 kb
+      2s   | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      "
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+
+    expect(storageScope.document.getRawData('entry')).toMatchInlineSnapshot(
+      `
+        data:
+          data:
+            value: { name: 'Cached document', value: 7 }
+
+        timestamp: 1735689600000
+        version: 1
+      `,
+    );
+
+    expect(storageScope.document.getRawData('manifest')).toMatchInlineSnapshot(
+      `
+        entries:
+          - lastAccessAt: 1735689604100
+        version: 1
+      `,
+    );
   });
 });
 
@@ -494,13 +573,14 @@ describe('collection store', () => {
 
     const startupOperationCapture = startPersistentStorageOperationCapture();
     createCollectionEnv({ storeName, sessionKey });
-    const startupOperationBreakdown = startupOperationCapture.finish();
+    const startupOperationBreakdown =
+      startupOperationCapture.finish().timelineString;
 
-    expect(startupOperationBreakdown).toMatchInlineSnapshot(`[]`);
+    expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
       expiredItemExists: localStorage.getItem(expiredItemKey) !== null,
@@ -512,11 +592,14 @@ describe('collection store', () => {
       freshItemExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.50 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user (entry)'
-      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2 (entry)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb -> 0.22 kb'
+      "
+      time |
+      2s   | 📖 ✅ tsdf._m.c (catalog) | 0.50 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb
+      .    | 🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user (entry)
+      .    | 🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2 (entry)
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb -> 0.22 kb
+      "
     `);
   });
 
@@ -535,18 +618,19 @@ describe('collection store', () => {
       sessionKey: 'sess1',
       maxItems: 2,
     });
-    const startupOperationBreakdown = startupOperationCapture.finish();
+    const startupOperationBreakdown =
+      startupOperationCapture.finish().timelineString;
 
-    expect(startupOperationBreakdown).toMatchInlineSnapshot(`[]`);
+    expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     // Drain the startup-scheduled global scan before capturing the maxItems flush.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     const readCapture = startPersistentStorageOperationCapture();
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Fresh' } });
     await advanceTime(1100);
     await flushAllTimers();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
       listStoredCollectionItemPayloads(
@@ -555,12 +639,15 @@ describe('collection store', () => {
       ).sort(),
     ).toEqual(['b', 'c']);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
-      - '✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c (entry) | ❌ -> 0.21 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb -> 0.46 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a (entry)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb -> 0.33 kb'
+      "
+      time |
+      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb
+      .    | ✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c (entry) | ❌ -> 0.21 kb
+      .    | 📖 ✅ tsdf._m.c (catalog) | 0.51 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb -> 0.46 kb
+      .    | 🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a (entry)
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb -> 0.33 kb
+      "
     `);
   });
 
@@ -575,7 +662,7 @@ describe('collection store', () => {
     const env = createCollectionEnv({ storeName, sessionKey });
 
     // Drain the startup scan so this capture only measures the direct read path.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     const readCapture = startPersistentStorageOperationCapture();
 
@@ -587,18 +674,22 @@ describe('collection store', () => {
       value: { id: '1', name: 'Cached user' }
     `);
 
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(env.store.state[getCompositeKey('1')]?.data).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Cached user' }
     `);
     expect(
-      operationsBreakdown.filter((operation) =>
-        operation.includes(`tsdf.${sessionKey}.${storeName}.ci."1 (entry)`),
-      ),
-    ).toMatchInlineSnapshot(`
-      ['📖 ✅ tsdf.sess1.col-direct-get-item-state.ci."1 (entry) | 0.22 kb']
-    `);
+      operationsBreakdown
+        .split('\n')
+        .filter((operation) =>
+          [`tsdf.${sessionKey}.${storeName}.ci."1 (entry)`].some((fragment) =>
+            operation.includes(fragment),
+          ),
+        ),
+    ).toMatchInlineSnapshot(
+      `['.    | 📖 ✅ tsdf.sess1.col-direct-get-item-state.ci."1 (entry) | 0.22 kb']`,
+    );
   });
 
   test('hook remount reuses hydrated collection state without touching localStorage again', async () => {
@@ -612,7 +703,7 @@ describe('collection store', () => {
     const env = createCollectionEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the UI mount path only.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     // The first mount must hydrate the cold cached item from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
@@ -627,16 +718,16 @@ describe('collection store', () => {
       value: { id: '1', name: 'Cached user' }
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.48 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb'
-      - '📖 ✅ tsdf.sess1.col-remount-flow.ci."1 (entry) | 0.22 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.48 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.48 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb -> 0.19 kb'
+      "
+      time |
+      0    | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb
+      .    | 📖 ✅ tsdf.sess1.col-remount-flow.ci."1 (entry) | 0.22 kb
+      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb
+      2s   | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb -> 0.19 kb
+      "
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('useMultipleItems remount reuses hydrated collection items without touching localStorage again', async () => {
@@ -653,7 +744,7 @@ describe('collection store', () => {
     const env = createCollectionEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the hook mount path only.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     // The first mount must hydrate both cold cached items from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
@@ -670,15 +761,19 @@ describe('collection store', () => {
         - { id: '2', name: 'Cached user 2' }
       `);
     expect(
-      findCapturedOperations(firstMountOperations, [
-        `tsdf.${sessionKey}.${storeName}.ci."1 (entry)`,
-        `tsdf.${sessionKey}.${storeName}.ci."2 (entry)`,
-      ]),
+      firstMountOperations
+        .split('\n')
+        .filter((operation) =>
+          [
+            `tsdf.${sessionKey}.${storeName}.ci."1 (entry)`,
+            `tsdf.${sessionKey}.${storeName}.ci."2 (entry)`,
+          ].some((fragment) => operation.includes(fragment)),
+        ),
     ).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."1 (entry) | 0.22 kb'
-      - '📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."2 (entry) | 0.22 kb'
+      - '.    | 📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."1 (entry) | 0.22 kb'
+      - '.    | 📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."2 (entry) | 0.22 kb'
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('getItemState stays in memory after a hook has already hydrated the collection item', async () => {
@@ -692,7 +787,7 @@ describe('collection store', () => {
     const env = createCollectionEnv({ storeName, sessionKey });
 
     // Hydrate the item through a realistic UI mount first.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
     const hook = renderHook(() =>
       env.apiStore.useItem('1', { disableRefetchOnMount: true }),
     );
@@ -707,9 +802,9 @@ describe('collection store', () => {
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
       value: { id: '1', name: 'Cached user' }
     `);
-    const getItemStateOperations = getItemStateCapture.finish();
+    const getItemStateOperations = getItemStateCapture.finish().timelineString;
 
-    expect(getItemStateOperations).toMatchInlineSnapshot(`[]`);
+    expect(getItemStateOperations).toMatchInlineSnapshot(`"empty"`);
   });
 });
 
@@ -745,13 +840,14 @@ describe('list query store', () => {
 
     const startupOperationCapture = startPersistentStorageOperationCapture();
     createListQueryEnv({ storeName, sessionKey });
-    const startupOperationBreakdown = startupOperationCapture.finish();
+    const startupOperationBreakdown =
+      startupOperationCapture.finish().timelineString;
 
-    expect(startupOperationBreakdown).toMatchInlineSnapshot(`[]`);
+    expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
       expiredItemExists: localStorage.getItem(expiredItem.storageKey) !== null,
@@ -765,13 +861,16 @@ describe('list query store', () => {
       freshQueryExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.96 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.li."expired-users||1 (entry)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb -> 0.24 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (entry)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb -> 0.36 kb'
+      "
+      time |
+      2s   | 📖 ✅ tsdf._m.c (catalog) | 0.96 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb
+      .    | 🗑️ ✅->❌ tsdf.sess1.list-query-expiration.li."expired-users||1 (entry)
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb -> 0.24 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb
+      .    | 🗑️ ✅->❌ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (entry)
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb -> 0.36 kb
+      "
     `);
   });
 
@@ -794,38 +893,41 @@ describe('list query store', () => {
     });
 
     // Drain the startup-scheduled global scan before capturing the query fetch/eviction flow.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     const readCapture = startPersistentStorageOperationCapture();
     env.scheduleFetch('highPriority', thirdQuery);
     await flushAllTimers();
     await advanceTime(1100);
     await flushAllTimers();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`),
     ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
-      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)'
-      - '🔑[1] ✅ tsdf._m.c (catalog)'
-      - '🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)'
-      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)'
-      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry) | ❌ -> 0.23 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb -> 0.84 kb'
-      - '📖 ❌ tsdf.sess1.lq-query-metadata.li."third||1 (entry)'
-      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.li."third||1 (entry) | ❌ -> 0.20 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.49 kb -> 0.93 kb'
-      - '📖 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)'
-      - '✍️ ❌->✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.93 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb -> 0.58 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.21 kb'
+      "
+      time  |
+      1.81s | 📖 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
+      .     | 🔑[0] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
+      .     | 🔑[1] ✅ tsdf._m.c (catalog)
+      .     | 🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)
+      .     | 🔑[3] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)
+      .     | ✍️ ❌->✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry) | ❌ -> 0.23 kb
+      .     | 📖 ✅ tsdf._m.c (catalog) | 0.49 kb
+      .     | 📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb
+      .     | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb -> 0.84 kb
+      .     | 📖 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
+      .     | 📖 ❌ tsdf.sess1.lq-query-metadata.li."third||1 (entry)
+      .     | ✍️ ❌->✅ tsdf.sess1.lq-query-metadata.li."third||1 (entry) | ❌ -> 0.20 kb
+      .     | ✍️ ✅->✅ tsdf._m.c (catalog) | 0.49 kb -> 0.93 kb
+      .     | ✍️ ❌->✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.21 kb
+      .     | 📖 ✅ tsdf._m.c (catalog) | 0.93 kb
+      .     | 📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb
+      .     | 🗑️ ✅->❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
+      .     | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb -> 0.58 kb
+      .     | 📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.21 kb
+      "
     `);
   });
 
@@ -850,7 +952,7 @@ describe('list query store', () => {
     const env = createListQueryEnv({ storeName, sessionKey, maxItems: 2 });
 
     // Drain the startup-scheduled global scan before capturing the maxItems flush.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     const readCapture = startPersistentStorageOperationCapture();
     env.apiStore.addItemToState(rawItemPayload('users', 3), {
@@ -859,26 +961,27 @@ describe('list query store', () => {
     });
     await advanceTime(1100);
     await flushAllTimers();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
     ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ❌ tsdf.sess1.lq-item-metadata.li."users||3 (entry)'
-      - '✍️ ❌->✅ tsdf.sess1.lq-item-metadata.li."users||3 (entry) | ❌ -> 0.20 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.55 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||3 (entry)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb'
+      "
+      time |
+      1s   | 📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb
+      .    | 📖 ❌ tsdf.sess1.lq-item-metadata.li."users||3 (entry)
+      .    | ✍️ ❌->✅ tsdf.sess1.lq-item-metadata.li."users||3 (entry) | ❌ -> 0.20 kb
+      .    | 📖 ✅ tsdf._m.c (catalog) | 0.92 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.55 kb
+      .    | 📖 ✅ tsdf._m.c (catalog) | 0.92 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb
+      .    | 🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||3 (entry)
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb
+      "
     `);
   });
 
@@ -898,7 +1001,7 @@ describe('list query store', () => {
     const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so this capture only measures the direct read-through path.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     const readCapture = startPersistentStorageOperationCapture();
 
@@ -918,7 +1021,7 @@ describe('list query store', () => {
         name: 'Cached user'
       `);
 
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(env.store.state.queries[getCompositeKey(usersQuery)])
       .toMatchInlineSnapshot(`
@@ -936,22 +1039,26 @@ describe('list query store', () => {
         name: 'Cached user'
       `);
     expect(
-      operationsBreakdown.filter((operation) =>
-        operation.includes(
-          `tsdf.${sessionKey}.${storeName}.lq.{tableId:"users"} (entry)`,
+      operationsBreakdown
+        .split('\n')
+        .filter((operation) =>
+          [`tsdf.${sessionKey}.${storeName}.lq.{tableId:"users"} (entry)`].some(
+            (fragment) => operation.includes(fragment),
+          ),
         ),
-      ),
-    ).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (entry) | 0.23 kb'
-    `);
-    expect(
-      operationsBreakdown.filter((operation) =>
-        operation.includes(
-          `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
-        ),
-      ),
     ).toMatchInlineSnapshot(
-      `['📖 ✅ tsdf.sess1.lq-direct-get-query-state.li."users||1 (entry) | 0.21 kb']`,
+      `- '.    | 📖 ✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (entry) | 0.23 kb'`,
+    );
+    expect(
+      operationsBreakdown
+        .split('\n')
+        .filter((operation) =>
+          [`tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`].some(
+            (fragment) => operation.includes(fragment),
+          ),
+        ),
+    ).toMatchInlineSnapshot(
+      `- '.    | 📖 ✅ tsdf.sess1.lq-direct-get-query-state.li."users||1 (entry) | 0.21 kb'`,
     );
   });
 
@@ -971,7 +1078,7 @@ describe('list query store', () => {
     const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted query flow.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     // The first mount hydrates the cold query and its item from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
@@ -986,26 +1093,24 @@ describe('list query store', () => {
       - { id: 1, name: 'Cached user' }
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb'
-      - '📖 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (entry) | 0.23 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb -> 0.33 kb'
+      "
+      time |
+      0    | 📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb
+      .    | 📖 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (entry) | 0.23 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb
+      .    | 📖 ✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb
+      .    | 📖 ✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb
+      1s   | 📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb
+      .    | ✍️ ✅->✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb
+      .    | 📖 ✅ tsdf._m.c (catalog) | 1.44 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb -> 0.21 kb
+      2s   | 📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb -> 0.33 kb
+      "
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('item hook remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
@@ -1020,7 +1125,7 @@ describe('list query store', () => {
     const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted item flow.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     // The first mount must hydrate the cold cached item from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
@@ -1036,14 +1141,18 @@ describe('list query store', () => {
       name: 'Cached user'
     `);
     expect(
-      findCapturedOperations(firstMountOperations, [
-        `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
-      ]),
+      firstMountOperations
+        .split('\n')
+        .filter((operation) =>
+          [`tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`].some(
+            (fragment) => operation.includes(fragment),
+          ),
+        ),
     ).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf.sess1.lq-item-remount-flow.li."users||1 (entry) | 0.21 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-item-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-item-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '.    | ✍️ ✅->✅ tsdf.sess1.lq-item-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('useMultipleItems remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
@@ -1062,7 +1171,7 @@ describe('list query store', () => {
     const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted item flow.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     // The first mount must hydrate both cold cached items from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
@@ -1082,17 +1191,21 @@ describe('list query store', () => {
         - { id: 2, name: 'Cached user 2' }
       `);
     expect(
-      findCapturedOperations(firstMountOperations, [
-        `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
-        `tsdf.${sessionKey}.${storeName}.li."users||2 (entry)`,
-      ]),
+      firstMountOperations
+        .split('\n')
+        .filter((operation) =>
+          [
+            `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
+            `tsdf.${sessionKey}.${storeName}.li."users||2 (entry)`,
+          ].some((fragment) => operation.includes(fragment)),
+        ),
     ).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (entry) | 0.21 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (entry) | 0.21 kb -> 0.29 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (entry) | 0.21 kb'
+      - '.    | ✍️ ✅->✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
+      - '.    | ✍️ ✅->✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (entry) | 0.21 kb -> 0.29 kb'
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('useMultipleListQueries remount reuses hydrated queries without touching localStorage again', async () => {
@@ -1119,7 +1232,7 @@ describe('list query store', () => {
     const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted query flow.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
 
     // The first mount must hydrate both cold cached queries and their items from persistence.
     const { secondHook, firstMountOperations, remountOperations } =
@@ -1139,23 +1252,27 @@ describe('list query store', () => {
       - ['Cached project']
     `);
     expect(
-      findCapturedOperations(firstMountOperations, [
-        `tsdf.${sessionKey}.${storeName}.lq.{tableId:"users"} (entry)`,
-        `tsdf.${sessionKey}.${storeName}.lq.{tableId:"projects"} (entry)`,
-        `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
-        `tsdf.${sessionKey}.${storeName}.li."projects||1 (entry)`,
-      ]),
+      firstMountOperations
+        .split('\n')
+        .filter((operation) =>
+          [
+            `tsdf.${sessionKey}.${storeName}.lq.{tableId:"users"} (entry)`,
+            `tsdf.${sessionKey}.${storeName}.lq.{tableId:"projects"} (entry)`,
+            `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
+            `tsdf.${sessionKey}.${storeName}.li."projects||1 (entry)`,
+          ].some((fragment) => operation.includes(fragment)),
+        ),
     ).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (entry) | 0.23 kb'
-      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (entry) | 0.24 kb'
-      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb'
-      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb -> 0.30 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (entry) | 0.23 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (entry) | 0.24 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb'
+      - '.    | 📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb'
+      - '.    | ✍️ ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
+      - '.    | ✍️ ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb -> 0.30 kb'
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('updating a hydrated list-query item writes the mutation without rereading cached entries', async () => {
@@ -1174,7 +1291,7 @@ describe('list query store', () => {
     const env = createListQueryEnv({ storeName, sessionKey });
 
     // Hydrate the cached query through a normal mounted component first.
-    await settleStartupBackgroundScan();
+    await waitForScheduledCleanup();
     renderHook(() =>
       env.apiStore.useListQuery(usersQuery, { disableRefetchOnMount: true }),
     );
@@ -1189,7 +1306,7 @@ describe('list query store', () => {
     });
     await advanceTime(1100);
     await flushAllTimers();
-    const mutationOperations = mutationCapture.finish();
+    const mutationOperations = mutationCapture.finish().timelineString;
 
     expect(
       persistentStore
@@ -1200,10 +1317,13 @@ describe('list query store', () => {
       name: 'Edited user'
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
-      - '✍️ ✅->✅ tsdf.sess1.lq-mutation-flow.li."users||1 (entry) | 0.29 kb -> 0.29 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.21 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.21 kb -> 0.21 kb'
+      "
+      time |
+      1s   | ✍️ ✅->✅ tsdf.sess1.lq-mutation-flow.li."users||1 (entry) | 0.29 kb -> 0.29 kb
+      .    | 📖 ✅ tsdf._m.c (catalog) | 0.92 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.21 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.21 kb -> 0.21 kb
+      "
     `);
   });
 });

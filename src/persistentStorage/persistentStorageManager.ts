@@ -88,11 +88,29 @@ export function scheduleLocalStorageRemoval(key: string): void {
   });
 }
 
-function refreshLocalStorageTimestampUnlocked(key: string): void {
+type LocalStorageMetadataLookupMode = 'auto' | 'single' | 'namespace';
+
+type LocalStorageMetadataOptions = {
+  metadataMode?: LocalStorageMetadataLookupMode;
+  metadataNamespacePrefix?: string;
+};
+
+function refreshLocalStorageTimestampUnlocked(
+  key: string,
+  {
+    metadataMode = 'auto',
+    metadataNamespacePrefix,
+  }: LocalStorageMetadataOptions = {},
+): void {
   const now = Date.now();
   if (shouldThrottleLocalStorageTouch(key, now)) return;
 
-  if (localPersistentStorage.touchEntry(key)) {
+  if (
+    localPersistentStorage.touchEntry(key, {
+      mode: metadataMode,
+      namespacePrefix: metadataNamespacePrefix,
+    })
+  ) {
     recordLocalStorageTouch(key, now);
     return;
   }
@@ -303,11 +321,16 @@ export function createPersistentStorageNamespaceHandle<T>(
   async function readEntry(
     entryKey: string,
   ): Promise<StorageCacheEntry<T> | null> {
-    const key = getKey(entryKey);
-    if (key === false) return null;
+    const prefix = getPrefix();
+    if (prefix === false) return null;
+
+    const key = `${prefix}${entryKey}`;
     try {
       if (adapter === 'local-sync') {
-        return readStorageEntryFromLocalStorageSync<T>(key, version);
+        return readStorageEntryFromLocalStorageSync<T>(key, version, {
+          metadataMode: 'namespace',
+          metadataNamespacePrefix: prefix,
+        });
       }
 
       const entry = await adapter.read<StorageCacheEntry<T>>(key);
@@ -328,12 +351,20 @@ export function createPersistentStorageNamespaceHandle<T>(
   }
 
   async function load(entryKey: string): Promise<T | null> {
-    const key = getKey(entryKey);
+    const prefix = getPrefix();
+    if (prefix === false) return null;
+
+    const key = `${prefix}${entryKey}`;
     const entry = await readEntry(entryKey);
-    if (!key || !entry) return null;
+    if (!entry) return null;
 
     if (adapter === 'local-sync') {
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+      scheduleIdleCleanup(() =>
+        refreshLocalStorageTimestamp(key, {
+          metadataMode: 'namespace',
+          metadataNamespacePrefix: prefix,
+        }),
+      );
     }
 
     return entry.data;
@@ -380,13 +411,18 @@ export function createPersistentStorageNamespaceHandle<T>(
   }
 
   async function remove(entryKey: string): Promise<void> {
-    const key = getKey(entryKey);
-    if (key === false) return;
+    const prefix = getPrefix();
+    if (prefix === false) return;
+
+    const key = `${prefix}${entryKey}`;
 
     try {
       if (adapter === 'local-sync') {
         await runLocalStorageMutation(() => {
-          localPersistentStorage.remove(key);
+          localPersistentStorage.remove(key, {
+            mode: 'namespace',
+            namespacePrefix: prefix,
+          });
         });
         return;
       }
@@ -445,8 +481,15 @@ export function createPersistentStorageNamespaceHandle<T>(
 export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
   version: number,
+  {
+    metadataMode = 'auto',
+    metadataNamespacePrefix,
+  }: LocalStorageMetadataOptions = {},
 ): StorageCacheEntry<T> | null {
-  const metadata = localPersistentStorage.readEntryMetadataByPayload(key);
+  const metadata = localPersistentStorage.readEntryMetadataByPayload(key, {
+    mode: metadataMode,
+    namespacePrefix: metadataNamespacePrefix,
+  });
   const raw = localPersistentStorage.readRaw(key);
 
   if (metadata === null) {
@@ -553,9 +596,12 @@ export async function clearAllSessionStorage(
  * Refreshes the timestamp of a localStorage cache entry to track last access time.
  * Used by store persistence setup functions after successful sync reads.
  */
-export function refreshLocalStorageTimestamp(key: string): void {
+export function refreshLocalStorageTimestamp(
+  key: string,
+  options?: LocalStorageMetadataOptions,
+): void {
   void localPersistentStorage.runLocked(() => {
-    refreshLocalStorageTimestampUnlocked(key);
+    refreshLocalStorageTimestampUnlocked(key, options);
   });
 }
 

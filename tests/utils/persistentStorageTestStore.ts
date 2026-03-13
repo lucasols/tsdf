@@ -1,6 +1,8 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  getManagedLocalStorageRootKeyForSingle,
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
@@ -30,6 +32,7 @@ type PersistentTestStoreStorage = {
   listKeys: (prefix: string) => string[];
   has: (key: string) => boolean;
   getRaw: (key: string) => string | null;
+  getCatalogRaw: () => unknown;
   storageKind?: 'localStorage' | 'memory';
 };
 
@@ -51,7 +54,9 @@ export type PersistentTestStoreScope = {
     seed: <T>(data: T, options?: StorageSeedOptions) => string;
     readEntry: <T>() => StorageCacheEntry<PersistedDocumentData<T>>;
     readData: <T>() => T | null;
+    getRawData: (kind: 'entry' | 'manifest') => unknown;
   };
+  storage: PersistentTestStoreStorage;
   collection: {
     itemKey: (payload: string) => string;
     itemStorageKey: (payload: string) => string;
@@ -186,7 +191,19 @@ function createPersistentTestStore(
             )?.data.data ?? null
           );
         },
+        getRawData(kind: 'entry' | 'manifest') {
+          if (kind === 'entry') {
+            return safeJsonParse(storage.getRaw(documentStorageKey) ?? 'null');
+          }
+
+          return safeJsonParse(
+            storage.getRaw(
+              `${getManagedLocalStorageRootKeyForSingle(documentStorageKey)}.m`,
+            ) ?? 'null',
+          );
+        },
       },
+      storage,
       collection: {
         itemKey: collectionItemKey,
         itemStorageKey: collectionItemStorageKey,
@@ -376,6 +393,9 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
     getRaw(key: string) {
       return localStorage.getItem(key);
     },
+    getCatalogRaw() {
+      return safeJsonParse(localStorage.getItem('tsdf._m.c') ?? 'null');
+    },
     storageKind: 'localStorage',
   });
 }
@@ -407,6 +427,9 @@ export function createInMemoryPersistentTestStore(
     },
     getRaw(key: string) {
       return storageMap.get(key) ?? null;
+    },
+    getCatalogRaw() {
+      return safeJsonParse(storageMap.get('tsdf._m.c') ?? 'null');
     },
     storageKind: 'memory',
   });

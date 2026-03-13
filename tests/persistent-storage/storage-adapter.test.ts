@@ -176,6 +176,111 @@ describe('localStorage adapter', () => {
       `);
   });
 
+  test('single-entry metadata reads and touches avoid catalog lookups', () => {
+    const storageKey = createLocalStoragePersistentTestStore()
+      .scope('single-fast-path', 'sess1')
+      .document.seed({ value: { name: 'cached', value: 1 } });
+    const rootKey = localPersistentStorage.getRootKeyForSingle(storageKey);
+
+    expect(JSON.parse(localStorage.getItem(`${rootKey}.m`) ?? 'null'))
+      .toMatchInlineSnapshot(`
+        entries:
+          - lastAccessAt: 1735689600000
+        version: 1
+      `);
+
+    const operationCapture = startPersistentStorageOperationCapture();
+
+    const metadata = localPersistentStorage.readEntryMetadataByPayload(
+      storageKey,
+      { mode: 'single' },
+    );
+
+    expect(metadata).toHaveProperty('entryKey', undefined);
+    expect(metadata).toMatchInlineSnapshot(`
+      lastAccessAt: 1735689600000
+      payloadKey: 'tsdf.sess1.single-fast-path'
+    `);
+    expect(
+      localPersistentStorage.touchEntry(storageKey, { mode: 'single' }),
+    ).toBe(true);
+
+    const { operations: rawOperations, timelineString } =
+      operationCapture.finish();
+    const catalogReads = rawOperations.filter(
+      (operation) =>
+        operation.type === 'getItem' && operation.key === 'tsdf._m.c',
+    );
+    const manifestReads = rawOperations.filter(
+      (operation) =>
+        operation.type === 'getItem' && operation.key === `${rootKey}.m`,
+    );
+
+    expect(rawOperations).toHaveLength(4);
+    expect(timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      "
+    `);
+    expect(catalogReads).toHaveLength(0);
+    expect(manifestReads).toHaveLength(3);
+  });
+
+  test('namespace metadata reads and touches avoid catalog lookups when prefix is known', () => {
+    const storeName = 'namespace-fast-path';
+    const prefix = `tsdf.sess1.${storeName}.ci.`;
+    const storageKey = createLocalStoragePersistentTestStore()
+      .scope(storeName, 'sess1')
+      .collection.seedItem('a', { value: { id: 'a', name: 'cached' } });
+    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+
+    expect(JSON.parse(localStorage.getItem(`${rootKey}.m`) ?? 'null'))
+      .toMatchInlineSnapshot(`
+        entries:
+          - entryKey: '"a'
+            lastAccessAt: 1735689600000
+            meta: { payload: 'a' }
+        version: 1
+      `);
+
+    const operationCapture = startPersistentStorageOperationCapture();
+
+    const metadata = localPersistentStorage.readEntryMetadataByPayload(
+      storageKey,
+      { mode: 'namespace', namespacePrefix: prefix },
+    );
+
+    expect(metadata).toMatchInlineSnapshot(`
+      entryKey: '"a'
+      lastAccessAt: 1735689600000
+      meta: { payload: 'a' }
+      payloadKey: 'tsdf.sess1.namespace-fast-path.ci."a'
+    `);
+    expect(
+      localPersistentStorage.touchEntry(storageKey, {
+        mode: 'namespace',
+        namespacePrefix: prefix,
+      }),
+    ).toBe(true);
+
+    const { operations: rawOperations } = operationCapture.finish();
+    const catalogReads = rawOperations.filter(
+      (operation) =>
+        operation.type === 'getItem' && operation.key === 'tsdf._m.c',
+    );
+    const manifestReads = rawOperations.filter(
+      (operation) =>
+        operation.type === 'getItem' && operation.key === `${rootKey}.m`,
+    );
+
+    expect(catalogReads).toHaveLength(0);
+    expect(manifestReads).toHaveLength(3);
+  });
+
   test('unlocked metadata reads pick up external manifest updates instead of serving stale cached data', () => {
     const prefix = 'tsdf.sess1.external-sync.ci.';
     const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
@@ -356,15 +461,15 @@ describe('localStorage adapter', () => {
         `);
     });
 
-    const operations = operationCapture.finish();
-    const catalogReads = operations.filter(
+    const { operations: rawOperations } = operationCapture.finish();
+    const catalogReads = rawOperations.filter(
       (operation) =>
-        operation.startsWith('📖') && operation.includes('tsdf._m.c'),
+        operation.type === 'getItem' && operation.key === 'tsdf._m.c',
     );
-    const manifestReads = operations.filter(
+    const manifestReads = rawOperations.filter(
       (operation) =>
-        operation.startsWith('📖') &&
-        operation.includes('tsdf._m.r.n:sess1.nested-lock.ci.m'),
+        operation.type === 'getItem' &&
+        operation.key === 'tsdf._m.r.n:sess1.nested-lock.ci.m',
     );
 
     expect(catalogReads).toHaveLength(1);

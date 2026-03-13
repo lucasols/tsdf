@@ -61,23 +61,43 @@ function formatByteSize(byteSize: number): string {
   return `${(byteSize / 1024).toFixed(2)} kb`;
 }
 
-type PersistentStorageOperation =
+const secondsFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 3,
+});
+
+function formatTimeMs(ms: number): string {
+  if (ms === 0) return '0';
+  if (ms >= 1000) return `${secondsFormatter.format(ms / 1000)}s`;
+  return `${ms}ms`;
+}
+
+function formatRelativeTime(
+  ms: number,
+  previousMs: number | undefined,
+): string {
+  if (previousMs !== undefined && ms === previousMs) return '.';
+  return formatTimeMs(ms);
+}
+
+export type PersistentStorageOperation =
   | {
+      time: number;
       type: 'getItem';
       exists: boolean;
       key: string | null;
       valueByteSize: number | null;
     }
   | {
+      time: number;
       type: 'setItem';
       existsBefore: boolean;
       key: string;
       valueByteSizeBefore: number | null;
       valueByteSizeAfter: number;
     }
-  | { type: 'removeItem'; existsBefore: boolean; key: string }
-  | { type: 'key'; index: number; key: string | null }
-  | { type: 'clear' };
+  | { time: number; type: 'removeItem'; existsBefore: boolean; key: string }
+  | { time: number; type: 'key'; index: number; key: string | null }
+  | { time: number; type: 'clear' };
 
 function formatPersistentStorageOperation(
   operation: PersistentStorageOperation,
@@ -107,16 +127,57 @@ function formatPersistentStorageOperation(
   }
 }
 
-function getPersistentStorageOperationLog(
-  operations: PersistentStorageOperation[],
-): string[] {
-  return operations.map(formatPersistentStorageOperation);
+function formatTableString(rows: Array<{ cols: string[] }>): string {
+  if (rows.length === 0) return '';
+
+  const colWidths: number[] = [];
+  for (const { cols } of rows) {
+    for (const [index, col] of cols.entries()) {
+      colWidths[index] = Math.max(colWidths[index] ?? 0, col.length);
+    }
+  }
+
+  return rows
+    .map(({ cols }) =>
+      cols
+        .map((col, index) => col.padEnd(colWidths[index] ?? 0))
+        .join(' | ')
+        .trimEnd(),
+    )
+    .join('\n');
 }
 
-export type PersistentStorageOperationCapture = { finish: () => string[] };
+export function getPersistentStorageOperationTimelineString(
+  operations: readonly PersistentStorageOperation[],
+): string {
+  if (operations.length === 0) return 'empty';
+
+  const rows: Array<{ cols: string[] }> = [{ cols: ['time', ''] }];
+  let previousTime: number | undefined;
+
+  for (const operation of operations) {
+    rows.push({
+      cols: [
+        formatRelativeTime(operation.time, previousTime),
+        formatPersistentStorageOperation(operation),
+      ],
+    });
+    previousTime = operation.time;
+  }
+
+  return ['\n', formatTableString(rows), '\n'].join('');
+}
+
+export type PersistentStorageOperationCapture = {
+  finish: () => {
+    timelineString: string;
+    operations: readonly PersistentStorageOperation[];
+  };
+};
 
 export function startPersistentStorageOperationCapture(): PersistentStorageOperationCapture {
   const operations: PersistentStorageOperation[] = [];
+  const startedAt = Date.now();
   const originalGetItem = localStorage.getItem.bind(localStorage);
   const originalSetItem = localStorage.setItem.bind(localStorage);
   const originalRemoveItem = localStorage.removeItem.bind(localStorage);
@@ -135,6 +196,7 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
   getItemSpy.mockImplementation((key: string): string | null => {
     const value = originalGetItem(key);
     operations.push({
+      time: Date.now() - startedAt,
       type: 'getItem',
       key,
       exists: value !== null,
@@ -145,6 +207,7 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
   setItemSpy.mockImplementation((key: string, value: string): void => {
     const existingValue = originalGetItem(key);
     operations.push({
+      time: Date.now() - startedAt,
       type: 'setItem',
       key,
       existsBefore: existingValue !== null,
@@ -156,6 +219,7 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
   });
   removeItemSpy.mockImplementation((key: string): void => {
     operations.push({
+      time: Date.now() - startedAt,
       type: 'removeItem',
       key,
       existsBefore: originalGetItem(key) !== null,
@@ -164,23 +228,27 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
   });
   keySpy.mockImplementation((index: number): string | null => {
     const key = originalKey(index);
-    operations.push({ type: 'key', index, key });
+    operations.push({ time: Date.now() - startedAt, type: 'key', index, key });
     return key;
   });
   clearSpy.mockImplementation((): void => {
-    operations.push({ type: 'clear' });
+    operations.push({ time: Date.now() - startedAt, type: 'clear' });
     originalClear();
   });
 
   return {
     finish() {
-      const operationLog = getPersistentStorageOperationLog(operations);
+      const finishedOperations = [...operations];
       getItemSpy.mockRestore();
       setItemSpy.mockRestore();
       removeItemSpy.mockRestore();
       keySpy.mockRestore();
       clearSpy.mockRestore();
-      return operationLog;
+      return {
+        timelineString:
+          getPersistentStorageOperationTimelineString(finishedOperations),
+        operations: finishedOperations,
+      };
     },
   };
 }
