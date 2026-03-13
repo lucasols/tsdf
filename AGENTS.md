@@ -89,6 +89,7 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
   - `range(start, end)`: creates an array of numbers from start to end (inclusive)
   - `pick(obj, keys)`: picks specific keys from an object
 - Add comments to explain the purpose of different phases of the test, especially when using `expect` statements, to make it easier for future readers to understand the intent of the test
+- After updating snapshots automatically via `vitest --update-snapshots` or `vitest -u`, check the diff to ensure that the updates are expected and not regressions.
 
 ## General Guidelines
 
