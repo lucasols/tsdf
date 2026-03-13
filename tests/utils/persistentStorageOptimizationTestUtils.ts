@@ -48,76 +48,107 @@ function describePersistentStorageKey(key: string): string | null {
   return null;
 }
 
-type PersistentStorageReadCall = { exists: boolean; key: string | null };
+function formatPersistentStorageKey(key: string | null): string {
+  if (typeof key !== 'string') return '<non-string>';
 
-function formatReadKey(call: PersistentStorageReadCall): string {
-  if (typeof call.key !== 'string') {
-    return `${call.exists ? '✅' : '❌'} <non-string>`;
-  }
+  const description = describePersistentStorageKey(key);
+  if (description === null) return key;
 
-  const description = describePersistentStorageKey(call.key);
-  if (description === null) return `${call.exists ? '✅' : '❌'} ${call.key}`;
-
-  return `${call.exists ? '✅' : '❌'} ${call.key} (${description})`;
+  return `${key} (${description})`;
 }
 
-export type PersistentStorageReadBreakdown = {
-  metadataKeys: string[];
-  payloadKeys: string[];
-  otherKeys: string[];
-};
+type PersistentStorageOperation =
+  | { type: 'getItem'; exists: boolean; key: string | null }
+  | { type: 'setItem'; existsBefore: boolean; key: string }
+  | { type: 'removeItem'; existsBefore: boolean; key: string }
+  | { type: 'key'; index: number; key: string | null }
+  | { type: 'clear' };
 
-function getPersistentStorageReadBreakdown(
-  calls: PersistentStorageReadCall[],
-): PersistentStorageReadBreakdown {
-  const breakdown: PersistentStorageReadBreakdown = {
-    metadataKeys: [],
-    payloadKeys: [],
-    otherKeys: [],
-  };
-
-  for (const call of calls) {
-    if (typeof call.key !== 'string') continue;
-
-    if (
-      call.key.startsWith('tsdf._m.') ||
-      call.key.startsWith('tsdf.__lsm__.')
-    ) {
-      breakdown.metadataKeys.push(formatReadKey(call));
-      continue;
-    }
-
-    if (call.key.startsWith('tsdf.')) {
-      breakdown.payloadKeys.push(formatReadKey(call));
-      continue;
-    }
-
-    breakdown.otherKeys.push(formatReadKey(call));
+function formatPersistentStorageOperation(
+  operation: PersistentStorageOperation,
+): string {
+  switch (operation.type) {
+    case 'getItem':
+      return `GET ${operation.exists ? '✅' : '❌'} ${formatPersistentStorageKey(operation.key)}`;
+    case 'setItem':
+      return `SET ${operation.existsBefore ? '✅' : '❌'}->✅ ${formatPersistentStorageKey(operation.key)}`;
+    case 'removeItem':
+      return `REMOVE ${operation.existsBefore ? '✅' : '❌'}->❌ ${formatPersistentStorageKey(operation.key)}`;
+    case 'key':
+      return `KEY[${operation.index}] ${operation.key === null ? '❌' : '✅'} ${formatPersistentStorageKey(operation.key)}`;
+    case 'clear':
+      return 'CLEAR';
   }
-
-  return breakdown;
 }
 
-export type PersistentStorageReadCapture = {
-  finish: () => PersistentStorageReadBreakdown;
-};
+function getPersistentStorageOperationLog(
+  operations: PersistentStorageOperation[],
+): string[] {
+  return operations.map(formatPersistentStorageOperation);
+}
 
-export function startPersistentStorageReadCapture(): PersistentStorageReadCapture {
-  const calls: PersistentStorageReadCall[] = [];
+export type PersistentStorageOperationCapture = { finish: () => string[] };
+
+export function startPersistentStorageOperationCapture(): PersistentStorageOperationCapture {
+  const operations: PersistentStorageOperation[] = [];
   const originalGetItem = localStorage.getItem.bind(localStorage);
+  const originalSetItem = localStorage.setItem.bind(localStorage);
+  const originalRemoveItem = localStorage.removeItem.bind(localStorage);
+  const originalKey = localStorage.key.bind(localStorage);
+  const originalClear = localStorage.clear.bind(localStorage);
   const getItemSpy = vi.spyOn(localStorage, 'getItem');
+  const setItemSpy = vi.spyOn(localStorage, 'setItem');
+  const removeItemSpy = vi.spyOn(localStorage, 'removeItem');
+  const keySpy = vi.spyOn(localStorage, 'key');
+  const clearSpy = vi.spyOn(localStorage, 'clear');
   getItemSpy.mockClear();
+  setItemSpy.mockClear();
+  removeItemSpy.mockClear();
+  keySpy.mockClear();
+  clearSpy.mockClear();
   getItemSpy.mockImplementation((key: string): string | null => {
     const value = originalGetItem(key);
-    calls.push({ key, exists: value !== null });
+    operations.push({ type: 'getItem', key, exists: value !== null });
     return value;
+  });
+  setItemSpy.mockImplementation((key: string, value: string): void => {
+    operations.push({
+      type: 'setItem',
+      key,
+      existsBefore: originalGetItem(key) !== null,
+    });
+    originalSetItem(key, value);
+  });
+  removeItemSpy.mockImplementation((key: string): void => {
+    operations.push({
+      type: 'removeItem',
+      key,
+      existsBefore: originalGetItem(key) !== null,
+    });
+    originalRemoveItem(key);
+  });
+  keySpy.mockImplementation((index: number): string | null => {
+    const key = originalKey(index);
+    operations.push({ type: 'key', index, key });
+    return key;
+  });
+  clearSpy.mockImplementation((): void => {
+    operations.push({ type: 'clear' });
+    originalClear();
   });
 
   return {
     finish() {
-      const readBreakdown = getPersistentStorageReadBreakdown(calls);
+      const operationLog = getPersistentStorageOperationLog(operations);
       getItemSpy.mockRestore();
-      return readBreakdown;
+      setItemSpy.mockRestore();
+      removeItemSpy.mockRestore();
+      keySpy.mockRestore();
+      clearSpy.mockRestore();
+      return operationLog;
     },
   };
 }
+
+export const startPersistentStorageReadCapture =
+  startPersistentStorageOperationCapture;
