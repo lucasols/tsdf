@@ -58,6 +58,7 @@ import {
 } from '../utils/browserTabsSync';
 import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
+import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import {
   StoreError,
   StoreFetchError,
@@ -898,9 +899,9 @@ export function createListQueryStore<
   ): Promise<PersistentStoragePreloadResult<QueryPayload>[]> {
     const payloads = Array.isArray(payload) ? payload : [payload];
 
-    if (!persistence?.hasAsyncPreload) {
+    if (!persistence) {
       persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Async preload is not available'),
+        new Error('Persistent storage preload is not available'),
       );
       return payloads.map((queryPayload) => ({
         payload: queryPayload,
@@ -940,9 +941,9 @@ export function createListQueryStore<
   ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
     const payloads = Array.isArray(payload) ? payload : [payload];
 
-    if (!persistence?.hasAsyncPreload) {
+    if (!persistence) {
       persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Async preload is not available'),
+        new Error('Persistent storage preload is not available'),
       );
       return payloads.map((itemPayload) => ({
         payload: itemPayload,
@@ -1007,12 +1008,14 @@ export function createListQueryStore<
     getQueryKey,
     getItemKey,
     normalizeFieldsOption,
-    preloadQueries: persistence?.hasAsyncPreload
+    syncHydrationEnabled: !!persistence && !persistence.hasAsyncPreload,
+    preloadQueries: persistence
       ? (queryKeys) => persistence.preloadQueries(queryKeys)
       : undefined,
-    preloadItems: persistence?.hasAsyncPreload
+    preloadItems: persistence
       ? (itemKeys) => persistence.preloadItems(itemKeys)
       : undefined,
+    persistence,
     testInitialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
     noFetchItemFnError,
     offlineController: offlineFetchController,
@@ -1672,12 +1675,15 @@ export function createListQueryStore<
         registerActiveQueryRefs,
         touchQueries,
         getQueryState,
+        persistence?.readHydratedQuery,
         persistence
           ? (payloads) =>
               persistence.maybeHydrateQueries(
                 payloads.map((payload) => getQueryKey(payload)),
               )
           : undefined,
+        !!persistence && !persistence.hasAsyncPreload,
+        persistence?.readHydratedItem,
         scheduleAutomaticListQueryFetch,
         queryInvalidationWasTriggered,
         itemFieldInvalidationPriorities,
@@ -1689,7 +1695,15 @@ export function createListQueryStore<
       const queryItemKeys = store.useSelectorRC((state) =>
         result.map((queryResult) =>
           queryResult.queryKey
-            ? (state.queries[queryResult.queryKey]?.items ?? [])
+            ? (() => {
+                const queryEntry = readOwnMaterializedValue(
+                  state.queries,
+                  queryResult.queryKey,
+                );
+                return queryEntry.status === 'materialized'
+                  ? queryEntry.value.items
+                  : [];
+              })()
             : [],
         ),
       );
@@ -1745,7 +1759,17 @@ export function createListQueryStore<
     );
 
     const itemKeys = store.useSelectorRC((state) =>
-      result.queryKey ? (state.queries[result.queryKey]?.items ?? []) : [],
+      result.queryKey
+        ? (() => {
+            const queryEntry = readOwnMaterializedValue(
+              state.queries,
+              result.queryKey,
+            );
+            return queryEntry.status === 'materialized'
+              ? queryEntry.value.items
+              : [];
+          })()
+        : [],
     );
     const offlineEntities = useOfflineStoreEntities({
       sessionKey: getSessionKey(),
@@ -1792,6 +1816,8 @@ export function createListQueryStore<
               payloads.map((payload) => getItemKey(payload)),
             )
         : undefined,
+      !!persistence && !persistence.hasAsyncPreload,
+      persistence?.readHydratedItem,
       itemInvalidationWasTriggered,
       itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,

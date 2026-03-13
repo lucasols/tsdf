@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { assertNoEnsureIsLoadedWithDebouncePayload } from '../utils/payloadDebounce';
+import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import {
   ValidPayload,
   ValidStoreState,
@@ -171,7 +172,15 @@ export function useItem<
     }
 
     observe
-      .ifSelector((state) => state.itemQueries[result.itemStateKey]?.status)
+      .ifSelector((state) => {
+        const itemQueryEntry = readOwnMaterializedValue(
+          state.itemQueries,
+          result.itemStateKey,
+        );
+        return itemQueryEntry.status === 'materialized'
+          ? itemQueryEntry.value?.status
+          : undefined;
+      })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {
           emitIsLoadedEvt();

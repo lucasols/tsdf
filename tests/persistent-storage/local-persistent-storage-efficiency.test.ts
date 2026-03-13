@@ -1,5 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { renderHook } from '@testing-library/react';
+import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
@@ -68,6 +70,61 @@ async function settleStartupBackgroundScan(): Promise<void> {
   // Creating a local-sync persistence handle schedules the one-off global scan.
   // Drain it before capturing operation-specific traces so snapshots stay focused.
   await waitForScheduledCleanup();
+}
+
+function findCapturedOperations(
+  operations: string[],
+  fragments: string[],
+): string[] {
+  return operations.filter((operation) =>
+    fragments.some((fragment) => operation.includes(fragment)),
+  );
+}
+
+async function captureHookRemount<Result>(render: () => Result) {
+  const firstMountCapture = startPersistentStorageOperationCapture();
+  const firstHook = renderHook(render);
+  await flushAllTimers();
+  const firstMountOperations = firstMountCapture.finish();
+
+  firstHook.unmount();
+
+  const remountCapture = startPersistentStorageOperationCapture();
+  const secondHook = renderHook(render);
+  await flushAllTimers();
+  const remountOperations = remountCapture.finish();
+
+  return { secondHook, firstMountOperations, remountOperations };
+}
+
+type DocumentState = { name: string; value: number };
+
+function setCachedDocumentData(
+  storeName: string,
+  sessionKey: string,
+  data: DocumentState,
+): string {
+  return persistentStore
+    .scope(storeName, sessionKey)
+    .document.seed({ value: data });
+}
+
+function createDocumentEnv(options: {
+  storeName: string;
+  sessionKey?: string;
+  serverData?: DocumentState;
+}) {
+  return createDocumentStoreTestEnv(
+    options.serverData ?? { name: 'test', value: 42 },
+    {
+      getSessionKey: () => options.sessionKey ?? 'session1',
+      persistentStorage: {
+        storeName: options.storeName,
+        adapter: 'local-sync',
+        schema: wrappedDocumentSchema,
+      },
+    },
+  );
 }
 
 type CollectionItemState = { id: string; name: string };
@@ -374,6 +431,45 @@ describe('persistent storage efficiency', () => {
   });
 });
 
+describe('document store', () => {
+  test('document hook remount stays fully in memory after the cached document is loaded at startup', async () => {
+    const storeName = 'doc-remount-flow';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 7,
+    });
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture focuses only on hook mount behavior.
+    await settleStartupBackgroundScan();
+
+    // Document local-sync hydration happens during store initialization, so mount should not hit storage.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useDocument({
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 7 }`,
+    );
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
+      - '📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.14 kb'
+      - '📖 ✅ tsdf.sess1.doc-remount-flow (entry) | 0.20 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
+      - '📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.14 kb'
+      - '✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.14 kb -> 0.14 kb'
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+  });
+});
+
 describe('collection store', () => {
   test('expiration cleanup removes expired items through namespace metadata only', async () => {
     const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
@@ -461,13 +557,159 @@ describe('collection store', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
       - '✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c (entry) | ❌ -> 0.21 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb -> 0.46 kb'
       - '🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb -> 0.33 kb'
     `);
+  });
+
+  test('direct getItemState reads the cached collection item once and promotes it into state', async () => {
+    const storeName = 'col-direct-get-item-state';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached user' },
+    });
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture only measures the direct read path.
+    await settleStartupBackgroundScan();
+
+    const readCapture = startPersistentStorageOperationCapture();
+
+    // The first direct read should hydrate from storage and the second one should reuse state.
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached user' }
+    `);
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached user' }
+    `);
+
+    const operationsBreakdown = readCapture.finish();
+
+    expect(env.store.state[getCompositeKey('1')]?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached user' }
+    `);
+    expect(
+      operationsBreakdown.filter((operation) =>
+        operation.includes(`tsdf.${sessionKey}.${storeName}.ci."1 (entry)`),
+      ),
+    ).toMatchInlineSnapshot(`
+      ['📖 ✅ tsdf.sess1.col-direct-get-item-state.ci."1 (entry) | 0.22 kb']
+    `);
+  });
+
+  test('hook remount reuses hydrated collection state without touching localStorage again', async () => {
+    const storeName = 'col-remount-flow';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached user' },
+    });
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the UI mount path only.
+    await settleStartupBackgroundScan();
+
+    // The first mount must hydrate the cold cached item from persistence.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useItem('1', {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached user' }
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf._m.c (catalog) | 0.48 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb'
+      - '📖 ✅ tsdf.sess1.col-remount-flow.ci."1 (entry) | 0.22 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.48 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.48 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb'
+      - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.19 kb -> 0.19 kb'
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('useMultipleItems remount reuses hydrated collection items without touching localStorage again', async () => {
+    const storeName = 'col-multi-remount-flow';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached user 1' },
+    });
+    setCachedCollectionItem(storeName, sessionKey, '2', {
+      value: { id: '2', name: 'Cached user 2' },
+    });
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the hook mount path only.
+    await settleStartupBackgroundScan();
+
+    // The first mount must hydrate both cold cached items from persistence.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.map((item) => item.data?.value))
+      .toMatchInlineSnapshot(`
+        - { id: '1', name: 'Cached user 1' }
+        - { id: '2', name: 'Cached user 2' }
+      `);
+    expect(
+      findCapturedOperations(firstMountOperations, [
+        `tsdf.${sessionKey}.${storeName}.ci."1 (entry)`,
+        `tsdf.${sessionKey}.${storeName}.ci."2 (entry)`,
+      ]),
+    ).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."1 (entry) | 0.22 kb'
+      - '📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."2 (entry) | 0.22 kb'
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('getItemState stays in memory after a hook has already hydrated the collection item', async () => {
+    const storeName = 'col-get-item-state-flow';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached user' },
+    });
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Hydrate the item through a realistic UI mount first.
+    await settleStartupBackgroundScan();
+    const hook = renderHook(() =>
+      env.apiStore.useItem('1', { disableRefetchOnMount: true }),
+    );
+    await flushAllTimers();
+    hook.unmount();
+
+    // Direct imperative reads should now hit the materialized store state only.
+    const getItemStateCapture = startPersistentStorageOperationCapture();
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached user' }
+    `);
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached user' }
+    `);
+    const getItemStateOperations = getItemStateCapture.finish();
+
+    expect(getItemStateOperations).toMatchInlineSnapshot(`[]`);
   });
 });
 
@@ -570,17 +812,11 @@ describe('list query store', () => {
       - '🔑[1] ✅ tsdf._m.c (catalog)'
       - '🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)'
       - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
-      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)'
-      - '🔑[1] ✅ tsdf._m.c (catalog)'
-      - '🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)'
-      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)'
       - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry) | ❌ -> 0.23 kb'
       - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb -> 0.84 kb'
+      - '📖 ❌ tsdf.sess1.lq-query-metadata.li."third||1 (entry)'
       - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.li."third||1 (entry) | ❌ -> 0.20 kb'
       - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.49 kb -> 0.93 kb'
       - '📖 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)'
@@ -627,40 +863,347 @@ describe('list query store', () => {
 
     expect(
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
-    ).toMatchInlineSnapshot(`['"users||3']`);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
       - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (entry) | 0.25 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.li."users||1 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.li."users||2 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (entry) | 0.25 kb -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb -> 0.30 kb'
+      - '📖 ❌ tsdf.sess1.lq-item-metadata.li."users||3 (entry)'
       - '✍️ ❌->✅ tsdf.sess1.lq-item-metadata.li."users||3 (entry) | ❌ -> 0.20 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.55 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||1 (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||3 (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||2 (entry)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.21 kb'
+    `);
+  });
+
+  test('direct getQueryState hydrates the cached list query once and leaves its items in memory for later reads', async () => {
+    const storeName = 'lq-direct-get-query-state';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture only measures the direct read-through path.
+    await settleStartupBackgroundScan();
+
+    const readCapture = startPersistentStorageOperationCapture();
+
+    // Reading the query should pull both the query and its referenced item into state.
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached user'
+      `);
+
+    const operationsBreakdown = readCapture.finish();
+
+    expect(env.store.state.queries[getCompositeKey(usersQuery)])
+      .toMatchInlineSnapshot(`
+        error: null
+        hasMore: '❌'
+        items: ['"users||1']
+        payload: { tableId: 'users' }
+        refetchOnMount: 'lowPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      `);
+    expect(env.store.state.items[storeItemKey('users', 1)])
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached user'
+      `);
+    expect(
+      operationsBreakdown.filter((operation) =>
+        operation.includes(
+          `tsdf.${sessionKey}.${storeName}.lq.{tableId:"users"} (entry)`,
+        ),
+      ),
+    ).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (entry) | 0.23 kb'
+    `);
+    expect(
+      operationsBreakdown.filter((operation) =>
+        operation.includes(
+          `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
+        ),
+      ),
+    ).toMatchInlineSnapshot(
+      `['📖 ✅ tsdf.sess1.lq-direct-get-query-state.li."users||1 (entry) | 0.21 kb']`,
+    );
+  });
+
+  test('query hook remount reuses hydrated list-query state without touching localStorage again', async () => {
+    const storeName = 'lq-remount-flow';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the mounted query flow.
+    await settleStartupBackgroundScan();
+
+    // The first mount hydrates the cold query and its item from persistence.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useListQuery(usersQuery, {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.items).toMatchInlineSnapshot(`
+      - { id: 1, name: 'Cached user' }
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb'
+      - '📖 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (entry) | 0.23 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
+      - '📖 ✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
+      - '📖 ✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb'
+      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.21 kb -> 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 1.44 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb'
+      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.33 kb -> 0.33 kb'
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('item hook remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
+    const storeName = 'lq-item-remount-flow';
+    const sessionKey = 'sess1';
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the mounted item flow.
+    await settleStartupBackgroundScan();
+
+    // The first mount must hydrate the cold cached item from persistence.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useItem(rawItemPayload('users', 1), {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Cached user'
+    `);
+    expect(
+      findCapturedOperations(firstMountOperations, [
+        `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
+      ]),
+    ).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf.sess1.lq-item-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-item-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('useMultipleItems remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
+    const storeName = 'lq-multi-item-remount-flow';
+    const sessionKey = 'sess1';
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user 1',
+    });
+    setCachedItem(storeName, sessionKey, 'users', 2, {
+      id: 2,
+      name: 'Cached user 2',
+    });
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the mounted item flow.
+    await settleStartupBackgroundScan();
+
+    // The first mount must hydrate both cold cached items from persistence.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useMultipleItems(
+          [
+            { payload: rawItemPayload('users', 1) },
+            { payload: rawItemPayload('users', 2) },
+          ],
+          { disableRefetchOnMount: true, returnRefetchingStatus: true },
+        ),
+      );
+
+    expect(secondHook.result.current.map((item) => item.data))
+      .toMatchInlineSnapshot(`
+        - { id: 1, name: 'Cached user 1' }
+        - { id: 2, name: 'Cached user 2' }
+      `);
+    expect(
+      findCapturedOperations(firstMountOperations, [
+        `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
+        `tsdf.${sessionKey}.${storeName}.li."users||2 (entry)`,
+      ]),
+    ).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (entry) | 0.21 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (entry) | 0.21 kb -> 0.29 kb'
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('useMultipleListQueries remount reuses hydrated queries without touching localStorage again', async () => {
+    const storeName = 'lq-multi-query-remount-flow';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const projectsQuery = { tableId: 'projects' };
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+    setCachedItem(storeName, sessionKey, 'projects', 1, {
+      id: 1,
+      name: 'Cached project',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+    setCachedQuery(storeName, sessionKey, projectsQuery, [
+      storeItemKey('projects', 1),
+    ]);
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the mounted query flow.
+    await settleStartupBackgroundScan();
+
+    // The first mount must hydrate both cold cached queries and their items from persistence.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useMultipleListQueries(
+          [{ payload: usersQuery }, { payload: projectsQuery }],
+          { disableRefetchOnMount: true, returnRefetchingStatus: true },
+        ),
+      );
+
+    expect(
+      secondHook.result.current.map((query) =>
+        query.items.map((item) => item.name),
+      ),
+    ).toMatchInlineSnapshot(`
+      - ['Cached user']
+      - ['Cached project']
+    `);
+    expect(
+      findCapturedOperations(firstMountOperations, [
+        `tsdf.${sessionKey}.${storeName}.lq.{tableId:"users"} (entry)`,
+        `tsdf.${sessionKey}.${storeName}.lq.{tableId:"projects"} (entry)`,
+        `tsdf.${sessionKey}.${storeName}.li."users||1 (entry)`,
+        `tsdf.${sessionKey}.${storeName}.li."projects||1 (entry)`,
+      ]),
+    ).toMatchInlineSnapshot(`
+      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (entry) | 0.23 kb'
+      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (entry) | 0.24 kb'
+      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb'
+      - '📖 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (entry) | 0.21 kb -> 0.29 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (entry) | 0.22 kb -> 0.30 kb'
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('updating a hydrated list-query item writes the mutation without rereading cached entries', async () => {
+    const storeName = 'lq-mutation-flow';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Hydrate the cached query through a normal mounted component first.
+    await settleStartupBackgroundScan();
+    renderHook(() =>
+      env.apiStore.useListQuery(usersQuery, { disableRefetchOnMount: true }),
+    );
+    await flushAllTimers();
+
+    // Mutating the already-hydrated item should only need manifest reads plus writes.
+    const mutationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.apiStore.updateItemState(rawItemPayload('users', 1), (draft) => {
+        draft.name = 'Edited user';
+      });
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+    const mutationOperations = mutationCapture.finish();
+
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readItemData<Row>('users', 1),
+    ).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Edited user'
+    `);
+    expect(mutationOperations).toMatchInlineSnapshot(`
+      - '✍️ ✅->✅ tsdf.sess1.lq-mutation-flow.li."users||1 (entry) | 0.29 kb -> 0.29 kb'
       - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ❌ tsdf.sess1.lq-item-metadata.li."users||1 (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ❌ tsdf.sess1.lq-item-metadata.li."users||2 (entry)'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.21 kb'
+      - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.21 kb -> 0.21 kb'
     `);
   });
 });

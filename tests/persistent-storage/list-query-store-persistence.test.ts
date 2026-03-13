@@ -315,9 +315,9 @@ describe('localStorage: list query store persistence', () => {
       `);
     expect(env.store.state.items[storeItemKey('users', 1)])
       .toMatchInlineSnapshot(`
-      id: 1
-      name: 'Cached v1'
-    `);
+        id: 1
+        name: 'Cached v1'
+      `);
 
     // Once the cached entry is read through into state, later storage changes
     // should not silently replace the live in-memory state.
@@ -357,14 +357,14 @@ describe('localStorage: list query store persistence', () => {
     `);
     expect(env.store.state.queries[getCompositeKey(usersQuery)])
       .toMatchInlineSnapshot(`
-      error: null
-      hasMore: '❌'
-      items: ['"users||1']
-      payload: { tableId: 'users' }
-      refetchOnMount: 'lowPriority'
-      status: 'success'
-      wasLoaded: '✅'
-    `);
+        error: null
+        hasMore: '❌'
+        items: ['"users||1']
+        payload: { tableId: 'users' }
+        refetchOnMount: 'lowPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      `);
 
     // Once the cached query is read through into state, later storage changes
     // should not silently replace the live in-memory query snapshot.

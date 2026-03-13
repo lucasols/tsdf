@@ -20,11 +20,14 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
+import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
   type ListQueryUseMultipleItemsQuery,
   type PartialResourcesConfig,
+  type TSDFItemQuery,
   type TSFDListQueryState,
   type TSFDUseListItemReturn,
 } from './types';
@@ -90,6 +93,18 @@ export function useMultipleItems<
     options?: { fields?: FieldsInput },
   ) => ScheduleFetchResults,
   preloadItems: ((payloads: ItemPayload[]) => Promise<boolean[]>) | undefined,
+  preloadItemsBeforePaint: boolean,
+  readFallbackItemState:
+    | ((
+        itemKey: string,
+      ) =>
+        | {
+            item: ItemState | null | undefined;
+            itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+            loadedFields: string[] | undefined;
+          }
+        | undefined)
+    | undefined,
   itemInvalidationWasTriggered: Set<string>,
   itemFieldInvalidationPriorities: Map<string, FetchType>,
   itemPendingInvalidationFields: Map<string, string[]>,
@@ -181,11 +196,26 @@ export function useMultipleItems<
           showPartialAsRefetching,
           queryMetadata,
         }): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
-          const itemQuery = state.itemQueries[itemKey];
-          const rawItemState = state.items[itemKey];
-          const hasCachedDataInState =
-            rawItemState !== null && rawItemState !== undefined;
-          const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+          const itemQueryEntry = readOwnMaterializedValue(
+            state.itemQueries,
+            itemKey,
+          );
+          const itemEntry = readOwnMaterializedValue(state.items, itemKey);
+          const loadedFieldsEntry = readOwnMaterializedValue(
+            state.itemLoadedFields,
+            itemKey,
+          );
+          const itemQuery =
+            itemQueryEntry.status === 'materialized'
+              ? itemQueryEntry.value
+              : undefined;
+          const rawItemState =
+            itemEntry.status === 'materialized' ? itemEntry.value : undefined;
+          const hasCachedDataInState = rawItemState != null;
+          const loadedFields =
+            loadedFieldsEntry.status === 'materialized'
+              ? loadedFieldsEntry.value
+              : [];
           let itemState = rawItemState;
           let loadingFields: string[] | undefined;
 
@@ -358,14 +388,28 @@ export function useMultipleItems<
         },
       );
     },
-    [loadFromStateOnly, queriesWithId, selector, partialResources],
+    [loadFromStateOnly, partialResources, queriesWithId, selector],
   );
 
   const autoFetchSignalSelector = useCallback(
     (state: State) => {
       return queriesWithId.map(({ itemKey, fields }) => {
-        const itemQuery = state.itemQueries[itemKey];
-        const loadedFields = state.itemLoadedFields[itemKey] ?? [];
+        const itemQueryEntry = readOwnMaterializedValue(
+          state.itemQueries,
+          itemKey,
+        );
+        const loadedFieldsEntry = readOwnMaterializedValue(
+          state.itemLoadedFields,
+          itemKey,
+        );
+        const itemQuery =
+          itemQueryEntry.status === 'materialized'
+            ? itemQueryEntry.value
+            : undefined;
+        const loadedFields =
+          loadedFieldsEntry.status === 'materialized'
+            ? loadedFieldsEntry.value
+            : [];
         const missingRequestedFields =
           partialResources && Array.isArray(fields) && fields.length > 0
             ? fields.filter((field) => !loadedFields.includes(field)).sort()
@@ -384,6 +428,95 @@ export function useMultipleItems<
   const storeState = store.useSelectorRC(resultSelector, {
     equalityFn: deepEqual,
   });
+  const visibleStoreState = useMemo(() => {
+    return storeState.map(
+      (
+        result,
+        index,
+      ): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
+        const query = queriesWithId[index];
+        if (
+          result.status !== 'loading' &&
+          result.status !== 'idle' &&
+          !(result.status === 'error' && result.error?.id === cacheMissError.id)
+        ) {
+          return result;
+        }
+
+        if (loadFromStateOnly) return result;
+
+        if (query && readFallbackItemState) {
+          const fallbackItemState = readFallbackItemState(query.itemKey);
+          const fallbackLoadedFields = fallbackItemState?.loadedFields ?? [];
+          const hasAllRequestedFallbackFields =
+            !partialResources ||
+            query.fields === undefined ||
+            (Array.isArray(query.fields) &&
+              query.fields.every((field) =>
+                fallbackLoadedFields.includes(field),
+              ));
+
+          if (!hasAllRequestedFallbackFields) return result;
+
+          if (fallbackItemState?.itemQuery === null) {
+            return {
+              itemStateKey: result.itemStateKey,
+              status: 'deleted',
+              error: null,
+              isLoading: false,
+              payload: query.payload,
+              data: selector
+                ? selector(null, null)
+                : __LEGIT_CAST__<Selected, null>(null),
+              isPendingOfflineSync: false,
+              queryMetadata: result.queryMetadata,
+            };
+          }
+
+          if (
+            fallbackItemState?.itemQuery &&
+            fallbackItemState.item !== undefined &&
+            fallbackItemState.item !== null
+          ) {
+            let itemState = fallbackItemState.item;
+
+            if (
+              partialResources &&
+              Array.isArray(query.fields) &&
+              query.fields.length > 0
+            ) {
+              itemState = partialResources.selectFields(
+                query.fields,
+                itemState,
+              );
+            }
+
+            return {
+              itemStateKey: result.itemStateKey,
+              status: 'success',
+              error: null,
+              isLoading: false,
+              payload: query.payload,
+              data: selector
+                ? selector(itemState, fallbackItemState.itemQuery.payload)
+                : __LEGIT_CAST__<Selected, ItemState>(itemState),
+              isPendingOfflineSync: false,
+              queryMetadata: result.queryMetadata,
+            };
+          }
+        }
+
+        return result;
+      },
+    );
+  }, [
+    loadFromStateOnly,
+    partialResources,
+    queriesWithId,
+    readFallbackItemState,
+    selector,
+    storeState,
+  ]);
   const autoFetchSignals = store.useSelectorRC(autoFetchSignalSelector, {
     equalityFn: deepEqual,
   });
@@ -439,16 +572,40 @@ export function useMultipleItems<
 
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
+  useIsomorphicLayoutEffect(() => {
+    if (
+      loadFromStateOnly ||
+      !preloadItemsBeforePaint ||
+      !preloadItems ||
+      fetchQueriesWithId.length < 1
+    ) {
+      return;
+    }
+
+    void preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
+  }, [
+    fetchQueriesWithId,
+    loadFromStateOnly,
+    preloadItems,
+    preloadItemsBeforePaint,
+  ]);
+
   useEffect(() => {
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (preloadItems && fetchQueriesWithId.length > 0) {
+      if (loadFromStateOnly) return;
+
+      if (
+        !preloadItemsBeforePaint &&
+        preloadItems &&
+        fetchQueriesWithId.length > 0
+      ) {
         await preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
         if (effectState.cancelled) return;
       }
 
-      if (loadFromStateOnly || !fetchItemFn) return;
+      if (!fetchItemFn) return;
 
       const removedItems = new Set(ignoreItemsInRefetchOnMount);
 
@@ -550,7 +707,6 @@ export function useMultipleItems<
         ignoreItemsInRefetchOnMount.delete(itemKey);
       }
     })();
-
     return () => {
       effectState.cancelled = true;
     };
@@ -558,6 +714,7 @@ export function useMultipleItems<
     ignoreItemsInRefetchOnMount,
     loadFromStateOnly,
     preloadItems,
+    preloadItemsBeforePaint,
     fetchQueriesWithId,
     scheduleAutomaticItemFetch,
     autoFetchSignals,
@@ -568,5 +725,5 @@ export function useMultipleItems<
     store,
   ]);
 
-  return storeState;
+  return visibleStoreState;
 }

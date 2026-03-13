@@ -10,6 +10,7 @@ import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
 } from './offline/types';
+import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   convertStoreDataForPersistence,
@@ -92,89 +93,15 @@ function toCollectionItemState<
   };
 }
 
-function defineLazyLocalStorageItem<
+function materializeCollectionStateEntry<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
-  StorageState = unknown,
 >(
   state: TSFDCollectionState<ItemState, ItemPayload>,
   itemKey: string,
-  storageKey: string,
-  version: number,
-  payloadSchema: CollectionPersistentStorageConfig<
-    ItemState,
-    ItemPayload
-  >['payloadSchema'],
-  dataSchema: NormalizedPersistentStorageDataSchema<ItemState, StorageState>,
-  shouldIgnoreItem: (payload: ItemPayload) => boolean,
-  onHydrated: (
-    itemKey: string,
-    persisted: PersistedCollectionItemData<unknown>,
-  ) => void,
-): void {
-  Object.defineProperty(state, itemKey, {
-    configurable: true,
-    enumerable: false,
-    get() {
-      const cacheEntry = readStorageEntryFromLocalStorageSync<
-        PersistedCollectionItemData<unknown>
-      >(storageKey, version);
-
-      if (!cacheEntry) {
-        Object.defineProperty(state, itemKey, {
-          configurable: true,
-          enumerable: false,
-          value: undefined,
-          writable: true,
-        });
-        return undefined;
-      }
-
-      const persisted = parsePersistedCollectionItemData(
-        cacheEntry.data,
-        payloadSchema,
-      );
-      if (!persisted) {
-        scheduleLocalStorageRemoval(storageKey);
-        Object.defineProperty(state, itemKey, {
-          configurable: true,
-          enumerable: false,
-          value: undefined,
-          writable: true,
-        });
-        return undefined;
-      }
-
-      const item = toCollectionItemState(
-        persisted,
-        dataSchema,
-        shouldIgnoreItem,
-      );
-
-      if (!item) {
-        scheduleLocalStorageRemoval(storageKey);
-        Object.defineProperty(state, itemKey, {
-          configurable: true,
-          enumerable: false,
-          value: undefined,
-          writable: true,
-        });
-        return undefined;
-      }
-
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
-      onHydrated(itemKey, cacheEntry.data);
-
-      Object.defineProperty(state, itemKey, {
-        configurable: true,
-        enumerable: true,
-        value: item,
-        writable: true,
-      });
-
-      return item;
-    },
-  });
+  item: TSFDCollectionItem<ItemState, ItemPayload>,
+): TSFDCollectionState<ItemState, ItemPayload> {
+  return { ...state, [itemKey]: item };
 }
 
 export type CollectionPersistenceSetup<
@@ -187,6 +114,11 @@ export type CollectionPersistenceSetup<
   attach(store: Store<TSFDCollectionState<ItemState, ItemPayload>>): void;
   maybeHydrateItems(itemKeys: string[]): Promise<boolean[]>;
   preloadItems(itemKeys: string[]): Promise<boolean[]>;
+  getHydratedItemKeys(this: void): string[];
+  readHydratedItem(
+    this: void,
+    itemKey: string,
+  ): TSFDCollectionItem<ItemState, ItemPayload> | undefined;
   hasAsyncPreload: boolean;
   dispose(): void;
   clear(): Promise<void>;
@@ -289,6 +221,95 @@ export function setupCollectionPersistence<
     return knownPersistedKeys;
   }
 
+  function rememberHydratedItem(
+    itemKey: string,
+    persisted: PersistedCollectionItemData<unknown>,
+  ): void {
+    hydratedPersistedKeys.add(itemKey);
+    persistedSnapshotByKey.set(itemKey, JSON.stringify(persisted));
+    knownPersistedKeys?.add(itemKey);
+  }
+
+  function forgetPersistedItem(itemKey: string): void {
+    hydratedPersistedKeys.delete(itemKey);
+    persistedSnapshotByKey.delete(itemKey);
+    knownPersistedKeys?.delete(itemKey);
+  }
+
+  function parseHydratedItemSnapshot(
+    snapshot: string,
+  ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
+    try {
+      const persisted = parsePersistedCollectionItemData(
+        JSON.parse(snapshot),
+        config.payloadSchema,
+      );
+      return persisted
+        ? (toCollectionItemState(persisted, dataSchema, shouldIgnoreItem) ??
+            undefined)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function readRememberedHydratedItem(
+    itemKey: string,
+  ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
+    const snapshot = persistedSnapshotByKey.get(itemKey);
+    if (!snapshot) return undefined;
+
+    const item = parseHydratedItemSnapshot(snapshot);
+    if (!item) {
+      forgetPersistedItem(itemKey);
+    }
+
+    return item;
+  }
+
+  function readHydratedLocalStorageItem(
+    itemKey: string,
+  ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
+    if (localStorageAdapter === null) return undefined;
+
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return undefined;
+
+    const prefix = getCollectionPrefix();
+    if (prefix === false) return undefined;
+
+    const storageKey = `${prefix}${itemKey}`;
+    const cacheEntry = readStorageEntryFromLocalStorageSync<
+      PersistedCollectionItemData<unknown>
+    >(storageKey, version);
+
+    if (!cacheEntry) {
+      forgetPersistedItem(itemKey);
+      return undefined;
+    }
+
+    const persisted = parsePersistedCollectionItemData(
+      cacheEntry.data,
+      config.payloadSchema,
+    );
+    if (!persisted) {
+      scheduleLocalStorageRemoval(storageKey);
+      forgetPersistedItem(itemKey);
+      return undefined;
+    }
+
+    const item = toCollectionItemState(persisted, dataSchema, shouldIgnoreItem);
+    if (!item) {
+      scheduleLocalStorageRemoval(storageKey);
+      forgetPersistedItem(itemKey);
+      return undefined;
+    }
+
+    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
+    rememberHydratedItem(itemKey, cacheEntry.data);
+    return item;
+  }
+
   function createInitialState(
     baseState: TSFDCollectionState<ItemState, ItemPayload>,
   ): TSFDCollectionState<ItemState, ItemPayload> {
@@ -300,85 +321,41 @@ export function setupCollectionPersistence<
     const prefix = getCollectionPrefix();
     if (prefix === false) return baseState;
     syncMaintenanceRegistration();
+    return baseState;
+  }
 
-    const initialState = { ...baseState };
-
-    for (const storageKey of localStorageAdapter.listKeys(prefix)) {
-      const itemKey = storageKey.slice(prefix.length);
-      if (itemKey in initialState) continue;
-
-      defineLazyLocalStorageItem(
-        initialState,
-        itemKey,
-        storageKey,
-        version,
-        config.payloadSchema,
-        dataSchema,
-        shouldIgnoreItem,
-        (hydratedItemKey, persisted) => {
-          hydratedPersistedKeys.add(hydratedItemKey);
-          persistedSnapshotByKey.set(
-            hydratedItemKey,
-            JSON.stringify(persisted),
-          );
-        },
-      );
+  function readHydratedItem(
+    this: void,
+    itemKey: string,
+  ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
+    if (localStorageAdapter !== null) {
+      return readHydratedLocalStorageItem(itemKey);
     }
 
-    return initialState;
+    const snapshot = persistedSnapshotByKey.get(itemKey);
+    if (snapshot) return parseHydratedItemSnapshot(snapshot);
+    return undefined;
   }
 
   async function preloadItem(itemKey: string): Promise<boolean> {
     if (!storeRef) return false;
-    if (storeRef.state[itemKey] !== undefined)
-      return storeRef.state[itemKey] !== null;
+    const itemEntry = readOwnMaterializedValue(storeRef.state, itemKey);
+    if (itemEntry.status === 'materialized') {
+      return itemEntry.value !== null;
+    }
 
     if (localStorageAdapter !== null) {
-      const sessionKey = config.getSessionKey();
-      if (sessionKey === false) return false;
+      const validated =
+        readRememberedHydratedItem(itemKey) ?? readHydratedItem(itemKey);
+      if (!validated) return false;
 
-      const storageKey = `${getStoragePrefixForStoreNamespace(
-        sessionKey,
-        config.storeName,
-        COLLECTION_STORAGE_ENTRY_PREFIX,
-      )}${itemKey}`;
-      const cacheEntry = readStorageEntryFromLocalStorageSync<
-        PersistedCollectionItemData<unknown>
-      >(storageKey, version);
-
-      if (!cacheEntry) return false;
-
-      const persisted = parsePersistedCollectionItemData(
-        cacheEntry.data,
-        config.payloadSchema,
-      );
-      if (!persisted) {
-        scheduleLocalStorageRemoval(storageKey);
-        return false;
+      const currentEntry = readOwnMaterializedValue(storeRef.state, itemKey);
+      if (currentEntry.status === 'materialized') {
+        return currentEntry.value !== null;
       }
 
-      const validated = toCollectionItemState(
-        persisted,
-        dataSchema,
-        shouldIgnoreItem,
-      );
-
-      if (!validated) {
-        scheduleLocalStorageRemoval(storageKey);
-        return false;
-      }
-
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
-      hydratedPersistedKeys.add(itemKey);
-      persistedSnapshotByKey.set(itemKey, JSON.stringify(cacheEntry.data));
-
-      storeRef.produceState(
-        (draft) => {
-          if (draft[itemKey] === undefined) {
-            draft[itemKey] = validated;
-          }
-        },
-        { action: 'persistent-storage-hydrate' },
+      storeRef.setState(
+        materializeCollectionStateEntry(storeRef.state, itemKey, validated),
       );
 
       return true;
@@ -415,20 +392,19 @@ export function setupCollectionPersistence<
           return false;
         }
 
-        hydratedPersistedKeys.add(itemKey);
-        persistedSnapshotByKey.set(itemKey, JSON.stringify(cached));
+        rememberHydratedItem(itemKey, cached);
 
         if (storeRef.state[itemKey] !== undefined) {
           return storeRef.state[itemKey] !== null;
         }
 
-        storeRef.produceState(
-          (draft) => {
-            if (draft[itemKey] === undefined) {
-              draft[itemKey] = validated;
-            }
-          },
-          { action: 'persistent-storage-hydrate' },
+        const currentEntry = readOwnMaterializedValue(storeRef.state, itemKey);
+        if (currentEntry.status === 'materialized') {
+          return currentEntry.value !== null;
+        }
+
+        storeRef.setState(
+          materializeCollectionStateEntry(storeRef.state, itemKey, validated),
         );
 
         return true;
@@ -444,7 +420,6 @@ export function setupCollectionPersistence<
   }
 
   async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
-    if (localStorageAdapter !== null) return itemKeys.map(() => false);
     return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
   }
 
@@ -518,7 +493,7 @@ export function setupCollectionPersistence<
           ignoredEntries.map(({ itemKey }) => namespace.remove(itemKey)),
         );
         for (const { itemKey } of ignoredEntries) {
-          persistedSnapshotByKey.delete(itemKey);
+          forgetPersistedItem(itemKey);
         }
       }
 
@@ -556,7 +531,7 @@ export function setupCollectionPersistence<
       );
       for (const { itemKey } of filteredEntries) {
         if (!keptKeys.has(itemKey)) {
-          persistedSnapshotByKey.delete(itemKey);
+          forgetPersistedItem(itemKey);
         }
       }
 
@@ -629,7 +604,7 @@ export function setupCollectionPersistence<
         ignoredEntries.map(({ itemKey }) => namespace.remove(itemKey)),
       );
       for (const { itemKey } of ignoredEntries) {
-        persistedSnapshotByKey.delete(itemKey);
+        forgetPersistedItem(itemKey);
       }
     }
 
@@ -671,7 +646,7 @@ export function setupCollectionPersistence<
     );
     for (const { itemKey } of filteredEntries) {
       if (!keptKeys.has(itemKey)) {
-        persistedSnapshotByKey.delete(itemKey);
+        forgetPersistedItem(itemKey);
       }
     }
 
@@ -694,16 +669,30 @@ export function setupCollectionPersistence<
       const previousPersistedKeys = await ensureKnownPersistedKeys();
       const removedKeys = new Set<string>();
       syncMaintenanceRegistration();
+      const stateEntries: Array<
+        [string, TSFDCollectionItem<ItemState, ItemPayload> | null]
+      > = [];
+      for (const itemKey of Object.keys(state)) {
+        const item = state[itemKey];
+        if (item === undefined) continue;
+        stateEntries.push([itemKey, item]);
+      }
+      const knownStateKeys = new Set(stateEntries.map(([itemKey]) => itemKey));
+      for (const itemKey of hydratedPersistedKeys) {
+        if (knownStateKeys.has(itemKey)) continue;
+        const hydratedItem = readHydratedItem(itemKey);
+        if (hydratedItem === undefined) continue;
+        stateEntries.push([itemKey, hydratedItem]);
+      }
 
-      for (const [itemKey, item] of Object.entries(state)) {
+      for (const [itemKey, item] of stateEntries) {
         if (!item?.data) {
           if (
             previousPersistedKeys.has(itemKey) &&
             hydratedPersistedKeys.has(itemKey)
           ) {
             tasks.push(namespace.remove(itemKey));
-            persistedSnapshotByKey.delete(itemKey);
-            hydratedPersistedKeys.delete(itemKey);
+            forgetPersistedItem(itemKey);
             removedKeys.add(itemKey);
           }
           continue;
@@ -712,8 +701,7 @@ export function setupCollectionPersistence<
         if (shouldIgnoreItem(item.payload)) {
           if (previousPersistedKeys.has(itemKey)) {
             tasks.push(namespace.remove(itemKey));
-            persistedSnapshotByKey.delete(itemKey);
-            hydratedPersistedKeys.delete(itemKey);
+            forgetPersistedItem(itemKey);
             removedKeys.add(itemKey);
           }
           continue;
@@ -746,8 +734,7 @@ export function setupCollectionPersistence<
         if (!hydratedPersistedKeys.has(itemKey)) continue;
 
         tasks.push(namespace.remove(itemKey));
-        persistedSnapshotByKey.delete(itemKey);
-        hydratedPersistedKeys.delete(itemKey);
+        forgetPersistedItem(itemKey);
         removedKeys.add(itemKey);
       }
 
@@ -827,6 +814,8 @@ export function setupCollectionPersistence<
     attach,
     maybeHydrateItems,
     preloadItems,
+    getHydratedItemKeys: () => [...hydratedPersistedKeys],
+    readHydratedItem,
     hasAsyncPreload: localStorageAdapter === null,
     dispose,
     clear,
