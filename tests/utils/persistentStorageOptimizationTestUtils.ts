@@ -43,7 +43,7 @@ function describePersistentStorageKey(key: string): string | null {
     return 'root';
   }
 
-  if (key.startsWith('tsdf.')) return 'payload';
+  if (key.startsWith('tsdf.')) return 'entry';
 
   return null;
 }

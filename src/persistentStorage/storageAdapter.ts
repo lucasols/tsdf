@@ -20,7 +20,6 @@ import {
   registerManagedLocalStorageMaintenanceCallback,
   removeManagedLocalStoragePayload,
   runManagedLocalStorageMaintenance,
-  setManagedLocalStorageRootNeedsMaintenance,
   touchManagedLocalStoragePayload,
   unregisterManagedLocalStorageMaintenanceCallback,
   upsertManagedLocalStorageNamespaceEntry,
@@ -161,13 +160,12 @@ type LocalPersistentStorage = {
   removeEntryMetadata(payloadKey: string): boolean;
   clearRoot(rootKey: string): void;
   clearSession(sessionKey: string): void;
-  setRootNeedsMaintenance(rootKey: string, needsMaintenance: boolean): void;
   registerMaintenanceCallback(
     rootKey: string,
     callback: () => Promise<void>,
   ): void;
   unregisterMaintenanceCallback(rootKey: string): void;
-  runMaintenance(): Promise<void>;
+  runMaintenance(forceRootKeys?: Iterable<string>): Promise<void>;
   readProtectedStorageKeys(sessionKey: string): Set<string>;
 };
 
@@ -316,14 +314,6 @@ export const localPersistentStorage: LocalPersistentStorage = {
       getActiveManagedLocalStorageIo(),
     );
   },
-  setRootNeedsMaintenance(rootKey: string, needsMaintenance: boolean): void {
-    warnIfManagedLocalStorageLockUnavailable();
-    setManagedLocalStorageRootNeedsMaintenance(
-      rootKey,
-      needsMaintenance,
-      getActiveManagedLocalStorageIo(),
-    );
-  },
   registerMaintenanceCallback(
     rootKey: string,
     callback: () => Promise<void>,
@@ -335,10 +325,12 @@ export const localPersistentStorage: LocalPersistentStorage = {
     warnIfManagedLocalStorageLockUnavailable();
     unregisterManagedLocalStorageMaintenanceCallback(rootKey);
   },
-  runMaintenance(): Promise<void> {
+  runMaintenance(forceRootKeys?: Iterable<string>): Promise<void> {
     warnIfManagedLocalStorageLockUnavailable();
     return runWithManagedLocalStorageLock(() =>
-      runManagedLocalStorageMaintenance(getActiveManagedLocalStorageIo()),
+      runManagedLocalStorageMaintenance(getActiveManagedLocalStorageIo(), {
+        forceRootKeys,
+      }),
     );
   },
   readProtectedStorageKeys(sessionKey: string): Set<string> {

@@ -247,12 +247,12 @@ describe('persistent storage efficiency', () => {
     expect(localStorage.getItem(expiredDoc.document.storageKey())).toBeNull();
     expect(localStorage.getItem(freshDoc.document.storageKey())).not.toBeNull();
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.94 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.85 kb'
       - '📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.14 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.expired-doc (payload)'
+      - '🗑️ ✅->❌ tsdf.sess1.expired-doc (entry)'
       - '🗑️ ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)'
       - '📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.14 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.94 kb -> 0.98 kb'
+      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.85 kb -> 0.88 kb'
     `);
   });
 
@@ -290,10 +290,10 @@ describe('persistent storage efficiency', () => {
 
     expect(localStorage.getItem('tsdf.sess1.corrupted')).not.toBeNull();
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.93 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.83 kb'
       - '📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.14 kb'
       - '📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.14 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.93 kb -> 0.96 kb'
+      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.83 kb -> 0.87 kb'
     `);
   });
 
@@ -357,13 +357,13 @@ describe('persistent storage efficiency', () => {
       unprotectedEntryExists: '❌'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 2.19 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 1.99 kb'
       - '📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.14 kb'
       - '📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.14 kb'
-      - '🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (payload)'
+      - '🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)'
       - '🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)'
       - '📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.14 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 2.19 kb -> 2.26 kb'
+      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.99 kb -> 2.06 kb'
     `);
   });
 });
@@ -410,12 +410,11 @@ describe('collection store', () => {
       freshItemExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user (payload)'
-      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user-2 (payload)'
+      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user (entry)'
+      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user-2 (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb -> 0.22 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.58 kb -> 0.59 kb'
     `);
   });
 
@@ -451,26 +450,22 @@ describe('collection store', () => {
       ).sort(),
     ).toEqual(['b', 'c']);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
-      - '✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.collection.item."c (payload) | ❌ -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.58 kb -> 0.58 kb'
+      - '✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.collection.item."c (entry) | ❌ -> 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb -> 0.46 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.58 kb -> 0.58 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.collection.item."a (payload)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.collection.item."a (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb -> 0.33 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.58 kb -> 0.60 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.60 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
     `);
   });
 });
@@ -527,14 +522,13 @@ describe('list query store', () => {
       freshQueryExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 1.11 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 1.01 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.listQuery.item."expired-users||1 (payload)'
+      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.listQuery.item."expired-users||1 (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb -> 0.24 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.listQuery.query.{tableId:"expired-users"} (payload)'
+      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.listQuery.query.{tableId:"expired-users"} (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb -> 0.36 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.11 kb -> 1.14 kb'
     `);
   });
 
@@ -567,45 +561,39 @@ describe('list query store', () => {
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`),
     ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.56 kb'
-      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (payload)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
+      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (entry)'
       - '🔑[1] ✅ tsdf._m.c (catalog)'
       - '🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)'
-      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (payload)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.56 kb'
+      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.56 kb'
-      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (payload)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
+      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (entry)'
       - '🔑[1] ✅ tsdf._m.c (catalog)'
       - '🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)'
-      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (payload)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.56 kb'
+      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
-      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"third"} (payload) | ❌ -> 0.23 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.56 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.56 kb -> 0.56 kb'
+      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"third"} (entry) | ❌ -> 0.23 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb -> 0.84 kb'
-      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.item."third||1 (payload) | ❌ -> 0.20 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.56 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.56 kb -> 1.07 kb'
+      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.item."third||1 (entry) | ❌ -> 0.20 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
+      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.51 kb -> 0.98 kb'
       - '📖 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)'
       - '✍️ ❌->✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.98 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (payload)'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.98 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb -> 0.58 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.11 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.11 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.98 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.58 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.21 kb'
     `);
   });
 
@@ -642,57 +630,48 @@ describe('list query store', () => {
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`),
     ).toMatchInlineSnapshot(`['"users||3']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (payload) | 0.25 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (entry) | 0.25 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (payload) | 0.25 kb -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.07 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (entry) | 0.25 kb -> 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb -> 0.30 kb'
-      - '✍️ ❌->✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||3 (payload) | ❌ -> 0.20 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.07 kb'
+      - '✍️ ❌->✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||3 (entry) | ❌ -> 0.20 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.55 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload)'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload)'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.07 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.07 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.30 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 1.07 kb -> 1.10 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.10 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload)'
-      - '📖 ✅ tsdf._m.c (catalog) | 1.10 kb'
+      - '📖 ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload)'
+      - '📖 ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (entry)'
     `);
   });
 });

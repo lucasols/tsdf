@@ -610,7 +610,6 @@ describe('expiration scan', () => {
       lastCleanupAt: null
       maxAgeMs: 604800000
       mode: 'single'
-      needsMaintenance: '❌'
       sessionKey: 'sess1'
       storageKey: 'tsdf.sess1.interval-config'
       storagePrefix: null

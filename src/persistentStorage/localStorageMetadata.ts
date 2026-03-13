@@ -1,6 +1,6 @@
+import { shallowEqual } from '@ls-stack/utils/shallowEqual';
 import {
   rc_array,
-  rc_boolean,
   rc_discriminated_union,
   rc_literals,
   rc_null,
@@ -13,7 +13,6 @@ import {
   type RcInferType,
   type RcType,
 } from 'runcheck';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 
 const METADATA_VERSION = 1;
 
@@ -23,8 +22,6 @@ const ROOT_KEY_PREFIX = `${METADATA_KEY_PREFIX}r.`;
 
 export const DEFAULT_LOCAL_STORAGE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-let maintenanceScheduled = false;
-let maintenanceScheduleVersion = 0;
 const maintenanceCallbacks = new Map<string, () => Promise<void>>();
 
 export type ManagedLocalStorageIo = {
@@ -51,7 +48,6 @@ const managedLocalStorageRootSharedShape = {
   storeName: rc_string,
   cleanupIntervalMs: rc_number,
   lastCleanupAt: rc_number.orNull(),
-  needsMaintenance: rc_boolean,
   maxAgeMs: rc_number,
   protectedKeys: rc_array(rc_string).withFallback([]).optionalKey(),
 };
@@ -248,14 +244,20 @@ function upsertCatalogRoot(
   catalog: ManagedLocalStorageCatalog,
   rootKey: string,
   root: ManagedLocalStorageRoot,
-): void {
+): boolean {
   const index = findCatalogRootIndex(catalog, rootKey);
   if (index === -1) {
     catalog.roots.push(root);
-    return;
+    return true;
   }
 
+  const existingRoot = catalog.roots[index];
+  if (!existingRoot) return false;
+
+  if (shallowEqual(existingRoot, root)) return false;
+
   catalog.roots[index] = root;
+  return true;
 }
 
 function removeRootKeyFromCatalog(
@@ -288,7 +290,7 @@ function writeRoot(
   io: ManagedLocalStorageIo,
 ): void {
   const catalog = readCatalog(io);
-  upsertCatalogRoot(catalog, rootKey, root);
+  if (!upsertCatalogRoot(catalog, rootKey, root)) return;
   writeCatalog(catalog, io);
 }
 
@@ -336,7 +338,6 @@ function ensureRoot(
     storeName: params.storeName,
     cleanupIntervalMs,
     lastCleanupAt: current?.lastCleanupAt ?? null,
-    needsMaintenance: current?.needsMaintenance ?? false,
     maxAgeMs: params.maxAgeMs,
     protectedKeys: current?.protectedKeys,
   };
@@ -356,8 +357,9 @@ function ensureRoot(
           storagePrefix: params.storagePrefix,
         };
 
-  upsertCatalogRoot(catalog, rootKey, root);
-  writeCatalog(catalog, io);
+  if (upsertCatalogRoot(catalog, rootKey, root)) {
+    writeCatalog(catalog, io);
+  }
 
   return { rootKey, root };
 }
@@ -719,22 +721,6 @@ export function clearManagedLocalStorageSession(
   }
 }
 
-export function setManagedLocalStorageRootNeedsMaintenance(
-  rootKey: string,
-  needsMaintenance: boolean,
-  io: ManagedLocalStorageIo = directManagedLocalStorageIo,
-): void {
-  const root = readManagedLocalStorageRoot(rootKey, io);
-  if (!root) return;
-
-  root.needsMaintenance = needsMaintenance;
-  writeRoot(rootKey, root, io);
-
-  if (needsMaintenance) {
-    scheduleManagedLocalStorageMaintenance();
-  }
-}
-
 export function registerManagedLocalStorageMaintenanceCallback(
   rootKey: string,
   callback: () => Promise<void>,
@@ -749,7 +735,6 @@ export function unregisterManagedLocalStorageMaintenanceCallback(
 }
 
 function isMaintenanceDue(root: ManagedLocalStorageRoot): boolean {
-  if (root.needsMaintenance) return true;
   if (root.lastCleanupAt === null) return true;
   return Date.now() - root.lastCleanupAt >= root.cleanupIntervalMs;
 }
@@ -816,33 +801,19 @@ function runGenericCleanupForRoot(
   );
 }
 
-export function scheduleManagedLocalStorageMaintenance(): void {
-  if (maintenanceScheduled) return;
-
-  maintenanceScheduled = true;
-  const scheduledVersion = ++maintenanceScheduleVersion;
-  scheduleIdleCleanup(() => {
-    if (scheduledVersion !== maintenanceScheduleVersion) return;
-
-    maintenanceScheduled = false;
-    void runManagedLocalStorageMaintenance();
-  });
-}
-
 export async function runManagedLocalStorageMaintenance(
   io: ManagedLocalStorageIo = directManagedLocalStorageIo,
+  { forceRootKeys = [] }: { forceRootKeys?: Iterable<string> } = {},
 ): Promise<void> {
-  maintenanceScheduled = false;
-  maintenanceScheduleVersion++;
-
   const catalog = readCatalog(io);
   const catalogRoots = getCatalogRootEntries(catalog);
+  const forcedRootKeys = new Set(forceRootKeys);
   const protectedKeysBySession = readProtectedKeysBySession(catalogRoots);
   const invokedCallbacks = new Set<() => Promise<void>>();
   let catalogChanged = false;
 
   for (const { rootKey, root } of catalogRoots) {
-    if (!isMaintenanceDue(root)) continue;
+    if (!forcedRootKeys.has(rootKey) && !isMaintenanceDue(root)) continue;
 
     runGenericCleanupForRoot(
       rootKey,
@@ -864,14 +835,12 @@ export async function runManagedLocalStorageMaintenance(
             getManagedLocalStorageRootKeyFromRoot(candidate) === rootKey,
         ) ?? root;
       latestRoot.lastCleanupAt = Date.now();
-      latestRoot.needsMaintenance = false;
-      upsertCatalogRoot(catalog, rootKey, latestRoot);
-      catalogChanged = true;
+      catalogChanged =
+        upsertCatalogRoot(catalog, rootKey, latestRoot) || catalogChanged;
       continue;
     }
 
     root.lastCleanupAt = Date.now();
-    root.needsMaintenance = false;
     catalogChanged = true;
   }
 
@@ -891,7 +860,5 @@ export function readManagedLocalStorageProtectedKeys(
 }
 
 export function resetManagedLocalStorageState(): void {
-  maintenanceScheduled = false;
-  maintenanceScheduleVersion = 0;
   maintenanceCallbacks.clear();
 }

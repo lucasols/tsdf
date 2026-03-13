@@ -1599,11 +1599,8 @@ export function setupListQueryPersistence<
         hasIgnoreItemFilter ||
         knownPersistedItemKeys.size > maxItems ||
         knownPersistedQueryKeys.size > maxQueries;
-      for (const rootKey of maintenanceRootKeys) {
-        localStorageAdapter.setRootNeedsMaintenance(rootKey, needsMaintenance);
-      }
       if (needsMaintenance) {
-        await localStorageAdapter.runMaintenance();
+        await localStorageAdapter.runMaintenance(maintenanceRootKeys);
       }
       return;
     }

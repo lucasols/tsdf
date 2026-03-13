@@ -159,7 +159,6 @@ describe('localStorage adapter', () => {
             lastCleanupAt: null
             maxAgeMs: 60000
             mode: 'namespace'
-            needsMaintenance: '❌'
             sessionKey: 'sess1'
             storageKey: null
             storagePrefix: 'tsdf.sess1.compact-metadata.collection.item.'

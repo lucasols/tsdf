@@ -759,12 +759,8 @@ export function setupCollectionPersistence<
     if (localStorageAdapter !== null && maintenanceRootKey !== null) {
       const needsMaintenance =
         hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
-      localStorageAdapter.setRootNeedsMaintenance(
-        maintenanceRootKey,
-        needsMaintenance,
-      );
       if (needsMaintenance) {
-        await localStorageAdapter.runMaintenance();
+        await localStorageAdapter.runMaintenance([maintenanceRootKey]);
       }
       return;
     }
