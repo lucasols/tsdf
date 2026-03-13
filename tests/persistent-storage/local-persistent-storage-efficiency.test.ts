@@ -381,6 +381,11 @@ describe('collection store', () => {
       { value: { id: 'expired-user', name: 'Expired User' } },
       { timestamp: expiredTimestamp },
     );
+    const expiredItemKey2 = collectionScope.collection.seedItem(
+      'expired-user-2',
+      { value: { id: 'expired-user-2', name: 'Expired User 2' } },
+      { timestamp: expiredTimestamp },
+    );
     const freshItemKey = collectionScope.collection.seedItem('fresh-user', {
       value: { id: 'fresh-user', name: 'Fresh User' },
     });
@@ -397,16 +402,19 @@ describe('collection store', () => {
 
     expect({
       expiredItemExists: localStorage.getItem(expiredItemKey) !== null,
+      expiredItem2Exists: localStorage.getItem(expiredItemKey2) !== null,
       freshItemExists: localStorage.getItem(freshItemKey) !== null,
     }).toMatchInlineSnapshot(`
+      expiredItem2Exists: '❌'
       expiredItemExists: '❌'
       freshItemExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       - '📖 ✅ tsdf._m.c (catalog) | 0.58 kb'
-      - '📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.40 kb'
+      - '📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb'
       - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user (payload)'
-      - '✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.40 kb -> 0.22 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user-2 (payload)'
+      - '✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb -> 0.22 kb'
       - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.58 kb -> 0.59 kb'
     `);
   });
