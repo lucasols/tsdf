@@ -1,7 +1,6 @@
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { localPersistentStorage } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -20,6 +19,15 @@ import {
   getOfflineQueueEntryData,
   type UpdateValueOperations,
 } from './offlineReplayTestShared';
+
+async function waitForMicrotaskCondition(
+  condition: () => boolean,
+  maxTurns = 20,
+): Promise<void> {
+  for (let turn = 0; turn < maxTurns && !condition(); turn += 1) {
+    await Promise.resolve();
+  }
+}
 
 describe('offline replay queueing and retry behavior', () => {
   let network = createOfflineNetworkMock();
@@ -54,7 +62,7 @@ describe('offline replay queueing and retry behavior', () => {
         testScenario: 'loaded',
         persistentStorage: {
           storeName: 'offline-temp-id-collection',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offlineMode: {
@@ -110,9 +118,7 @@ describe('offline replay queueing and retry behavior', () => {
     act(() => {
       network.goOnline();
     });
-    for (let index = 0; index < 4 && resolveCreates.length === 0; index += 1) {
-      await Promise.resolve();
-    }
+    await waitForMicrotaskCondition(() => resolveCreates.length > 0);
     expect(resolveCreates).toHaveLength(1);
     resolveCreates[0]?.({ id: 'users||ada', name: 'Ada' });
     await vi.runAllTimersAsync();
@@ -152,7 +158,7 @@ describe('offline replay queueing and retry behavior', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName,
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: network.config,
@@ -302,7 +308,7 @@ describe('offline replay queueing and retry behavior', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'needs-confirmation-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: { enabled: true },
@@ -390,7 +396,7 @@ describe('offline replay queueing and retry behavior', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'needs-confirmation-no-outage-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           operations: {
@@ -445,7 +451,7 @@ describe('offline replay queueing and retry behavior', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-needs-confirmation-accumulation-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: { enabled: true },
@@ -536,7 +542,7 @@ describe('offline replay queueing and retry behavior', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'online-needs-confirmation-retry-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: network.config,
@@ -590,7 +596,7 @@ describe('offline replay queueing and retry behavior', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'replay-session-switch-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: network.config,
@@ -623,9 +629,7 @@ describe('offline replay queueing and retry behavior', () => {
     act(() => {
       network.goOnline();
     });
-    for (let index = 0; index < 4 && !resolveReplay; index += 1) {
-      await Promise.resolve();
-    }
+    await waitForMicrotaskCondition(() => resolveReplay !== undefined);
 
     expect(resolveReplay).toBeDefined();
     sessionKey = 'replay-session-b';

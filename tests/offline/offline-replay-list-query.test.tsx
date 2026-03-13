@@ -2,7 +2,6 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { localPersistentStorage } from '../../src/main';
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
@@ -67,7 +66,7 @@ describe('offline replay list-query behavior', () => {
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           storeName: 'offline-replay-mutation-payload',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
@@ -156,7 +155,7 @@ describe('offline replay list-query behavior', () => {
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
           storeName: 'offline-replay-temp-list-query',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
           queryPayloadSchema: listQueryQueryPayloadSchema,
@@ -237,10 +236,10 @@ describe('offline replay list-query behavior', () => {
     ).toMatchInlineSnapshot(`[]`);
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
-      time | query-items               | query-status |
-      0    | Ada, Grace                | success      | [query-status, query-items] ui-initialized
-      10ms | Ada, Grace                | error        | [query-status] ui-changed
-      2s   | Ada, Grace, Linus offline | error        | [query-items] ui-changed
+      time  | query-items               | query-status |
+      0     | Ada, Grace                | success      | [query-status, query-items] ui-initialized
+      10ms  | Ada, Grace                | error        | [query-status] ui-changed
+      1.01s | Ada, Grace, Linus offline | error        | [query-items] ui-changed
       "
     `);
 

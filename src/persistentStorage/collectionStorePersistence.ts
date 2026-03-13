@@ -21,18 +21,18 @@ import {
 } from './parsePersistedData';
 import {
   createPersistentStorageNamespaceHandle,
+  getLocalStorageAdapter,
   getStoragePrefixForStoreNamespace,
   readManifestPayloadMeta,
   readProtectedStorageKeys,
-  scheduleSyncStorageRemoval,
-  readStorageEntryFromSyncStorageSync,
-  refreshSyncStorageTimestamp,
+  scheduleLocalStorageRemoval,
+  readStorageEntryFromLocalStorageSync,
+  refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   CollectionPersistentStorageConfig,
   PersistedCollectionItemData,
-  SyncStorageAdapter,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
@@ -96,7 +96,6 @@ function defineLazyLocalStorageItem<
   ItemPayload extends ValidPayload,
   StorageState = unknown,
 >(
-  storageAdapter: SyncStorageAdapter,
   state: TSFDCollectionState<ItemState, ItemPayload>,
   itemKey: string,
   storageKey: string,
@@ -116,9 +115,9 @@ function defineLazyLocalStorageItem<
     configurable: true,
     enumerable: false,
     get() {
-      const cacheEntry = readStorageEntryFromSyncStorageSync<
+      const cacheEntry = readStorageEntryFromLocalStorageSync<
         PersistedCollectionItemData<unknown>
-      >(storageAdapter, storageKey, version);
+      >(storageKey, version);
 
       if (!cacheEntry) {
         Object.defineProperty(state, itemKey, {
@@ -135,7 +134,7 @@ function defineLazyLocalStorageItem<
         payloadSchema,
       );
       if (!persisted) {
-        scheduleSyncStorageRemoval(storageAdapter, storageKey);
+        scheduleLocalStorageRemoval(storageKey);
         Object.defineProperty(state, itemKey, {
           configurable: true,
           enumerable: false,
@@ -152,7 +151,7 @@ function defineLazyLocalStorageItem<
       );
 
       if (!item) {
-        scheduleSyncStorageRemoval(storageAdapter, storageKey);
+        scheduleLocalStorageRemoval(storageKey);
         Object.defineProperty(state, itemKey, {
           configurable: true,
           enumerable: false,
@@ -162,9 +161,7 @@ function defineLazyLocalStorageItem<
         return undefined;
       }
 
-      scheduleIdleCleanup(() =>
-        refreshSyncStorageTimestamp(storageAdapter, storageKey),
-      );
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
       onHydrated(itemKey, cacheEntry.data);
 
       Object.defineProperty(state, itemKey, {
@@ -224,8 +221,7 @@ export function setupCollectionPersistence<
   );
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = config.adapter;
-  const syncStorageAdapter =
-    storageAdapter.kind === 'sync' ? storageAdapter : null;
+  const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
 
@@ -266,20 +262,20 @@ export function setupCollectionPersistence<
   }
 
   function syncMaintenanceRegistration(): void {
-    if (syncStorageAdapter === null) return;
+    if (localStorageAdapter === null) return;
 
     const prefix = getCollectionPrefix();
     if (prefix === false) return;
 
-    const nextRootKey = syncStorageAdapter.getRootKeyForPrefix(prefix);
+    const nextRootKey = localStorageAdapter.getRootKeyForPrefix(prefix);
     if (maintenanceRootKey === nextRootKey) return;
 
     if (maintenanceRootKey !== null) {
-      syncStorageAdapter.unregisterMaintenanceCallback(maintenanceRootKey);
+      localStorageAdapter.unregisterMaintenanceCallback(maintenanceRootKey);
     }
 
     maintenanceRootKey = nextRootKey;
-    syncStorageAdapter.registerMaintenanceCallback(
+    localStorageAdapter.registerMaintenanceCallback(
       maintenanceRootKey,
       evictStoredItems,
     );
@@ -295,7 +291,7 @@ export function setupCollectionPersistence<
   function createInitialState(
     baseState: TSFDCollectionState<ItemState, ItemPayload>,
   ): TSFDCollectionState<ItemState, ItemPayload> {
-    if (storageAdapter.kind !== 'sync') return baseState;
+    if (localStorageAdapter === null) return baseState;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return baseState;
@@ -306,12 +302,11 @@ export function setupCollectionPersistence<
 
     const initialState = { ...baseState };
 
-    for (const storageKey of storageAdapter.listKeys(prefix)) {
+    for (const storageKey of localStorageAdapter.listKeys(prefix)) {
       const itemKey = storageKey.slice(prefix.length);
       if (itemKey in initialState) continue;
 
       defineLazyLocalStorageItem(
-        storageAdapter,
         initialState,
         itemKey,
         storageKey,
@@ -337,7 +332,7 @@ export function setupCollectionPersistence<
     if (storeRef.state[itemKey] !== undefined)
       return storeRef.state[itemKey] !== null;
 
-    if (storageAdapter.kind === 'sync') {
+    if (localStorageAdapter !== null) {
       const sessionKey = config.getSessionKey();
       if (sessionKey === false) return false;
 
@@ -346,9 +341,9 @@ export function setupCollectionPersistence<
         config.storeName,
         'collection.item',
       )}${itemKey}`;
-      const cacheEntry = readStorageEntryFromSyncStorageSync<
+      const cacheEntry = readStorageEntryFromLocalStorageSync<
         PersistedCollectionItemData<unknown>
-      >(storageAdapter, storageKey, version);
+      >(storageKey, version);
 
       if (!cacheEntry) return false;
 
@@ -357,7 +352,7 @@ export function setupCollectionPersistence<
         config.payloadSchema,
       );
       if (!persisted) {
-        scheduleSyncStorageRemoval(storageAdapter, storageKey);
+        scheduleLocalStorageRemoval(storageKey);
         return false;
       }
 
@@ -368,13 +363,11 @@ export function setupCollectionPersistence<
       );
 
       if (!validated) {
-        scheduleSyncStorageRemoval(storageAdapter, storageKey);
+        scheduleLocalStorageRemoval(storageKey);
         return false;
       }
 
-      scheduleIdleCleanup(() =>
-        refreshSyncStorageTimestamp(storageAdapter, storageKey),
-      );
+      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
       hydratedPersistedKeys.add(itemKey);
       persistedSnapshotByKey.set(itemKey, JSON.stringify(cacheEntry.data));
 
@@ -450,7 +443,7 @@ export function setupCollectionPersistence<
   }
 
   async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
-    if (storageAdapter.kind === 'sync') return itemKeys.map(() => false);
+    if (localStorageAdapter !== null) return itemKeys.map(() => false);
     return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
   }
 
@@ -473,8 +466,8 @@ export function setupCollectionPersistence<
         .map((key) => key.slice(prefix.length)),
     );
 
-    if (syncStorageAdapter !== null) {
-      const metadataEntries = syncStorageAdapter.listEntryMetadata(prefix);
+    if (localStorageAdapter !== null) {
+      const metadataEntries = localStorageAdapter.listEntryMetadata(prefix);
       if (metadataEntries.length === 0) return;
 
       if (
@@ -763,15 +756,15 @@ export function setupCollectionPersistence<
       knownPersistedKeys.add(itemKey);
     }
 
-    if (syncStorageAdapter !== null && maintenanceRootKey !== null) {
+    if (localStorageAdapter !== null && maintenanceRootKey !== null) {
       const needsMaintenance =
         hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
-      syncStorageAdapter.setRootNeedsMaintenance(
+      localStorageAdapter.setRootNeedsMaintenance(
         maintenanceRootKey,
         needsMaintenance,
       );
       if (needsMaintenance) {
-        await syncStorageAdapter.runMaintenance();
+        await localStorageAdapter.runMaintenance();
       }
       return;
     }
@@ -806,8 +799,8 @@ export function setupCollectionPersistence<
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
-    if (syncStorageAdapter !== null && maintenanceRootKey !== null) {
-      syncStorageAdapter.unregisterMaintenanceCallback(maintenanceRootKey);
+    if (localStorageAdapter !== null && maintenanceRootKey !== null) {
+      localStorageAdapter.unregisterMaintenanceCallback(maintenanceRootKey);
       maintenanceRootKey = null;
     }
     namespace.dispose();
@@ -826,7 +819,7 @@ export function setupCollectionPersistence<
     attach,
     maybeHydrateItems,
     preloadItems,
-    hasAsyncPreload: storageAdapter.kind === 'async',
+    hasAsyncPreload: localStorageAdapter === null,
     dispose,
     clear,
   };

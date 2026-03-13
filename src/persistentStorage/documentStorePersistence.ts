@@ -10,15 +10,15 @@ import {
 } from './parsePersistedData';
 import {
   createPersistentStorageHandle,
+  getLocalStorageAdapter,
   getStorageKeyForStore,
-  readStorageEntryFromSyncStorageSync,
-  refreshSyncStorageTimestamp,
+  readStorageEntryFromLocalStorageSync,
+  refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   DocumentPersistentStorageConfig,
   PersistedDocumentData,
-  SyncStorageAdapter,
 } from './types';
 
 type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
@@ -27,13 +27,12 @@ type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
   | null;
 
 function readDocumentFromLocalStorageSync(
-  adapter: SyncStorageAdapter,
   key: string,
   version: number,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
-  const entry = readStorageEntryFromSyncStorageSync<
+  const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
-  >(adapter, key, version);
+  >(key, version);
   if (!entry) return { persisted: null, foundEntry: false };
 
   const persisted = parsePersistedDocumentData(entry.data);
@@ -65,6 +64,7 @@ export function setupDocumentPersistence<
 ): DocumentPersistenceSetup<State> {
   const version = config.version ?? 1;
   const storageAdapter = config.adapter;
+  const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
   const handle = createPersistentStorageHandle<
     PersistedDocumentData<State | StorageState>
@@ -77,7 +77,7 @@ export function setupDocumentPersistence<
 
   function hydrateFromLocalStorage(): void {
     if (!storeRef) return;
-    if (storageAdapter.kind !== 'sync') return;
+    if (localStorageAdapter === null) return;
 
     const currentState = storeRef.state;
     if (currentState.status !== 'idle' || currentState.data !== null) return;
@@ -87,7 +87,6 @@ export function setupDocumentPersistence<
 
     const key = getStorageKeyForStore(sessionKey, config.storeName);
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
-      storageAdapter,
       key,
       version,
     );
@@ -105,7 +104,7 @@ export function setupDocumentPersistence<
       return;
     }
 
-    scheduleIdleCleanup(() => refreshSyncStorageTimestamp(storageAdapter, key));
+    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
 
     storeRef.setPartialState(
       { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
@@ -124,14 +123,13 @@ export function setupDocumentPersistence<
       return baseState;
     }
 
-    if (storageAdapter.kind !== 'sync') return baseState;
+    if (localStorageAdapter === null) return baseState;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return baseState;
 
     const key = getStorageKeyForStore(sessionKey, config.storeName);
     const { persisted, foundEntry } = readDocumentFromLocalStorageSync(
-      storageAdapter,
       key,
       version,
     );
@@ -149,7 +147,7 @@ export function setupDocumentPersistence<
       return baseState;
     }
 
-    scheduleIdleCleanup(() => refreshSyncStorageTimestamp(storageAdapter, key));
+    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
 
     return {
       ...baseState,
@@ -160,7 +158,7 @@ export function setupDocumentPersistence<
   }
 
   async function preloadPersistentStorage(): Promise<void> {
-    if (storageAdapter.kind === 'sync' || !storeRef) return;
+    if (localStorageAdapter !== null || !storeRef) return;
     if (preloadPromise) return preloadPromise;
 
     const currentGeneration = generation;
@@ -195,7 +193,7 @@ export function setupDocumentPersistence<
   }
 
   async function maybeHydrateFromStorage(): Promise<void> {
-    if (storageAdapter.kind === 'sync') {
+    if (localStorageAdapter !== null) {
       hydrateFromLocalStorage();
       return;
     }
@@ -246,7 +244,7 @@ export function setupDocumentPersistence<
     attach,
     maybeHydrateFromStorage,
     preloadPersistentStorage,
-    hasAsyncPreload: storageAdapter.kind === 'async',
+    hasAsyncPreload: localStorageAdapter === null,
     dispose,
     clear,
   };

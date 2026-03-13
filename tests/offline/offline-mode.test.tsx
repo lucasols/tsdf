@@ -7,7 +7,6 @@ import {
   type DocumentOfflineOperationDefinition,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
-  localPersistentStorage,
   useGlobalOfflineEntities,
   useGlobalOfflineStatus,
 } from '../../src/main';
@@ -90,7 +89,7 @@ describe('offline mode network and session', () => {
       testScenario: 'idle',
       persistentStorage: {
         storeName: 'plain-persistence-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
       },
     });
@@ -187,7 +186,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName,
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: network.config,
@@ -303,7 +302,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-owned-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: network.config,
@@ -369,7 +368,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-missing-session-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: network.config,
@@ -428,7 +427,7 @@ describe('offline mode network and session', () => {
         testScenario: 'loaded',
         persistentStorage: {
           storeName: 'offline-global-hook-doc',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
             network: network.config,
@@ -480,7 +479,7 @@ describe('offline mode network and session', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-read-cache-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: { network: network.config, operations: {} },
       },
@@ -511,7 +510,7 @@ describe('offline mode network and session', () => {
       testScenario: 'idle',
       persistentStorage: {
         storeName: 'offline-read-empty-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: { network: network.config, operations: {} },
       },
@@ -542,7 +541,7 @@ describe('offline mode network and session', () => {
       getSessionKey: () => sessionKey,
       persistentStorage: {
         storeName: 'shared-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: { network: { enabled: true }, operations: {} },
       },
@@ -554,7 +553,7 @@ describe('offline mode network and session', () => {
         getSessionKey: () => sessionKey,
         persistentStorage: {
           storeName: 'shared-collection',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
           offlineMode: { network: { enabled: true }, operations: {} },
@@ -592,7 +591,7 @@ describe('offline mode network and session', () => {
         testScenario: 'loaded',
         persistentStorage: {
           storeName,
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
             network: network.config,
