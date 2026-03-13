@@ -17,7 +17,6 @@ import type {
 } from '../../src/persistentStorage/types';
 import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
@@ -122,7 +121,7 @@ function createEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       storeName: options.storeName,
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
       version: options.version,

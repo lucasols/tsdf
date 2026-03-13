@@ -14,7 +14,6 @@ import {
 } from 'vitest';
 import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
@@ -196,7 +195,7 @@ function createEnv(options: {
     bindFocusController: options.bindFocusController,
     persistentStorage: {
       storeName: options.storeName,
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,

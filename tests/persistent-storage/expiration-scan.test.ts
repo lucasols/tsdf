@@ -14,10 +14,7 @@ import {
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../src/persistentStorage/persistentStorageManager';
-import {
-  localPersistentStorage,
-  opfsPersistentStorage,
-} from '../../src/persistentStorage/storageAdapter';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -58,6 +55,10 @@ function seedManagedDocumentRoot(args: {
   });
 }
 
+function readManagedRoot(rootKey: string) {
+  return readManagedLocalStorageRoot(rootKey);
+}
+
 beforeAll(() => {
   vi.useFakeTimers();
 });
@@ -96,7 +97,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'fresh-doc',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
         },
       },
@@ -126,7 +127,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'keep-a',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
         },
       },
@@ -156,7 +157,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'scan-once-a',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
         },
       },
@@ -180,7 +181,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'scan-once-b',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
         },
       },
@@ -213,7 +214,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess-a',
         persistentStorage: {
           storeName: 'account-a-doc',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
         },
       },
@@ -236,7 +237,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess-b',
         persistentStorage: {
           storeName: 'account-b-doc',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
         },
       },
@@ -283,7 +284,7 @@ describe('expiration scan', () => {
 
     // The managed metadata must keep the full dotted session key so cleanup
     // can match protected keys back to the correct session.
-    expect(readManagedLocalStorageRoot(protectedRootKey)?.sessionKey).toBe(
+    expect(readManagedRoot(protectedRootKey)?.sessionKey).toBe(
       dottedSessionKey,
     );
 
@@ -296,7 +297,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess-trigger',
         persistentStorage: {
           storeName: 'trigger-doc',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
         },
       },
@@ -308,8 +309,7 @@ describe('expiration scan', () => {
         localStorage.getItem(protectedDoc.document.storageKey()) !== null,
       unprotectedEntryExists:
         localStorage.getItem(unprotectedDoc.document.storageKey()) !== null,
-      protectedRootSession:
-        readManagedLocalStorageRoot(protectedRootKey)?.sessionKey,
+      protectedRootSession: readManagedRoot(protectedRootKey)?.sessionKey,
     }).toMatchInlineSnapshot(`
       protectedEntryExists: '✅'
       protectedRootSession: 'user@example.com'
@@ -376,7 +376,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'throttle-trigger',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
           cleanupIntervalMs,
         },
@@ -385,14 +385,13 @@ describe('expiration scan', () => {
 
     await waitForScheduledCleanup();
 
-    const firstCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const firstCleanupAt = readManagedRoot(triggerRootKey)?.lastCleanupAt;
 
     expect({
       staleEntryExists:
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
       triggerCleanupIntervalMs:
-        readManagedLocalStorageRoot(triggerRootKey)?.cleanupIntervalMs,
+        readManagedRoot(triggerRootKey)?.cleanupIntervalMs,
       triggerLastCleanupRecorded: firstCleanupAt != null,
     }).toMatchInlineSnapshot(`
       staleEntryExists: '❌'
@@ -417,7 +416,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'throttle-trigger',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
           cleanupIntervalMs,
         },
@@ -426,8 +425,7 @@ describe('expiration scan', () => {
 
     await waitForScheduledCleanup();
 
-    const throttledCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const throttledCleanupAt = readManagedRoot(triggerRootKey)?.lastCleanupAt;
 
     expect({
       cleanupRanAgain: throttledCleanupAt !== firstCleanupAt,
@@ -449,7 +447,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'throttle-trigger',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
           cleanupIntervalMs,
         },
@@ -458,8 +456,7 @@ describe('expiration scan', () => {
 
     await waitForScheduledCleanup();
 
-    const finalCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const finalCleanupAt = readManagedRoot(triggerRootKey)?.lastCleanupAt;
 
     expect({
       cleanupRanAgain:
@@ -504,7 +501,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'eager-trigger',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
           cleanupIntervalMs: 0,
         },
@@ -513,12 +510,10 @@ describe('expiration scan', () => {
 
     await waitForScheduledCleanup();
 
-    const firstCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const firstCleanupAt = readManagedRoot(triggerRootKey)?.lastCleanupAt;
 
     expect({
-      cleanupIntervalMs:
-        readManagedLocalStorageRoot(triggerRootKey)?.cleanupIntervalMs,
+      cleanupIntervalMs: readManagedRoot(triggerRootKey)?.cleanupIntervalMs,
       staleEntryExists:
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
       triggerLastCleanupRecorded: firstCleanupAt != null,
@@ -552,7 +547,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'eager-trigger',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
           cleanupIntervalMs: 0,
         },
@@ -561,8 +556,7 @@ describe('expiration scan', () => {
 
     await waitForScheduledCleanup();
 
-    const secondCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const secondCleanupAt = readManagedRoot(triggerRootKey)?.lastCleanupAt;
 
     expect({
       cleanupRanAgain:
@@ -586,7 +580,7 @@ describe('expiration scan', () => {
         getSessionKey: () => 'sess1',
         persistentStorage: {
           storeName: 'interval-config',
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: wrappedSchema,
           cleanupIntervalMs: 1_000,
         },
@@ -595,7 +589,7 @@ describe('expiration scan', () => {
 
     // Store initialization alone should not create managed metadata for an unused sync root.
     expect({
-      rootExistsAfterInit: readManagedLocalStorageRoot(rootKey) !== null,
+      rootExistsAfterInit: readManagedRoot(rootKey) !== null,
       rootKeyUsesManagedPrefix: rootKey.startsWith('tsdf._m.r.'),
       rootKeyUsesLegacyPrefix: rootKey.includes('__localStorageMeta__'),
     }).toMatchInlineSnapshot(`
@@ -611,7 +605,7 @@ describe('expiration scan', () => {
       lastAccessAt: Date.now(),
     });
 
-    expect(readManagedLocalStorageRoot(rootKey)).toMatchInlineSnapshot(`
+    expect(readManagedRoot(rootKey)).toMatchInlineSnapshot(`
       cleanupIntervalMs: 5000
       lastCleanupAt: null
       maxAgeMs: 604800000
@@ -643,10 +637,9 @@ describe('expiration scan', () => {
     });
 
     expect({
-      cleanupIntervalMs:
-        readManagedLocalStorageRoot(rootKey)?.cleanupIntervalMs,
-      sessionKey: readManagedLocalStorageRoot(rootKey)?.sessionKey,
-      storeName: readManagedLocalStorageRoot(rootKey)?.storeName,
+      cleanupIntervalMs: readManagedRoot(rootKey)?.cleanupIntervalMs,
+      sessionKey: readManagedRoot(rootKey)?.sessionKey,
+      storeName: readManagedRoot(rootKey)?.storeName,
     }).toMatchInlineSnapshot(`
       cleanupIntervalMs: 5000
       sessionKey: 'sess1'

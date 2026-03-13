@@ -10,7 +10,6 @@ import {
   type DefineOfflineOperation,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
-  localPersistentStorage,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
@@ -62,10 +61,6 @@ afterEach(() => {
   vi.useRealTimers();
   localStorage.clear();
 });
-
-
-
-
 
 type DirectListQueryOfflineOperations = DefineListQueryOfflineOperations<
   User,
@@ -134,7 +129,7 @@ test('direct list-query store offline public api supports the main operation hoo
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-list-query-offline',
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: userSchema,
       itemPayloadSchema: userPayloadSchema,
       queryPayloadSchema: usersQueryPayloadSchema,

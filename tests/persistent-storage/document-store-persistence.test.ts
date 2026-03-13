@@ -17,7 +17,6 @@ import {
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
@@ -94,7 +93,7 @@ function createDocPersistenceEnv(options: {
     getSessionKey,
     persistentStorage: {
       storeName: options.storeName,
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: wrappedSchema,
       version: options.version,
       onPersistentStorageError: options.onPersistentStorageError,
@@ -678,7 +677,7 @@ describe('standard schema support', () => {
       blockWindowClose: null,
       persistentStorage: {
         storeName: 'std-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: standardSchema,
       },
     });

@@ -57,9 +57,24 @@ function formatPersistentStorageKey(key: string | null): string {
   return `${key} (${description})`;
 }
 
+function formatByteSize(byteSize: number): string {
+  return `${(byteSize / 1024).toFixed(2)} kb`;
+}
+
 type PersistentStorageOperation =
-  | { type: 'getItem'; exists: boolean; key: string | null }
-  | { type: 'setItem'; existsBefore: boolean; key: string }
+  | {
+      type: 'getItem';
+      exists: boolean;
+      key: string | null;
+      valueByteSize: number | null;
+    }
+  | {
+      type: 'setItem';
+      existsBefore: boolean;
+      key: string;
+      valueByteSizeBefore: number | null;
+      valueByteSizeAfter: number;
+    }
   | { type: 'removeItem'; existsBefore: boolean; key: string }
   | { type: 'key'; index: number; key: string | null }
   | { type: 'clear' };
@@ -68,16 +83,27 @@ function formatPersistentStorageOperation(
   operation: PersistentStorageOperation,
 ): string {
   switch (operation.type) {
-    case 'getItem':
-      return `GET ${operation.exists ? '✅' : '❌'} ${formatPersistentStorageKey(operation.key)}`;
-    case 'setItem':
-      return `SET ${operation.existsBefore ? '✅' : '❌'}->✅ ${formatPersistentStorageKey(operation.key)}`;
+    case 'getItem': {
+      const base = `📖 ${operation.exists ? '✅' : '❌'} ${formatPersistentStorageKey(operation.key)}`;
+      if (operation.valueByteSize !== null) {
+        return `${base} | ${formatByteSize(operation.valueByteSize)}`;
+      }
+      return base;
+    }
+    case 'setItem': {
+      const base = `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅ ${formatPersistentStorageKey(operation.key)}`;
+      const before =
+        operation.valueByteSizeBefore !== null
+          ? formatByteSize(operation.valueByteSizeBefore)
+          : '❌';
+      return `${base} | ${before} -> ${formatByteSize(operation.valueByteSizeAfter)}`;
+    }
     case 'removeItem':
-      return `REMOVE ${operation.existsBefore ? '✅' : '❌'}->❌ ${formatPersistentStorageKey(operation.key)}`;
+      return `🗑️ ${operation.existsBefore ? '✅' : '❌'}->❌ ${formatPersistentStorageKey(operation.key)}`;
     case 'key':
-      return `KEY[${operation.index}] ${operation.key === null ? '❌' : '✅'} ${formatPersistentStorageKey(operation.key)}`;
+      return `🔑[${operation.index}] ${operation.key === null ? '❌' : '✅'} ${formatPersistentStorageKey(operation.key)}`;
     case 'clear':
-      return 'CLEAR';
+      return '🧹';
   }
 }
 
@@ -108,14 +134,23 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
   clearSpy.mockClear();
   getItemSpy.mockImplementation((key: string): string | null => {
     const value = originalGetItem(key);
-    operations.push({ type: 'getItem', key, exists: value !== null });
+    operations.push({
+      type: 'getItem',
+      key,
+      exists: value !== null,
+      valueByteSize: value !== null ? value.length * 2 : null,
+    });
     return value;
   });
   setItemSpy.mockImplementation((key: string, value: string): void => {
+    const existingValue = originalGetItem(key);
     operations.push({
       type: 'setItem',
       key,
-      existsBefore: originalGetItem(key) !== null,
+      existsBefore: existingValue !== null,
+      valueByteSizeBefore:
+        existingValue !== null ? existingValue.length * 2 : null,
+      valueByteSizeAfter: value.length * 2,
     });
     originalSetItem(key, value);
   });
