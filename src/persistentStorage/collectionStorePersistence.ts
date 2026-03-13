@@ -685,88 +685,99 @@ export function setupCollectionPersistence<
   async function flushPersistedState(): Promise<void> {
     if (!storeRef) return;
 
-    const state = storeRef.state;
-    const tasks: Promise<void>[] = [];
-    const nextPersistedKeys = new Set<string>();
-    const previousPersistedKeys = await ensureKnownPersistedKeys();
-    const removedKeys = new Set<string>();
-    syncMaintenanceRegistration();
+    async function flushState(): Promise<void> {
+      const state = storeRef?.state;
+      if (!state) return;
 
-    for (const [itemKey, item] of Object.entries(state)) {
-      if (!item?.data) {
+      const tasks: Promise<void>[] = [];
+      const nextPersistedKeys = new Set<string>();
+      const previousPersistedKeys = await ensureKnownPersistedKeys();
+      const removedKeys = new Set<string>();
+      syncMaintenanceRegistration();
+
+      for (const [itemKey, item] of Object.entries(state)) {
+        if (!item?.data) {
+          if (
+            previousPersistedKeys.has(itemKey) &&
+            hydratedPersistedKeys.has(itemKey)
+          ) {
+            tasks.push(namespace.remove(itemKey));
+            persistedSnapshotByKey.delete(itemKey);
+            hydratedPersistedKeys.delete(itemKey);
+            removedKeys.add(itemKey);
+          }
+          continue;
+        }
+
+        if (shouldIgnoreItem(item.payload)) {
+          if (previousPersistedKeys.has(itemKey)) {
+            tasks.push(namespace.remove(itemKey));
+            persistedSnapshotByKey.delete(itemKey);
+            hydratedPersistedKeys.delete(itemKey);
+            removedKeys.add(itemKey);
+          }
+          continue;
+        }
+
+        nextPersistedKeys.add(itemKey);
+        const converted = convertStoreDataForPersistence(item.data, dataSchema);
+        if (!converted.ok) {
+          config.onPersistentStorageError?.(converted.error);
+          continue;
+        }
+
+        const nextValue = { data: converted.value, payload: item.payload };
+        const nextSnapshot = JSON.stringify(nextValue);
+
         if (
-          previousPersistedKeys.has(itemKey) &&
-          hydratedPersistedKeys.has(itemKey)
+          persistedSnapshotByKey.get(itemKey) === nextSnapshot &&
+          previousPersistedKeys.has(itemKey)
         ) {
-          tasks.push(namespace.remove(itemKey));
-          persistedSnapshotByKey.delete(itemKey);
-          hydratedPersistedKeys.delete(itemKey);
-          removedKeys.add(itemKey);
+          continue;
         }
-        continue;
+
+        persistedSnapshotByKey.set(itemKey, nextSnapshot);
+        hydratedPersistedKeys.add(itemKey);
+        tasks.push(namespace.save(itemKey, nextValue));
       }
 
-      if (shouldIgnoreItem(item.payload)) {
-        if (previousPersistedKeys.has(itemKey)) {
-          tasks.push(namespace.remove(itemKey));
-          persistedSnapshotByKey.delete(itemKey);
-          hydratedPersistedKeys.delete(itemKey);
-          removedKeys.add(itemKey);
+      for (const itemKey of previousPersistedKeys) {
+        if (nextPersistedKeys.has(itemKey)) continue;
+        if (!hydratedPersistedKeys.has(itemKey)) continue;
+
+        tasks.push(namespace.remove(itemKey));
+        persistedSnapshotByKey.delete(itemKey);
+        hydratedPersistedKeys.delete(itemKey);
+        removedKeys.add(itemKey);
+      }
+
+      await Promise.all(tasks);
+      knownPersistedKeys = new Set(previousPersistedKeys);
+      for (const itemKey of removedKeys) {
+        knownPersistedKeys.delete(itemKey);
+      }
+      for (const itemKey of nextPersistedKeys) {
+        knownPersistedKeys.add(itemKey);
+      }
+
+      if (localStorageAdapter !== null && maintenanceRootKey !== null) {
+        const needsMaintenance =
+          hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
+        if (needsMaintenance) {
+          await localStorageAdapter.runMaintenance([maintenanceRootKey]);
         }
-        continue;
+        return;
       }
 
-      nextPersistedKeys.add(itemKey);
-      const converted = convertStoreDataForPersistence(item.data, dataSchema);
-      if (!converted.ok) {
-        config.onPersistentStorageError?.(converted.error);
-        continue;
-      }
-
-      const nextValue = { data: converted.value, payload: item.payload };
-      const nextSnapshot = JSON.stringify(nextValue);
-
-      if (
-        persistedSnapshotByKey.get(itemKey) === nextSnapshot &&
-        previousPersistedKeys.has(itemKey)
-      ) {
-        continue;
-      }
-
-      persistedSnapshotByKey.set(itemKey, nextSnapshot);
-      hydratedPersistedKeys.add(itemKey);
-      tasks.push(namespace.save(itemKey, nextValue));
+      await evictStoredItems();
     }
 
-    for (const itemKey of previousPersistedKeys) {
-      if (nextPersistedKeys.has(itemKey)) continue;
-      if (!hydratedPersistedKeys.has(itemKey)) continue;
-
-      tasks.push(namespace.remove(itemKey));
-      persistedSnapshotByKey.delete(itemKey);
-      hydratedPersistedKeys.delete(itemKey);
-      removedKeys.add(itemKey);
-    }
-
-    await Promise.all(tasks);
-    knownPersistedKeys = new Set(previousPersistedKeys);
-    for (const itemKey of removedKeys) {
-      knownPersistedKeys.delete(itemKey);
-    }
-    for (const itemKey of nextPersistedKeys) {
-      knownPersistedKeys.add(itemKey);
-    }
-
-    if (localStorageAdapter !== null && maintenanceRootKey !== null) {
-      const needsMaintenance =
-        hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
-      if (needsMaintenance) {
-        await localStorageAdapter.runMaintenance([maintenanceRootKey]);
-      }
+    if (localStorageAdapter !== null) {
+      await localStorageAdapter.runLocked(flushState);
       return;
     }
 
-    await evictStoredItems();
+    await flushState();
   }
 
   function schedulePersistedStateFlush(): void {

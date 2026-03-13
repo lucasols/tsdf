@@ -19,6 +19,7 @@ import {
 } from '../../src/persistentStorage/localStorageMetadata';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { startPersistentStorageOperationCapture } from '../utils/persistentStorageOptimizationTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 beforeAll(() => {
@@ -307,6 +308,67 @@ describe('localStorage adapter', () => {
             payloadKey: 'tsdf.sess1.clear-recreate.ci."b'
         `);
     });
+  });
+
+  test('nested runLocked reuses the active metadata cache', async () => {
+    const prefix = 'tsdf.sess1.nested-lock.ci.';
+
+    upsertManagedLocalStorageNamespaceEntry({
+      sessionKey: 'sess1',
+      storeName: 'nested-lock',
+      storagePrefix: prefix,
+      entryKey: '"a',
+      payloadKey: `${prefix}"a`,
+      maxAgeMs: 60_000,
+      lastAccessAt: 1,
+    });
+
+    const operationCapture = startPersistentStorageOperationCapture();
+
+    await localPersistentStorage.runLocked(async () => {
+      expect(localPersistentStorage.listEntryMetadata(prefix))
+        .toMatchInlineSnapshot(`
+          - entryKey: '"a'
+            lastAccessAt: 1
+            payloadKey: 'tsdf.sess1.nested-lock.ci."a'
+        `);
+
+      await localPersistentStorage.runLocked(() => {
+        localPersistentStorage.upsertNamespaceEntry({
+          sessionKey: 'sess1',
+          storeName: 'nested-lock',
+          storagePrefix: prefix,
+          entryKey: '"b',
+          payloadKey: `${prefix}"b`,
+          maxAgeMs: 60_000,
+          lastAccessAt: 2,
+        });
+      });
+
+      expect(localPersistentStorage.listEntryMetadata(prefix))
+        .toMatchInlineSnapshot(`
+          - entryKey: '"a'
+            lastAccessAt: 1
+            payloadKey: 'tsdf.sess1.nested-lock.ci."a'
+          - entryKey: '"b'
+            lastAccessAt: 2
+            payloadKey: 'tsdf.sess1.nested-lock.ci."b'
+        `);
+    });
+
+    const operations = operationCapture.finish();
+    const catalogReads = operations.filter(
+      (operation) =>
+        operation.startsWith('📖') && operation.includes('tsdf._m.c'),
+    );
+    const manifestReads = operations.filter(
+      (operation) =>
+        operation.startsWith('📖') &&
+        operation.includes('tsdf._m.r.n:sess1.nested-lock.ci.m'),
+    );
+
+    expect(catalogReads).toHaveLength(1);
+    expect(manifestReads).toHaveLength(1);
   });
 
   test('persistent storage config accepts the local-sync adapter sentinel', () => {

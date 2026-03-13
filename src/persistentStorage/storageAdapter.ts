@@ -121,6 +121,10 @@ function warnIfManagedLocalStorageLockUnavailable(): void {
 async function runWithManagedLocalStorageLock<T>(
   callback: () => T | Promise<T>,
 ): Promise<T> {
+  if (getManagedLocalStorageIo() !== undefined) {
+    return await callback();
+  }
+
   const lockManager = getManagedLocalStorageLockManager();
 
   if (lockManager == null) {
