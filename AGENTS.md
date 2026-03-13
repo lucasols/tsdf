@@ -109,6 +109,7 @@ This codebase is undergoing a major rewrite. Assume the current implementation i
 - **Tests are the source of truth.** Write the simplest code that satisfies them. If a test encodes a bad design, flag it instead of working around it.
 - **Be suspicious of existing code.** Actively look for unnecessary complexity, dead paths, poor naming, and over-engineering. Call out issues even outside your immediate task scope. Consider that current code is suboptimal until proven otherwise.
 - **Rewrite freely.** Large diffs are expected. Don't preserve patterns for consistency with bad code.
+- **Public API changes are allowed.** Don't hesitate to rename exports, change hook signatures, or restructure config objects if it results in a better and simpler API.
 
 ## Feature implementation
 
