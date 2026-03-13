@@ -186,6 +186,35 @@ describe('localStorage: collection store persistence', () => {
     `);
   });
 
+  test('direct cold key reads materialize state and stop consulting localStorage', () => {
+    const storeName = 'col-external-overwrite';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached v1' },
+    });
+
+    const env = createEnv({ storeName, sessionKey });
+
+    // First cold read hydrates from the persisted entry.
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
+    `);
+    expect(env.store.state[itemKey('1')]?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
+    `);
+
+    // Once the cached entry is read through into state, later storage changes
+    // should not silently replace the in-memory source of truth.
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached v2' },
+    });
+
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
+    `);
+  });
+
   test('filter-based reads stay in-memory only and do not scan cold persisted items', () => {
     setCachedCollectionItem('col-filter', 'sess1', '1', {
       value: { id: '1', name: 'Cached' },
