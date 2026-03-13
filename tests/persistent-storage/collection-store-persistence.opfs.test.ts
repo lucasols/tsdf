@@ -34,7 +34,7 @@ function itemStorageKey(
   sessionKey: string,
   payload: string,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.collection.item.${itemKey(payload)}`;
+  return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
 }
 
 type ItemState = { id: string; name: string };
@@ -122,10 +122,9 @@ describe('opfs: collection store persistence', () => {
 
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getItemState('1')).toBeUndefined();
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`
-      - 'tsdf.sess1.col-opfs-hook.collection.item."1'
-      - 'tsdf.sess1.col-opfs-hook.collection.item."2'
-    `);
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
+      `['tsdf.sess1.col-opfs-hook.ci."1', 'tsdf.sess1.col-opfs-hook.ci."2']`,
+    );
 
     const renders = createLoggerStore();
 

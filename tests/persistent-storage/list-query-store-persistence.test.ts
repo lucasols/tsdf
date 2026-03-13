@@ -78,7 +78,7 @@ function itemStorageKey(
   tableId: string,
   id: number,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.listQuery.item.${storeItemKey(tableId, id)}`;
+  return `tsdf.${sessionKey}.${storeName}.li.${storeItemKey(tableId, id)}`;
 }
 
 function queryStorageKey(
@@ -86,7 +86,7 @@ function queryStorageKey(
   sessionKey: string,
   params: ListQueryParams,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.listQuery.query.${storeQueryKey(params)}`;
+  return `tsdf.${sessionKey}.${storeName}.lq.${storeQueryKey(params)}`;
 }
 
 function setCachedItem(
@@ -1025,7 +1025,7 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`))
+    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`))
       .toMatchInlineSnapshot(`
         ['{tableId:"first"}', '{tableId:"third"}']
       `);
@@ -1074,7 +1074,7 @@ describe('localStorage: list query store persistence', () => {
     await flushAllTimers();
 
     expect(
-      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`),
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
     ).toMatchInlineSnapshot(`['"users||1', '"users||3']`);
   });
 
@@ -1103,12 +1103,10 @@ describe('localStorage: list query store persistence', () => {
 
     expect(localStorage.getItem('tsdf.sess1.lq-evict')).toBeNull();
 
-    expect(listStoredKeys('tsdf.sess1.lq-evict.listQuery.query.'))
-      .toMatchInlineSnapshot(`
+    expect(listStoredKeys('tsdf.sess1.lq-evict.lq.')).toMatchInlineSnapshot(`
         ['{tableId:"second"}']
       `);
-    expect(listStoredKeys('tsdf.sess1.lq-evict.listQuery.item.'))
-      .toMatchInlineSnapshot(`
+    expect(listStoredKeys('tsdf.sess1.lq-evict.li.')).toMatchInlineSnapshot(`
         ['"second||1']
       `);
   });
@@ -1135,9 +1133,9 @@ describe('localStorage: list query store persistence', () => {
     await flushAllTimers();
 
     expect(
-      listStoredKeys('tsdf.sess1.lq-pinned-item-only.listQuery.query.').length,
+      listStoredKeys('tsdf.sess1.lq-pinned-item-only.lq.').length,
     ).toMatchInlineSnapshot(`1`);
-    expect(listStoredKeys('tsdf.sess1.lq-pinned-item-only.listQuery.item.'))
+    expect(listStoredKeys('tsdf.sess1.lq-pinned-item-only.li.'))
       .toMatchInlineSnapshot(`
         ['"second||1']
       `);
@@ -1166,10 +1164,10 @@ describe('localStorage: list query store persistence', () => {
     await flushAllTimers();
 
     expect(
-      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`).length,
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`).length,
     ).toMatchInlineSnapshot(`25`);
     expect(
-      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`).length,
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).length,
     ).toMatchInlineSnapshot(`125`);
   });
 
@@ -1197,7 +1195,7 @@ describe('localStorage: list query store persistence', () => {
       .toMatchInlineSnapshot(`
         ['"users||1', '"users||2']
       `);
-    expect(listStoredKeys('tsdf.sess1.lq-max-query-size.listQuery.item.'))
+    expect(listStoredKeys('tsdf.sess1.lq-max-query-size.li.'))
       .toMatchInlineSnapshot(`
         ['"users||1', '"users||2']
       `);
@@ -1254,8 +1252,7 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys('tsdf.sess1.lq-ignore.listQuery.item.'))
-      .toMatchInlineSnapshot(`
+    expect(listStoredKeys('tsdf.sess1.lq-ignore.li.')).toMatchInlineSnapshot(`
         ['"users||1']
       `);
     expect(getStoredQueryItemKeys('lq-ignore', 'sess1', usersQuery))

@@ -48,9 +48,7 @@ function getOfflineQueueEntries(
 
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (!key?.startsWith(`tsdf.${sessionKey}.${storeName}.offline.queue.`)) {
-      continue;
-    }
+    if (!key?.startsWith(`tsdf.${sessionKey}.${storeName}.oq.`)) continue;
 
     const rawEntry = localStorage.getItem(key);
     if (!rawEntry) {

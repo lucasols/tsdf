@@ -121,7 +121,7 @@ function createPersistentTestStore(
     }
 
     function collectionItemStorageKey(payload: string): string {
-      return `tsdf.${sessionKey}.${storeName}.collection.item.${collectionItemKey(payload)}`;
+      return `tsdf.${sessionKey}.${storeName}.ci.${collectionItemKey(payload)}`;
     }
 
     function rawListQueryItemPayload(
@@ -139,11 +139,11 @@ function createPersistentTestStore(
       tableId: string,
       id: number | string,
     ): string {
-      return `tsdf.${sessionKey}.${storeName}.listQuery.item.${listQueryItemKey(tableId, id)}`;
+      return `tsdf.${sessionKey}.${storeName}.li.${listQueryItemKey(tableId, id)}`;
     }
 
     function listQueryStorageKey(params: unknown): string {
-      return `tsdf.${sessionKey}.${storeName}.listQuery.query.${getCompositeKey(params)}`;
+      return `tsdf.${sessionKey}.${storeName}.lq.${getCompositeKey(params)}`;
     }
 
     function normalizeQueryItemRef(item: ListQueryItemRef): string {
@@ -201,7 +201,7 @@ function createPersistentTestStore(
             upsertManagedLocalStorageNamespaceEntry({
               sessionKey,
               storeName,
-              storagePrefix: `tsdf.${sessionKey}.${storeName}.collection.item.`,
+              storagePrefix: `tsdf.${sessionKey}.${storeName}.ci.`,
               entryKey: collectionItemKey(payload),
               payloadKey: key,
               maxAgeMs: TEST_MAX_AGE_MS,
@@ -248,7 +248,7 @@ function createPersistentTestStore(
             upsertManagedLocalStorageNamespaceEntry({
               sessionKey,
               storeName,
-              storagePrefix: `tsdf.${sessionKey}.${storeName}.listQuery.item.`,
+              storagePrefix: `tsdf.${sessionKey}.${storeName}.li.`,
               entryKey: itemKey,
               payloadKey: storageKey,
               maxAgeMs: TEST_MAX_AGE_MS,
@@ -278,7 +278,7 @@ function createPersistentTestStore(
             upsertManagedLocalStorageNamespaceEntry({
               sessionKey,
               storeName,
-              storagePrefix: `tsdf.${sessionKey}.${storeName}.listQuery.query.`,
+              storagePrefix: `tsdf.${sessionKey}.${storeName}.lq.`,
               entryKey: getCompositeKey(params),
               payloadKey: key,
               maxAgeMs: TEST_MAX_AGE_MS,

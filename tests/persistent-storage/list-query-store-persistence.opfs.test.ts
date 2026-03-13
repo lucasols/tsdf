@@ -173,7 +173,7 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.scopeReadRequests().slice(0, 2)).toMatchInlineSnapshot(`
-      ['listQuery.query.{tableId:"users"}', 'listQuery.item."users||1']
+      ['lq.{tableId:"users"}', 'li."users||1']
     `);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`

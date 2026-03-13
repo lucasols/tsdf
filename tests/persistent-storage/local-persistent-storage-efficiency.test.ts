@@ -83,7 +83,7 @@ function listStoredCollectionItemPayloads(
   storeName: string,
   sessionKey: string,
 ): string[] {
-  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
   const payloads: string[] = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -410,10 +410,10 @@ describe('collection store', () => {
       freshItemExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.50 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user (entry)'
-      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.collection.item."expired-user-2 (entry)'
+      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user (entry)'
+      - '🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2 (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb -> 0.22 kb'
     `);
   });
@@ -450,21 +450,21 @@ describe('collection store', () => {
       ).sort(),
     ).toEqual(['b', 'c']);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
-      - '✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.collection.item."c (entry) | ❌ -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c (entry) | ❌ -> 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb -> 0.46 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.collection.item."a (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb -> 0.33 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.53 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.33 kb'
     `);
   });
@@ -522,12 +522,12 @@ describe('list query store', () => {
       freshQueryExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 1.01 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.96 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.listQuery.item."expired-users||1 (entry)'
+      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.li."expired-users||1 (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb -> 0.24 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.listQuery.query.{tableId:"expired-users"} (entry)'
+      - '🗑️ ✅->❌ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (entry)'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb -> 0.36 kb'
     `);
   });
@@ -558,40 +558,40 @@ describe('list query store', () => {
     const operationsBreakdown = readCapture.finish();
 
     expect(
-      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`),
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`),
     ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
-      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
+      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)'
       - '🔑[1] ✅ tsdf._m.c (catalog)'
       - '🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)'
-      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
+      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
-      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
+      - '🔑[0] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)'
       - '🔑[1] ✅ tsdf._m.c (catalog)'
       - '🔑[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)'
-      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
+      - '🔑[3] ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
-      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"third"} (entry) | ❌ -> 0.23 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
+      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry) | ❌ -> 0.23 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.56 kb -> 0.84 kb'
-      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.item."third||1 (entry) | ❌ -> 0.20 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.51 kb'
-      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.51 kb -> 0.98 kb'
+      - '✍️ ❌->✅ tsdf.sess1.lq-query-metadata.li."third||1 (entry) | ❌ -> 0.20 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.49 kb'
+      - '✍️ ✅->✅ tsdf._m.c (catalog) | 0.49 kb -> 0.93 kb'
       - '📖 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)'
       - '✍️ ❌->✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.98 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.93 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.98 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.93 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb -> 0.58 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.98 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.93 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.58 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.21 kb'
     `);
@@ -627,51 +627,51 @@ describe('list query store', () => {
     const operationsBreakdown = readCapture.finish();
 
     expect(
-      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`),
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
     ).toMatchInlineSnapshot(`['"users||3']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (entry) | 0.25 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (entry) | 0.25 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf.sess1.lq-item-metadata.li."users||1 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (entry) | 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf.sess1.lq-item-metadata.li."users||2 (entry) | 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
-      - '✍️ ✅->✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (entry) | 0.25 kb -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '✍️ ✅->✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (entry) | 0.25 kb -> 0.21 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb -> 0.30 kb'
-      - '✍️ ❌->✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||3 (entry) | ❌ -> 0.20 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '✍️ ❌->✅ tsdf.sess1.lq-item-metadata.li."users||3 (entry) | ❌ -> 0.20 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.55 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||1 (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb'
-      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||2 (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb'
       - '✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.38 kb -> 0.21 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.30 kb'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (entry)'
-      - '📖 ✅ tsdf._m.c (catalog) | 0.97 kb'
+      - '📖 ❌ tsdf.sess1.lq-item-metadata.li."users||1 (entry)'
+      - '📖 ✅ tsdf._m.c (catalog) | 0.92 kb'
       - '📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.21 kb'
-      - '📖 ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (entry)'
+      - '📖 ❌ tsdf.sess1.lq-item-metadata.li."users||2 (entry)'
     `);
   });
 });

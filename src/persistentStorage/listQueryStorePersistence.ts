@@ -39,6 +39,10 @@ import {
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import {
+  LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+  LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+} from './storageEntryPrefixes';
 import type {
   ListQueryPersistentStorageConfig,
   PersistedListQueryData,
@@ -471,12 +475,15 @@ export function setupListQueryPersistence<
   const itemNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryItemData<ItemState | StorageState>
   >(
-    { ...persistentConfig, entryPrefix: 'listQuery.item' },
+    { ...persistentConfig, entryPrefix: LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX },
     { getManifestMeta: (data) => ({ payload: data.payload }) },
   );
   const queryNamespace =
     createPersistentStorageNamespaceHandle<PersistedListQueryData>(
-      { ...persistentConfig, entryPrefix: 'listQuery.query' },
+      {
+        ...persistentConfig,
+        entryPrefix: LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+      },
       {
         getManifestMeta: (data) => ({
           payload: data.payload,
@@ -514,7 +521,7 @@ export function setupListQueryPersistence<
     return getStoragePrefixForStoreNamespace(
       sessionKey,
       config.storeName,
-      'listQuery.item',
+      LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
     );
   }
 
@@ -525,7 +532,7 @@ export function setupListQueryPersistence<
     return getStoragePrefixForStoreNamespace(
       sessionKey,
       config.storeName,
-      'listQuery.query',
+      LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
     );
   }
 
@@ -658,7 +665,7 @@ export function setupListQueryPersistence<
       const storageKey = `${getStoragePrefixForStoreNamespace(
         sessionKey,
         config.storeName,
-        'listQuery.item',
+        LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
       )}${itemKey}`;
       const cacheEntry = readStorageEntryFromLocalStorageSync<
         PersistedListQueryItemData<unknown>
@@ -776,7 +783,7 @@ export function setupListQueryPersistence<
       const storageKey = `${getStoragePrefixForStoreNamespace(
         sessionKey,
         config.storeName,
-        'listQuery.query',
+        LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
       )}${queryKey}`;
       const cacheEntry =
         readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
@@ -938,7 +945,7 @@ export function setupListQueryPersistence<
         : getStoragePrefixForStoreNamespace(
             sessionKey,
             config.storeName,
-            'listQuery.query',
+            LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
           );
     const protectedQueryKeys =
       queryPrefix === null
@@ -1121,7 +1128,7 @@ export function setupListQueryPersistence<
         : getStoragePrefixForStoreNamespace(
             sessionKey,
             config.storeName,
-            'listQuery.item',
+            LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
           );
     const queryPrefix = getQueryPrefix();
     const protectedItemKeys =

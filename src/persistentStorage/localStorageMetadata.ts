@@ -115,12 +115,12 @@ function normalizeRootIdentityValue(value: string): string {
 }
 
 const COMPRESSED_NAMESPACE_ROOT_SUFFIXES = [
-  ['.collection.item.', '.ci'],
-  ['.listQuery.item.', '.li'],
-  ['.listQuery.query.', '.lq'],
-  ['.offline.queue.', '.oq'],
-  ['.offline.conflict.', '.oc'],
-  ['.offline.entity.', '.oe'],
+  ['.ci.', '.ci'],
+  ['.li.', '.li'],
+  ['.lq.', '.lq'],
+  ['.oq.', '.oq'],
+  ['.oc.', '.oc'],
+  ['.oe.', '.oe'],
 ] as const;
 
 function compactNamespaceRootIdentityValue(storagePrefix: string): string {

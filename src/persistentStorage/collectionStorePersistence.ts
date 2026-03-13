@@ -30,6 +30,7 @@ import {
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
+import { COLLECTION_STORAGE_ENTRY_PREFIX } from './storageEntryPrefixes';
 import type {
   CollectionPersistentStorageConfig,
   PersistedCollectionItemData,
@@ -228,7 +229,7 @@ export function setupCollectionPersistence<
   const namespace = createPersistentStorageNamespaceHandle<
     PersistedCollectionItemData<ItemState | StorageState>
   >(
-    { ...persistentConfig, entryPrefix: 'collection.item' },
+    { ...persistentConfig, entryPrefix: COLLECTION_STORAGE_ENTRY_PREFIX },
     { getManifestMeta: (data) => ({ payload: data.payload }) },
   );
 
@@ -257,7 +258,7 @@ export function setupCollectionPersistence<
     return getStoragePrefixForStoreNamespace(
       sessionKey,
       config.storeName,
-      'collection.item',
+      COLLECTION_STORAGE_ENTRY_PREFIX,
     );
   }
 
@@ -339,7 +340,7 @@ export function setupCollectionPersistence<
       const storageKey = `${getStoragePrefixForStoreNamespace(
         sessionKey,
         config.storeName,
-        'collection.item',
+        COLLECTION_STORAGE_ENTRY_PREFIX,
       )}${itemKey}`;
       const cacheEntry = readStorageEntryFromLocalStorageSync<
         PersistedCollectionItemData<unknown>

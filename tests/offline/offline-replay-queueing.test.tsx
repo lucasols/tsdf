@@ -620,9 +620,7 @@ describe('offline replay queueing and retry behavior', () => {
 
     expect(
       getLocalStorageKeys().filter((key) =>
-        key.startsWith(
-          'tsdf.replay-session-a.replay-session-switch-doc.offline.queue.',
-        ),
+        key.startsWith('tsdf.replay-session-a.replay-session-switch-doc.oq.'),
       ),
     ).toHaveLength(1);
 
@@ -638,9 +636,7 @@ describe('offline replay queueing and retry behavior', () => {
 
     expect(
       getLocalStorageKeys().filter((key) =>
-        key.startsWith(
-          'tsdf.replay-session-a.replay-session-switch-doc.offline.queue.',
-        ),
+        key.startsWith('tsdf.replay-session-a.replay-session-switch-doc.oq.'),
       ),
     ).toMatchInlineSnapshot(`[]`);
   });

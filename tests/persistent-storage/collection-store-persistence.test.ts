@@ -41,7 +41,7 @@ function itemStorageKey(
   sessionKey: string,
   payload: string,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.collection.item.${itemKey(payload)}`;
+  return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
 }
 
 type ItemState = { id: string; name: string };
@@ -62,7 +62,7 @@ function setCachedCollectionItem(
 }
 
 function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
-  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
   const keys: string[] = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -79,7 +79,7 @@ function listStoredItemPayloads(
   storeName: string,
   sessionKey: string,
 ): string[] {
-  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
   const payloads: string[] = [];
 
   for (let i = 0; i < localStorage.length; i++) {

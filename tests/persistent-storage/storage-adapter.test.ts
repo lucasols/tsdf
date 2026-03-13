@@ -136,7 +136,7 @@ describe('localStorage adapter', () => {
   });
 
   test('namespace metadata is stored without redundant root and payload keys', () => {
-    const prefix = 'tsdf.sess1.compact-metadata.collection.item.';
+    const prefix = 'tsdf.sess1.compact-metadata.ci.';
     const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
 
     upsertManagedLocalStorageNamespaceEntry({
@@ -161,7 +161,7 @@ describe('localStorage adapter', () => {
             mode: 'namespace'
             sessionKey: 'sess1'
             storageKey: null
-            storagePrefix: 'tsdf.sess1.compact-metadata.collection.item.'
+            storagePrefix: 'tsdf.sess1.compact-metadata.ci.'
             storeName: 'compact-metadata'
             version: 1
         version: 1
@@ -176,7 +176,7 @@ describe('localStorage adapter', () => {
   });
 
   test('unlocked metadata reads pick up external manifest updates instead of serving stale cached data', () => {
-    const prefix = 'tsdf.sess1.external-sync.collection.item.';
+    const prefix = 'tsdf.sess1.external-sync.ci.';
     const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
     const manifestKey = `${rootKey}.m`;
 
@@ -196,7 +196,7 @@ describe('localStorage adapter', () => {
       .toMatchInlineSnapshot(`
         - entryKey: '"a'
           lastAccessAt: 1
-          payloadKey: 'tsdf.sess1.external-sync.collection.item."a'
+          payloadKey: 'tsdf.sess1.external-sync.ci."a'
       `);
 
     // Simulate another tab rewriting the manifest directly in localStorage.
@@ -212,12 +212,12 @@ describe('localStorage adapter', () => {
       .toMatchInlineSnapshot(`
         - entryKey: '"b'
           lastAccessAt: 2
-          payloadKey: 'tsdf.sess1.external-sync.collection.item."b'
+          payloadKey: 'tsdf.sess1.external-sync.ci."b'
       `);
   });
 
   test('locked metadata cache stays coherent across awaits until the lock is released', async () => {
-    const prefix = 'tsdf.sess1.awaited-lock.collection.item.';
+    const prefix = 'tsdf.sess1.awaited-lock.ci.';
     const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
     const manifestKey = `${rootKey}.m`;
 
@@ -236,7 +236,7 @@ describe('localStorage adapter', () => {
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
-            payloadKey: 'tsdf.sess1.awaited-lock.collection.item."a'
+            payloadKey: 'tsdf.sess1.awaited-lock.ci."a'
         `);
 
       await Promise.resolve();
@@ -254,7 +254,7 @@ describe('localStorage adapter', () => {
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
-            payloadKey: 'tsdf.sess1.awaited-lock.collection.item."a'
+            payloadKey: 'tsdf.sess1.awaited-lock.ci."a'
         `);
     });
 
@@ -262,12 +262,12 @@ describe('localStorage adapter', () => {
       .toMatchInlineSnapshot(`
         - entryKey: '"b'
           lastAccessAt: 2
-          payloadKey: 'tsdf.sess1.awaited-lock.collection.item."b'
+          payloadKey: 'tsdf.sess1.awaited-lock.ci."b'
       `);
   });
 
   test('locked metadata cache invalidates a cleared root before recreating it', async () => {
-    const prefix = 'tsdf.sess1.clear-recreate.collection.item.';
+    const prefix = 'tsdf.sess1.clear-recreate.ci.';
     const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
 
     upsertManagedLocalStorageNamespaceEntry({
@@ -286,7 +286,7 @@ describe('localStorage adapter', () => {
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
-            payloadKey: 'tsdf.sess1.clear-recreate.collection.item."a'
+            payloadKey: 'tsdf.sess1.clear-recreate.ci."a'
         `);
 
       localPersistentStorage.clearRoot(rootKey);
@@ -304,7 +304,7 @@ describe('localStorage adapter', () => {
         .toMatchInlineSnapshot(`
           - entryKey: '"b'
             lastAccessAt: 2
-            payloadKey: 'tsdf.sess1.clear-recreate.collection.item."b'
+            payloadKey: 'tsdf.sess1.clear-recreate.ci."b'
         `);
     });
   });

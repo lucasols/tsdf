@@ -2,6 +2,11 @@ import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { ValidPayload } from '../../utils/storeShared';
 import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
+import {
+  OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+  OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+  OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+} from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
 import { validateWithSchema } from '../validateWithSchema';
 import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
@@ -245,7 +250,7 @@ export function createOfflineStoreController<
         adapter: resolvedAdapter,
         getSessionKey: () => sessionKey,
         onPersistentStorageError,
-        entryPrefix: 'offline.queue',
+        entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
       });
     const conflictNamespace =
       createPersistentStorageNamespaceHandle<OfflineConflictRecord>({
@@ -253,7 +258,7 @@ export function createOfflineStoreController<
         adapter: resolvedAdapter,
         getSessionKey: () => sessionKey,
         onPersistentStorageError,
-        entryPrefix: 'offline.conflict',
+        entryPrefix: OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
       });
     const entityNamespace =
       createPersistentStorageNamespaceHandle<GlobalOfflineEntity>({
@@ -261,7 +266,7 @@ export function createOfflineStoreController<
         adapter: resolvedAdapter,
         getSessionKey: () => sessionKey,
         onPersistentStorageError,
-        entryPrefix: 'offline.entity',
+        entryPrefix: OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
       });
 
     const unregister = session.registerStore({
