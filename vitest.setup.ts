@@ -25,12 +25,14 @@ expect.addSnapshotSerializer({
 const originalConsoleError = console.error;
 
 console.error = (...args) => {
-  if (
-    args.length > 0 &&
-    typeof args[0] === 'string' &&
-    args[0].includes('was not wrapped in act')
-  ) {
-    throw new Error(format(...args));
+  if (args.length > 0 && typeof args[0] === 'string') {
+    const errorMsg = args[0];
+    if (
+      errorMsg.includes('was not wrapped in act') ||
+      errorMsg.includes('Maximum update depth exceeded')
+    ) {
+      throw new Error(format(...args));
+    }
   }
   originalConsoleError(...args);
 };
