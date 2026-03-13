@@ -32,7 +32,7 @@ import {
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import { startPersistentStorageReadCapture } from '../utils/persistentStorageOptimizationTestUtils';
+import { startPersistentStorageOperationCapture } from '../utils/persistentStorageOptimizationTestUtils';
 import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const wrappedDocumentSchema = rc_object({
@@ -221,7 +221,7 @@ describe('persistent storage efficiency', () => {
     );
     freshDoc.document.seed({ value: { name: 'fresh', value: 2 } });
 
-    const startupReadCapture = startPersistentStorageReadCapture();
+    const startupReadCapture = startPersistentStorageOperationCapture();
     createDocumentStoreTestEnv(
       { name: 'fresh', value: 2 },
       {
@@ -235,25 +235,21 @@ describe('persistent storage efficiency', () => {
     );
     const startupReadBreakdown = startupReadCapture.finish();
 
-    expect(startupReadBreakdown).toMatchInlineSnapshot(`
-      metadataKeys: []
-      otherKeys: []
-      payloadKeys: []
-    `);
+    expect(startupReadBreakdown).toMatchInlineSnapshot(`[]`);
 
-    const readCapture = startPersistentStorageReadCapture();
+    const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
     const readBreakdown = readCapture.finish();
 
     expect(localStorage.getItem(expiredDoc.document.storageKey())).toBeNull();
     expect(localStorage.getItem(freshDoc.document.storageKey())).not.toBeNull();
     expect(readBreakdown).toMatchInlineSnapshot(`
-      metadataKeys:
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)'
-        - '✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest)'
-      otherKeys: []
-      payloadKeys: []
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)'
+      - 'REMOVE ✅->❌ tsdf.sess1.expired-doc (payload)'
+      - 'REMOVE ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)'
+      - 'GET ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
     `);
   });
 
@@ -285,18 +281,16 @@ describe('persistent storage efficiency', () => {
       },
     );
 
-    const readCapture = startPersistentStorageReadCapture();
+    const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
     const readBreakdown = readCapture.finish();
 
     expect(localStorage.getItem('tsdf.sess1.corrupted')).not.toBeNull();
     expect(readBreakdown).toMatchInlineSnapshot(`
-      metadataKeys:
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)'
-        - '✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest)'
-      otherKeys: []
-      payloadKeys: []
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)'
+      - 'GET ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
     `);
   });
 
@@ -344,7 +338,7 @@ describe('persistent storage efficiency', () => {
       },
     );
 
-    const readCapture = startPersistentStorageReadCapture();
+    const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup();
     const readBreakdown = readCapture.finish();
 
@@ -361,13 +355,13 @@ describe('persistent storage efficiency', () => {
       unprotectedEntryExists: '❌'
     `);
     expect(readBreakdown).toMatchInlineSnapshot(`
-      metadataKeys:
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest)'
-        - '✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)'
-        - '✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)'
-      otherKeys: []
-      payloadKeys: []
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest)'
+      - 'GET ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)'
+      - 'REMOVE ✅->❌ tsdf.user@example.com.unprotected-doc (payload)'
+      - 'REMOVE ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)'
+      - 'GET ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
     `);
   });
 });
@@ -388,7 +382,7 @@ describe('collection store', () => {
       maxItems: 2,
     });
 
-    const readCapture = startPersistentStorageReadCapture();
+    const readCapture = startPersistentStorageOperationCapture();
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Fresh' } });
     await advanceTime(1100);
     await flushAllTimers();
@@ -401,25 +395,29 @@ describe('collection store', () => {
       ).sort(),
     ).toEqual(['b', 'c']);
     expect(readBreakdown).toMatchInlineSnapshot(`
-      metadataKeys:
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-      otherKeys: []
-      payloadKeys: []
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'SET ❌->✅ tsdf.sess1.col-max-items-metadata.collection.item."c (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'REMOVE ✅->❌ tsdf.sess1.col-max-items-metadata.collection.item."a (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.collection.item..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
     `);
   });
 });
@@ -443,7 +441,7 @@ describe('list query store', () => {
       serverData: { third: [{ id: 1, name: 'Third' }] },
     });
 
-    const readCapture = startPersistentStorageReadCapture();
+    const readCapture = startPersistentStorageOperationCapture();
     env.scheduleFetch('highPriority', thirdQuery);
     await flushAllTimers();
     await advanceTime(1100);
@@ -454,35 +452,51 @@ describe('list query store', () => {
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`),
     ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
     expect(readBreakdown).toMatchInlineSnapshot(`
-      metadataKeys:
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '❌ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-      otherKeys: []
-      payloadKeys: []
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'KEY[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (payload)'
+      - 'KEY[1] ✅ tsdf._m.c (catalog)'
+      - 'KEY[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'KEY[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'KEY[0] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (payload)'
+      - 'KEY[1] ✅ tsdf._m.c (catalog)'
+      - 'KEY[2] ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'KEY[3] ✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"second"} (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"third"} (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ❌->✅ tsdf.sess1.lq-query-metadata.listQuery.item."third||1 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ❌ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'SET ❌->✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'REMOVE ✅->❌ tsdf.sess1.lq-query-metadata.listQuery.query.{tableId:"first"} (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-query-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
     `);
   });
 
@@ -506,7 +520,7 @@ describe('list query store', () => {
 
     const env = createListQueryEnv({ storeName, sessionKey, maxItems: 2 });
 
-    const readCapture = startPersistentStorageReadCapture();
+    const readCapture = startPersistentStorageOperationCapture();
     env.apiStore.addItemToState(rawItemPayload('users', 3), {
       id: 3,
       name: 'Fresh',
@@ -519,53 +533,63 @@ describe('list query store', () => {
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`),
     ).toMatchInlineSnapshot(`['"users||3']`);
     expect(readBreakdown).toMatchInlineSnapshot(`
-      metadataKeys:
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-        - '✅ tsdf._m.c (catalog)'
-        - '✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
-      otherKeys: []
-      payloadKeys:
-        - '✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (payload)'
-        - '✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload)'
-        - '✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload)'
-        - '❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload)'
-        - '❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf.sess1.lq-item-metadata.listQuery.query.{tableId:"users"} (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ❌->✅ tsdf.sess1.lq-item-metadata.listQuery.item."users||3 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'REMOVE ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'REMOVE ✅->❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.query..m (root, namespace, manifest)'
+      - 'SET ✅->✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||1 (payload)'
+      - 'GET ✅ tsdf._m.c (catalog)'
+      - 'GET ✅ tsdf._m.r.n:sess1.lq-item-metadata.listQuery.item..m (root, namespace, manifest)'
+      - 'GET ❌ tsdf.sess1.lq-item-metadata.listQuery.item."users||2 (payload)'
     `);
   });
 });
