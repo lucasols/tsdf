@@ -244,13 +244,10 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[10] ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
       .     | 🔑[11] ✅ tsdf.sess-trigger.trigger-doc (entry)
       .     | 🔑[12] ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.09 kb
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.08 kb
       .     | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.06 kb
       .     | 🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)
       .     | 🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status) | 0.06 kb
-      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue) | 0.15 kb
-      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity) | 0.09 kb
       .     | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.06 kb
       .     | ✍️ ✅->✅ tsdf._m.g (global maintenance) | 0.05 kb -> 0.05 kb
       "
@@ -261,8 +258,7 @@ describe('sync storage efficiency: maintenance', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        - a: 1735689601810
-          m: { o: '✅' }
+        - { a: 1735689601810, o: '✅' }
       v: 1
     `);
   });

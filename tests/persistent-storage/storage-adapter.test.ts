@@ -224,7 +224,7 @@ describe('localStorage adapter', () => {
         e:
           - a: 1735689600000
             k: '"a'
-            m: { p: 'a' }
+            p: 'a'
         v: 1
       `);
 

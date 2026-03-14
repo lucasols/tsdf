@@ -70,10 +70,10 @@ describe('sync storage efficiency: collection', () => {
       .    | 🔑[1] ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest)
       .    | 🔑[2] ✅ tsdf.sess1.collection-expiration.ci."expired-user-2 (entry)
       .    | 🔑[3] ✅ tsdf.sess1.collection-expiration.ci."fresh-user (entry)
-      .    | 📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.41 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.38 kb
       .    | 🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user (entry)
       .    | 🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2 (entry)
-      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.41 kb -> 0.15 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.38 kb -> 0.13 kb
       .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.05 kb
       "
     `);
@@ -119,16 +119,16 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.20 kb
+      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.17 kb
       .    | ✍️ ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c (entry) | ❌ -> 0.21 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.20 kb -> 0.28 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.17 kb -> 0.25 kb
       .    | 🔑[0] ✅ tsdf.sess1.col-max-items-metadata.ci."a (entry)
       .    | 🔑[1] ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest)
       .    | 🔑[2] ✅ tsdf.sess1.col-max-items-metadata.ci."b (entry)
       .    | 🔑[3] ✅ tsdf._m.g (global maintenance)
       .    | 🔑[4] ✅ tsdf.sess1.col-max-items-metadata.ci."c (entry)
       .    | 🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a (entry)
-      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.28 kb -> 0.20 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.25 kb -> 0.17 kb
       "
     `);
   });
@@ -162,7 +162,7 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m (root, namespace, manifest) | 0.11 kb
+      0    | 📖 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m (root, namespace, manifest) | 0.10 kb
       .    | 📖 ✅ tsdf.sess1.col-direct-get-item-state.ci."1 (entry) | 0.22 kb
       "
     `);
@@ -206,8 +206,8 @@ describe('sync storage efficiency: collection', () => {
       "
       time |
       1s   | ✍️ ✅->✅ tsdf.sess1.col-mutation-flow.ci."1 (entry) | 0.22 kb -> 0.22 kb
-      .    | 📖 ✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m (root, namespace, manifest) | 0.11 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m (root, namespace, manifest) | 0.11 kb -> 0.11 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m (root, namespace, manifest) | 0.10 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m (root, namespace, manifest) | 0.10 kb -> 0.10 kb
       "
     `);
   });
@@ -259,8 +259,8 @@ describe('sync storage efficiency: collection', () => {
       "
       time  |
       1.81s | ✍️ ✅->✅ tsdf.sess1.col-invalidation-flow.ci."1 (entry) | 0.22 kb -> 0.21 kb
-      .     | 📖 ✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m (root, namespace, manifest) | 0.11 kb
-      .     | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m (root, namespace, manifest) | 0.11 kb -> 0.11 kb
+      .     | 📖 ✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m (root, namespace, manifest) | 0.10 kb
+      .     | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m (root, namespace, manifest) | 0.10 kb -> 0.10 kb
       "
     `);
   });
@@ -293,11 +293,11 @@ describe('sync storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.11 kb
+      0    | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.10 kb
       .    | 📖 ✅ tsdf.sess1.col-remount-flow.ci."1 (entry) | 0.22 kb
-      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.11 kb
-      2s   | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.11 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.11 kb -> 0.11 kb
+      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.10 kb
+      2s   | 📖 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.10 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m (root, namespace, manifest) | 0.10 kb -> 0.10 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -336,15 +336,15 @@ describe('sync storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.20 kb
+      0    | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.17 kb
       .    | 📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."1 (entry) | 0.22 kb
-      .    | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.20 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.17 kb
       .    | 📖 ✅ tsdf.sess1.col-multi-remount-flow.ci."2 (entry) | 0.22 kb
-      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.20 kb
-      2s   | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.20 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.20 kb -> 0.20 kb
-      .    | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.20 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.20 kb -> 0.20 kb
+      1s   | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.17 kb
+      2s   | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.17 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.17 kb -> 0.17 kb
+      .    | 📖 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.17 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m (root, namespace, manifest) | 0.17 kb -> 0.17 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

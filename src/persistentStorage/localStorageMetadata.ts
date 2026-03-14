@@ -1,12 +1,11 @@
+import { isObject } from '@ls-stack/utils/typeGuards';
 import {
   rc_array,
   rc_literals,
   rc_number,
   rc_object,
   rc_parse_json,
-  rc_string,
   rc_unknown,
-  type RcInferType,
   type RcType,
 } from 'runcheck';
 
@@ -83,15 +82,9 @@ export function setManagedLocalStorageRuntimeConfigForTests(
   };
 }
 
-const managedLocalStorageStoredManifestEntrySchema = rc_object({
-  k: rc_string.optionalKey(),
-  a: rc_number,
-  m: rc_unknown.optionalKey(),
-});
-
 const managedLocalStorageManifestSchema = rc_object({
   v: rc_literals(METADATA_VERSION),
-  e: rc_array(managedLocalStorageStoredManifestEntrySchema),
+  e: rc_array(rc_unknown),
 });
 
 const managedLocalStorageGlobalMaintenanceSchema = rc_object({
@@ -209,14 +202,49 @@ function isManagedLocalStorageManifestKey(key: string): boolean {
   return parseManagedLocalStorageManifestKey(key) !== null;
 }
 
+function readStoredManifestEntryMeta(entry: Record<string, unknown>): unknown {
+  if ('m' in entry) {
+    return entry.m;
+  }
+
+  const { a: _lastAccessAt, k: _entryKey, ...meta } = entry;
+  return Object.keys(meta).length === 0 ? undefined : meta;
+}
+
 type StoredManagedLocalStorageManifestEntry = {
   entryKey: string | undefined;
   lastAccessAt: number;
   meta?: unknown;
 };
 
+function serializeStoredManifestEntry(
+  entry: StoredManagedLocalStorageManifestEntry,
+): Record<string, unknown> {
+  const serializedEntry: Record<string, unknown> = { a: entry.lastAccessAt };
+
+  if (entry.entryKey !== undefined) {
+    serializedEntry.k = entry.entryKey;
+  }
+
+  if (
+    isObject(entry.meta) &&
+    !Array.isArray(entry.meta) &&
+    !('a' in entry.meta) &&
+    !('k' in entry.meta) &&
+    !('m' in entry.meta)
+  ) {
+    return { ...serializedEntry, ...entry.meta };
+  }
+
+  if (entry.meta !== undefined) {
+    serializedEntry.m = entry.meta;
+  }
+
+  return serializedEntry;
+}
+
 type ManagedLocalStorageManifest = {
-  version: RcInferType<typeof managedLocalStorageManifestSchema>['v'];
+  version: typeof METADATA_VERSION;
   entries: StoredManagedLocalStorageManifestEntry[];
 };
 
@@ -231,14 +259,33 @@ function readParsedManifest(
   );
   if (!parsedManifest) return null;
 
-  return {
-    version: parsedManifest.v,
-    entries: parsedManifest.e.map((entry) => ({
-      entryKey: entry.k,
-      lastAccessAt: entry.a,
-      meta: entry.m,
-    })),
-  };
+  const entries: StoredManagedLocalStorageManifestEntry[] = [];
+
+  for (const rawEntry of parsedManifest.e) {
+    if (
+      !isObject(rawEntry) ||
+      Array.isArray(rawEntry) ||
+      typeof rawEntry.a !== 'number'
+    ) {
+      return null;
+    }
+
+    if (
+      'k' in rawEntry &&
+      rawEntry.k !== undefined &&
+      typeof rawEntry.k !== 'string'
+    ) {
+      return null;
+    }
+
+    entries.push({
+      entryKey: typeof rawEntry.k === 'string' ? rawEntry.k : undefined,
+      lastAccessAt: rawEntry.a,
+      meta: readStoredManifestEntryMeta(rawEntry),
+    });
+  }
+
+  return { version: parsedManifest.v, entries };
 }
 
 function readManifest(
@@ -267,11 +314,7 @@ function writeManifest(
     manifestKey,
     {
       v: manifest.version,
-      e: manifest.entries.map((entry) => ({
-        k: entry.entryKey,
-        a: entry.lastAccessAt,
-        m: entry.meta,
-      })),
+      e: manifest.entries.map(serializeStoredManifestEntry),
     },
     io,
   );
@@ -805,19 +848,15 @@ function readGlobalMaintenanceState(
   return { version: parsedState.v, lastCleanupAt: parsedState.lca };
 }
 
-type ManagedLocalStorageGlobalMaintenanceRaw = RcInferType<
-  typeof managedLocalStorageGlobalMaintenanceSchema
->;
-
 function writeGlobalMaintenanceState(
   state: ManagedLocalStorageGlobalMaintenance,
   io: ManagedLocalStorageIo,
 ): void {
-  const rawState: ManagedLocalStorageGlobalMaintenanceRaw = {
-    v: state.version,
-    lca: state.lastCleanupAt,
-  };
-  writeMetadataJson(GLOBAL_MAINTENANCE_KEY, rawState, io);
+  writeMetadataJson(
+    GLOBAL_MAINTENANCE_KEY,
+    { v: state.version, lca: state.lastCleanupAt },
+    io,
+  );
 }
 
 function isMaintenanceDue(
@@ -836,7 +875,28 @@ function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
   knownKeys: Set<string>;
 } {
   const allKeys = io.listKeys();
-  const manifestKeys = allKeys.filter(isManagedLocalStorageManifestKey);
+  const manifestKeys = allKeys.filter((key) => {
+    if (!isManagedLocalStorageManifestKey(key)) return false;
+
+    const manifestLocation = parseManagedLocalStorageManifestKey(key);
+    if (
+      manifestLocation?.kind === 'single' &&
+      manifestLocation.payloadKey.includes('._o_.')
+    ) {
+      return false;
+    }
+
+    if (
+      manifestLocation?.kind === 'namespace' &&
+      (manifestLocation.storagePrefix.endsWith('.oq.') ||
+        manifestLocation.storagePrefix.endsWith('.oc.') ||
+        manifestLocation.storagePrefix.endsWith('.oe.'))
+    ) {
+      return false;
+    }
+
+    return true;
+  });
   const knownKeys = new Set(allKeys);
 
   return { manifestKeys, knownKeys };
