@@ -198,9 +198,9 @@ describe('collection hook payload debounce', () => {
 
     expect(env.serverTable.getRequestHistory('item', { includeTime: false }))
       .toMatchInlineSnapshot(`
-      - _type: 'item'
-        payload: { itemId: '2' }
-    `);
+        - _type: 'item'
+          payload: { itemId: '2' }
+      `);
 
     expect(renders.snapshotFromLast).toMatchInlineSnapshot(`
       "

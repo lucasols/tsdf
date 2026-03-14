@@ -338,9 +338,9 @@ describe('localStorage: converted list query store persistence', () => {
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
     expect(mockStore.listQuery.readItemData<StoredRow>('users', 1))
       .toMatchInlineSnapshot(`
-      label: 'Cached'
-      rowId: 1
-    `);
+        label: 'Cached'
+        rowId: 1
+      `);
     expect(mockStore.listQuery.readQueryEntry(usersQuery).data.payload)
       .toMatchInlineSnapshot(`
         tableId: 'users'
