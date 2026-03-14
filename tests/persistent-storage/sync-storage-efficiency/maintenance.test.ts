@@ -253,30 +253,30 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[2] ✅ tsdf._m.g (global maintenance)
       .     | 🔑[3] ✅ tsdf.user@example.com.unprotected-doc (entry)
       .     | 🔑[4] ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 🔑[5] ✅ tsdf.user@example.com._o_.s (entry)
-      .     | 🔑[6] ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest)
-      .     | 🔑[7] ✅ tsdf.user@example.com._o_.p (entry)
-      .     | 🔑[8] ✅ tsdf._m.r.s:user@example.com._o_.p.m (root, single, manifest)
-      .     | 🔑[9] ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry)
-      .     | 🔑[10] ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest)
-      .     | 🔑[11] ✅ tsdf.user@example.com.protected-doc.oe.document (entry)
-      .     | 🔑[12] ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest)
+      .     | 🔑[5] ✅ tsdf.user@example.com._o_.s (entry, offline session status)
+      .     | 🔑[6] ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status)
+      .     | 🔑[7] ✅ tsdf.user@example.com._o_.p (entry, offline protected keys)
+      .     | 🔑[8] ✅ tsdf._m.r.s:user@example.com._o_.p.m (root, single, manifest, offline protected keys)
+      .     | 🔑[9] ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue)
+      .     | 🔑[10] ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue)
+      .     | 🔑[11] ✅ tsdf.user@example.com.protected-doc.oe.document (entry, offline entity)
+      .     | 🔑[12] ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
       .     | 🔑[13] ✅ tsdf.sess-trigger.trigger-doc (entry)
       .     | 🔑[14] ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf.user@example.com._o_.p (entry) | 0.19 kb
+      .     | 📖 ✅ tsdf.user@example.com._o_.p (entry, offline protected keys) | 0.19 kb
       .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.11 kb
       .     | 📖 ✅ tsdf.user@example.com.protected-doc (entry) | 0.19 kb
       .     | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.11 kb
       .     | 📖 ✅ tsdf.user@example.com.unprotected-doc (entry) | 0.19 kb
       .     | 🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)
       .     | 🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest) | 0.11 kb
-      .     | 📖 ✅ tsdf.user@example.com._o_.s (entry) | 0.59 kb
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.p.m (root, single, manifest) | 0.22 kb
-      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest) | 0.21 kb
-      .     | 📖 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry) | 0.77 kb
-      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest) | 0.15 kb
-      .     | 📖 ✅ tsdf.user@example.com.protected-doc.oe.document (entry) | 0.66 kb
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status) | 0.11 kb
+      .     | 📖 ✅ tsdf.user@example.com._o_.s (entry, offline session status) | 0.59 kb
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.p.m (root, single, manifest, offline protected keys) | 0.22 kb
+      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue) | 0.21 kb
+      .     | 📖 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue) | 0.77 kb
+      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity) | 0.15 kb
+      .     | 📖 ✅ tsdf.user@example.com.protected-doc.oe.document (entry, offline entity) | 0.66 kb
       .     | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.11 kb
       .     | 📖 ✅ tsdf.sess-trigger.trigger-doc (entry) | 0.18 kb
       .     | ✍️ ✅->✅ tsdf._m.g (global maintenance) | 0.05 kb -> 0.05 kb

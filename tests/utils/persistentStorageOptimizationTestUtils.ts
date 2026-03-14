@@ -2,50 +2,90 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 
+const OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX = 'oq';
+const OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX = 'oc';
+const OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX = 'oe';
+const MANAGED_PERSISTENT_PREFIXES = ['tsdf._m.r.', 'tsdf.__lsm__.r.'] as const;
+const MANAGED_PERSISTENT_SPECIAL_KEYS: Readonly<Record<string, string>> = {
+  'tsdf._m.l': 'lease',
+  'tsdf.__lsm__.l': 'lease',
+  'tsdf._m.g': 'global maintenance',
+} as const;
+const MANIFEST_PART = '.manifest.';
+
 function describePersistentStorageKey(key: string): string | null {
-  if (key === 'tsdf._m.l' || key === 'tsdf.__lsm__.l') return 'lease';
-  if (key === 'tsdf._m.g') return 'global maintenance';
+  const specialKeyDescription = MANAGED_PERSISTENT_SPECIAL_KEYS[key];
+  if (specialKeyDescription !== undefined) return specialKeyDescription;
 
-  for (const prefix of ['tsdf._m.r.', 'tsdf.__lsm__.r.']) {
-    if (!key.startsWith(prefix)) continue;
-
-    const identity = key.slice(prefix.length);
-    if (identity.endsWith('.m') || identity.endsWith('.manifest')) {
-      if (identity.startsWith('s:') || identity.startsWith('single:')) {
-        return 'root, single, manifest';
-      }
-
-      if (identity.startsWith('n:') || identity.startsWith('namespace:')) {
-        return 'root, namespace, manifest';
-      }
-
-      return 'root, manifest';
-    }
-
-    if (identity.includes('.manifest.')) {
-      const [rootIdentity, shardIndex] = identity.split('.manifest.');
-      const rootType =
-        rootIdentity?.startsWith('s:') || rootIdentity?.startsWith('single:')
-          ? 'single'
-          : rootIdentity?.startsWith('n:') ||
-              rootIdentity?.startsWith('namespace:')
-            ? 'namespace'
-            : 'root';
-      return `root, ${rootType}, manifest shard ${shardIndex ?? '?'}`;
-    }
-
-    if (identity.startsWith('s:') || identity.startsWith('single:')) {
-      return 'root, single';
-    }
-
-    if (identity.startsWith('n:') || identity.startsWith('namespace:')) {
-      return 'root, namespace';
-    }
-
-    return 'root';
+  const managedPrefix = MANAGED_PERSISTENT_PREFIXES.find((prefix) =>
+    key.startsWith(prefix),
+  );
+  if (managedPrefix === undefined) {
+    return key.startsWith('tsdf.')
+      ? withOfflinePrefix('entry', describeOfflineStorageType(key))
+      : null;
   }
 
-  if (key.startsWith('tsdf.')) return 'entry';
+  const identity = key.slice(managedPrefix.length);
+  if (identity.endsWith('.m') || identity.endsWith('.manifest')) {
+    return withOfflinePrefix(
+      `root, ${describeRootKind(identity)}, manifest`,
+      describeOfflineStorageType(identity),
+    );
+  }
+
+  const manifestMarkerIndex = identity.indexOf(MANIFEST_PART);
+  if (manifestMarkerIndex >= 0) {
+    const rootIdentity = identity.slice(0, manifestMarkerIndex);
+    const shardIndex = identity.slice(
+      manifestMarkerIndex + MANIFEST_PART.length,
+    );
+    return withOfflinePrefix(
+      `root, ${describeRootKind(rootIdentity)}, manifest shard ${
+        shardIndex || '?'
+      }`,
+      describeOfflineStorageType(rootIdentity),
+    );
+  }
+
+  return withOfflinePrefix(
+    `root, ${describeRootKind(identity)}`,
+    describeOfflineStorageType(identity),
+  );
+}
+
+function describeRootKind(identity: string): 'single' | 'namespace' | 'root' {
+  if (identity.startsWith('s:') || identity.startsWith('single:')) {
+    return 'single';
+  }
+
+  if (identity.startsWith('n:') || identity.startsWith('namespace:')) {
+    return 'namespace';
+  }
+
+  return 'root';
+}
+
+function withOfflinePrefix(label: string, offlineType: string | null): string {
+  return offlineType ? `${label}, ${offlineType}` : label;
+}
+
+function describeOfflineStorageType(value: string): string | null {
+  if (value.includes('._o_.s')) return 'offline session status';
+
+  if (value.includes('._o_.p')) return 'offline protected keys';
+
+  if (value.includes(`.${OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX}.`)) {
+    return 'offline queue';
+  }
+
+  if (value.includes(`.${OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX}.`)) {
+    return 'offline conflict';
+  }
+
+  if (value.includes(`.${OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX}.`)) {
+    return 'offline entity';
+  }
 
   return null;
 }

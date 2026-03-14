@@ -77,7 +77,7 @@ describe('sync storage efficiency: collection', () => {
       .    | 🗑️ ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2 (entry)
       .    | 📖 ✅ tsdf.sess1.collection-expiration.ci."fresh-user (entry) | 0.25 kb
       .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m (root, namespace, manifest) | 0.59 kb -> 0.22 kb
-      .    | 📖 ❌ tsdf.sess1._o_.p (entry)
+      .    | 📖 ❌ tsdf.sess1._o_.p (entry, offline protected keys)
       .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.05 kb
       "
     `);
@@ -133,7 +133,7 @@ describe('sync storage efficiency: collection', () => {
       .    | 🔑[4] ✅ tsdf.sess1.col-max-items-metadata.ci."c (entry)
       .    | 📖 ✅ tsdf.sess1.col-max-items-metadata.ci."a (entry) | 0.22 kb
       .    | 📖 ✅ tsdf.sess1.col-max-items-metadata.ci."b (entry) | 0.22 kb
-      .    | 📖 ❌ tsdf.sess1._o_.p (entry)
+      .    | 📖 ❌ tsdf.sess1._o_.p (entry, offline protected keys)
       .    | 🗑️ ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a (entry)
       .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.46 kb -> 0.33 kb
       "

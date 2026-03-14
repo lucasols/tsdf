@@ -91,7 +91,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 🗑️ ✅->❌ tsdf.sess1.list-query-expiration.li."expired-users||1 (entry)
       .    | 📖 ✅ tsdf.sess1.list-query-expiration.li."fresh-users||2 (entry) | 0.22 kb
       .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.44 kb -> 0.24 kb
-      .    | 📖 ❌ tsdf.sess1._o_.p (entry)
+      .    | 📖 ❌ tsdf.sess1._o_.p (entry, offline protected keys)
       .    | 📖 ✅ tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.69 kb
       .    | 📖 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (entry) | 0.26 kb
       .    | 🗑️ ✅->❌ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (entry)
@@ -158,7 +158,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 🔑[6] ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
       .     | 📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.21 kb
       .     | 📖 ✅ tsdf.sess1.lq-query-metadata.li."third||1 (entry) | 0.20 kb
-      .     | 📖 ❌ tsdf.sess1._o_.p (entry)
+      .     | 📖 ❌ tsdf.sess1._o_.p (entry, offline protected keys)
       .     | 📖 ✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb
       .     | 🗑️ ✅->❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
       .     | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.84 kb -> 0.58 kb
@@ -224,7 +224,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 ✅ tsdf.sess1.lq-item-metadata.li."users||1 (entry) | 0.21 kb
       .    | 📖 ✅ tsdf.sess1.lq-item-metadata.li."users||2 (entry) | 0.21 kb
       .    | 📖 ✅ tsdf.sess1.lq-item-metadata.li."users||3 (entry) | 0.20 kb
-      .    | 📖 ❌ tsdf.sess1._o_.p (entry)
+      .    | 📖 ❌ tsdf.sess1._o_.p (entry, offline protected keys)
       .    | 📖 ✅ tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.35 kb
       .    | 🗑️ ✅->❌ tsdf.sess1.lq-item-metadata.li."users||3 (entry)
       .    | ✍️ ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb
