@@ -242,7 +242,7 @@ function createPersistentTestStore(
               storagePrefix: `tsdf.${sessionKey}.${storeName}.ci.`,
               entryKey: collectionItemKey(payload),
               lastAccessAt: entry.timestamp,
-              meta: { payload },
+              meta: { p: payload },
             });
           }
 
@@ -285,7 +285,7 @@ function createPersistentTestStore(
               storagePrefix: `tsdf.${sessionKey}.${storeName}.li.`,
               entryKey: itemKey,
               lastAccessAt: entry.timestamp,
-              meta: { payload },
+              meta: { p: payload },
             });
           }
 
@@ -311,11 +311,7 @@ function createPersistentTestStore(
               storagePrefix: `tsdf.${sessionKey}.${storeName}.lq.`,
               entryKey: getCompositeKey(params),
               lastAccessAt: entry.timestamp,
-              meta: {
-                payload: params,
-                items: entry.data.items,
-                hasMore: entry.data.hasMore,
-              },
+              meta: { p: params, i: entry.data.items, h: entry.data.hasMore },
             });
           }
 

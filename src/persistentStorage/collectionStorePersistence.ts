@@ -165,7 +165,7 @@ export function setupCollectionPersistence<
     PersistedCollectionItemData<ItemState | StorageState>
   >(
     { ...persistentConfig, entryPrefix: COLLECTION_STORAGE_ENTRY_PREFIX },
-    { getManifestMeta: (data) => ({ payload: data.payload }) },
+    { getManifestMeta: (data) => ({ p: data.payload }) },
   );
 
   let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =

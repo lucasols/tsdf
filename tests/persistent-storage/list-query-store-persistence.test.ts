@@ -1158,10 +1158,9 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`))
-      .toMatchInlineSnapshot(`
-        ['{tableId:"first"}', '{tableId:"third"}']
-      `);
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`),
+    ).toMatchInlineSnapshot(`['{tableId:"first"}', '{tableId:"third"}']`);
   });
 
   test('when maxItems is exceeded, the least recently read item is evicted first', async () => {
@@ -1278,12 +1277,12 @@ describe('localStorage: list query store persistence', () => {
 
     expect(localStorage.getItem('tsdf.sess1.lq-evict')).toBeNull();
 
-    expect(listStoredKeys('tsdf.sess1.lq-evict.lq.')).toMatchInlineSnapshot(`
-      ['{tableId:"second"}']
-    `);
-    expect(listStoredKeys('tsdf.sess1.lq-evict.li.')).toMatchInlineSnapshot(`
-      ['"second||1']
-    `);
+    expect(listStoredKeys('tsdf.sess1.lq-evict.lq.')).toMatchInlineSnapshot(
+      `['{tableId:"second"}']`,
+    );
+    expect(listStoredKeys('tsdf.sess1.lq-evict.li.')).toMatchInlineSnapshot(
+      `['"second||1']`,
+    );
   });
 
   test('pinned items survive eviction even when their query is evicted', async () => {
@@ -1310,10 +1309,9 @@ describe('localStorage: list query store persistence', () => {
     expect(
       listStoredKeys('tsdf.sess1.lq-pinned-item-only.lq.').length,
     ).toMatchInlineSnapshot(`1`);
-    expect(listStoredKeys('tsdf.sess1.lq-pinned-item-only.li.'))
-      .toMatchInlineSnapshot(`
-        ['"second||1']
-      `);
+    expect(
+      listStoredKeys('tsdf.sess1.lq-pinned-item-only.li.'),
+    ).toMatchInlineSnapshot(`['"second||1']`);
   });
 
   test('default persistence limits keep up to 500 items and 100 queries', async () => {
@@ -1428,9 +1426,9 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys('tsdf.sess1.lq-ignore.li.')).toMatchInlineSnapshot(`
-      ['"users||1']
-    `);
+    expect(listStoredKeys('tsdf.sess1.lq-ignore.li.')).toMatchInlineSnapshot(
+      `['"users||1']`,
+    );
     expect(getStoredQueryItemKeys('lq-ignore', 'sess1', usersQuery))
       .toMatchInlineSnapshot(`
         ['"users||1']

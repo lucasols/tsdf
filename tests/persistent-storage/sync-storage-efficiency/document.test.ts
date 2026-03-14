@@ -49,10 +49,10 @@ describe('sync storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb
+      0    | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.06 kb
       .    | 📖 ✅ tsdf.sess1.doc-remount-flow (entry) | 0.20 kb
-      2s   | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      2s   | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.06 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.06 kb -> 0.06 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -126,8 +126,8 @@ describe('sync storage efficiency: document', () => {
       "
       time |
       1s   | ✍️ ✅->✅ tsdf.sess1.doc-mutation-flow (entry) | 0.20 kb -> 0.20 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.11 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.06 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.06 kb -> 0.06 kb
       "
     `);
   });
@@ -176,8 +176,8 @@ describe('sync storage efficiency: document', () => {
       "
       time  |
       1.81s | ✍️ ✅->✅ tsdf.sess1.doc-invalidation-flow (entry) | 0.20 kb -> 0.20 kb
-      .     | 📖 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.11 kb
-      .     | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      .     | 📖 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.06 kb
+      .     | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.06 kb -> 0.06 kb
       "
     `);
   });

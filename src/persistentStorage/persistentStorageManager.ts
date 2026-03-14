@@ -8,8 +8,11 @@ import {
 } from 'runcheck';
 import {
   getManagedLocalStorageRuntimeConfig,
+  isManagedLocalStorageEntryOfflineProtected,
   resetManagedLocalStorageState,
+  setManagedLocalStorageEntryOfflineProtected,
 } from './localStorageMetadata';
+import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
@@ -71,6 +74,25 @@ function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
       getManagedLocalStorageRuntimeConfig().maxAgeMs,
     );
   });
+}
+
+function preserveOfflineProtectionFlag(
+  sessionKey: string,
+  storageKey: string,
+  nextMeta: unknown,
+  getCurrentMeta: () => unknown,
+): unknown {
+  const protectedKeys = getSessionProtectedKeysSnapshot(sessionKey);
+  if (protectedKeys !== null) {
+    return setManagedLocalStorageEntryOfflineProtected(
+      nextMeta,
+      protectedKeys.has(storageKey),
+    );
+  }
+
+  return isManagedLocalStorageEntryOfflineProtected(getCurrentMeta())
+    ? setManagedLocalStorageEntryOfflineProtected(nextMeta, true)
+    : nextMeta;
 }
 
 async function runLocalStorageMutation<T>(
@@ -206,6 +228,8 @@ export function createPersistentStorageHandle<T>(
   async function writeEntry(data: T): Promise<void> {
     const key = getKey();
     if (key === false) return;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return;
 
     const entry: StorageCacheEntry<T> = {
       data,
@@ -220,7 +244,14 @@ export function createPersistentStorageHandle<T>(
           localPersistentStorage.upsertSingleEntry({
             storageKey: key,
             lastAccessAt: entry.timestamp,
-            meta: getManifestMeta?.(data),
+            meta: preserveOfflineProtectionFlag(
+              sessionKey,
+              key,
+              getManifestMeta?.(data),
+              () =>
+                localPersistentStorage.readSingleEntryMetadataByPayload(key)
+                  ?.meta,
+            ),
           });
           recordLocalStorageTouch(key, entry.timestamp);
         });
@@ -370,6 +401,8 @@ export function createPersistentStorageNamespaceHandle<T>(
   async function save(entryKey: string, data: T): Promise<void> {
     const key = getKey(entryKey);
     if (key === false) return;
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return;
 
     const entry: StorageCacheEntry<T> = {
       data,
@@ -388,7 +421,16 @@ export function createPersistentStorageNamespaceHandle<T>(
             storagePrefix: prefix,
             entryKey,
             lastAccessAt: entry.timestamp,
-            meta: getManifestMeta?.(data, entryKey),
+            meta: preserveOfflineProtectionFlag(
+              sessionKey,
+              key,
+              getManifestMeta?.(data, entryKey),
+              () =>
+                localPersistentStorage.readNamespaceEntryMetadataByPayload(
+                  key,
+                  prefix,
+                )?.meta,
+            ),
           });
           recordLocalStorageTouch(key, entry.timestamp);
         });
@@ -553,11 +595,11 @@ export function createProtectedStorageKey(args: {
 }
 
 export function readManifestPayloadMeta(meta: unknown): unknown {
-  if (typeof meta !== 'object' || meta === null || !('payload' in meta)) {
+  if (typeof meta !== 'object' || meta === null || !('p' in meta)) {
     return undefined;
   }
 
-  return meta.payload;
+  return meta.p;
 }
 
 /** Clears all persistent storage entries for a given session key and adapter. */

@@ -84,23 +84,19 @@ export function setManagedLocalStorageRuntimeConfigForTests(
 }
 
 const managedLocalStorageStoredManifestEntrySchema = rc_object({
-  entryKey: rc_string.optionalKey(),
-  lastAccessAt: rc_number,
-  meta: rc_unknown.optionalKey(),
+  k: rc_string.optionalKey(),
+  a: rc_number,
+  m: rc_unknown.optionalKey(),
 });
 
 const managedLocalStorageManifestSchema = rc_object({
-  version: rc_literals(METADATA_VERSION),
-  entries: rc_array(managedLocalStorageStoredManifestEntrySchema),
+  v: rc_literals(METADATA_VERSION),
+  e: rc_array(managedLocalStorageStoredManifestEntrySchema),
 });
 
 const managedLocalStorageGlobalMaintenanceSchema = rc_object({
   v: rc_literals(METADATA_VERSION),
   lca: rc_number.orNull(),
-});
-
-const protectedKeysEntrySchema = rc_object({
-  data: rc_object({ keys: rc_array(rc_string).withFallback([]).optionalKey() }),
 });
 
 function readParsedMetadataJson<T>(
@@ -220,7 +216,7 @@ type StoredManagedLocalStorageManifestEntry = {
 };
 
 type ManagedLocalStorageManifest = {
-  version: RcInferType<typeof managedLocalStorageManifestSchema>['version'];
+  version: RcInferType<typeof managedLocalStorageManifestSchema>['v'];
   entries: StoredManagedLocalStorageManifestEntry[];
 };
 
@@ -236,11 +232,11 @@ function readParsedManifest(
   if (!parsedManifest) return null;
 
   return {
-    version: parsedManifest.version,
-    entries: parsedManifest.entries.map((entry) => ({
-      entryKey: entry.entryKey,
-      lastAccessAt: entry.lastAccessAt,
-      meta: entry.meta,
+    version: parsedManifest.v,
+    entries: parsedManifest.e.map((entry) => ({
+      entryKey: entry.k,
+      lastAccessAt: entry.a,
+      meta: entry.m,
     })),
   };
 }
@@ -267,7 +263,18 @@ function writeManifest(
     return;
   }
 
-  writeMetadataJson(manifestKey, manifest, io);
+  writeMetadataJson(
+    manifestKey,
+    {
+      v: manifest.version,
+      e: manifest.entries.map((entry) => ({
+        k: entry.entryKey,
+        a: entry.lastAccessAt,
+        m: entry.meta,
+      })),
+    },
+    io,
+  );
 }
 
 function getPayloadKeyForManifestEntry(
@@ -411,15 +418,137 @@ export function readManagedLocalStorageNamespaceEntryByPayload(
   );
 }
 
+export function isManagedLocalStorageEntryOfflineProtected(
+  meta: unknown,
+): boolean {
+  return (
+    typeof meta === 'object' &&
+    meta !== null &&
+    !Array.isArray(meta) &&
+    'o' in meta &&
+    meta.o === true
+  );
+}
+
+export function setManagedLocalStorageEntryOfflineProtected(
+  meta: unknown,
+  offlineProtected: boolean,
+): unknown {
+  const baseMeta = Object.fromEntries(
+    typeof meta === 'object' && meta !== null && !Array.isArray(meta)
+      ? Object.entries(meta)
+      : [],
+  );
+
+  if (offlineProtected) {
+    return { ...baseMeta, o: true };
+  }
+
+  const { o: _ignored, ...nextMeta } = baseMeta;
+  return Object.keys(nextMeta).length === 0 ? undefined : nextMeta;
+}
+
 export function readManagedLocalStorageProtectedKeys(
   sessionKey: string,
   io: ManagedLocalStorageIo = directManagedLocalStorageIo,
 ): Set<string> {
-  return new Set(
-    readManagedLocalStorageProtectedKeysByStorageKey(
-      `tsdf.${sessionKey}._o_.p`,
-      io,
-    ),
+  const allKeys = io.listKeys();
+  const knownKeys = new Set(allKeys);
+  const protectedKeys = new Set<string>();
+
+  for (const manifestKey of allKeys) {
+    if (
+      !isManagedLocalStorageManifestKey(manifestKey) ||
+      !manifestBelongsToSession(manifestKey, sessionKey)
+    ) {
+      continue;
+    }
+
+    const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
+    const manifest = readParsedManifest(manifestKey, io);
+    if (!manifestLocation || !manifest) continue;
+
+    for (const entry of manifest.entries) {
+      if (!isManagedLocalStorageEntryOfflineProtected(entry.meta)) continue;
+
+      const payloadKey = getPayloadKeyForManifestEntry(
+        manifestLocation,
+        entry.entryKey,
+      );
+      if (payloadKey === null || !knownKeys.has(payloadKey)) continue;
+
+      protectedKeys.add(payloadKey);
+    }
+  }
+
+  return protectedKeys;
+}
+
+export function syncManagedLocalStorageSessionProtection(
+  sessionKey: string,
+  protectedKeys: Iterable<string>,
+  io: ManagedLocalStorageIo = directManagedLocalStorageIo,
+): void {
+  const nextProtectedKeys = new Set(protectedKeys);
+
+  for (const manifestKey of io.listKeys()) {
+    if (
+      !isManagedLocalStorageManifestKey(manifestKey) ||
+      !manifestBelongsToSession(manifestKey, sessionKey)
+    ) {
+      continue;
+    }
+
+    const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
+    const manifest = readParsedManifest(manifestKey, io);
+    if (!manifestLocation || !manifest) continue;
+
+    let manifestChanged = false;
+    const nextEntries: StoredManagedLocalStorageManifestEntry[] = [];
+
+    for (const entry of manifest.entries) {
+      const payloadKey = getPayloadKeyForManifestEntry(
+        manifestLocation,
+        entry.entryKey,
+      );
+      if (payloadKey === null) {
+        nextEntries.push(entry);
+        continue;
+      }
+
+      const shouldProtect =
+        !isOfflinePayloadKey(payloadKey) && nextProtectedKeys.has(payloadKey);
+      if (
+        isManagedLocalStorageEntryOfflineProtected(entry.meta) === shouldProtect
+      ) {
+        nextEntries.push(entry);
+        continue;
+      }
+
+      manifestChanged = true;
+      nextEntries.push({
+        ...entry,
+        meta: setManagedLocalStorageEntryOfflineProtected(
+          entry.meta,
+          shouldProtect,
+        ),
+      });
+    }
+
+    if (manifestChanged) {
+      writeManifest(
+        manifestKey,
+        { version: METADATA_VERSION, entries: nextEntries },
+        io,
+      );
+    }
+  }
+
+  const legacyProtectedKeysStorageKey = `tsdf.${sessionKey}._o_.p`;
+  io.removeItem(legacyProtectedKeysStorageKey);
+  removeMetadataJson(
+    getManagedLocalStorageManifestKeyForSingle(legacyProtectedKeysStorageKey),
+    io,
   );
 }
 
@@ -702,45 +831,15 @@ function isMaintenanceDue(
   );
 }
 
-function readManagedLocalStorageProtectedKeysByStorageKey(
-  storageKey: string,
-  io: ManagedLocalStorageIo,
-): string[] {
-  return (
-    readParsedMetadataJson(storageKey, protectedKeysEntrySchema, io)?.data
-      .keys ?? []
-  );
-}
-
-function collectProtectedKeysFromStorage(
-  keys: Iterable<string>,
-  io: ManagedLocalStorageIo,
-): Set<string> {
-  const protectedKeys = new Set<string>();
-
-  for (const key of keys) {
-    if (!key.endsWith('._o_.p')) continue;
-
-    for (const protectedKey of readManagedLocalStorageProtectedKeysByStorageKey(
-      key,
-      io,
-    )) {
-      protectedKeys.add(protectedKey);
-    }
-  }
-
-  return protectedKeys;
-}
-
 function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
   manifestKeys: string[];
-  protectedKeys: Set<string>;
+  knownKeys: Set<string>;
 } {
   const allKeys = io.listKeys();
   const manifestKeys = allKeys.filter(isManagedLocalStorageManifestKey);
-  const protectedKeys = collectProtectedKeysFromStorage(allKeys, io);
+  const knownKeys = new Set(allKeys);
 
-  return { manifestKeys, protectedKeys };
+  return { manifestKeys, knownKeys };
 }
 
 function isOfflinePayloadKey(payloadKey: string): boolean {
@@ -749,7 +848,7 @@ function isOfflinePayloadKey(payloadKey: string): boolean {
 
 function runGenericCleanupForManifest(
   manifestKey: string,
-  protectedKeys: Set<string>,
+  knownKeys: Set<string>,
   io: ManagedLocalStorageIo,
 ): void {
   const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
@@ -776,12 +875,11 @@ function runGenericCleanupForManifest(
     );
     if (payloadKey === null) continue;
 
-    const rawPayload = io.getItem(payloadKey);
-    if (rawPayload === null) continue;
+    if (!knownKeys.has(payloadKey)) continue;
 
     if (
       !isOfflinePayloadKey(payloadKey) &&
-      !protectedKeys.has(payloadKey) &&
+      !isManagedLocalStorageEntryOfflineProtected(entry.meta) &&
       now - entry.lastAccessAt > managedLocalStorageRuntimeConfig.maxAgeMs
     ) {
       io.removeItem(payloadKey);
@@ -810,16 +908,16 @@ export async function runManagedLocalStorageMaintenance(
     return;
   }
 
-  const { manifestKeys, protectedKeys } = runGlobalSweep
+  const { manifestKeys, knownKeys } = runGlobalSweep
     ? collectManagedLocalStorageSweepTargets(io)
     : {
         manifestKeys: [...forcedManifestKeys],
-        protectedKeys: collectProtectedKeysFromStorage(io.listKeys(), io),
+        knownKeys: new Set(io.listKeys()),
       };
   const invokedCallbacks = new Set<() => Promise<void>>();
 
   for (const manifestKey of manifestKeys) {
-    runGenericCleanupForManifest(manifestKey, protectedKeys, io);
+    runGenericCleanupForManifest(manifestKey, knownKeys, io);
 
     const callback = maintenanceCallbacks.get(manifestKey);
     if (!callback || invokedCallbacks.has(callback)) continue;

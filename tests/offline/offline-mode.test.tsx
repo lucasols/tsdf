@@ -10,6 +10,7 @@ import {
   useGlobalOfflineEntities,
   useGlobalOfflineStatus,
 } from '../../src/main';
+import { readManagedLocalStorageSingleEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -460,7 +461,12 @@ describe('offline mode network and session', () => {
     });
 
     expect(mutationOk).toBe(true);
-    expect(localStorage.getItem(`tsdf.${sessionKey}._o_.p`)).not.toBeNull();
+    await advanceTime(1010);
+    expect(
+      readManagedLocalStorageSingleEntryByPayload(
+        `tsdf.${sessionKey}.offline-global-hook-doc`,
+      ),
+    ).toMatchObject({ meta: { o: true } });
 
     act(() => {
       globalHook.unmount();

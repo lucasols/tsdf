@@ -153,10 +153,10 @@ describe('localStorage adapter', () => {
     expect(localStorage.getItem('tsdf._m.g')).toBeNull();
     expect(JSON.parse(localStorage.getItem(manifestKey) ?? 'null'))
       .toMatchInlineSnapshot(`
-        entries:
-          - entryKey: '"a'
-            lastAccessAt: 1
-        version: 1
+        e:
+          - a: 1
+            k: '"a'
+        v: 1
       `);
   });
 
@@ -169,9 +169,9 @@ describe('localStorage adapter', () => {
 
     expect(JSON.parse(localStorage.getItem(manifestKey) ?? 'null'))
       .toMatchInlineSnapshot(`
-        entries:
-          - lastAccessAt: 1735689600000
-        version: 1
+        e:
+          - a: 1735689600000
+        v: 1
       `);
 
     const operationCapture = startPersistentStorageOperationCapture();
@@ -201,10 +201,10 @@ describe('localStorage adapter', () => {
     expect(timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb -> 0.11 kb ⚠️ UNCHANGED
+      0    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb -> 0.06 kb ⚠️ UNCHANGED
       "
     `);
     expect(globalMaintenanceReads).toHaveLength(0);
@@ -221,11 +221,11 @@ describe('localStorage adapter', () => {
 
     expect(JSON.parse(localStorage.getItem(manifestKey) ?? 'null'))
       .toMatchInlineSnapshot(`
-        entries:
-          - entryKey: '"a'
-            lastAccessAt: 1735689600000
-            meta: { payload: 'a' }
-        version: 1
+        e:
+          - a: 1735689600000
+            k: '"a'
+            m: { p: 'a' }
+        v: 1
       `);
 
     const operationCapture = startPersistentStorageOperationCapture();
@@ -238,7 +238,7 @@ describe('localStorage adapter', () => {
     expect(metadata).toMatchInlineSnapshot(`
       entryKey: '"a'
       lastAccessAt: 1735689600000
-      meta: { payload: 'a' }
+      meta: { p: 'a' }
       payloadKey: 'tsdf.sess1.namespace-fast-path.ci."a'
     `);
     expect(localPersistentStorage.touchNamespaceEntry(storageKey, prefix)).toBe(
@@ -281,10 +281,7 @@ describe('localStorage adapter', () => {
     // Simulate another tab rewriting the manifest directly in localStorage.
     localStorage.setItem(
       manifestKey,
-      JSON.stringify({
-        version: 1,
-        entries: [{ entryKey: '"b', lastAccessAt: 2 }],
-      }),
+      JSON.stringify({ v: 1, e: [{ k: '"b', a: 2 }] }),
     );
 
     expect(localPersistentStorage.listManifestEntries(prefix))
@@ -318,10 +315,7 @@ describe('localStorage adapter', () => {
       // Simulate a non-coordinated external write while this tab still holds the lock.
       localStorage.setItem(
         manifestKey,
-        JSON.stringify({
-          version: 1,
-          entries: [{ entryKey: '"b', lastAccessAt: 2 }],
-        }),
+        JSON.stringify({ v: 1, e: [{ k: '"b', a: 2 }] }),
       );
 
       expect(localPersistentStorage.listManifestEntries(prefix))

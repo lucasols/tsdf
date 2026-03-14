@@ -22,6 +22,7 @@ import {
   registerManagedLocalStorageMaintenanceCallback,
   removeManagedLocalStorageSinglePayload,
   runManagedLocalStorageMaintenance,
+  syncManagedLocalStorageSessionProtection,
   touchManagedLocalStorageNamespacePayload,
   touchManagedLocalStorageSinglePayload,
   unregisterManagedLocalStorageMaintenanceCallback,
@@ -217,6 +218,10 @@ type LocalPersistentStorage = {
   unregisterMaintenanceCallback(manifestKey: string): void;
   runMaintenance(forceManifestKeys?: Iterable<string>): Promise<void>;
   readProtectedStorageKeys(sessionKey: string): Set<string>;
+  syncSessionProtectedKeys(
+    sessionKey: string,
+    protectedKeys: Iterable<string>,
+  ): void;
 };
 
 export const localPersistentStorage: LocalPersistentStorage = {
@@ -386,6 +391,16 @@ export const localPersistentStorage: LocalPersistentStorage = {
   readProtectedStorageKeys(sessionKey: string): Set<string> {
     return readManagedLocalStorageProtectedKeys(
       sessionKey,
+      getManagedLocalStorageIoWithWarning(),
+    );
+  },
+  syncSessionProtectedKeys(
+    sessionKey: string,
+    protectedKeys: Iterable<string>,
+  ): void {
+    syncManagedLocalStorageSessionProtection(
+      sessionKey,
+      protectedKeys,
       getManagedLocalStorageIoWithWarning(),
     );
   },

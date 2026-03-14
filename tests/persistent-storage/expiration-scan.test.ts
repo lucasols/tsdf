@@ -12,6 +12,7 @@ import {
   getManagedLocalStorageManifestKeyForSingle,
   resetManagedLocalStorageState,
   setManagedLocalStorageRuntimeConfigForTests,
+  upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -118,7 +119,7 @@ describe('expiration scan', () => {
     `);
   });
 
-  test('protected dotted-session entries survive the sweep without protected manifests', async () => {
+  test('protected dotted-session entries survive the sweep via manifest metadata', async () => {
     const staleTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';
     const protectedDoc = persistentStore.scope(
@@ -129,7 +130,6 @@ describe('expiration scan', () => {
       'unprotected-doc',
       dottedSessionKey,
     );
-    const protectedKeysStorageKey = `tsdf.${dottedSessionKey}._o_.p`;
 
     protectedDoc.document.seed(
       { value: { name: 'protected', value: 1 } },
@@ -140,17 +140,11 @@ describe('expiration scan', () => {
       { timestamp: staleTimestamp },
     );
 
-    persistentStore.storage.writeValue(protectedKeysStorageKey, {
-      data: { keys: [protectedDoc.document.storageKey()] },
-      timestamp: Date.now(),
-      version: 1,
+    upsertManagedLocalStorageSingleEntry({
+      storageKey: protectedDoc.document.storageKey(),
+      lastAccessAt: staleTimestamp,
+      meta: { o: true },
     });
-
-    expect(
-      localStorage.getItem(
-        getManagedLocalStorageManifestKeyForSingle(protectedKeysStorageKey),
-      ),
-    ).toBeNull();
 
     createTriggerEnv();
     await waitForScheduledCleanup();

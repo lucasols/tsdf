@@ -78,9 +78,9 @@ type ListQueryPersistenceOfflineOperations<
   | null;
 
 const listQueryQueryManifestMetaSchema = rc_object({
-  payload: rc_unknown.optionalKey(),
-  items: rc_array(rc_string).withFallback([]).optionalKey(),
-  hasMore: rc_boolean.withFallback(false).optionalKey(),
+  p: rc_unknown.optionalKey(),
+  i: rc_array(rc_string).withFallback([]).optionalKey(),
+  h: rc_boolean.withFallback(false).optionalKey(),
 });
 
 type QueryManifestMeta = {
@@ -96,9 +96,9 @@ function readQueryManifestMeta(meta: unknown): QueryManifestMeta {
   }
 
   return {
-    payload: parsed.payload,
-    items: parsed.items ?? [],
-    hasMore: parsed.hasMore === true,
+    payload: parsed.p,
+    items: parsed.i ?? [],
+    hasMore: parsed.h === true,
   };
 }
 
@@ -336,7 +336,7 @@ export function setupListQueryPersistence<
     PersistedListQueryItemData<ItemState | StorageState>
   >(
     { ...persistentConfig, entryPrefix: LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX },
-    { getManifestMeta: (data) => ({ payload: data.payload }) },
+    { getManifestMeta: (data) => ({ p: data.payload }) },
   );
   const queryNamespace =
     createPersistentStorageNamespaceHandle<PersistedListQueryData>(
@@ -346,9 +346,9 @@ export function setupListQueryPersistence<
       },
       {
         getManifestMeta: (data) => ({
-          payload: data.payload,
-          items: data.items,
-          hasMore: data.hasMore,
+          p: data.payload,
+          i: data.items,
+          h: data.hasMore,
         }),
       },
     );

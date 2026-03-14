@@ -1,10 +1,7 @@
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
-import {
-  getManagedLocalStorageManifestKeyForSingle,
-  upsertManagedLocalStorageSingleEntry,
-} from '../../../src/persistentStorage/localStorageMetadata';
+import { upsertManagedLocalStorageSingleEntry } from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { advanceTime } from '../../utils/genericTestUtils';
@@ -76,12 +73,10 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest)
       .    | 🔑[4] ✅ external-cache
       .    | 🔑[5] ✅ feature-flag
-      .    | 📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.11 kb
-      .    | 📖 ✅ tsdf.sess1.expired-doc (entry) | 0.18 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.06 kb
       .    | 🗑️ ✅->❌ tsdf.sess1.expired-doc (entry)
       .    | 🗑️ ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
-      .    | 📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.11 kb
-      .    | 📖 ✅ tsdf.sess1.fresh-doc (entry) | 0.18 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.06 kb
       .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.05 kb
       "
     `);
@@ -120,10 +115,8 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[1] ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)
       .    | 🔑[2] ✅ tsdf.sess1.trigger (entry)
       .    | 🔑[3] ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest)
-      .    | 📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.11 kb
-      .    | 📖 ✅ tsdf.sess1.corrupted (entry) | 0.05 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.11 kb
-      .    | 📖 ✅ tsdf.sess1.trigger (entry) | 0.17 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.06 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.06 kb
       .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.05 kb
       "
     `);
@@ -135,10 +128,6 @@ describe('sync storage efficiency: maintenance', () => {
     const offlineNetwork = createOfflineNetworkMock();
     const protectedDocStorageKey = `tsdf.${dottedSessionKey}.protected-doc`;
     const unprotectedDocStorageKey = `tsdf.${dottedSessionKey}.unprotected-doc`;
-    const protectedKeysStorageKey = `tsdf.${dottedSessionKey}._o_.p`;
-    const protectedKeysManifestKey = getManagedLocalStorageManifestKeyForSingle(
-      protectedKeysStorageKey,
-    );
 
     // Seed two cached dotted-session entries through normal store fetch/persist flows.
     const protectedSeedEnv = createDocumentEnv({
@@ -223,10 +212,7 @@ describe('sync storage efficiency: maintenance', () => {
     triggerDocEnv.scheduleFetch('highPriority');
     await advanceTime(1810);
 
-    // The real offline setup persists protected keys through managed storage metadata.
-    expect(localStorage.getItem(protectedKeysManifestKey)).not.toBeNull();
-
-    // Capture the full sweep so the snapshot shows protected-key loading and stale-entry removal.
+    // Capture the full sweep so the snapshot shows the manifest-only scan and stale-entry removal.
     const readCapture = startPersistentStorageOperationCapture();
     await waitForScheduledCleanup(190);
     const operationsBreakdown = readCapture.finish().timelineString;
@@ -235,13 +221,10 @@ describe('sync storage efficiency: maintenance', () => {
     expect({
       protectedEntryExists:
         localStorage.getItem(protectedDocStorageKey) !== null,
-      protectedKeysManifestExists:
-        localStorage.getItem(protectedKeysManifestKey) !== null,
       unprotectedEntryExists:
         localStorage.getItem(unprotectedDocStorageKey) !== null,
     }).toMatchInlineSnapshot(`
       protectedEntryExists: '✅'
-      protectedKeysManifestExists: '✅'
       unprotectedEntryExists: '❌'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
@@ -255,50 +238,32 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[4] ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
       .     | 🔑[5] ✅ tsdf.user@example.com._o_.s (entry, offline session status)
       .     | 🔑[6] ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status)
-      .     | 🔑[7] ✅ tsdf.user@example.com._o_.p (entry, offline protected keys)
-      .     | 🔑[8] ✅ tsdf._m.r.s:user@example.com._o_.p.m (root, single, manifest, offline protected keys)
-      .     | 🔑[9] ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue)
-      .     | 🔑[10] ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue)
-      .     | 🔑[11] ✅ tsdf.user@example.com.protected-doc.oe.document (entry, offline entity)
-      .     | 🔑[12] ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
-      .     | 🔑[13] ✅ tsdf.sess-trigger.trigger-doc (entry)
-      .     | 🔑[14] ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf.user@example.com._o_.p (entry, offline protected keys) | 0.19 kb
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.11 kb
-      .     | 📖 ✅ tsdf.user@example.com.protected-doc (entry) | 0.19 kb
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.11 kb
-      .     | 📖 ✅ tsdf.user@example.com.unprotected-doc (entry) | 0.19 kb
+      .     | 🔑[7] ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue)
+      .     | 🔑[8] ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue)
+      .     | 🔑[9] ✅ tsdf.user@example.com.protected-doc.oe.document (entry, offline entity)
+      .     | 🔑[10] ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
+      .     | 🔑[11] ✅ tsdf.sess-trigger.trigger-doc (entry)
+      .     | 🔑[12] ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.09 kb
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.06 kb
       .     | 🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)
       .     | 🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status) | 0.11 kb
-      .     | 📖 ✅ tsdf.user@example.com._o_.s (entry, offline session status) | 0.59 kb
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.p.m (root, single, manifest, offline protected keys) | 0.22 kb
-      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue) | 0.21 kb
-      .     | 📖 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue) | 0.77 kb
-      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity) | 0.15 kb
-      .     | 📖 ✅ tsdf.user@example.com.protected-doc.oe.document (entry, offline entity) | 0.66 kb
-      .     | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.11 kb
-      .     | 📖 ✅ tsdf.sess-trigger.trigger-doc (entry) | 0.18 kb
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status) | 0.06 kb
+      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue) | 0.15 kb
+      .     | 📖 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity) | 0.09 kb
+      .     | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.06 kb
       .     | ✍️ ✅->✅ tsdf._m.g (global maintenance) | 0.05 kb -> 0.05 kb
       "
     `);
-
-    expect(getParsedLocalStorageValue('tsdf.user@example.com._o_.p'))
-      .toMatchInlineSnapshot(`
-        data:
-          keys: ['tsdf.user@example.com.protected-doc']
-
-        timestamp: 1736380803620
-        version: 1
-      `);
     expect(
       getParsedLocalStorageValue(
         'tsdf._m.r.s:user@example.com.protected-doc.m',
       ),
     ).toMatchInlineSnapshot(`
-      entries:
-        - lastAccessAt: 1735689601810
-      version: 1
+      e:
+        - a: 1735689601810
+          m: { o: '✅' }
+      v: 1
     `);
   });
 });
