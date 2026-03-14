@@ -8,26 +8,22 @@ import {
   rc_unknown,
 } from 'runcheck';
 import {
-  clearManagedLocalStorageRoot,
+  clearManagedLocalStorageManifest,
   clearManagedLocalStorageSession,
   directManagedLocalStorageIo,
-  getManagedLocalStorageRootKeyForPrefix,
-  getManagedLocalStorageRootKeyForSingle,
+  getManagedLocalStorageManifestKeyForPrefix,
+  getManagedLocalStorageManifestKeyForSingle,
   listManagedLocalStorageKeysSync,
-  readManagedLocalStorageEntryByPayload,
   readManagedLocalStorageManifestEntriesByPrefix,
-  type ManagedLocalStoragePayloadLookupMode,
   readManagedLocalStorageNamespaceEntryByPayload,
-  readManagedLocalStorageSingleEntryByPayload,
   readManagedLocalStorageProtectedKeys,
+  readManagedLocalStorageSingleEntryByPayload,
   removeManagedLocalStorageNamespacePayload,
   registerManagedLocalStorageMaintenanceCallback,
-  removeManagedLocalStoragePayload,
   removeManagedLocalStorageSinglePayload,
   runManagedLocalStorageMaintenance,
   touchManagedLocalStorageNamespacePayload,
   touchManagedLocalStorageSinglePayload,
-  touchManagedLocalStoragePayload,
   unregisterManagedLocalStorageMaintenanceCallback,
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
@@ -45,8 +41,21 @@ function createCachedManagedLocalStorageIo(): {
   deactivate: () => void;
   io: ManagedLocalStorageIo;
 } {
-  const cache = new Map<string, string | null>();
+  const VALUE_NOT_LOADED = Symbol('VALUE_NOT_LOADED');
+  const cache = new Map<string, string | null | typeof VALUE_NOT_LOADED>();
   let active = true;
+  let allKeysLoaded = false;
+
+  function loadAllKeys(): void {
+    if (allKeysLoaded) return;
+
+    allKeysLoaded = true;
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (key === null || cache.has(key)) continue;
+      cache.set(key, VALUE_NOT_LOADED);
+    }
+  }
 
   return {
     deactivate() {
@@ -60,7 +69,10 @@ function createCachedManagedLocalStorageIo(): {
         }
 
         if (cache.has(key)) {
-          return cache.get(key) ?? null;
+          const cachedValue = cache.get(key);
+          if (cachedValue !== VALUE_NOT_LOADED) {
+            return cachedValue ?? null;
+          }
         }
 
         const raw = localStorage.getItem(key);
@@ -78,6 +90,20 @@ function createCachedManagedLocalStorageIo(): {
           cache.set(key, null);
         }
         localStorage.removeItem(key);
+      },
+      listKeys() {
+        if (!active) return directManagedLocalStorageIo.listKeys();
+
+        loadAllKeys();
+        const keys: string[] = [];
+
+        for (const [key, value] of cache.entries()) {
+          if (value !== null) {
+            keys.push(key);
+          }
+        }
+
+        return keys;
       },
     },
   };
@@ -103,6 +129,11 @@ function getManagedLocalStorageIo(): ManagedLocalStorageIo | undefined {
 
 function getActiveManagedLocalStorageIo(): ManagedLocalStorageIo {
   return getManagedLocalStorageIo() ?? directManagedLocalStorageIo;
+}
+
+function getManagedLocalStorageIoWithWarning(): ManagedLocalStorageIo {
+  warnIfManagedLocalStorageLockUnavailable();
+  return getActiveManagedLocalStorageIo();
 }
 
 function getManagedLocalStorageLockManager(): LockManager | null {
@@ -144,10 +175,9 @@ async function runWithManagedLocalStorageLock<T>(
   );
 }
 
-type ManagedLocalStoragePayloadLookupOptions = {
-  mode?: ManagedLocalStoragePayloadLookupMode;
-  namespacePrefix?: string;
-};
+export type LocalStorageMetadataOptions =
+  | { metadata: 'single' }
+  | { metadata: 'namespace'; namespacePrefix: string };
 
 type LocalPersistentStorage = {
   kind: 'local-sync';
@@ -155,16 +185,19 @@ type LocalPersistentStorage = {
   readRaw(key: string): string | null;
   read<T>(key: string): T | null;
   write<T>(key: string, value: T): void;
-  remove(key: string, options?: ManagedLocalStoragePayloadLookupOptions): void;
+  remove(key: string, options?: LocalStorageMetadataOptions): void;
   removeByPrefix(prefix: string): void;
   listKeys(prefix: string): string[];
-  getRootKeyForSingle(storageKey: string): string;
-  getRootKeyForPrefix(storagePrefix: string): string;
-  readEntryMetadataByPayload(
+  getManifestKeyForSingle(storageKey: string): string;
+  getManifestKeyForPrefix(storagePrefix: string): string;
+  readSingleEntryMetadataByPayload(
     payloadKey: string,
-    options?: ManagedLocalStoragePayloadLookupOptions,
-  ): ReturnType<typeof readManagedLocalStorageEntryByPayload>;
-  listEntryMetadata(
+  ): ReturnType<typeof readManagedLocalStorageSingleEntryByPayload>;
+  readNamespaceEntryMetadataByPayload(
+    payloadKey: string,
+    namespacePrefix: string,
+  ): ReturnType<typeof readManagedLocalStorageNamespaceEntryByPayload>;
+  listManifestEntries(
     prefix: string,
   ): ReturnType<typeof readManagedLocalStorageManifestEntriesByPrefix>;
   upsertSingleEntry(
@@ -173,22 +206,16 @@ type LocalPersistentStorage = {
   upsertNamespaceEntry(
     args: Parameters<typeof upsertManagedLocalStorageNamespaceEntry>[0],
   ): string;
-  touchEntry(
-    payloadKey: string,
-    options?: ManagedLocalStoragePayloadLookupOptions,
-  ): boolean;
-  removeEntryMetadata(
-    payloadKey: string,
-    options?: ManagedLocalStoragePayloadLookupOptions,
-  ): boolean;
-  clearRoot(rootKey: string): void;
+  touchSingleEntry(payloadKey: string): boolean;
+  touchNamespaceEntry(payloadKey: string, namespacePrefix: string): boolean;
+  clearManifest(manifestKey: string): void;
   clearSession(sessionKey: string): void;
   registerMaintenanceCallback(
-    rootKey: string,
+    manifestKey: string,
     callback: () => Promise<void>,
   ): void;
-  unregisterMaintenanceCallback(rootKey: string): void;
-  runMaintenance(forceRootKeys?: Iterable<string>): Promise<void>;
+  unregisterMaintenanceCallback(manifestKey: string): void;
+  runMaintenance(forceManifestKeys?: Iterable<string>): Promise<void>;
   readProtectedStorageKeys(sessionKey: string): Set<string>;
 };
 
@@ -199,8 +226,7 @@ export const localPersistentStorage: LocalPersistentStorage = {
     return runWithManagedLocalStorageLock(callback);
   },
   readRaw(key: string): string | null {
-    warnIfManagedLocalStorageLockUnavailable();
-    return localStorage.getItem(key);
+    return getManagedLocalStorageIoWithWarning().getItem(key);
   },
   /**
    * Reads a value from `localStorage` for this exact key.
@@ -220,51 +246,43 @@ export const localPersistentStorage: LocalPersistentStorage = {
    * Stores a value in `localStorage` using `JSON.stringify` for persistence.
    */
   write<T>(key: string, value: T): void {
-    warnIfManagedLocalStorageLockUnavailable();
-    localStorage.setItem(key, JSON.stringify(value));
+    getManagedLocalStorageIoWithWarning().setItem(key, JSON.stringify(value));
   },
 
   /**
    * Removes a single cache entry from `localStorage`.
    */
-  remove(
-    key: string,
-    {
-      mode = 'auto',
-      namespacePrefix,
-    }: ManagedLocalStoragePayloadLookupOptions = {},
-  ): void {
-    warnIfManagedLocalStorageLockUnavailable();
-    localStorage.removeItem(key);
-    const io = getActiveManagedLocalStorageIo();
-    if (mode === 'single') {
+  remove(key: string, options?: LocalStorageMetadataOptions): void {
+    const io = getManagedLocalStorageIoWithWarning();
+    io.removeItem(key);
+    if (options?.metadata === 'single') {
       removeManagedLocalStorageSinglePayload(key, io);
       return;
     }
-    if (mode === 'namespace') {
-      removeManagedLocalStorageNamespacePayload(key, io, namespacePrefix);
-      return;
+    if (options?.metadata === 'namespace') {
+      removeManagedLocalStorageNamespacePayload(
+        key,
+        options.namespacePrefix,
+        io,
+      );
     }
-
-    removeManagedLocalStoragePayload(key, io, namespacePrefix);
   },
 
   /**
    * Removes all keys beginning with the provided prefix from `localStorage`.
    */
   removeByPrefix(prefix: string): void {
-    warnIfManagedLocalStorageLockUnavailable();
-    const keysToRemove: string[] = [];
-
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith(prefix)) {
-        keysToRemove.push(key);
-      }
+    const io = getManagedLocalStorageIoWithWarning();
+    const manifestKey = getManagedLocalStorageManifestKeyForPrefix(prefix);
+    if (io.getItem(manifestKey) !== null) {
+      clearManagedLocalStorageManifest(manifestKey, io);
+      return;
     }
 
-    for (const key of keysToRemove) {
-      localPersistentStorage.remove(key);
+    for (const key of io.listKeys()) {
+      if (key.startsWith(prefix)) {
+        localPersistentStorage.remove(key);
+      }
     }
   },
 
@@ -272,160 +290,103 @@ export const localPersistentStorage: LocalPersistentStorage = {
    * Returns all keys in `localStorage` that start with the provided prefix.
    */
   listKeys(prefix: string): string[] {
-    warnIfManagedLocalStorageLockUnavailable();
-    const managedKeys = listManagedLocalStorageKeysSync(
-      prefix,
-      getActiveManagedLocalStorageIo(),
-    );
+    const io = getManagedLocalStorageIoWithWarning();
+    const managedKeys = listManagedLocalStorageKeysSync(prefix, io);
     if (managedKeys !== null) return managedKeys;
 
-    const keys: string[] = [];
-
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith(prefix)) {
-        keys.push(key);
-      }
-    }
-
-    return keys;
+    return io.listKeys().filter((key) => key.startsWith(prefix));
   },
-  getRootKeyForSingle(storageKey: string): string {
-    return getManagedLocalStorageRootKeyForSingle(storageKey);
+  getManifestKeyForSingle(storageKey: string): string {
+    return getManagedLocalStorageManifestKeyForSingle(storageKey);
   },
-  getRootKeyForPrefix(storagePrefix: string): string {
-    return getManagedLocalStorageRootKeyForPrefix(storagePrefix);
+  getManifestKeyForPrefix(storagePrefix: string): string {
+    return getManagedLocalStorageManifestKeyForPrefix(storagePrefix);
   },
-  readEntryMetadataByPayload(
-    payloadKey: string,
-    {
-      mode = 'auto',
-      namespacePrefix,
-    }: ManagedLocalStoragePayloadLookupOptions = {},
-  ) {
-    warnIfManagedLocalStorageLockUnavailable();
-    const io = getActiveManagedLocalStorageIo();
-    if (mode === 'single') {
-      return readManagedLocalStorageSingleEntryByPayload(payloadKey, io);
-    }
-    if (mode === 'namespace') {
-      return readManagedLocalStorageNamespaceEntryByPayload(
-        payloadKey,
-        io,
-        namespacePrefix,
-      );
-    }
-
-    return readManagedLocalStorageEntryByPayload(
+  readSingleEntryMetadataByPayload(payloadKey: string) {
+    return readManagedLocalStorageSingleEntryByPayload(
       payloadKey,
-      io,
-      namespacePrefix,
+      getManagedLocalStorageIoWithWarning(),
     );
   },
-  listEntryMetadata(prefix: string) {
-    warnIfManagedLocalStorageLockUnavailable();
+  readNamespaceEntryMetadataByPayload(
+    payloadKey: string,
+    namespacePrefix: string,
+  ) {
+    return readManagedLocalStorageNamespaceEntryByPayload(
+      payloadKey,
+      namespacePrefix,
+      getManagedLocalStorageIoWithWarning(),
+    );
+  },
+  listManifestEntries(prefix: string) {
     return readManagedLocalStorageManifestEntriesByPrefix(
       prefix,
-      getActiveManagedLocalStorageIo(),
+      getManagedLocalStorageIoWithWarning(),
     );
   },
   upsertSingleEntry(
     args: Parameters<typeof upsertManagedLocalStorageSingleEntry>[0],
   ): string {
-    warnIfManagedLocalStorageLockUnavailable();
     return upsertManagedLocalStorageSingleEntry(
       args,
-      getActiveManagedLocalStorageIo(),
+      getManagedLocalStorageIoWithWarning(),
     );
   },
   upsertNamespaceEntry(
     args: Parameters<typeof upsertManagedLocalStorageNamespaceEntry>[0],
   ): string {
-    warnIfManagedLocalStorageLockUnavailable();
     return upsertManagedLocalStorageNamespaceEntry(
       args,
-      getActiveManagedLocalStorageIo(),
+      getManagedLocalStorageIoWithWarning(),
     );
   },
-  touchEntry(
-    payloadKey: string,
-    {
-      mode = 'auto',
-      namespacePrefix,
-    }: ManagedLocalStoragePayloadLookupOptions = {},
-  ): boolean {
-    warnIfManagedLocalStorageLockUnavailable();
-    const io = getActiveManagedLocalStorageIo();
-    if (mode === 'single') {
-      return touchManagedLocalStorageSinglePayload(payloadKey, io);
-    }
-    if (mode === 'namespace') {
-      return touchManagedLocalStorageNamespacePayload(
-        payloadKey,
-        io,
-        namespacePrefix,
-      );
-    }
-
-    return touchManagedLocalStoragePayload(payloadKey, io, namespacePrefix);
+  touchSingleEntry(payloadKey: string): boolean {
+    return touchManagedLocalStorageSinglePayload(
+      payloadKey,
+      getManagedLocalStorageIoWithWarning(),
+    );
   },
-  removeEntryMetadata(
-    payloadKey: string,
-    {
-      mode = 'auto',
+  touchNamespaceEntry(payloadKey: string, namespacePrefix: string): boolean {
+    return touchManagedLocalStorageNamespacePayload(
+      payloadKey,
       namespacePrefix,
-    }: ManagedLocalStoragePayloadLookupOptions = {},
-  ): boolean {
-    warnIfManagedLocalStorageLockUnavailable();
-    const io = getActiveManagedLocalStorageIo();
-    if (mode === 'single') {
-      return removeManagedLocalStorageSinglePayload(payloadKey, io);
-    }
-    if (mode === 'namespace') {
-      return removeManagedLocalStorageNamespacePayload(
-        payloadKey,
-        io,
-        namespacePrefix,
-      );
-    }
-
-    return removeManagedLocalStoragePayload(payloadKey, io, namespacePrefix);
+      getManagedLocalStorageIoWithWarning(),
+    );
   },
-  clearRoot(rootKey: string): void {
-    warnIfManagedLocalStorageLockUnavailable();
-    clearManagedLocalStorageRoot(rootKey, getActiveManagedLocalStorageIo());
+  clearManifest(manifestKey: string): void {
+    clearManagedLocalStorageManifest(
+      manifestKey,
+      getManagedLocalStorageIoWithWarning(),
+    );
   },
   clearSession(sessionKey: string): void {
-    warnIfManagedLocalStorageLockUnavailable();
     clearManagedLocalStorageSession(
       sessionKey,
-      getActiveManagedLocalStorageIo(),
+      getManagedLocalStorageIoWithWarning(),
     );
   },
   registerMaintenanceCallback(
-    rootKey: string,
+    manifestKey: string,
     callback: () => Promise<void>,
   ): void {
     warnIfManagedLocalStorageLockUnavailable();
-    registerManagedLocalStorageMaintenanceCallback(rootKey, callback);
+    registerManagedLocalStorageMaintenanceCallback(manifestKey, callback);
   },
-  unregisterMaintenanceCallback(rootKey: string): void {
+  unregisterMaintenanceCallback(manifestKey: string): void {
     warnIfManagedLocalStorageLockUnavailable();
-    unregisterManagedLocalStorageMaintenanceCallback(rootKey);
+    unregisterManagedLocalStorageMaintenanceCallback(manifestKey);
   },
-  runMaintenance(forceRootKeys?: Iterable<string>): Promise<void> {
-    warnIfManagedLocalStorageLockUnavailable();
+  runMaintenance(forceManifestKeys?: Iterable<string>): Promise<void> {
     return runWithManagedLocalStorageLock(() =>
-      runManagedLocalStorageMaintenance(getActiveManagedLocalStorageIo(), {
-        forceRootKeys,
+      runManagedLocalStorageMaintenance(getManagedLocalStorageIoWithWarning(), {
+        forceManifestKeys,
       }),
     );
   },
   readProtectedStorageKeys(sessionKey: string): Set<string> {
-    warnIfManagedLocalStorageLockUnavailable();
     return readManagedLocalStorageProtectedKeys(
       sessionKey,
-      getActiveManagedLocalStorageIo(),
+      getManagedLocalStorageIoWithWarning(),
     );
   },
 };

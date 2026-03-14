@@ -32,6 +32,7 @@ import {
   type ParsedPersistedListQueryItemData,
 } from './parsePersistedData';
 import {
+  assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
   getLocalStorageAdapter,
   getStoragePrefixForStoreNamespace,
@@ -115,7 +116,7 @@ function readManagedQueryEntriesByKey(
   if (!localStorageAdapter || !queryPrefix) return null;
 
   return new Map(
-    localStorageAdapter.listEntryMetadata(queryPrefix).map((entry) => {
+    localStorageAdapter.listManifestEntries(queryPrefix).map((entry) => {
       const queryMeta = readQueryManifestMeta(entry.meta);
 
       return [
@@ -304,6 +305,8 @@ export function setupListQueryPersistence<
 ): ListQueryPersistenceSetup<ItemState, QueryPayload, ItemPayload> {
   type State = TSFDListQueryState<ItemState, QueryPayload, ItemPayload>;
 
+  assertValidPersistentStoreName(config.storeName);
+
   const version = config.version ?? 1;
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
   const maxQueries = config.maxQueries ?? DEFAULT_MAX_QUERIES;
@@ -362,7 +365,7 @@ export function setupListQueryPersistence<
   const hydratedPersistedQueryKeys = new Set<string>();
   let knownPersistedItemKeys: Set<string> | null = null;
   let knownPersistedQueryKeys: Set<string> | null = null;
-  let maintenanceRootKeys = new Set<string>();
+  let maintenanceManifestKeys = new Set<string>();
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -406,23 +409,25 @@ export function setupListQueryPersistence<
     const queryPrefix = getQueryPrefix();
     if (itemPrefix === false || queryPrefix === false) return;
 
-    const nextRootKeys = new Set([
-      localStorageAdapter.getRootKeyForPrefix(itemPrefix),
-      localStorageAdapter.getRootKeyForPrefix(queryPrefix),
+    const nextManifestKeys = new Set([
+      localStorageAdapter.getManifestKeyForPrefix(itemPrefix),
+      localStorageAdapter.getManifestKeyForPrefix(queryPrefix),
     ]);
-    const rootKeysChanged =
-      nextRootKeys.size !== maintenanceRootKeys.size ||
-      [...nextRootKeys].some((rootKey) => !maintenanceRootKeys.has(rootKey));
-    if (!rootKeysChanged) return;
+    const manifestKeysChanged =
+      nextManifestKeys.size !== maintenanceManifestKeys.size ||
+      [...nextManifestKeys].some(
+        (manifestKey) => !maintenanceManifestKeys.has(manifestKey),
+      );
+    if (!manifestKeysChanged) return;
 
-    for (const rootKey of maintenanceRootKeys) {
-      localStorageAdapter.unregisterMaintenanceCallback(rootKey);
+    for (const manifestKey of maintenanceManifestKeys) {
+      localStorageAdapter.unregisterMaintenanceCallback(manifestKey);
     }
 
-    maintenanceRootKeys = nextRootKeys;
-    for (const rootKey of maintenanceRootKeys) {
+    maintenanceManifestKeys = nextManifestKeys;
+    for (const manifestKey of maintenanceManifestKeys) {
       localStorageAdapter.registerMaintenanceCallback(
-        rootKey,
+        manifestKey,
         runSyncMaintenance,
       );
     }
@@ -534,10 +539,7 @@ export function setupListQueryPersistence<
     const storageKey = `${prefix}${itemKey}`;
     const cacheEntry = readStorageEntryFromLocalStorageSync<
       PersistedListQueryItemData<unknown>
-    >(storageKey, version, {
-      metadataMode: 'namespace',
-      metadataNamespacePrefix: prefix,
-    });
+    >(storageKey, version, { metadata: 'namespace', namespacePrefix: prefix });
 
     if (!cacheEntry) {
       forgetPersistedItem(itemKey);
@@ -549,22 +551,28 @@ export function setupListQueryPersistence<
       config.itemPayloadSchema,
     );
     if (!persisted) {
-      scheduleLocalStorageRemoval(storageKey);
+      scheduleLocalStorageRemoval(storageKey, {
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      });
       forgetPersistedItem(itemKey);
       return undefined;
     }
 
     const itemState = toItemState(persisted, dataSchema, shouldIgnoreItem);
     if (!itemState) {
-      scheduleLocalStorageRemoval(storageKey);
+      scheduleLocalStorageRemoval(storageKey, {
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      });
       forgetPersistedItem(itemKey);
       return undefined;
     }
 
     scheduleIdleCleanup(() =>
       refreshLocalStorageTimestamp(storageKey, {
-        metadataMode: 'namespace',
-        metadataNamespacePrefix: prefix,
+        metadata: 'namespace',
+        namespacePrefix: prefix,
       }),
     );
     rememberHydratedItem(itemKey, cacheEntry.data);
@@ -627,7 +635,7 @@ export function setupListQueryPersistence<
       readStorageEntryFromLocalStorageSync<PersistedListQueryData>(
         storageKey,
         version,
-        { metadataMode: 'namespace', metadataNamespacePrefix: prefix },
+        { metadata: 'namespace', namespacePrefix: prefix },
       );
 
     if (!cacheEntry) {
@@ -640,15 +648,18 @@ export function setupListQueryPersistence<
       config.queryPayloadSchema,
     );
     if (!persistedQuery) {
-      scheduleLocalStorageRemoval(storageKey);
+      scheduleLocalStorageRemoval(storageKey, {
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      });
       forgetPersistedQuery(queryKey);
       return undefined;
     }
 
     scheduleIdleCleanup(() =>
       refreshLocalStorageTimestamp(storageKey, {
-        metadataMode: 'namespace',
-        metadataNamespacePrefix: prefix,
+        metadata: 'namespace',
+        namespacePrefix: prefix,
       }),
     );
     rememberHydratedQuery(queryKey, cacheEntry.data);
@@ -1173,7 +1184,8 @@ export function setupListQueryPersistence<
     }
 
     if (localStorageAdapter !== null && itemPrefix !== null) {
-      const metadataEntries = localStorageAdapter.listEntryMetadata(itemPrefix);
+      const metadataEntries =
+        localStorageAdapter.listManifestEntries(itemPrefix);
       if (!hasIgnoreItemFilter && metadataEntries.length <= maxItems) return;
 
       const metadataEntriesWithPayload = metadataEntries.map((entry) => ({
@@ -1636,13 +1648,13 @@ export function setupListQueryPersistence<
       knownPersistedQueryKeys.add(queryKey);
     }
 
-    if (localStorageAdapter !== null && maintenanceRootKeys.size > 0) {
+    if (localStorageAdapter !== null && maintenanceManifestKeys.size > 0) {
       const needsMaintenance =
         hasIgnoreItemFilter ||
         knownPersistedItemKeys.size > maxItems ||
         knownPersistedQueryKeys.size > maxQueries;
       if (needsMaintenance) {
-        await localStorageAdapter.runMaintenance(maintenanceRootKeys);
+        await localStorageAdapter.runMaintenance(maintenanceManifestKeys);
       }
       return;
     }
@@ -1680,11 +1692,11 @@ export function setupListQueryPersistence<
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
-    if (localStorageAdapter !== null && maintenanceRootKeys.size > 0) {
-      for (const rootKey of maintenanceRootKeys) {
-        localStorageAdapter.unregisterMaintenanceCallback(rootKey);
+    if (localStorageAdapter !== null && maintenanceManifestKeys.size > 0) {
+      for (const manifestKey of maintenanceManifestKeys) {
+        localStorageAdapter.unregisterMaintenanceCallback(manifestKey);
       }
-      maintenanceRootKeys = new Set();
+      maintenanceManifestKeys = new Set();
     }
     itemNamespace.dispose();
     queryNamespace.dispose();

@@ -9,6 +9,7 @@ import {
   parsePersistedStoreData,
 } from './parsePersistedData';
 import {
+  assertValidPersistentStoreName,
   createPersistentStorageHandle,
   getLocalStorageAdapter,
   getStorageKeyForStore,
@@ -32,7 +33,7 @@ function readDocumentFromLocalStorageSync(
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
   const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
-  >(key, version, { metadataMode: 'single' });
+  >(key, version, { metadata: 'single' });
   if (!entry) return { persisted: null, foundEntry: false };
 
   const persisted = parsePersistedDocumentData(entry.data);
@@ -62,13 +63,16 @@ export function setupDocumentPersistence<
     TOfflineOperations
   > & { getSessionKey: () => string | false },
 ): DocumentPersistenceSetup<State> {
+  assertValidPersistentStoreName(config.storeName);
+
   const version = config.version ?? 1;
   const storageAdapter = config.adapter;
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
-  const handle = createPersistentStorageHandle<
-    PersistedDocumentData<State | StorageState>
-  >(config);
+  const handle =
+    createPersistentStorageHandle<PersistedDocumentData<State | StorageState>>(
+      config,
+    );
 
   let storeRef: Store<DocumentStoreState<State>> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -105,7 +109,7 @@ export function setupDocumentPersistence<
     }
 
     scheduleIdleCleanup(() =>
-      refreshLocalStorageTimestamp(key, { metadataMode: 'single' }),
+      refreshLocalStorageTimestamp(key, { metadata: 'single' }),
     );
 
     storeRef.setPartialState(
@@ -150,7 +154,7 @@ export function setupDocumentPersistence<
     }
 
     scheduleIdleCleanup(() =>
-      refreshLocalStorageTimestamp(key, { metadataMode: 'single' }),
+      refreshLocalStorageTimestamp(key, { metadata: 'single' }),
     );
 
     return {

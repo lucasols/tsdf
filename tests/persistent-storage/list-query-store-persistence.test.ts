@@ -16,7 +16,7 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
-import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import type {
   PersistedListQueryData,
@@ -131,7 +131,11 @@ function listStoredKeys(prefix: string): string[] {
 }
 
 function getStoredEntryTimestamp(key: string): number {
-  const entry = readManagedLocalStorageEntryByPayload(key);
+  const itemIndex = key.indexOf('.li.');
+  const queryIndex = key.indexOf('.lq.');
+  const splitIndex = itemIndex === -1 ? queryIndex : itemIndex;
+  const prefix = splitIndex === -1 ? `${key}.` : key.slice(0, splitIndex + 4);
+  const entry = readManagedLocalStorageNamespaceEntryByPayload(key, prefix);
   if (entry === null) {
     throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
@@ -225,6 +229,14 @@ afterEach(() => {
 });
 
 describe('localStorage: list query store persistence', () => {
+  test('dev-only check rejects store ids containing dots', () => {
+    expect(() =>
+      createEnv({ storeName: 'users.with-dot', sessionKey: 'sess1' }),
+    ).toThrowError(
+      '[tsdf] persistentStorage.storeName "users.with-dot" must not contain ".".',
+    );
+  });
+
   test('direct query reads lazily hydrate only the requested query and its items', () => {
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };

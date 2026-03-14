@@ -15,7 +15,7 @@ import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -42,6 +42,10 @@ function itemStorageKey(
   payload: string,
 ): string {
   return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
+}
+
+function itemStoragePrefix(storeName: string, sessionKey: string): string {
+  return `tsdf.${sessionKey}.${storeName}.ci.`;
 }
 
 type ItemState = { id: string; name: string };
@@ -99,7 +103,11 @@ function listStoredItemPayloads(
 }
 
 function getStoredCollectionItemTimestamp(key: string): number {
-  const entry = readManagedLocalStorageEntryByPayload(key);
+  const [_, sessionKey = '', storeName = ''] = key.split('.');
+  const entry = readManagedLocalStorageNamespaceEntryByPayload(
+    key,
+    itemStoragePrefix(storeName, sessionKey),
+  );
   if (entry === null) {
     throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
@@ -147,6 +155,14 @@ afterEach(() => {
 });
 
 describe('localStorage: collection store persistence', () => {
+  test('dev-only check rejects store ids containing dots', () => {
+    expect(() =>
+      createEnv({ storeName: 'collection.with-dot', sessionKey: 'sess1' }),
+    ).toThrowError(
+      '[tsdf] persistentStorage.storeName "collection.with-dot" must not contain ".".',
+    );
+  });
+
   test('direct key reads lazily hydrate only the requested cached items', () => {
     setCachedCollectionItem('col-local', 'sess1', '1', {
       value: { id: '1', name: 'Alice' },

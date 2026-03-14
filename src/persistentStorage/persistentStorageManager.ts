@@ -6,11 +6,15 @@ import {
   rc_parse_json,
   rc_unknown,
 } from 'runcheck';
-import { resetManagedLocalStorageState } from './localStorageMetadata';
+import {
+  getManagedLocalStorageRuntimeConfig,
+  resetManagedLocalStorageState,
+} from './localStorageMetadata';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   localPersistentStorage,
   opfsPersistentStorage,
+  type LocalStorageMetadataOptions,
 } from './storageAdapter';
 import type {
   AsyncStorageAdapter,
@@ -21,8 +25,6 @@ import type {
 
 const DEBOUNCE_MS = 1000;
 export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
-
-const PERSISTENT_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
 const cacheEntrySchema = rc_object({
   data: rc_unknown,
@@ -46,6 +48,15 @@ function getStorageKey(sessionKey: string, storeName: string): string {
   return `tsdf.${sessionKey}.${storeName}`;
 }
 
+export function assertValidPersistentStoreName(storeName: string): void {
+  if (import.meta.env.PROD) return;
+  if (!storeName.includes('.')) return;
+
+  throw new Error(
+    `[tsdf] persistentStorage.storeName "${storeName}" must not contain ".".`,
+  );
+}
+
 function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
   if (adapter === 'local-sync') {
     if (localStorageExpirationScanScheduled) return;
@@ -55,7 +66,10 @@ function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
     scannedAsyncAdapters.add(adapter);
   }
   scheduleIdleCleanup(() => {
-    void runExpirationScan(adapter, PERSISTENT_STORAGE_MAX_AGE_MS);
+    void runExpirationScan(
+      adapter,
+      getManagedLocalStorageRuntimeConfig().maxAgeMs,
+    );
   });
 }
 
@@ -80,49 +94,35 @@ function shouldThrottleLocalStorageTouch(
   );
 }
 
-export function scheduleLocalStorageRemoval(key: string): void {
+export function scheduleLocalStorageRemoval(
+  key: string,
+  options: LocalStorageMetadataOptions,
+): void {
   scheduleIdleCleanup(() => {
     void runLocalStorageMutation(() => {
-      localPersistentStorage.remove(key);
+      localPersistentStorage.remove(key, options);
     });
   });
 }
 
-type LocalStorageMetadataLookupMode = 'auto' | 'single' | 'namespace';
-
-type LocalStorageMetadataOptions = {
-  metadataMode?: LocalStorageMetadataLookupMode;
-  metadataNamespacePrefix?: string;
-};
-
 function refreshLocalStorageTimestampUnlocked(
   key: string,
-  {
-    metadataMode = 'auto',
-    metadataNamespacePrefix,
-  }: LocalStorageMetadataOptions = {},
+  options: LocalStorageMetadataOptions,
 ): void {
   const now = Date.now();
   if (shouldThrottleLocalStorageTouch(key, now)) return;
 
-  if (
-    localPersistentStorage.touchEntry(key, {
-      mode: metadataMode,
-      namespacePrefix: metadataNamespacePrefix,
-    })
-  ) {
+  const touched =
+    options.metadata === 'single'
+      ? localPersistentStorage.touchSingleEntry(key)
+      : localPersistentStorage.touchNamespaceEntry(
+          key,
+          options.namespacePrefix,
+        );
+
+  if (touched) {
     recordLocalStorageTouch(key, now);
-    return;
   }
-
-  const raw = localPersistentStorage.readRaw(key);
-  if (raw === null) return;
-
-  const result = rc_parse_json(raw, cacheEntrySchema);
-  if (!result.ok) return;
-
-  localPersistentStorage.write(key, { ...result.value, timestamp: now });
-  recordLocalStorageTouch(key, now);
 }
 
 export type PersistentStorageHandle<T> = {
@@ -175,10 +175,14 @@ export function createPersistentStorageHandle<T>(
     if (key === false) return null;
     try {
       if (adapter === 'local-sync') {
-        const entry = readStorageEntryFromLocalStorageSync<T>(key, version);
+        const entry = readStorageEntryFromLocalStorageSync<T>(key, version, {
+          metadata: 'single',
+        });
         if (!entry) return null;
 
-        scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+        scheduleIdleCleanup(() =>
+          refreshLocalStorageTimestamp(key, { metadata: 'single' }),
+        );
         return entry.data;
       }
 
@@ -213,15 +217,8 @@ export function createPersistentStorageHandle<T>(
       if (adapter === 'local-sync') {
         await runLocalStorageMutation(() => {
           localPersistentStorage.write(key, entry);
-          const sessionKey = config.getSessionKey();
-          if (sessionKey === false) return;
-
           localPersistentStorage.upsertSingleEntry({
-            sessionKey,
-            storeName: config.storeName,
             storageKey: key,
-            cleanupIntervalMs: config.cleanupIntervalMs,
-            maxAgeMs: PERSISTENT_STORAGE_MAX_AGE_MS,
             lastAccessAt: entry.timestamp,
             meta: getManifestMeta?.(data),
           });
@@ -263,8 +260,8 @@ export function createPersistentStorageHandle<T>(
     try {
       if (adapter === 'local-sync') {
         await runLocalStorageMutation(() => {
-          localPersistentStorage.clearRoot(
-            localPersistentStorage.getRootKeyForSingle(key),
+          localPersistentStorage.clearManifest(
+            localPersistentStorage.getManifestKeyForSingle(key),
           );
         });
       } else {
@@ -328,8 +325,8 @@ export function createPersistentStorageNamespaceHandle<T>(
     try {
       if (adapter === 'local-sync') {
         return readStorageEntryFromLocalStorageSync<T>(key, version, {
-          metadataMode: 'namespace',
-          metadataNamespacePrefix: prefix,
+          metadata: 'namespace',
+          namespacePrefix: prefix,
         });
       }
 
@@ -361,8 +358,8 @@ export function createPersistentStorageNamespaceHandle<T>(
     if (adapter === 'local-sync') {
       scheduleIdleCleanup(() =>
         refreshLocalStorageTimestamp(key, {
-          metadataMode: 'namespace',
-          metadataNamespacePrefix: prefix,
+          metadata: 'namespace',
+          namespacePrefix: prefix,
         }),
       );
     }
@@ -384,18 +381,12 @@ export function createPersistentStorageNamespaceHandle<T>(
       if (adapter === 'local-sync') {
         await runLocalStorageMutation(() => {
           localPersistentStorage.write(key, entry);
-          const sessionKey = config.getSessionKey();
           const prefix = getPrefix();
-          if (sessionKey === false || prefix === false) return;
+          if (prefix === false) return;
 
           localPersistentStorage.upsertNamespaceEntry({
-            sessionKey,
-            storeName: config.storeName,
             storagePrefix: prefix,
             entryKey,
-            payloadKey: key,
-            cleanupIntervalMs: config.cleanupIntervalMs,
-            maxAgeMs: PERSISTENT_STORAGE_MAX_AGE_MS,
             lastAccessAt: entry.timestamp,
             meta: getManifestMeta?.(data, entryKey),
           });
@@ -420,7 +411,7 @@ export function createPersistentStorageNamespaceHandle<T>(
       if (adapter === 'local-sync') {
         await runLocalStorageMutation(() => {
           localPersistentStorage.remove(key, {
-            mode: 'namespace',
+            metadata: 'namespace',
             namespacePrefix: prefix,
           });
         });
@@ -459,8 +450,8 @@ export function createPersistentStorageNamespaceHandle<T>(
     try {
       if (adapter === 'local-sync') {
         await runLocalStorageMutation(() => {
-          localPersistentStorage.clearRoot(
-            localPersistentStorage.getRootKeyForPrefix(prefix),
+          localPersistentStorage.clearManifest(
+            localPersistentStorage.getManifestKeyForPrefix(prefix),
           );
         });
       } else {
@@ -481,47 +472,47 @@ export function createPersistentStorageNamespaceHandle<T>(
 export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
   version: number,
-  {
-    metadataMode = 'auto',
-    metadataNamespacePrefix,
-  }: LocalStorageMetadataOptions = {},
+  options: LocalStorageMetadataOptions,
 ): StorageCacheEntry<T> | null {
-  const metadata = localPersistentStorage.readEntryMetadataByPayload(key, {
-    mode: metadataMode,
-    namespacePrefix: metadataNamespacePrefix,
-  });
+  const metadata =
+    options.metadata === 'single'
+      ? localPersistentStorage.readSingleEntryMetadataByPayload(key)
+      : localPersistentStorage.readNamespaceEntryMetadataByPayload(
+          key,
+          options.namespacePrefix,
+        );
   const raw = localPersistentStorage.readRaw(key);
 
-  if (metadata === null) {
-    if (raw !== null) {
-      scheduleLocalStorageRemoval(key);
-    }
+  function removeAndReturnNull(): null {
+    scheduleLocalStorageRemoval(key, options);
     return null;
   }
 
-  if (raw === null) {
-    scheduleLocalStorageRemoval(key);
+  if (metadata === null) {
+    if (raw !== null) return removeAndReturnNull();
     return null;
   }
+
+  if (
+    Date.now() - metadata.lastAccessAt >
+    getManagedLocalStorageRuntimeConfig().maxAgeMs
+  ) {
+    return removeAndReturnNull();
+  }
+
+  if (raw === null) return removeAndReturnNull();
 
   try {
     const result = rc_parse_json(raw, cacheEntrySchema);
-    if (!result.ok) {
-      scheduleLocalStorageRemoval(key);
-      return null;
-    }
+    if (!result.ok) return removeAndReturnNull();
     const entry = result.value;
-    if (entry.version !== version) {
-      scheduleLocalStorageRemoval(key);
-      return null;
-    }
+    if (entry.version !== version) return removeAndReturnNull();
 
     return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
       entry,
     );
   } catch {
-    scheduleLocalStorageRemoval(key);
-    return null;
+    return removeAndReturnNull();
   }
 }
 
@@ -598,7 +589,7 @@ export async function clearAllSessionStorage(
  */
 export function refreshLocalStorageTimestamp(
   key: string,
-  options?: LocalStorageMetadataOptions,
+  options: LocalStorageMetadataOptions,
 ): void {
   void localPersistentStorage.runLocked(() => {
     refreshLocalStorageTimestampUnlocked(key, options);
@@ -620,18 +611,17 @@ async function runExpirationScan(
   const protectedKeys = new Set<string>();
 
   for (const key of keys) {
-    if (!key.endsWith('.__offline__.protected')) continue;
+    if (!key.endsWith('._o_.p')) continue;
 
-    const entry = await adapter.read<StorageCacheEntry<{ keys: string[] }>>(
-      key,
-    );
+    const entry =
+      await adapter.read<StorageCacheEntry<{ keys: string[] }>>(key);
     for (const protectedKey of entry?.data.keys ?? []) {
       protectedKeys.add(protectedKey);
     }
   }
 
   for (const key of keys) {
-    if (key.includes('.__offline__.')) continue;
+    if (key.includes('._o_.')) continue;
     if (protectedKeys.has(key)) continue;
 
     const raw = await adapter.read<unknown>(key);
@@ -664,7 +654,7 @@ export async function readProtectedStorageKeys(
   }
 
   const entry = await adapter.read<StorageCacheEntry<{ keys: string[] }>>(
-    `tsdf.${sessionKey}.__offline__.protected`,
+    `tsdf.${sessionKey}._o_.p`,
   );
 
   return new Set(entry?.data.keys ?? []);

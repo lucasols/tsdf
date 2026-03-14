@@ -460,9 +460,7 @@ describe('offline mode network and session', () => {
     });
 
     expect(mutationOk).toBe(true);
-    expect(
-      localStorage.getItem(`tsdf.${sessionKey}.__offline__.protected`),
-    ).not.toBeNull();
+    expect(localStorage.getItem(`tsdf.${sessionKey}._o_.p`)).not.toBeNull();
 
     act(() => {
       globalHook.unmount();

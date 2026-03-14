@@ -2,7 +2,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
-  getManagedLocalStorageRootKeyForSingle,
+  getManagedLocalStorageManifestKeyForSingle,
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
@@ -22,7 +22,33 @@ type ListQuerySeedItemOptions = StorageSeedOptions & {
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
 
-export const TEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+type GlobalMaintenanceState = {
+  lastCleanupAt: number | null;
+  version?: unknown;
+};
+
+function parseGlobalMaintenanceRaw(
+  raw: string | null,
+): GlobalMaintenanceState | null {
+  const maintenance = safeJsonParse(raw ?? 'null');
+  if (
+    typeof maintenance !== 'object' ||
+    maintenance === null ||
+    !('lca' in maintenance)
+  ) {
+    return null;
+  }
+
+  const { lca } = maintenance;
+  if (typeof lca !== 'number' && lca !== null) {
+    return null;
+  }
+
+  return {
+    lastCleanupAt: lca,
+    version: 'v' in maintenance ? maintenance.v : undefined,
+  };
+}
 
 type PersistentTestStoreStorage = {
   writeRaw: (key: string, raw: string) => void;
@@ -32,7 +58,7 @@ type PersistentTestStoreStorage = {
   listKeys: (prefix: string) => string[];
   has: (key: string) => boolean;
   getRaw: (key: string) => string | null;
-  getCatalogRaw: () => unknown;
+  getGlobalMaintenanceRaw: () => GlobalMaintenanceState | null;
   storageKind?: 'localStorage' | 'memory';
 };
 
@@ -168,10 +194,7 @@ function createPersistentTestStore(
           storage.writeValue(documentStorageKey, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageSingleEntry({
-              sessionKey,
-              storeName,
               storageKey: documentStorageKey,
-              maxAgeMs: TEST_MAX_AGE_MS,
               lastAccessAt: entry.timestamp,
             });
           }
@@ -198,7 +221,7 @@ function createPersistentTestStore(
 
           return safeJsonParse(
             storage.getRaw(
-              `${getManagedLocalStorageRootKeyForSingle(documentStorageKey)}.m`,
+              getManagedLocalStorageManifestKeyForSingle(documentStorageKey),
             ) ?? 'null',
           );
         },
@@ -216,12 +239,8 @@ function createPersistentTestStore(
           storage.writeValue(key, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
-              sessionKey,
-              storeName,
               storagePrefix: `tsdf.${sessionKey}.${storeName}.ci.`,
               entryKey: collectionItemKey(payload),
-              payloadKey: key,
-              maxAgeMs: TEST_MAX_AGE_MS,
               lastAccessAt: entry.timestamp,
               meta: { payload },
             });
@@ -263,12 +282,8 @@ function createPersistentTestStore(
           storage.writeValue(storageKey, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
-              sessionKey,
-              storeName,
               storagePrefix: `tsdf.${sessionKey}.${storeName}.li.`,
               entryKey: itemKey,
-              payloadKey: storageKey,
-              maxAgeMs: TEST_MAX_AGE_MS,
               lastAccessAt: entry.timestamp,
               meta: { payload },
             });
@@ -293,12 +308,8 @@ function createPersistentTestStore(
           storage.writeValue(key, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
-              sessionKey,
-              storeName,
               storagePrefix: `tsdf.${sessionKey}.${storeName}.lq.`,
               entryKey: getCompositeKey(params),
-              payloadKey: key,
-              maxAgeMs: TEST_MAX_AGE_MS,
               lastAccessAt: entry.timestamp,
               meta: {
                 payload: params,
@@ -342,29 +353,6 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
     },
     writeValue<T>(key: string, value: T) {
       localStorage.setItem(key, JSON.stringify(value));
-      if (key.endsWith('.__offline__.protected')) {
-        const sessionKey = key.slice(
-          'tsdf.'.length,
-          -'.__offline__.protected'.length,
-        );
-        const protectedKeys =
-          typeof value === 'object' &&
-          value !== null &&
-          'data' in value &&
-          typeof value.data === 'object' &&
-          value.data !== null &&
-          'keys' in value.data &&
-          Array.isArray(value.data.keys)
-            ? value.data.keys
-            : [];
-        upsertManagedLocalStorageSingleEntry({
-          sessionKey,
-          storeName: '__offline__.protected',
-          storageKey: key,
-          maxAgeMs: TEST_MAX_AGE_MS,
-          meta: { keys: protectedKeys },
-        });
-      }
     },
     readEntry<T>(key: string): T | null {
       const raw = localStorage.getItem(key);
@@ -393,8 +381,8 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
     getRaw(key: string) {
       return localStorage.getItem(key);
     },
-    getCatalogRaw() {
-      return safeJsonParse(localStorage.getItem('tsdf._m.c') ?? 'null');
+    getGlobalMaintenanceRaw() {
+      return parseGlobalMaintenanceRaw(localStorage.getItem('tsdf._m.g'));
     },
     storageKind: 'localStorage',
   });
@@ -428,8 +416,8 @@ export function createInMemoryPersistentTestStore(
     getRaw(key: string) {
       return storageMap.get(key) ?? null;
     },
-    getCatalogRaw() {
-      return safeJsonParse(storageMap.get('tsdf._m.c') ?? 'null');
+    getGlobalMaintenanceRaw() {
+      return parseGlobalMaintenanceRaw(storageMap.get('tsdf._m.g') ?? null);
     },
     storageKind: 'memory',
   });

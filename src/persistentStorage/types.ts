@@ -84,7 +84,7 @@ export type PersistentStoragePreloadResult<
 
 /** Base config shared by all store types. */
 export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
-  /** Unique name for this store's persistent storage key. */
+  /** Unique name for this store's persistent storage key. Must not contain `.`. */
   storeName: string;
   /** Injected adapter used to save and restore persistent data. Use `'local-sync'` for built-in localStorage or provide a custom async adapter. */
   adapter: StorageAdapter;
@@ -92,12 +92,6 @@ export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
   schema: PersistentStorageDataSchema<TFinal, TStorage>;
   /** Version number for cache invalidation. Defaults to 1. */
   version?: number;
-  /**
-   * Throttles automatic background cleanup for the built-in localStorage adapter.
-   * Direct cleanup caused by malformed or version-mismatched entries is not delayed.
-   * Defaults to 24 hours. Use `0` to allow maintenance on every eligible init.
-   */
-  cleanupIntervalMs?: number;
   /**
    * Returns a session key scoping storage per org/tenant.
    * Return `false` to indicate the session is not ready — all storage

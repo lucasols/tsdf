@@ -197,14 +197,14 @@ function createSessionPersistenceHandles(args: {
 
   return {
     sessionHandle: createPersistentStorageHandle<GlobalOfflineStatus>({
-      storeName: '__offline__.session',
+      storeName: '_o_.s',
       adapter,
       getSessionKey: () => args.sessionKey,
       onPersistentStorageError: args.onPersistentStorageError,
     }),
     protectedKeysHandle: createPersistentStorageHandle<{ keys: string[] }>(
       {
-        storeName: '__offline__.protected',
+        storeName: '_o_.p',
         adapter,
         getSessionKey: () => args.sessionKey,
         onPersistentStorageError: args.onPersistentStorageError,

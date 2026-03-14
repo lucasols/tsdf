@@ -1,0 +1,184 @@
+import { renderHook } from '@testing-library/react';
+import { act } from 'react';
+import { describe, expect, test } from 'vitest';
+import { startPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
+import {
+  captureHookRemount,
+  createDocumentEnv,
+  flushInvalidationPersistence,
+  persistentStore,
+  setCachedDocumentData,
+  settleStartupBackgroundScan,
+  setupSyncStorageEfficiencyTestSuite,
+} from './shared';
+
+setupSyncStorageEfficiencyTestSuite();
+
+describe('sync storage efficiency: document', () => {
+  test('document hook remount stays fully in memory after the cached document is loaded at startup', async () => {
+    const storeName = 'doc-remount-flow';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 7,
+    });
+
+    // Store creation should only queue the startup maintenance pass.
+    const startupCapture = startPersistentStorageOperationCapture();
+    const env = createDocumentEnv({ storeName, sessionKey });
+    const startupOperations = startupCapture.finish().timelineString;
+
+    expect(startupOperations).toMatchInlineSnapshot(`"empty"`);
+
+    // Drain the startup scan so this capture focuses only on hook mount behavior.
+    await settleStartupBackgroundScan();
+
+    // Document local-sync hydration happens during store initialization, so mount should not hit storage twice.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useDocument({
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 7 }`,
+    );
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb
+      .    | 📖 ✅ tsdf.sess1.doc-remount-flow (entry) | 0.20 kb
+      2s   | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('direct store.state reads stay in memory once the document is hydrated', async () => {
+    const storeName = 'doc-direct-state-read';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 8,
+    });
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Hydrate once through the public hook, then measure direct synchronous reads only.
+    await settleStartupBackgroundScan();
+    const hook = renderHook(() =>
+      env.apiStore.useDocument({ disableRefetchOnMount: true }),
+    );
+    await flushInvalidationPersistence(0);
+    hook.unmount();
+
+    const readCapture = startPersistentStorageOperationCapture();
+    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'Cached document', value: 8 }
+    `);
+    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'Cached document', value: 8 }
+    `);
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('updating a hydrated document writes the mutation without rereading cached entries', async () => {
+    const storeName = 'doc-mutation-flow';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 8,
+    });
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Hydrate the cached document through a normal mounted hook first.
+    await settleStartupBackgroundScan();
+    renderHook(() => env.apiStore.useDocument({ disableRefetchOnMount: true }));
+    await flushInvalidationPersistence(0);
+
+    // Mutating the already-hydrated document should only need writes plus manifest maintenance.
+    const mutationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.apiStore.updateState((draft) => {
+        draft.value = { name: 'Edited document', value: 99 };
+      });
+    });
+    await flushInvalidationPersistence();
+    const mutationOperations = mutationCapture.finish().timelineString;
+
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .document.readData<{ value: { name: string; value: number } }>(),
+    ).toMatchInlineSnapshot(`
+      value: { name: 'Edited document', value: 99 }
+    `);
+    expect(mutationOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      1s   | ✍️ ✅->✅ tsdf.sess1.doc-mutation-flow (entry) | 0.20 kb -> 0.20 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      "
+    `);
+  });
+
+  test('useDocument invalidation snapshots the full persistence timeline through the refetch save', async () => {
+    const storeName = 'doc-invalidation-flow';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 8,
+    });
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
+    await settleStartupBackgroundScan();
+    const hook = renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+
+    // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
+    const invalidationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.setServerData({ name: 'Fresh document', value: 42 });
+      env.apiStore.invalidateData('highPriority');
+    });
+    await flushInvalidationPersistence();
+    const invalidationOperations = invalidationCapture.finish().timelineString;
+
+    expect(hook.result.current.data).toMatchInlineSnapshot(`
+      value: { name: 'Fresh document', value: 42 }
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .document.readData<{ value: { name: string; value: number } }>(),
+    ).toMatchInlineSnapshot(`
+      value: { name: 'Fresh document', value: 42 }
+    `);
+    expect(invalidationOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      1.81s | ✍️ ✅->✅ tsdf.sess1.doc-invalidation-flow (entry) | 0.20 kb -> 0.20 kb
+      .     | 📖 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.11 kb
+      .     | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      "
+    `);
+  });
+});

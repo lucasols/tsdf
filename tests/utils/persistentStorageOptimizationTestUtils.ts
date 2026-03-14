@@ -1,8 +1,10 @@
+import { safeJsonParse } from '@ls-stack/utils/safeJson';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 
 function describePersistentStorageKey(key: string): string | null {
   if (key === 'tsdf._m.l' || key === 'tsdf.__lsm__.l') return 'lease';
-  if (key === 'tsdf._m.c' || key === 'tsdf.__lsm__.c') return 'catalog';
+  if (key === 'tsdf._m.g') return 'global maintenance';
 
   for (const prefix of ['tsdf._m.r.', 'tsdf.__lsm__.r.']) {
     if (!key.startsWith(prefix)) continue;
@@ -91,6 +93,7 @@ export type PersistentStorageOperation =
       time: number;
       type: 'setItem';
       existsBefore: boolean;
+      valueChanged: boolean;
       key: string;
       valueByteSizeBefore: number | null;
       valueByteSizeAfter: number;
@@ -111,12 +114,13 @@ function formatPersistentStorageOperation(
       return base;
     }
     case 'setItem': {
+      const unchangedFlag = !operation.valueChanged ? ' ⚠️ UNCHANGED' : '';
       const base = `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅ ${formatPersistentStorageKey(operation.key)}`;
       const before =
         operation.valueByteSizeBefore !== null
           ? formatByteSize(operation.valueByteSizeBefore)
           : '❌';
-      return `${base} | ${before} -> ${formatByteSize(operation.valueByteSizeAfter)}`;
+      return `${base} | ${before} -> ${formatByteSize(operation.valueByteSizeAfter)}${unchangedFlag}`;
     }
     case 'removeItem':
       return `🗑️ ${operation.existsBefore ? '✅' : '❌'}->❌ ${formatPersistentStorageKey(operation.key)}`;
@@ -211,6 +215,7 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
       type: 'setItem',
       key,
       existsBefore: existingValue !== null,
+      valueChanged: existingValue !== value,
       valueByteSizeBefore:
         existingValue !== null ? existingValue.length * 2 : null,
       valueByteSizeAfter: value.length * 2,
@@ -255,3 +260,10 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
 
 export const startPersistentStorageReadCapture =
   startPersistentStorageOperationCapture;
+
+export function getParsedLocalStorageValue<T = unknown>(key: string): T | null {
+  const value = localStorage.getItem(key);
+  if (value === null) return null;
+
+  return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(value));
+}

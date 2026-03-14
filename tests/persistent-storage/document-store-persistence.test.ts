@@ -13,7 +13,7 @@ import {
 } from 'vitest';
 import { createDocumentStore } from '../../src/documentStore';
 import {
-  readManagedLocalStorageEntryByPayload,
+  readManagedLocalStorageSingleEntryByPayload,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
@@ -24,10 +24,7 @@ import type {
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
-import {
-  createLocalStoragePersistentTestStore,
-  TEST_MAX_AGE_MS,
-} from '../utils/persistentStorageTestStore';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const testDataSchema = rc_object({ name: rc_string, value: rc_number });
 const wrappedSchema = rc_object({ value: testDataSchema });
@@ -46,13 +43,7 @@ function registerManagedDocumentKey(
   lastAccessAt = Date.now(),
 ): string {
   const key = documentStorageKey(storeName, sessionKey);
-  upsertManagedLocalStorageSingleEntry({
-    sessionKey,
-    storeName,
-    storageKey: key,
-    maxAgeMs: TEST_MAX_AGE_MS,
-    lastAccessAt,
-  });
+  upsertManagedLocalStorageSingleEntry({ storageKey: key, lastAccessAt });
 
   return key;
 }
@@ -70,7 +61,7 @@ function setCachedDocumentData(
 }
 
 function getStoredEntryTimestamp(key: string): number {
-  const entry = readManagedLocalStorageEntryByPayload(key);
+  const entry = readManagedLocalStorageSingleEntryByPayload(key);
   if (entry === null) {
     throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
@@ -115,6 +106,17 @@ afterEach(() => {
 });
 
 describe('localStorage: document store persistence', () => {
+  test('dev-only check rejects store ids containing dots', () => {
+    expect(() =>
+      createDocPersistenceEnv({
+        storeName: 'doc.with-dot',
+        sessionKey: 'sess1',
+      }),
+    ).toThrowError(
+      '[tsdf] persistentStorage.storeName "doc.with-dot" must not contain ".".',
+    );
+  });
+
   test('data is available on first render from cached localStorage', () => {
     setCachedDocumentData('doc1', 'sess1', { name: 'cached', value: 1 });
 

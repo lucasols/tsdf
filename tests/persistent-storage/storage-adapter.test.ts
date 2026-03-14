@@ -138,36 +138,20 @@ describe('localStorage adapter', () => {
 
   test('namespace metadata is stored without redundant root and payload keys', () => {
     const prefix = 'tsdf.sess1.compact-metadata.ci.';
-    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+    const manifestKey = localPersistentStorage.getManifestKeyForPrefix(prefix);
 
     upsertManagedLocalStorageNamespaceEntry({
-      sessionKey: 'sess1',
-      storeName: 'compact-metadata',
       storagePrefix: prefix,
       entryKey: '"a',
-      payloadKey: `${prefix}"a`,
-      maxAgeMs: 60_000,
       lastAccessAt: 1,
     });
 
-    expect(rootKey).toMatchInlineSnapshot(
-      `"tsdf._m.r.n:sess1.compact-metadata.ci"`,
+    expect(manifestKey).toMatchInlineSnapshot(
+      `"tsdf._m.r.n:sess1.compact-metadata.ci.m"`,
     );
-    expect(JSON.parse(localStorage.getItem('tsdf._m.c') ?? 'null'))
-      .toMatchInlineSnapshot(`
-        roots:
-          - cleanupIntervalMs: 86400000
-            lastCleanupAt: null
-            maxAgeMs: 60000
-            mode: 'namespace'
-            sessionKey: 'sess1'
-            storageKey: null
-            storagePrefix: 'tsdf.sess1.compact-metadata.ci.'
-            storeName: 'compact-metadata'
-            version: 1
-        version: 1
-      `);
-    expect(JSON.parse(localStorage.getItem(`${rootKey}.m`) ?? 'null'))
+    expect(localStorage.getItem('tsdf._m.c')).toBeNull();
+    expect(localStorage.getItem('tsdf._m.g')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(manifestKey) ?? 'null'))
       .toMatchInlineSnapshot(`
         entries:
           - entryKey: '"a'
@@ -180,9 +164,10 @@ describe('localStorage adapter', () => {
     const storageKey = createLocalStoragePersistentTestStore()
       .scope('single-fast-path', 'sess1')
       .document.seed({ value: { name: 'cached', value: 1 } });
-    const rootKey = localPersistentStorage.getRootKeyForSingle(storageKey);
+    const manifestKey =
+      localPersistentStorage.getManifestKeyForSingle(storageKey);
 
-    expect(JSON.parse(localStorage.getItem(`${rootKey}.m`) ?? 'null'))
+    expect(JSON.parse(localStorage.getItem(manifestKey) ?? 'null'))
       .toMatchInlineSnapshot(`
         entries:
           - lastAccessAt: 1735689600000
@@ -191,29 +176,25 @@ describe('localStorage adapter', () => {
 
     const operationCapture = startPersistentStorageOperationCapture();
 
-    const metadata = localPersistentStorage.readEntryMetadataByPayload(
-      storageKey,
-      { mode: 'single' },
-    );
+    const metadata =
+      localPersistentStorage.readSingleEntryMetadataByPayload(storageKey);
 
     expect(metadata).toHaveProperty('entryKey', undefined);
     expect(metadata).toMatchInlineSnapshot(`
       lastAccessAt: 1735689600000
       payloadKey: 'tsdf.sess1.single-fast-path'
     `);
-    expect(
-      localPersistentStorage.touchEntry(storageKey, { mode: 'single' }),
-    ).toBe(true);
+    expect(localPersistentStorage.touchSingleEntry(storageKey)).toBe(true);
 
     const { operations: rawOperations, timelineString } =
       operationCapture.finish();
-    const catalogReads = rawOperations.filter(
+    const globalMaintenanceReads = rawOperations.filter(
       (operation) =>
-        operation.type === 'getItem' && operation.key === 'tsdf._m.c',
+        operation.type === 'getItem' && operation.key === 'tsdf._m.g',
     );
     const manifestReads = rawOperations.filter(
       (operation) =>
-        operation.type === 'getItem' && operation.key === `${rootKey}.m`,
+        operation.type === 'getItem' && operation.key === manifestKey,
     );
 
     expect(rawOperations).toHaveLength(4);
@@ -223,10 +204,10 @@ describe('localStorage adapter', () => {
       0    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
       .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
       .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb -> 0.11 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.11 kb -> 0.11 kb ⚠️ UNCHANGED
       "
     `);
-    expect(catalogReads).toHaveLength(0);
+    expect(globalMaintenanceReads).toHaveLength(0);
     expect(manifestReads).toHaveLength(3);
   });
 
@@ -236,9 +217,9 @@ describe('localStorage adapter', () => {
     const storageKey = createLocalStoragePersistentTestStore()
       .scope(storeName, 'sess1')
       .collection.seedItem('a', { value: { id: 'a', name: 'cached' } });
-    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+    const manifestKey = localPersistentStorage.getManifestKeyForPrefix(prefix);
 
-    expect(JSON.parse(localStorage.getItem(`${rootKey}.m`) ?? 'null'))
+    expect(JSON.parse(localStorage.getItem(manifestKey) ?? 'null'))
       .toMatchInlineSnapshot(`
         entries:
           - entryKey: '"a'
@@ -249,9 +230,9 @@ describe('localStorage adapter', () => {
 
     const operationCapture = startPersistentStorageOperationCapture();
 
-    const metadata = localPersistentStorage.readEntryMetadataByPayload(
+    const metadata = localPersistentStorage.readNamespaceEntryMetadataByPayload(
       storageKey,
-      { mode: 'namespace', namespacePrefix: prefix },
+      prefix,
     );
 
     expect(metadata).toMatchInlineSnapshot(`
@@ -260,45 +241,37 @@ describe('localStorage adapter', () => {
       meta: { payload: 'a' }
       payloadKey: 'tsdf.sess1.namespace-fast-path.ci."a'
     `);
-    expect(
-      localPersistentStorage.touchEntry(storageKey, {
-        mode: 'namespace',
-        namespacePrefix: prefix,
-      }),
-    ).toBe(true);
+    expect(localPersistentStorage.touchNamespaceEntry(storageKey, prefix)).toBe(
+      true,
+    );
 
     const { operations: rawOperations } = operationCapture.finish();
-    const catalogReads = rawOperations.filter(
+    const globalMaintenanceReads = rawOperations.filter(
       (operation) =>
-        operation.type === 'getItem' && operation.key === 'tsdf._m.c',
+        operation.type === 'getItem' && operation.key === 'tsdf._m.g',
     );
     const manifestReads = rawOperations.filter(
       (operation) =>
-        operation.type === 'getItem' && operation.key === `${rootKey}.m`,
+        operation.type === 'getItem' && operation.key === manifestKey,
     );
 
-    expect(catalogReads).toHaveLength(0);
+    expect(globalMaintenanceReads).toHaveLength(0);
     expect(manifestReads).toHaveLength(3);
   });
 
   test('unlocked metadata reads pick up external manifest updates instead of serving stale cached data', () => {
     const prefix = 'tsdf.sess1.external-sync.ci.';
-    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
-    const manifestKey = `${rootKey}.m`;
+    const manifestKey = localPersistentStorage.getManifestKeyForPrefix(prefix);
 
     // Prime metadata using the normal managed-local-storage write path.
     upsertManagedLocalStorageNamespaceEntry({
-      sessionKey: 'sess1',
-      storeName: 'external-sync',
       storagePrefix: prefix,
       entryKey: '"a',
-      payloadKey: `${prefix}"a`,
-      maxAgeMs: 60_000,
       lastAccessAt: 1,
     });
 
     // First read warms the current runtime's metadata path.
-    expect(localPersistentStorage.listEntryMetadata(prefix))
+    expect(localPersistentStorage.listManifestEntries(prefix))
       .toMatchInlineSnapshot(`
         - entryKey: '"a'
           lastAccessAt: 1
@@ -314,7 +287,7 @@ describe('localStorage adapter', () => {
       }),
     );
 
-    expect(localPersistentStorage.listEntryMetadata(prefix))
+    expect(localPersistentStorage.listManifestEntries(prefix))
       .toMatchInlineSnapshot(`
         - entryKey: '"b'
           lastAccessAt: 2
@@ -324,21 +297,16 @@ describe('localStorage adapter', () => {
 
   test('locked metadata cache stays coherent across awaits until the lock is released', async () => {
     const prefix = 'tsdf.sess1.awaited-lock.ci.';
-    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
-    const manifestKey = `${rootKey}.m`;
+    const manifestKey = localPersistentStorage.getManifestKeyForPrefix(prefix);
 
     upsertManagedLocalStorageNamespaceEntry({
-      sessionKey: 'sess1',
-      storeName: 'awaited-lock',
       storagePrefix: prefix,
       entryKey: '"a',
-      payloadKey: `${prefix}"a`,
-      maxAgeMs: 60_000,
       lastAccessAt: 1,
     });
 
     await localPersistentStorage.runLocked(async () => {
-      expect(localPersistentStorage.listEntryMetadata(prefix))
+      expect(localPersistentStorage.listManifestEntries(prefix))
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
@@ -356,7 +324,7 @@ describe('localStorage adapter', () => {
         }),
       );
 
-      expect(localPersistentStorage.listEntryMetadata(prefix))
+      expect(localPersistentStorage.listManifestEntries(prefix))
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
@@ -364,7 +332,7 @@ describe('localStorage adapter', () => {
         `);
     });
 
-    expect(localPersistentStorage.listEntryMetadata(prefix))
+    expect(localPersistentStorage.listManifestEntries(prefix))
       .toMatchInlineSnapshot(`
         - entryKey: '"b'
           lastAccessAt: 2
@@ -374,39 +342,31 @@ describe('localStorage adapter', () => {
 
   test('locked metadata cache invalidates a cleared root before recreating it', async () => {
     const prefix = 'tsdf.sess1.clear-recreate.ci.';
-    const rootKey = localPersistentStorage.getRootKeyForPrefix(prefix);
+    const manifestKey = localPersistentStorage.getManifestKeyForPrefix(prefix);
 
     upsertManagedLocalStorageNamespaceEntry({
-      sessionKey: 'sess1',
-      storeName: 'clear-recreate',
       storagePrefix: prefix,
       entryKey: '"a',
-      payloadKey: `${prefix}"a`,
-      maxAgeMs: 60_000,
       lastAccessAt: 1,
     });
 
     await localPersistentStorage.runLocked(() => {
-      // Warm the lock-scoped metadata path, then clear and recreate the root.
-      expect(localPersistentStorage.listEntryMetadata(prefix))
+      // Warm the lock-scoped metadata path, then clear and recreate the manifest.
+      expect(localPersistentStorage.listManifestEntries(prefix))
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
             payloadKey: 'tsdf.sess1.clear-recreate.ci."a'
         `);
 
-      localPersistentStorage.clearRoot(rootKey);
+      localPersistentStorage.clearManifest(manifestKey);
       localPersistentStorage.upsertNamespaceEntry({
-        sessionKey: 'sess1',
-        storeName: 'clear-recreate',
         storagePrefix: prefix,
         entryKey: '"b',
-        payloadKey: `${prefix}"b`,
-        maxAgeMs: 60_000,
         lastAccessAt: 2,
       });
 
-      expect(localPersistentStorage.listEntryMetadata(prefix))
+      expect(localPersistentStorage.listManifestEntries(prefix))
         .toMatchInlineSnapshot(`
           - entryKey: '"b'
             lastAccessAt: 2
@@ -419,19 +379,15 @@ describe('localStorage adapter', () => {
     const prefix = 'tsdf.sess1.nested-lock.ci.';
 
     upsertManagedLocalStorageNamespaceEntry({
-      sessionKey: 'sess1',
-      storeName: 'nested-lock',
       storagePrefix: prefix,
       entryKey: '"a',
-      payloadKey: `${prefix}"a`,
-      maxAgeMs: 60_000,
       lastAccessAt: 1,
     });
 
     const operationCapture = startPersistentStorageOperationCapture();
 
     await localPersistentStorage.runLocked(async () => {
-      expect(localPersistentStorage.listEntryMetadata(prefix))
+      expect(localPersistentStorage.listManifestEntries(prefix))
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
@@ -440,17 +396,13 @@ describe('localStorage adapter', () => {
 
       await localPersistentStorage.runLocked(() => {
         localPersistentStorage.upsertNamespaceEntry({
-          sessionKey: 'sess1',
-          storeName: 'nested-lock',
           storagePrefix: prefix,
           entryKey: '"b',
-          payloadKey: `${prefix}"b`,
-          maxAgeMs: 60_000,
           lastAccessAt: 2,
         });
       });
 
-      expect(localPersistentStorage.listEntryMetadata(prefix))
+      expect(localPersistentStorage.listManifestEntries(prefix))
         .toMatchInlineSnapshot(`
           - entryKey: '"a'
             lastAccessAt: 1
@@ -462,9 +414,9 @@ describe('localStorage adapter', () => {
     });
 
     const { operations: rawOperations } = operationCapture.finish();
-    const catalogReads = rawOperations.filter(
+    const globalMaintenanceReads = rawOperations.filter(
       (operation) =>
-        operation.type === 'getItem' && operation.key === 'tsdf._m.c',
+        operation.type === 'getItem' && operation.key === 'tsdf._m.g',
     );
     const manifestReads = rawOperations.filter(
       (operation) =>
@@ -472,7 +424,7 @@ describe('localStorage adapter', () => {
         operation.key === 'tsdf._m.r.n:sess1.nested-lock.ci.m',
     );
 
-    expect(catalogReads).toHaveLength(1);
+    expect(globalMaintenanceReads).toHaveLength(0);
     expect(manifestReads).toHaveLength(1);
   });
 
