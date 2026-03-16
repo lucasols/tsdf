@@ -52,7 +52,7 @@ function setCachedDocumentData(
   storeName: string,
   sessionKey: string,
   data: TestData,
-  version = 1,
+  version: number | undefined = undefined,
   timestamp = Date.now(),
 ) {
   persistentStore
@@ -479,7 +479,7 @@ describe('localStorage: document store persistence', () => {
       'doc-revalidation-no-refetch',
       'sess1',
       { name: 'stale', value: 1 },
-      1,
+      undefined,
       originalTimestamp,
     );
     const key = documentStorageKey('doc-revalidation-no-refetch', 'sess1');
@@ -542,7 +542,6 @@ describe('localStorage: invalid data cleanup', () => {
     const entry: StorageCacheEntry<{ data: { invalid: true } }> = {
       data: { data: { invalid: true } },
       timestamp: Date.now(),
-      version: 1,
     };
     localStorage.setItem(key, JSON.stringify(entry));
     registerManagedDocumentKey('cleanup-schema', 'sess1', entry.timestamp);
@@ -565,7 +564,7 @@ describe('localStorage: invalid data cleanup', () => {
     const key = documentStorageKey('cleanup-malformed', 'sess1');
     localStorage.setItem(
       key,
-      JSON.stringify({ timestamp: Date.now(), version: 1, wrongShape: true }),
+      JSON.stringify({ timestamp: Date.now(), wrongShape: true }),
     );
     registerManagedDocumentKey('cleanup-malformed', 'sess1');
 
@@ -609,7 +608,6 @@ describe('localStorage: invalid data cleanup', () => {
       {
         data: { data: { value: { name: 'cached', value: 1 } } },
         timestamp: originalTimestamp,
-        version: 1,
       };
     localStorage.setItem(key, JSON.stringify(entry));
     registerManagedDocumentKey('ts-refresh', 'sess1', entry.timestamp);
@@ -636,7 +634,6 @@ describe('localStorage: invalid data cleanup', () => {
       {
         data: { data: { value: { name: 'cached', value: 1 } } },
         timestamp: originalTimestamp,
-        version: 1,
       };
     localStorage.setItem(key, JSON.stringify(entry));
     registerManagedDocumentKey(
@@ -664,7 +661,6 @@ describe('standard schema support', () => {
     const entry: StorageCacheEntry<{ data: TestData }> = {
       data: { data: { name: 'standard', value: 99 } },
       timestamp: Date.now(),
-      version: 1,
     };
     localStorage.setItem(key, JSON.stringify(entry));
     registerManagedDocumentKey('std-doc', 'sess-std', entry.timestamp);
