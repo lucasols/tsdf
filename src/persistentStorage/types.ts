@@ -66,8 +66,8 @@ export type StorageCacheEntry<T> = {
   data: T;
   /** Epoch timestamp used for age-based maintenance. */
   timestamp: number;
-  /** Persisted schema version for migration-safe hydration. */
-  version: number;
+  /** Optional user-configured cache version used for migration-safe hydration. */
+  version?: number;
 };
 
 /** Result entry returned by explicit persistent-storage preload APIs. */
@@ -90,7 +90,7 @@ export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
   adapter: StorageAdapter;
   /** Schema used to validate cached data on load and optionally convert persisted data. */
   schema: PersistentStorageDataSchema<TFinal, TStorage>;
-  /** Version number for cache invalidation. Defaults to 1. */
+  /** Optional version number for cache invalidation. When omitted, no version is persisted or checked. */
   version?: number;
   /**
    * Returns a session key scoping storage per org/tenant.

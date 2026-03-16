@@ -29,7 +29,7 @@ type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
 
 function readDocumentFromLocalStorageSync(
   key: string,
-  version: number,
+  version: number | undefined,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
   const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
@@ -65,7 +65,7 @@ export function setupDocumentPersistence<
 ): DocumentPersistenceSetup<State> {
   assertValidPersistentStoreName(config.storeName);
 
-  const version = config.version ?? 1;
+  const version = config.version;
   const storageAdapter = config.adapter;
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);

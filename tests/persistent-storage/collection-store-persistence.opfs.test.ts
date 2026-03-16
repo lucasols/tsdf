@@ -47,12 +47,15 @@ function setCachedCollectionItem(
   sessionKey: string,
   payload: string,
   data: PersistedItemState,
-  version = 1,
+  version: number | undefined = undefined,
 ): string {
   const key = itemStorageKey(storeName, sessionKey, payload);
   const entry: StorageCacheEntry<
     PersistedCollectionItemData<PersistedItemState>
-  > = { data: { data, payload }, timestamp: Date.now(), version };
+  > =
+    version === undefined
+      ? { data: { data, payload }, timestamp: Date.now() }
+      : { data: { data, payload }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 

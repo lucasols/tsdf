@@ -1,15 +1,13 @@
 import { isObject } from '@ls-stack/utils/typeGuards';
 import {
   rc_array,
-  rc_literals,
   rc_number,
   rc_object,
+  rc_parse,
   rc_parse_json,
   rc_unknown,
   type RcType,
 } from 'runcheck';
-
-const METADATA_VERSION = 1;
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
@@ -83,12 +81,10 @@ export function setManagedLocalStorageRuntimeConfigForTests(
 }
 
 const managedLocalStorageManifestSchema = rc_object({
-  v: rc_literals(METADATA_VERSION),
   e: rc_array(rc_unknown),
 });
 
 const managedLocalStorageGlobalMaintenanceSchema = rc_object({
-  v: rc_literals(METADATA_VERSION),
   lca: rc_number.orNull(),
 });
 
@@ -98,7 +94,12 @@ function readParsedMetadataJson<T>(
   io: ManagedLocalStorageIo,
 ): T | null {
   const raw = io.getItem(key);
-  return raw === null ? null : rc_parse_json(raw, schema).unwrapOrNull();
+  if (raw === null) return null;
+
+  const parsedRaw = rc_parse_json(raw, rc_unknown).unwrapOrNull();
+  if (parsedRaw === null) return null;
+
+  return rc_parse(parsedRaw, schema).unwrapOrNull();
 }
 
 function writeMetadataJson(
@@ -244,7 +245,6 @@ function serializeStoredManifestEntry(
 }
 
 type ManagedLocalStorageManifest = {
-  version: typeof METADATA_VERSION;
   entries: StoredManagedLocalStorageManifestEntry[];
 };
 
@@ -285,19 +285,14 @@ function readParsedManifest(
     });
   }
 
-  return { version: parsedManifest.v, entries };
+  return { entries };
 }
 
 function readManifest(
   manifestKey: string,
   io: ManagedLocalStorageIo,
 ): ManagedLocalStorageManifest {
-  return (
-    readParsedManifest(manifestKey, io) ?? {
-      version: METADATA_VERSION,
-      entries: [],
-    }
-  );
+  return readParsedManifest(manifestKey, io) ?? { entries: [] };
 }
 
 function writeManifest(
@@ -312,10 +307,7 @@ function writeManifest(
 
   writeMetadataJson(
     manifestKey,
-    {
-      v: manifest.version,
-      e: manifest.entries.map(serializeStoredManifestEntry),
-    },
+    { e: manifest.entries.map(serializeStoredManifestEntry) },
     io,
   );
 }
@@ -579,11 +571,7 @@ export function syncManagedLocalStorageSessionProtection(
     }
 
     if (manifestChanged) {
-      writeManifest(
-        manifestKey,
-        { version: METADATA_VERSION, entries: nextEntries },
-        io,
-      );
+      writeManifest(manifestKey, { entries: nextEntries }, io);
     }
   }
 
@@ -626,11 +614,7 @@ function removeManifestEntry(
 
   if (nextEntries.length === manifest.entries.length) return;
 
-  writeManifest(
-    manifestKey,
-    { version: METADATA_VERSION, entries: nextEntries },
-    io,
-  );
+  writeManifest(manifestKey, { entries: nextEntries }, io);
 }
 
 type UpsertSingleEntryParams = {
@@ -827,10 +811,7 @@ export function unregisterManagedLocalStorageMaintenanceCallback(
   maintenanceCallbacks.delete(manifestKey);
 }
 
-type ManagedLocalStorageGlobalMaintenance = {
-  version: typeof METADATA_VERSION;
-  lastCleanupAt: number | null;
-};
+type ManagedLocalStorageGlobalMaintenance = { lastCleanupAt: number | null };
 
 function readGlobalMaintenanceState(
   io: ManagedLocalStorageIo,
@@ -842,21 +823,17 @@ function readGlobalMaintenanceState(
   );
 
   if (parsedState === null) {
-    return { version: METADATA_VERSION, lastCleanupAt: null };
+    return { lastCleanupAt: null };
   }
 
-  return { version: parsedState.v, lastCleanupAt: parsedState.lca };
+  return { lastCleanupAt: parsedState.lca };
 }
 
 function writeGlobalMaintenanceState(
   state: ManagedLocalStorageGlobalMaintenance,
   io: ManagedLocalStorageIo,
 ): void {
-  writeMetadataJson(
-    GLOBAL_MAINTENANCE_KEY,
-    { v: state.version, lca: state.lastCleanupAt },
-    io,
-  );
+  writeMetadataJson(GLOBAL_MAINTENANCE_KEY, { lca: state.lastCleanupAt }, io);
 }
 
 function isMaintenanceDue(
@@ -951,11 +928,7 @@ function runGenericCleanupForManifest(
 
   if (nextEntries.length === manifest.entries.length) return;
 
-  writeManifest(
-    manifestKey,
-    { version: METADATA_VERSION, entries: nextEntries },
-    io,
-  );
+  writeManifest(manifestKey, { entries: nextEntries }, io);
 }
 
 export async function runManagedLocalStorageMaintenance(
@@ -987,10 +960,7 @@ export async function runManagedLocalStorageMaintenance(
   }
 
   if (runGlobalSweep) {
-    writeGlobalMaintenanceState(
-      { version: METADATA_VERSION, lastCleanupAt: Date.now() },
-      io,
-    );
+    writeGlobalMaintenanceState({ lastCleanupAt: Date.now() }, io);
   }
 }
 

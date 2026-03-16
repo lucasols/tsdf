@@ -28,7 +28,7 @@ const wrappedItemSchema = rc_object({
 const cachedCollectionItemEntrySchema = rc_object({
   data: rc_object({ data: wrappedItemSchema, payload: rc_string }),
   timestamp: rc_number,
-  version: rc_number,
+  version: rc_number.optional(),
 });
 const persistentStore = createLocalStoragePersistentTestStore();
 
@@ -57,7 +57,7 @@ function setCachedCollectionItem(
   sessionKey: string,
   payload: string,
   data: PersistedItemState,
-  version = 1,
+  version: number | undefined = undefined,
   timestamp = Date.now(),
 ): string {
   return persistentStore
@@ -286,7 +286,7 @@ describe('localStorage: collection store persistence', () => {
       'sess1',
       '1',
       { value: { id: '1', name: 'Cached' } },
-      1,
+      undefined,
       originalTimestamp,
     );
 

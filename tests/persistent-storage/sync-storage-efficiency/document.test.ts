@@ -53,10 +53,10 @@ describe('sync storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.06 kb
-      .    | 📖 ✅ tsdf.sess1.doc-remount-flow (entry) | 0.20 kb
-      2s   | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.06 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.06 kb -> 0.06 kb
+      0    | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ tsdf.sess1.doc-remount-flow (entry) | 0.18 kb
+      2s   | 📖 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.05 kb -> 0.05 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -129,9 +129,9 @@ describe('sync storage efficiency: document', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | ✍️ ✅->✅ tsdf.sess1.doc-mutation-flow (entry) | 0.20 kb -> 0.20 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.06 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.06 kb -> 0.06 kb
+      1s   | ✍️ ✅->✅ tsdf.sess1.doc-mutation-flow (entry) | 0.18 kb -> 0.18 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.05 kb -> 0.05 kb
       "
     `);
   });
@@ -179,9 +179,9 @@ describe('sync storage efficiency: document', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | ✍️ ✅->✅ tsdf.sess1.doc-invalidation-flow (entry) | 0.20 kb -> 0.20 kb
-      .     | 📖 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.06 kb
-      .     | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.06 kb -> 0.06 kb
+      1.81s | ✍️ ✅->✅ tsdf.sess1.doc-invalidation-flow (entry) | 0.18 kb -> 0.18 kb
+      .     | 📖 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.05 kb
+      .     | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.05 kb -> 0.05 kb
       "
     `);
   });
@@ -250,7 +250,6 @@ describe('sync storage efficiency: document', () => {
     expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
       e:
         - { a: 1735689605910, o: '✅' }
-      v: 1
     `);
   });
 });

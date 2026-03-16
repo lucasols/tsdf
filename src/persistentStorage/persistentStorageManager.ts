@@ -1,8 +1,8 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  rc_parse,
   rc_number,
   rc_object,
-  rc_parse,
   rc_parse_json,
   rc_unknown,
 } from 'runcheck';
@@ -32,7 +32,7 @@ export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
 const cacheEntrySchema = rc_object({
   data: rc_unknown,
   timestamp: rc_number,
-  version: rc_number,
+  version: rc_number.optional(),
 });
 
 const timestampSchema = rc_object({ timestamp: rc_number });
@@ -174,7 +174,7 @@ export function createPersistentStorageHandle<T>(
   config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
   { getManifestMeta }: { getManifestMeta?: (data: T) => unknown } = {},
 ): PersistentStorageHandle<T> {
-  const version = config.version ?? 1;
+  const version = config.version;
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -213,7 +213,7 @@ export function createPersistentStorageHandle<T>(
       const entry = await adapter.read<StorageCacheEntry<T>>(key);
       if (!entry) return null;
 
-      if (entry.version !== version) {
+      if (!doesStorageEntryVersionMatch(entry.version, version)) {
         scheduleIdleCleanup(() => {
           void adapter.remove(key);
         });
@@ -233,11 +233,7 @@ export function createPersistentStorageHandle<T>(
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return;
 
-    const entry: StorageCacheEntry<T> = {
-      data,
-      timestamp: Date.now(),
-      version,
-    };
+    const entry = createStorageCacheEntry(data, Date.now(), version);
 
     try {
       if (adapter === 'local-sync') {
@@ -330,7 +326,7 @@ export function createPersistentStorageNamespaceHandle<T>(
     getManifestMeta,
   }: { getManifestMeta?: (data: T, entryKey: string) => unknown } = {},
 ): PersistentStorageNamespaceHandle<T> {
-  const version = config.version ?? 1;
+  const version = config.version;
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
   scheduleAdapterExpirationScan(adapter);
@@ -366,7 +362,7 @@ export function createPersistentStorageNamespaceHandle<T>(
       const entry = await adapter.read<StorageCacheEntry<T>>(key);
       if (!entry) return null;
 
-      if (entry.version !== version) {
+      if (!doesStorageEntryVersionMatch(entry.version, version)) {
         scheduleIdleCleanup(() => {
           void adapter.remove(key);
         });
@@ -406,11 +402,7 @@ export function createPersistentStorageNamespaceHandle<T>(
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return;
 
-    const entry: StorageCacheEntry<T> = {
-      data,
-      timestamp: Date.now(),
-      version,
-    };
+    const entry = createStorageCacheEntry(data, Date.now(), version);
 
     try {
       if (adapter === 'local-sync') {
@@ -515,7 +507,7 @@ export function createPersistentStorageNamespaceHandle<T>(
 
 export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
-  version: number,
+  version: number | undefined,
   options: LocalStorageMetadataOptions,
 ): StorageCacheEntry<T> | null {
   const metadata =
@@ -550,7 +542,9 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
     const result = rc_parse_json(raw, cacheEntrySchema);
     if (!result.ok) return removeAndReturnNull();
     const entry = result.value;
-    if (entry.version !== version) return removeAndReturnNull();
+    if (!doesStorageEntryVersionMatch(entry.version, version)) {
+      return removeAndReturnNull();
+    }
 
     return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
       entry,
@@ -558,6 +552,29 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
   } catch {
     return removeAndReturnNull();
   }
+}
+
+function doesStorageEntryVersionMatch(
+  entryVersion: number | undefined,
+  expectedVersion: number | undefined,
+): boolean {
+  if (expectedVersion === undefined) {
+    return entryVersion === undefined;
+  }
+
+  return entryVersion === expectedVersion;
+}
+
+function createStorageCacheEntry<T>(
+  data: T,
+  timestamp: number,
+  version: number | undefined,
+): StorageCacheEntry<T> {
+  if (version === undefined) {
+    return { data, timestamp };
+  }
+
+  return { data, timestamp, version };
 }
 
 /**

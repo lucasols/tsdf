@@ -95,7 +95,7 @@ function setCachedItem(
   tableId: string,
   id: number,
   data: Row,
-  version = 1,
+  version: number | undefined = undefined,
   timestamp = Date.now(),
 ): string {
   return persistentStore
@@ -109,7 +109,7 @@ function setCachedQuery(
   params: ListQueryParams,
   items: string[],
   hasMore = false,
-  version = 1,
+  version: number | undefined = undefined,
   timestamp = Date.now(),
 ): string {
   return persistentStore
@@ -506,7 +506,7 @@ describe('localStorage: list query store persistence', () => {
       'users',
       1,
       { id: 1, name: 'Cached' },
-      1,
+      undefined,
       originalTimestamp,
     );
     const usersQueryKey = setCachedQuery(
@@ -515,7 +515,7 @@ describe('localStorage: list query store persistence', () => {
       usersQuery,
       [storeItemKey('users', 1)],
       false,
-      1,
+      undefined,
       originalTimestamp,
     );
     const originalItemTimestamp = getStoredEntryTimestamp(usersItem);

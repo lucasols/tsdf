@@ -144,7 +144,7 @@ export function setupCollectionPersistence<
 ): CollectionPersistenceSetup<ItemState, ItemPayload> {
   assertValidPersistentStoreName(config.storeName);
 
-  const version = config.version ?? 1;
+  const version = config.version;
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
   const resolveItemKey =
     options.getItemKey ?? ((payload: ItemPayload) => getCompositeKey(payload));

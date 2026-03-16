@@ -22,10 +22,7 @@ type ListQuerySeedItemOptions = StorageSeedOptions & {
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
 
-type GlobalMaintenanceState = {
-  lastCleanupAt: number | null;
-  version?: unknown;
-};
+type GlobalMaintenanceState = { lastCleanupAt: number | null };
 
 function parseGlobalMaintenanceRaw(
   raw: string | null,
@@ -44,10 +41,7 @@ function parseGlobalMaintenanceRaw(
     return null;
   }
 
-  return {
-    lastCleanupAt: lca,
-    version: 'v' in maintenance ? maintenance.v : undefined,
-  };
+  return { lastCleanupAt: lca };
 }
 
 type PersistentTestStoreStorage = {
@@ -134,10 +128,14 @@ function createPersistentTestStore(
     data: T,
     options: StorageSeedOptions = {},
   ): StorageCacheEntry<T> {
+    if (options.version === undefined) {
+      return { data, timestamp: options.timestamp ?? Date.now() };
+    }
+
     return {
       data,
       timestamp: options.timestamp ?? Date.now(),
-      version: options.version ?? 1,
+      version: options.version,
     };
   }
 

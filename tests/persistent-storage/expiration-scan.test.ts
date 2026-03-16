@@ -115,7 +115,7 @@ describe('expiration scan', () => {
     }).toMatchInlineSnapshot(`
       expiredEntryExists: '❌'
       freshEntryExists: '✅'
-      globalMaintenance: { lastCleanupAt: 1735689602000, version: 1 }
+      globalMaintenance: { lastCleanupAt: 1735689602000 }
     `);
   });
 

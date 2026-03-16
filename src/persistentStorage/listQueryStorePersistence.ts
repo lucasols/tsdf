@@ -307,7 +307,7 @@ export function setupListQueryPersistence<
 
   assertValidPersistentStoreName(config.storeName);
 
-  const version = config.version ?? 1;
+  const version = config.version;
   const maxItems = config.maxItems ?? DEFAULT_MAX_ITEMS;
   const maxQueries = config.maxQueries ?? DEFAULT_MAX_QUERIES;
   const maxQuerySize = config.maxQuerySize ?? DEFAULT_MAX_QUERY_SIZE;

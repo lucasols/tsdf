@@ -156,7 +156,6 @@ describe('localStorage adapter', () => {
         e:
           - a: 1
             k: '"a'
-        v: 1
       `);
   });
 
@@ -171,7 +170,6 @@ describe('localStorage adapter', () => {
       .toMatchInlineSnapshot(`
         e:
           - a: 1735689600000
-        v: 1
       `);
 
     const operationCapture = startPersistentStorageOperationCapture();
@@ -201,10 +199,10 @@ describe('localStorage adapter', () => {
     expect(timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.06 kb -> 0.06 kb ⚠️ UNCHANGED
+      0    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb -> 0.05 kb ⚠️ UNCHANGED
       "
     `);
     expect(globalMaintenanceReads).toHaveLength(0);
@@ -225,7 +223,6 @@ describe('localStorage adapter', () => {
           - a: 1735689600000
             k: '"a'
             p: 'a'
-        v: 1
       `);
 
     const operationCapture = startPersistentStorageOperationCapture();
@@ -281,7 +278,7 @@ describe('localStorage adapter', () => {
     // Simulate another tab rewriting the manifest directly in localStorage.
     localStorage.setItem(
       manifestKey,
-      JSON.stringify({ v: 1, e: [{ k: '"b', a: 2 }] }),
+      JSON.stringify({ e: [{ k: '"b', a: 2 }] }),
     );
 
     expect(localPersistentStorage.listManifestEntries(prefix))
@@ -315,7 +312,7 @@ describe('localStorage adapter', () => {
       // Simulate a non-coordinated external write while this tab still holds the lock.
       localStorage.setItem(
         manifestKey,
-        JSON.stringify({ v: 1, e: [{ k: '"b', a: 2 }] }),
+        JSON.stringify({ e: [{ k: '"b', a: 2 }] }),
       );
 
       expect(localPersistentStorage.listManifestEntries(prefix))

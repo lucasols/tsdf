@@ -73,18 +73,17 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[3] ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest)
       .    | 🔑[4] ✅ external-cache
       .    | 🔑[5] ✅ feature-flag
-      .    | 📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.06 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.05 kb
       .    | 🗑️ ✅->❌ tsdf.sess1.expired-doc (entry)
       .    | 🗑️ ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
-      .    | 📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.06 kb
-      .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.05 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
 
-    expect(getParsedLocalStorageValue('tsdf._m.g')).toMatchInlineSnapshot(`
-      lca: 1735689602000
-      v: 1
-    `);
+    expect(getParsedLocalStorageValue('tsdf._m.g')).toMatchInlineSnapshot(
+      `lca: 1735689602000`,
+    );
   });
 
   test('expiration cleanup leaves malformed payload blobs untouched and still snapshots the full manifest scan history', async () => {
@@ -115,9 +114,9 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[1] ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)
       .    | 🔑[2] ✅ tsdf.sess1.trigger (entry)
       .    | 🔑[3] ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest)
-      .    | 📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.06 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.06 kb
-      .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.05 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
   });
@@ -230,7 +229,7 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      190ms | 📖 ✅ tsdf._m.g (global maintenance) | 0.05 kb
+      190ms | 📖 ✅ tsdf._m.g (global maintenance) | 0.04 kb
       .     | 🔑[0] ✅ tsdf.user@example.com.protected-doc (entry)
       .     | 🔑[1] ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest)
       .     | 🔑[2] ✅ tsdf._m.g (global maintenance)
@@ -244,12 +243,12 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[10] ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
       .     | 🔑[11] ✅ tsdf.sess-trigger.trigger-doc (entry)
       .     | 🔑[12] ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.08 kb
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.06 kb
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.07 kb
+      .     | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.05 kb
       .     | 🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)
       .     | 🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.06 kb
-      .     | ✍️ ✅->✅ tsdf._m.g (global maintenance) | 0.05 kb -> 0.05 kb
+      .     | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.05 kb
+      .     | ✍️ ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
     expect(
@@ -259,7 +258,6 @@ describe('sync storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`
       e:
         - { a: 1735689601810, o: '✅' }
-      v: 1
     `);
   });
 });
