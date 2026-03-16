@@ -82,15 +82,17 @@ function preserveOfflineProtectionFlag(
   nextMeta: unknown,
   getCurrentMeta: () => unknown,
 ): unknown {
+  const currentMetaProtected =
+    isManagedLocalStorageEntryOfflineProtected(getCurrentMeta());
   const protectedKeys = getSessionProtectedKeysSnapshot(sessionKey);
   if (protectedKeys !== null) {
     return setManagedLocalStorageEntryOfflineProtected(
       nextMeta,
-      protectedKeys.has(storageKey),
+      protectedKeys.has(storageKey) || currentMetaProtected,
     );
   }
 
-  return isManagedLocalStorageEntryOfflineProtected(getCurrentMeta())
+  return currentMetaProtected
     ? setManagedLocalStorageEntryOfflineProtected(nextMeta, true)
     : nextMeta;
 }

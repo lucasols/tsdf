@@ -1,7 +1,11 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-import { startPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
+import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import {
+  getParsedLocalStorageValue,
+  startPersistentStorageOperationCapture,
+} from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
   createDocumentEnv,
@@ -179,6 +183,74 @@ describe('sync storage efficiency: document', () => {
       .     | 📖 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.06 kb
       .     | ✍️ ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.06 kb -> 0.06 kb
       "
+    `);
+  });
+
+  test('document invalidation preserves an offline marker added by another tab before the manifest update', async () => {
+    const storeName = 'doc-offline-marker-flow';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 8,
+    });
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+    const storageKey = persistentStore
+      .scope(storeName, sessionKey)
+      .document.storageKey();
+    const manifestKey =
+      localPersistentStorage.getManifestKeyForSingle(storageKey);
+
+    // Hydrate cached data first so the later save is a normal invalidation write.
+    await settleStartupBackgroundScan();
+    const hook = renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+
+    // Simulate another tab marking this document as offline-protected in the shared manifest.
+    const currentManifest = getParsedLocalStorageValue<{
+      e: Array<{ a: number; m?: unknown }>;
+      v: number;
+    }>(manifestKey);
+
+    localStorage.setItem(
+      manifestKey,
+      JSON.stringify({
+        ...currentManifest,
+        e: currentManifest?.e.map((entry) => ({
+          ...entry,
+          m: {
+            ...(typeof entry.m === 'object' && entry.m !== null ? entry.m : {}),
+            o: true,
+          },
+        })),
+      }),
+    );
+
+    // A normal invalidation save should keep the externally-added offline marker.
+    act(() => {
+      env.setServerData({ name: 'Fresh document', value: 42 });
+      env.apiStore.invalidateData('highPriority');
+    });
+    await flushInvalidationPersistence();
+
+    expect(hook.result.current.data).toMatchInlineSnapshot(`
+      value: { name: 'Fresh document', value: 42 }
+    `);
+    expect(
+      localPersistentStorage.readSingleEntryMetadataByPayload(storageKey)?.meta,
+    ).toMatchInlineSnapshot(`
+      o: '✅'
+    `);
+    expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
+      e:
+        - { a: 1735689605910, o: '✅' }
+      v: 1
     `);
   });
 });
