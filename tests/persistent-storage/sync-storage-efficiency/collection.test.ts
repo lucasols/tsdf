@@ -81,6 +81,17 @@ describe('sync storage efficiency: collection', () => {
       .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
+
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf._m.r.n:sess1.collection-expiration.ci.m',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        - a: 1735689600000
+          k: '"fresh-user'
+          p: 'fresh-user'
+    `);
   });
 
   test('maxItems cleanup snapshots the full manifest history', async () => {
