@@ -564,6 +564,10 @@ describe('sync storage efficiency: list-query', () => {
     const storeName = 'lq-delete-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
+    const filteredUsersQuery = {
+      tableId: 'users',
+      filters: [{ field: 'name', op: 'eq', value: 'Alice' }],
+    } satisfies ListQueryParams;
     const listQueryScope = persistentStore.scope(storeName, sessionKey);
     const deletedItemStorageKey = listQueryScope.listQuery.itemStorageKey(
       'users',
@@ -582,6 +586,7 @@ describe('sync storage efficiency: list-query', () => {
     });
 
     env.scheduleFetch('highPriority', usersQuery);
+    env.scheduleFetch('highPriority', filteredUsersQuery);
     await flushAllTimers();
     await advanceTime(1100);
     await flushAllTimers();
@@ -599,25 +604,40 @@ describe('sync storage efficiency: list-query', () => {
         ['"users||2']
       `);
     expect(
-      persistentStore
-        .scope(storeName, sessionKey)
-        .listQuery.readQueryEntry(usersQuery).data,
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}',
+      ),
     ).toMatchInlineSnapshot(`
-      hasMore: '❌'
-      items: ['"users||2']
-      payload: { tableId: 'users' }
+      a: 1735689604100
+      i: ['"users||2']
+      p: { tableId: 'users' }
+    `);
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604100
+      i: []
+
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Alice' }
+        tableId: 'users'
     `);
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time |
       1s   | 📖 ✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (query entry) | 0.15 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (query entry) | 0.15 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-delete-flow.li."users||1 (item entry) | 0.17 kb
-      .    | 🗑️ ✅->❌ #3 tsdf.sess1.lq-delete-flow.li."users||1 (item entry)
-      .    | 📖 ✅ #4 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb
-      .    | ✍️ ✅->✅ #4 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb -> 0.25 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.12 kb
+      .    | 📖 ✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.23 kb
+      .    | ✍️ ✅->✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.23 kb -> 0.21 kb
+      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb
+      .    | 📖 ✅ #4 tsdf.sess1.lq-delete-flow.li."users||1 (item entry) | 0.17 kb
+      .    | 🗑️ ✅->❌ #4 tsdf.sess1.lq-delete-flow.li."users||1 (item entry)
+      .    | 📖 ✅ #5 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb
+      .    | ✍️ ✅->✅ #5 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb -> 0.25 kb
+      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.12 kb
       "
     `);
   });
