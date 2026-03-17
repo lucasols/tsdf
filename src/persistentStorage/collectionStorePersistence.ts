@@ -319,13 +319,6 @@ export function setupCollectionPersistence<
   function createInitialState(
     baseState: TSFDCollectionState<ItemState, ItemPayload>,
   ): TSFDCollectionState<ItemState, ItemPayload> {
-    if (localStorageAdapter === null) return baseState;
-
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return baseState;
-
-    const prefix = getCollectionPrefix();
-    if (prefix === false) return baseState;
     syncMaintenanceRegistration();
     return baseState;
   }
@@ -342,8 +335,7 @@ export function setupCollectionPersistence<
     }
 
     const snapshot = persistedSnapshotByKey.get(itemKey);
-    if (snapshot) return parseHydratedItemSnapshot(snapshot);
-    return undefined;
+    return snapshot ? parseHydratedItemSnapshot(snapshot) : undefined;
   }
 
   async function preloadItem(itemKey: string): Promise<boolean> {
@@ -354,8 +346,7 @@ export function setupCollectionPersistence<
     }
 
     if (localStorageAdapter !== null) {
-      const validated =
-        readRememberedHydratedItem(itemKey) ?? readHydratedItem(itemKey);
+      const validated = readHydratedItem(itemKey);
       if (!validated) return false;
 
       const currentItem = storeRef.state[itemKey];

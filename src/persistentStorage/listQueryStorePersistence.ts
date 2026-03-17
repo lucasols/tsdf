@@ -28,25 +28,25 @@ import {
   type ParsedPersistedListQueryItemData,
 } from './parsePersistedData';
 import {
+  createEvictionComparator,
+  createShouldIgnoreItemPredicate,
+} from './persistenceUtils';
+import {
   assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
-  getLocalStorageMaxAgeMs,
   getLocalStorageAdapter,
-  mergeLocalStorageOfflineProtection,
-  recordLocalStorageTouch,
+  getLocalStorageMaxAgeMs,
   getStoragePrefixForStoreNamespace,
+  mergeLocalStorageOfflineProtection,
   readManifestPayloadMeta,
   readProtectedStorageKeys,
-  scheduleLocalStorageRemoval,
-  scheduleLocalStorageMaintenance,
   readStorageEntryFromLocalStorageSync,
+  recordLocalStorageTouch,
   refreshLocalStorageTimestamp,
+  scheduleLocalStorageMaintenance,
+  scheduleLocalStorageRemoval,
   touchLocalStorageKeyWithThrottle,
 } from './persistentStorageManager';
-import {
-  createShouldIgnoreItemPredicate,
-  createEvictionComparator,
-} from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
@@ -832,8 +832,7 @@ export function setupListQueryPersistence<
     if (existingItemQuery === null) return false;
 
     if (localStorageAdapter !== null) {
-      const itemState =
-        readRememberedHydratedItem(itemKey) ?? readHydratedItem(itemKey);
+      const itemState = readHydratedItem(itemKey);
       if (!itemState) return false;
 
       materializeHydratedItemState(itemKey, itemState);
@@ -899,9 +898,7 @@ export function setupListQueryPersistence<
     if (storeRef.state.queries[queryKey] !== undefined) return true;
 
     if (localStorageAdapter !== null) {
-      const persistedQuery =
-        readRememberedPersistedQueryData(queryKey) ??
-        readPersistedQueryData(queryKey);
+      const persistedQuery = readPersistedQueryData(queryKey);
       if (!persistedQuery) return false;
 
       const activeStore = storeRef;
