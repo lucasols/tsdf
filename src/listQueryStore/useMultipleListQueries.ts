@@ -15,7 +15,6 @@ import {
   getPayloadDebounceOptions,
   shouldDebouncePayload,
 } from '../utils/payloadDebounce';
-import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import {
   fetchTypePriority,
   type PayloadDebounce,
@@ -210,17 +209,8 @@ export function useMultipleListQueries<
       fields: FieldsInput | undefined,
     ): SelectedItem[] => {
       return filterAndMap(query.items, (itemKey) => {
-        const itemEntry = readOwnMaterializedValue(state.items, itemKey);
-        const itemQueryEntry = readOwnMaterializedValue(
-          state.itemQueries,
-          itemKey,
-        );
-        let item =
-          itemEntry.status === 'materialized' ? itemEntry.value : undefined;
-        const itemPayload =
-          itemQueryEntry.status === 'materialized'
-            ? itemQueryEntry.value?.payload
-            : undefined;
+        let item = state.items[itemKey];
+        const itemPayload = state.itemQueries[itemKey]?.payload;
         if (!item || !itemPayload) return false;
 
         // Apply field selection for partial resources
@@ -242,14 +232,7 @@ export function useMultipleListQueries<
       const itemLoadedFields = state
         ? state.itemLoadedFields
         : store.state.itemLoadedFields;
-      const loadedFieldsEntry = readOwnMaterializedValue(
-        itemLoadedFields,
-        itemKey,
-      );
-      const loadedFields =
-        loadedFieldsEntry.status === 'materialized'
-          ? loadedFieldsEntry.value
-          : [];
+      const loadedFields = itemLoadedFields[itemKey] ?? [];
       return (itemPendingInvalidationFields.get(itemKey) ?? []).filter(
         (field) => !loadedFields.includes(field),
       );
@@ -309,9 +292,7 @@ export function useMultipleListQueries<
           QueryPayload,
           QueryMetadata
         > => {
-          const queryEntry = readOwnMaterializedValue(state.queries, queryKey);
-          const query =
-            queryEntry.status === 'materialized' ? queryEntry.value : undefined;
+          const query = state.queries[queryKey];
           let loadingFields: string[] | undefined;
 
           if (!query) {
@@ -347,10 +328,7 @@ export function useMultipleListQueries<
 
           let status = query.status;
           const hasCachedItemsInState = query.items.some((itemKey) => {
-            const itemEntry = readOwnMaterializedValue(state.items, itemKey);
-            return (
-              itemEntry.status === 'materialized' && itemEntry.value !== null
-            );
+            return state.items[itemKey] != null;
           });
 
           // Override status when partial resources has items with missing fields
@@ -361,22 +339,11 @@ export function useMultipleListQueries<
             (status === 'success' || status === 'refetching')
           ) {
             const someItemMissingFields = query.items.some((itemKey) => {
-              const loadedFieldsEntry = readOwnMaterializedValue(
-                state.itemLoadedFields,
-                itemKey,
-              );
-              const loadedFields =
-                loadedFieldsEntry.status === 'materialized'
-                  ? loadedFieldsEntry.value
-                  : [];
+              const loadedFields = state.itemLoadedFields[itemKey] ?? [];
               return fields.some((f) => !loadedFields.includes(f));
             });
             const someItemMissingFieldsInState = query.items.some((itemKey) => {
-              const itemEntry = readOwnMaterializedValue(state.items, itemKey);
-              const item =
-                itemEntry.status === 'materialized'
-                  ? itemEntry.value
-                  : undefined;
+              const item = state.items[itemKey];
               if (!item || typeof item !== 'object') return true;
               const itemRecord = __LEGIT_CAST__<
                 Record<string, unknown>,
@@ -439,15 +406,8 @@ export function useMultipleListQueries<
                 status === 'loading' && query.items.length === 0
                   ? true
                   : query.items.some((itemKey) => {
-                      const loadedFields = (() => {
-                        const loadedFieldsEntry = readOwnMaterializedValue(
-                          state.itemLoadedFields,
-                          itemKey,
-                        );
-                        return loadedFieldsEntry.status === 'materialized'
-                          ? loadedFieldsEntry.value
-                          : [];
-                      })();
+                      const loadedFields =
+                        state.itemLoadedFields[itemKey] ?? [];
                       return !loadedFields.includes(field);
                     }),
               );
@@ -606,9 +566,7 @@ export function useMultipleListQueries<
         if (!partialResources) return [];
 
         return queriesWithId.map(({ key, fields }) => {
-          const queryEntry = readOwnMaterializedValue(state.queries, key);
-          const query =
-            queryEntry.status === 'materialized' ? queryEntry.value : undefined;
+          const query = state.queries[key];
           if (!query) {
             return {
               status: null,
@@ -631,14 +589,7 @@ export function useMultipleListQueries<
             Array.isArray(fields) && fields.length > 0
               ? query.items
                   .flatMap((itemKey) => {
-                    const loadedFieldsEntry = readOwnMaterializedValue(
-                      state.itemLoadedFields,
-                      itemKey,
-                    );
-                    const loadedFields =
-                      loadedFieldsEntry.status === 'materialized'
-                        ? loadedFieldsEntry.value
-                        : [];
+                    const loadedFields = state.itemLoadedFields[itemKey] ?? [];
                     return fields.filter(
                       (field) => !loadedFields.includes(field),
                     );

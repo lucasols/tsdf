@@ -15,8 +15,7 @@ import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
 } from './offline/types';
-import { hasOwnEntry } from '../utils/hasOwnEntry';
-import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
+
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   convertStoreDataForPersistence,
@@ -44,6 +43,10 @@ import {
   refreshLocalStorageTimestamp,
   touchLocalStorageKeyWithThrottle,
 } from './persistentStorageManager';
+import {
+  createShouldIgnoreItemPredicate,
+  createEvictionComparator,
+} from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
@@ -90,19 +93,6 @@ type ManagedQueryEntry = {
 
 type ManagedQueryEntriesByKey = Map<string, ManagedQueryEntry>;
 
-function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
-  ignoreItems:
-    | ListQueryPersistentStorageConfig<never, never, ItemPayload>['ignoreItems']
-    | undefined,
-  resolveItemKey: (payload: ItemPayload) => string,
-): (payload: ItemPayload) => boolean {
-  if (!ignoreItems) return () => false;
-  if (typeof ignoreItems === 'function') return ignoreItems;
-
-  const ignoredItemKeys = new Set(ignoreItems.map(resolveItemKey));
-  return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
-}
-
 function toItemState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -148,58 +138,6 @@ function limitPersistedQueryItems(
   return {
     itemKeys: limitedItemKeys,
     hasMore: hasMore || limitedItemKeys.length < itemKeys.length,
-  };
-}
-
-function materializeRecordEntry<Value>(
-  record: Record<string, Value>,
-  key: string,
-  value: Value,
-): Record<string, Value> {
-  return { ...record, [key]: value };
-}
-
-function materializeListQueryItemState<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
->(
-  state: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
-  itemKey: string,
-  itemState: {
-    item: ItemState;
-    itemQuery: TSDFItemQuery<ItemPayload>;
-    loadedFields: string[];
-  },
-): TSFDListQueryState<ItemState, QueryPayload, ItemPayload> {
-  return {
-    ...state,
-    items: materializeRecordEntry(state.items, itemKey, itemState.item),
-    itemQueries: materializeRecordEntry(
-      state.itemQueries,
-      itemKey,
-      itemState.itemQuery,
-    ),
-    itemLoadedFields: materializeRecordEntry(
-      state.itemLoadedFields,
-      itemKey,
-      itemState.loadedFields,
-    ),
-  };
-}
-
-function materializeListQueryQueryState<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
->(
-  state: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>,
-  queryKey: string,
-  query: TSFDListQuery<QueryPayload>,
-): TSFDListQueryState<ItemState, QueryPayload, ItemPayload> {
-  return {
-    ...state,
-    queries: materializeRecordEntry(state.queries, queryKey, query),
   };
 }
 
@@ -598,9 +536,18 @@ export function setupListQueryPersistence<
     if (!storeRef) return;
 
     suppressedPersistedStateFlushes++;
-    storeRef.setState(
-      materializeListQueryItemState(storeRef.state, itemKey, itemState),
-    );
+    storeRef.setState({
+      ...storeRef.state,
+      items: { ...storeRef.state.items, [itemKey]: itemState.item },
+      itemQueries: {
+        ...storeRef.state.itemQueries,
+        [itemKey]: itemState.itemQuery,
+      },
+      itemLoadedFields: {
+        ...storeRef.state.itemLoadedFields,
+        [itemKey]: itemState.loadedFields,
+      },
+    });
   }
 
   function materializeHydratedQueryState(
@@ -610,9 +557,10 @@ export function setupListQueryPersistence<
     if (!storeRef) return;
 
     suppressedPersistedStateFlushes++;
-    storeRef.setState(
-      materializeListQueryQueryState(storeRef.state, queryKey, query),
-    );
+    storeRef.setState({
+      ...storeRef.state,
+      queries: { ...storeRef.state.queries, [queryKey]: query },
+    });
   }
 
   function parseHydratedItemSnapshot(
@@ -871,28 +819,17 @@ export function setupListQueryPersistence<
 
   async function preloadItem(itemKey: string): Promise<boolean> {
     if (!storeRef) return false;
-    const itemQueryEntry = readOwnMaterializedValue(
-      storeRef.state.itemQueries,
-      itemKey,
-    );
-    const itemEntry = readOwnMaterializedValue(storeRef.state.items, itemKey);
-    const loadedFieldsEntry = readOwnMaterializedValue(
-      storeRef.state.itemLoadedFields,
-      itemKey,
-    );
+    const existingItemQuery = storeRef.state.itemQueries[itemKey];
+    const existingItem = storeRef.state.items[itemKey];
+    const existingLoadedFields = storeRef.state.itemLoadedFields[itemKey];
     if (
-      itemQueryEntry.status === 'materialized' &&
-      itemEntry.status === 'materialized' &&
-      loadedFieldsEntry.status === 'materialized'
+      existingItemQuery !== undefined &&
+      existingItem !== undefined &&
+      existingLoadedFields !== undefined
     ) {
-      return itemQueryEntry.value !== null;
+      return existingItemQuery !== null;
     }
-    if (
-      itemQueryEntry.status === 'materialized' &&
-      itemQueryEntry.value === null
-    ) {
-      return false;
-    }
+    if (existingItemQuery === null) return false;
 
     if (localStorageAdapter !== null) {
       const itemState =
@@ -959,11 +896,7 @@ export function setupListQueryPersistence<
 
   async function preloadQuery(queryKey: string): Promise<boolean> {
     if (!storeRef) return false;
-    const queryEntry = readOwnMaterializedValue(
-      storeRef.state.queries,
-      queryKey,
-    );
-    if (queryEntry.status === 'materialized') return true;
+    if (storeRef.state.queries[queryKey] !== undefined) return true;
 
     if (localStorageAdapter !== null) {
       const persistedQuery =
@@ -1045,17 +978,21 @@ export function setupListQueryPersistence<
         );
 
         suppressedPersistedStateFlushes++;
-        activeStore.setState(
-          materializeListQueryQueryState(activeStore.state, queryKey, {
-            error: null,
-            hasMore: limitedQuery.hasMore,
-            items: limitedQuery.itemKeys,
-            payload: persistedQuery.payload,
-            refetchOnMount: 'lowPriority',
-            status: 'success',
-            wasLoaded: true,
-          }),
-        );
+        activeStore.setState({
+          ...activeStore.state,
+          queries: {
+            ...activeStore.state.queries,
+            [queryKey]: {
+              error: null,
+              hasMore: limitedQuery.hasMore,
+              items: limitedQuery.itemKeys,
+              payload: persistedQuery.payload,
+              refetchOnMount: 'lowPriority',
+              status: 'success',
+              wasLoaded: true,
+            },
+          },
+        });
 
         return true;
       })
@@ -1153,18 +1090,12 @@ export function setupListQueryPersistence<
         );
       }
 
-      filteredEntries.sort((a, b) => {
-        if (a.offlineProtected && !b.offlineProtected) return -1;
-        if (!a.offlineProtected && b.offlineProtected) return 1;
-
-        const aPinned = pinnedQueryKeys.has(a.queryKey);
-        const bPinned = pinnedQueryKeys.has(b.queryKey);
-
-        if (aPinned && !bPinned) return -1;
-        if (!aPinned && bPinned) return 1;
-
-        return b.lastAccessAt - a.lastAccessAt;
-      });
+      filteredEntries.sort(
+        createEvictionComparator(
+          [(e) => e.offlineProtected, (e) => pinnedQueryKeys.has(e.queryKey)],
+          (e) => e.lastAccessAt,
+        ),
+      );
 
       const keptQueryKeys = new Set(
         filteredEntries.slice(0, maxQueries).map(({ queryKey }) => queryKey),
@@ -1250,21 +1181,15 @@ export function setupListQueryPersistence<
         : false;
     });
 
-    validEntries.sort((a, b) => {
-      const aProtected = protectedQueryKeys.has(a.queryKey);
-      const bProtected = protectedQueryKeys.has(b.queryKey);
-
-      if (aProtected && !bProtected) return -1;
-      if (!aProtected && bProtected) return 1;
-
-      const aPinned = pinnedQueryKeys.has(a.queryKey);
-      const bPinned = pinnedQueryKeys.has(b.queryKey);
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-
-      return b.lastAccessAt - a.lastAccessAt;
-    });
+    validEntries.sort(
+      createEvictionComparator(
+        [
+          (e) => protectedQueryKeys.has(e.queryKey),
+          (e) => pinnedQueryKeys.has(e.queryKey),
+        ],
+        (e) => e.lastAccessAt,
+      ),
+    );
 
     const keptQueryKeys = new Set(
       validEntries.slice(0, maxQueries).map(({ queryKey }) => queryKey),
@@ -1397,27 +1322,16 @@ export function setupListQueryPersistence<
         return;
       }
 
-      persistedItemEntries.sort((a, b) => {
-        const aProtected = protectedItemKeys.has(a.itemKey);
-        const bProtected = protectedItemKeys.has(b.itemKey);
-
-        if (aProtected && !bProtected) return -1;
-        if (!aProtected && bProtected) return 1;
-
-        const aPinned = pinnedItemKeys.has(a.itemKey);
-        const bPinned = pinnedItemKeys.has(b.itemKey);
-
-        if (aPinned && !bPinned) return -1;
-        if (!aPinned && bPinned) return 1;
-
-        const aReferenced = referencedItems.has(a.itemKey);
-        const bReferenced = referencedItems.has(b.itemKey);
-
-        if (aReferenced && !bReferenced) return -1;
-        if (!aReferenced && bReferenced) return 1;
-
-        return b.lastAccessAt - a.lastAccessAt;
-      });
+      persistedItemEntries.sort(
+        createEvictionComparator(
+          [
+            (e) => protectedItemKeys.has(e.itemKey),
+            (e) => pinnedItemKeys.has(e.itemKey),
+            (e) => referencedItems.has(e.itemKey),
+          ],
+          (e) => e.lastAccessAt,
+        ),
+      );
 
       const keptItemKeys = new Set(
         persistedItemEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
@@ -1533,27 +1447,16 @@ export function setupListQueryPersistence<
 
     if (!hasIgnoreItemFilter && persistedItemEntries.length <= maxItems) return;
 
-    persistedItemEntries.sort((a, b) => {
-      const aProtected = protectedItemKeys.has(a.itemKey);
-      const bProtected = protectedItemKeys.has(b.itemKey);
-
-      if (aProtected && !bProtected) return -1;
-      if (!aProtected && bProtected) return 1;
-
-      const aPinned = pinnedItemKeys.has(a.itemKey);
-      const bPinned = pinnedItemKeys.has(b.itemKey);
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-
-      const aReferenced = referencedItems.has(a.itemKey);
-      const bReferenced = referencedItems.has(b.itemKey);
-
-      if (aReferenced && !bReferenced) return -1;
-      if (!aReferenced && bReferenced) return 1;
-
-      return b.lastAccessAt - a.lastAccessAt;
-    });
+    persistedItemEntries.sort(
+      createEvictionComparator(
+        [
+          (e) => protectedItemKeys.has(e.itemKey),
+          (e) => pinnedItemKeys.has(e.itemKey),
+          (e) => referencedItems.has(e.itemKey),
+        ],
+        (e) => e.lastAccessAt,
+      ),
+    );
 
     const keptItemKeys = new Set(
       persistedItemEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
@@ -1651,8 +1554,8 @@ export function setupListQueryPersistence<
       if (query.status !== 'success' && !query.wasLoaded) continue;
 
       const filteredItems = query.items.filter((itemKey) => {
-        const hasItemInState = hasOwnEntry(state.items, itemKey);
-        const hasItemQueryInState = hasOwnEntry(state.itemQueries, itemKey);
+        const hasItemInState = Object.hasOwn(state.items, itemKey);
+        const hasItemQueryInState = Object.hasOwn(state.itemQueries, itemKey);
         const hydratedItem =
           hasItemInState && hasItemQueryInState
             ? undefined
@@ -1709,8 +1612,8 @@ export function setupListQueryPersistence<
     }
 
     for (const [itemKey, item] of itemEntries) {
-      const hasItemQueryInState = hasOwnEntry(state.itemQueries, itemKey);
-      const hasLoadedFieldsInState = hasOwnEntry(
+      const hasItemQueryInState = Object.hasOwn(state.itemQueries, itemKey);
+      const hasLoadedFieldsInState = Object.hasOwn(
         state.itemLoadedFields,
         itemKey,
       );

@@ -58,7 +58,6 @@ import {
 } from '../utils/browserTabsSync';
 import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
-import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import {
   StoreError,
   StoreFetchError,
@@ -1695,15 +1694,7 @@ export function createListQueryStore<
       const queryItemKeys = store.useSelectorRC((state) =>
         result.map((queryResult) =>
           queryResult.queryKey
-            ? (() => {
-                const queryEntry = readOwnMaterializedValue(
-                  state.queries,
-                  queryResult.queryKey,
-                );
-                return queryEntry.status === 'materialized'
-                  ? queryEntry.value.items
-                  : [];
-              })()
+            ? (state.queries[queryResult.queryKey]?.items ?? [])
             : [],
         ),
       );
@@ -1759,17 +1750,7 @@ export function createListQueryStore<
     );
 
     const itemKeys = store.useSelectorRC((state) =>
-      result.queryKey
-        ? (() => {
-            const queryEntry = readOwnMaterializedValue(
-              state.queries,
-              result.queryKey,
-            );
-            return queryEntry.status === 'materialized'
-              ? queryEntry.value.items
-              : [];
-          })()
-        : [],
+      result.queryKey ? (state.queries[result.queryKey]?.items ?? []) : [],
     );
     const offlineEntities = useOfflineStoreEntities({
       sessionKey: getSessionKey(),

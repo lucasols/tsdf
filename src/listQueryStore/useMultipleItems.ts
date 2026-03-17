@@ -21,7 +21,6 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
-import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
@@ -196,26 +195,10 @@ export function useMultipleItems<
           showPartialAsRefetching,
           queryMetadata,
         }): TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata> => {
-          const itemQueryEntry = readOwnMaterializedValue(
-            state.itemQueries,
-            itemKey,
-          );
-          const itemEntry = readOwnMaterializedValue(state.items, itemKey);
-          const loadedFieldsEntry = readOwnMaterializedValue(
-            state.itemLoadedFields,
-            itemKey,
-          );
-          const itemQuery =
-            itemQueryEntry.status === 'materialized'
-              ? itemQueryEntry.value
-              : undefined;
-          const rawItemState =
-            itemEntry.status === 'materialized' ? itemEntry.value : undefined;
+          const itemQuery = state.itemQueries[itemKey];
+          const rawItemState = state.items[itemKey];
           const hasCachedDataInState = rawItemState != null;
-          const loadedFields =
-            loadedFieldsEntry.status === 'materialized'
-              ? loadedFieldsEntry.value
-              : [];
+          const loadedFields = state.itemLoadedFields[itemKey] ?? [];
           let itemState = rawItemState;
           let loadingFields: string[] | undefined;
 
@@ -394,22 +377,8 @@ export function useMultipleItems<
   const autoFetchSignalSelector = useCallback(
     (state: State) => {
       return queriesWithId.map(({ itemKey, fields }) => {
-        const itemQueryEntry = readOwnMaterializedValue(
-          state.itemQueries,
-          itemKey,
-        );
-        const loadedFieldsEntry = readOwnMaterializedValue(
-          state.itemLoadedFields,
-          itemKey,
-        );
-        const itemQuery =
-          itemQueryEntry.status === 'materialized'
-            ? itemQueryEntry.value
-            : undefined;
-        const loadedFields =
-          loadedFieldsEntry.status === 'materialized'
-            ? loadedFieldsEntry.value
-            : [];
+        const itemQuery = state.itemQueries[itemKey];
+        const loadedFields = state.itemLoadedFields[itemKey] ?? [];
         const missingRequestedFields =
           partialResources && Array.isArray(fields) && fields.length > 0
             ? fields.filter((field) => !loadedFields.includes(field)).sort()

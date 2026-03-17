@@ -15,7 +15,7 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import { hasOwnEntry } from '../utils/hasOwnEntry';
+
 import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
@@ -655,9 +655,12 @@ export function createFetchApi<
         loadedFields: string[] | undefined;
       }
     | undefined {
-    const hasItem = hasOwnEntry(store.state.items, itemKey);
-    const hasItemQuery = hasOwnEntry(store.state.itemQueries, itemKey);
-    const hasLoadedFields = hasOwnEntry(store.state.itemLoadedFields, itemKey);
+    const hasItem = Object.hasOwn(store.state.items, itemKey);
+    const hasItemQuery = Object.hasOwn(store.state.itemQueries, itemKey);
+    const hasLoadedFields = Object.hasOwn(
+      store.state.itemLoadedFields,
+      itemKey,
+    );
     if (!hasItem && !hasItemQuery && !hasLoadedFields) return undefined;
 
     return {

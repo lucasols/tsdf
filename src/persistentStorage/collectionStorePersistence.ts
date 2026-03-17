@@ -11,7 +11,6 @@ import type {
   CollectionOfflineEntityRef,
 } from './offline/types';
 import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
-import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   convertStoreDataForPersistence,
@@ -33,6 +32,10 @@ import {
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
+import {
+  createShouldIgnoreItemPredicate,
+  createEvictionComparator,
+} from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import { COLLECTION_STORAGE_ENTRY_PREFIX } from './storageEntryPrefixes';
 import type {
@@ -59,19 +62,6 @@ type CollectionPersistenceOfflineOperations<
       ([ItemState | ItemPayload] extends [never] ? never : unknown))
   | null;
 
-function createShouldIgnoreItemPredicate<ItemPayload extends ValidPayload>(
-  ignoreItems:
-    | CollectionPersistentStorageConfig<never, ItemPayload>['ignoreItems']
-    | undefined,
-  resolveItemKey: (payload: ItemPayload) => string,
-): (payload: ItemPayload) => boolean {
-  if (!ignoreItems) return () => false;
-  if (typeof ignoreItems === 'function') return ignoreItems;
-
-  const ignoredItemKeys = new Set(ignoreItems.map(resolveItemKey));
-  return (payload) => ignoredItemKeys.has(resolveItemKey(payload));
-}
-
 function toCollectionItemState<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -94,17 +84,6 @@ function toCollectionItemState<
     status: 'success',
     wasLoaded: true,
   };
-}
-
-function materializeCollectionStateEntry<
-  ItemState extends ValidStoreState,
-  ItemPayload extends ValidPayload,
->(
-  state: TSFDCollectionState<ItemState, ItemPayload>,
-  itemKey: string,
-  item: TSFDCollectionItem<ItemState, ItemPayload>,
-): TSFDCollectionState<ItemState, ItemPayload> {
-  return { ...state, [itemKey]: item };
 }
 
 export type CollectionPersistenceSetup<
@@ -249,9 +228,7 @@ export function setupCollectionPersistence<
     if (!storeRef) return;
 
     suppressedPersistedStateFlushes++;
-    storeRef.setState(
-      materializeCollectionStateEntry(storeRef.state, itemKey, item),
-    );
+    storeRef.setState({ ...storeRef.state, [itemKey]: item });
   }
 
   function parseHydratedItemSnapshot(
@@ -371,9 +348,9 @@ export function setupCollectionPersistence<
 
   async function preloadItem(itemKey: string): Promise<boolean> {
     if (!storeRef) return false;
-    const itemEntry = readOwnMaterializedValue(storeRef.state, itemKey);
-    if (itemEntry.status === 'materialized') {
-      return itemEntry.value !== null;
+    const existingItem = storeRef.state[itemKey];
+    if (existingItem !== undefined) {
+      return existingItem !== null;
     }
 
     if (localStorageAdapter !== null) {
@@ -381,9 +358,9 @@ export function setupCollectionPersistence<
         readRememberedHydratedItem(itemKey) ?? readHydratedItem(itemKey);
       if (!validated) return false;
 
-      const currentEntry = readOwnMaterializedValue(storeRef.state, itemKey);
-      if (currentEntry.status === 'materialized') {
-        return currentEntry.value !== null;
+      const currentItem = storeRef.state[itemKey];
+      if (currentItem !== undefined) {
+        return currentItem !== null;
       }
 
       materializeHydratedItem(itemKey, validated);
@@ -426,11 +403,6 @@ export function setupCollectionPersistence<
 
         if (storeRef.state[itemKey] !== undefined) {
           return storeRef.state[itemKey] !== null;
-        }
-
-        const currentEntry = readOwnMaterializedValue(storeRef.state, itemKey);
-        if (currentEntry.status === 'materialized') {
-          return currentEntry.value !== null;
         }
 
         materializeHydratedItem(itemKey, validated);
@@ -530,21 +502,15 @@ export function setupCollectionPersistence<
         return;
       }
 
-      filteredEntries.sort((a, b) => {
-        const aProtected = protectedItemKeys.has(a.itemKey);
-        const bProtected = protectedItemKeys.has(b.itemKey);
-
-        if (aProtected && !bProtected) return -1;
-        if (!aProtected && bProtected) return 1;
-
-        const aPinned = pinnedItemKeys.has(a.itemKey);
-        const bPinned = pinnedItemKeys.has(b.itemKey);
-
-        if (aPinned && !bPinned) return -1;
-        if (!aPinned && bPinned) return 1;
-
-        return b.lastAccessAt - a.lastAccessAt;
-      });
+      filteredEntries.sort(
+        createEvictionComparator(
+          [
+            (e) => protectedItemKeys.has(e.itemKey),
+            (e) => pinnedItemKeys.has(e.itemKey),
+          ],
+          (e) => e.lastAccessAt,
+        ),
+      );
 
       const keptKeys = new Set(
         filteredEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
@@ -655,21 +621,15 @@ export function setupCollectionPersistence<
       return;
     }
 
-    filteredEntries.sort((a, b) => {
-      const aProtected = protectedItemKeys.has(a.itemKey);
-      const bProtected = protectedItemKeys.has(b.itemKey);
-
-      if (aProtected && !bProtected) return -1;
-      if (!aProtected && bProtected) return 1;
-
-      const aPinned = pinnedItemKeys.has(a.itemKey);
-      const bPinned = pinnedItemKeys.has(b.itemKey);
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-
-      return b.lastAccessAt - a.lastAccessAt;
-    });
+    filteredEntries.sort(
+      createEvictionComparator(
+        [
+          (e) => protectedItemKeys.has(e.itemKey),
+          (e) => pinnedItemKeys.has(e.itemKey),
+        ],
+        (e) => e.lastAccessAt,
+      ),
+    );
 
     const keptKeys = new Set(
       filteredEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),

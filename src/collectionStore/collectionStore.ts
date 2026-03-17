@@ -63,7 +63,7 @@ import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from '../utils/performMutation';
-import { hasOwnEntry } from '../utils/hasOwnEntry';
+
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   fetchTypePriority,
@@ -1142,7 +1142,7 @@ export function createCollectionStore<
     options: { materializeSyncState?: boolean } = {},
   ): CollectionItem | null | undefined {
     const item = store.state[itemKey];
-    if (hasOwnEntry(store.state, itemKey)) return item;
+    if (Object.hasOwn(store.state, itemKey)) return item;
     const hydratedItem = persistence?.readHydratedItem(itemKey);
 
     if (
@@ -1153,7 +1153,7 @@ export function createCollectionStore<
     ) {
       void persistence.preloadItems([itemKey]);
 
-      if (hasOwnEntry(store.state, itemKey)) {
+      if (Object.hasOwn(store.state, itemKey)) {
         return store.state[itemKey];
       }
     }

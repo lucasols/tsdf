@@ -3,7 +3,6 @@ import { useMemo } from 'react';
 import { Store, useSubscribeToStore } from 't-state';
 import { FetchType } from '../requestScheduler';
 import { assertNoEnsureIsLoadedWithDebouncePayload } from '../utils/payloadDebounce';
-import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import {
   ValidPayload,
   ValidStoreState,
@@ -151,10 +150,7 @@ export function useItem<
 
     observe
       .ifSelector((state) => {
-        const itemEntry = readOwnMaterializedValue(state, result.itemStateKey);
-        return itemEntry.status === 'materialized'
-          ? itemEntry.value?.status
-          : undefined;
+        return state[result.itemStateKey]?.status;
       })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {

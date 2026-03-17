@@ -20,7 +20,6 @@ import {
   ValidStoreState,
 } from '../utils/storeShared';
 import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
-import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import type {
   CollectionUseMultipleItemsQuery,
   TSFDCollectionItem,
@@ -176,9 +175,7 @@ export function useMultipleItems<
           ItemPayload,
           QueryMetadata
         > => {
-          const itemEntry = readOwnMaterializedValue(state, itemKey);
-          const item =
-            itemEntry.status === 'materialized' ? itemEntry.value : undefined;
+          const item = state[itemKey];
 
           const data = selector
             ? selector(item?.data ?? null)
