@@ -55,14 +55,13 @@ function populateStorage(
   storeName: string,
   sessionKey: string,
   data: TestData,
-  version = 1,
+  version: number | undefined = undefined,
 ) {
   const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> = {
-    data: { data: { value: data } },
-    timestamp: Date.now(),
-    version,
-  };
+  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
+    version === undefined
+      ? { data: { data: { value: data } }, timestamp: Date.now() }
+      : { data: { data: { value: data } }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 
@@ -112,7 +111,7 @@ describe('opfs: document store persistence', () => {
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toEqual([key, key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -140,7 +139,7 @@ describe('opfs: document store persistence', () => {
     await preloadPromise;
     await advanceTime(3000);
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toEqual([key, key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -181,7 +180,7 @@ describe('opfs: document store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.readRequests).toEqual([key, key]);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "

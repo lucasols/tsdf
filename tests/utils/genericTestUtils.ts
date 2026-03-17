@@ -30,3 +30,8 @@ export async function advanceTime(ms: number) {
     await vi.advanceTimersByTimeAsync(ms);
   });
 }
+
+export async function waitForScheduledCleanup(delayMs = 2100) {
+  await advanceTime(delayMs);
+  await flushAllTimers();
+}

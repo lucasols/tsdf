@@ -15,6 +15,7 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+
 import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
@@ -23,6 +24,7 @@ import {
   type OffsetPaginationConfig,
   type PartialResourcesConfig,
   type QueryFetchPayload,
+  type TSDFItemQuery,
   type TSFDListQuery,
   type TSFDListQueryState,
 } from './types';
@@ -93,8 +95,27 @@ export type CreateFetchApiOptions<
   normalizeFieldsOption: (
     fields: FieldsInput | undefined,
   ) => string[] | undefined;
+  syncHydrationEnabled?: boolean;
   preloadQueries?: (queryKeys: string[]) => Promise<boolean[]>;
   preloadItems?: (itemKeys: string[]) => Promise<boolean[]>;
+  persistence?: {
+    getHydratedItemKeys(this: void): string[];
+    getHydratedQueryKeys(this: void): string[];
+    readHydratedItem(
+      this: void,
+      itemKey: string,
+    ):
+      | {
+          item: ItemState;
+          itemQuery: TSDFItemQuery<ItemPayload>;
+          loadedFields: string[];
+        }
+      | undefined;
+    readHydratedQuery(
+      this: void,
+      queryKey: string,
+    ): TSFDListQuery<QueryPayload> | undefined;
+  } | null;
   testInitialLastFetchStartTime?: number;
   noFetchItemFnError: string;
   onQueryFetchStart?: (
@@ -144,8 +165,10 @@ export function createFetchApi<
   getQueryKey,
   getItemKey,
   normalizeFieldsOption,
+  syncHydrationEnabled = false,
   preloadQueries: preloadQueries_,
   preloadItems: preloadItems_,
+  persistence,
   testInitialLastFetchStartTime,
   noFetchItemFnError,
   onQueryFetchStart,
@@ -604,9 +627,72 @@ export function createFetchApi<
     }
   }
 
+  function getQueryStateByKey(queryKey: string): Query | undefined {
+    const query = store.state.queries[queryKey];
+    if (query !== undefined) return query;
+
+    const hydratedQuery = persistence?.readHydratedQuery(queryKey);
+    if (!hydratedQuery) return undefined;
+
+    if (syncHydrationEnabled && preloadQueries_) {
+      void preloadQueries_([queryKey]);
+      return store.state.queries[queryKey] ?? hydratedQuery;
+    }
+
+    return hydratedQuery;
+  }
+
   function getQueryState(params: QueryPayload): Query | undefined {
-    const queryKey = getQueryKey(params);
-    return store.state.queries[queryKey];
+    return getQueryStateByKey(getQueryKey(params));
+  }
+
+  function readMaterializedItemState(
+    itemKey: string,
+  ):
+    | {
+        item: ItemState | null | undefined;
+        itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+        loadedFields: string[] | undefined;
+      }
+    | undefined {
+    const hasItem = Object.hasOwn(store.state.items, itemKey);
+    const hasItemQuery = Object.hasOwn(store.state.itemQueries, itemKey);
+    const hasLoadedFields = Object.hasOwn(
+      store.state.itemLoadedFields,
+      itemKey,
+    );
+    if (!hasItem && !hasItemQuery && !hasLoadedFields) return undefined;
+
+    return {
+      item: hasItem ? store.state.items[itemKey] : undefined,
+      itemQuery: hasItemQuery ? store.state.itemQueries[itemKey] : undefined,
+      loadedFields: hasLoadedFields
+        ? store.state.itemLoadedFields[itemKey]
+        : undefined,
+    };
+  }
+
+  function readItemState(
+    itemKey: string,
+  ):
+    | {
+        item: ItemState | null | undefined;
+        itemQuery: TSDFItemQuery<ItemPayload> | null | undefined;
+        loadedFields: string[] | undefined;
+      }
+    | undefined {
+    const materializedItemState = readMaterializedItemState(itemKey);
+    if (materializedItemState) return materializedItemState;
+
+    const hydratedItem = persistence?.readHydratedItem(itemKey);
+    if (!hydratedItem) return undefined;
+
+    if (syncHydrationEnabled && preloadItems_) {
+      void preloadItems_([itemKey]);
+      return readMaterializedItemState(itemKey) ?? hydratedItem;
+    }
+
+    return hydratedItem;
   }
 
   function getQueriesKeyArray(
@@ -618,26 +704,43 @@ export function createFetchApi<
         payload,
       }));
     } else if (typeof payloads === 'function') {
-      return filterAndMap(
-        Object.entries(store.state.queries),
-        ([queryKey, query]) => {
-          return payloads(query.payload, query, queryKey)
-            ? { key: queryKey, payload: query.payload }
-            : false;
-        },
-      );
-    } else {
-      return [{ key: getQueryKey(payloads), payload: payloads }];
+      const queryKeys = new Set([
+        ...Object.keys(store.state.queries),
+        ...(persistence?.getHydratedQueryKeys() ?? []),
+      ]);
+
+      return filterAndMap([...queryKeys], (queryKey) => {
+        const query = getQueryStateByKey(queryKey);
+        return query && payloads(query.payload, query, queryKey)
+          ? { key: queryKey, payload: query.payload }
+          : false;
+      });
     }
+
+    return [{ key: getQueryKey(payloads), payload: payloads }];
   }
 
   function getQueriesState(
     params: QueryPayload[] | FilterQueryFn<QueryPayload>,
   ): { query: Query; key: string }[] {
+    if (typeof params === 'function') {
+      const queryKeys = new Set([
+        ...Object.keys(store.state.queries),
+        ...(persistence?.getHydratedQueryKeys() ?? []),
+      ]);
+
+      return filterAndMap([...queryKeys], (queryKey) => {
+        const query = getQueryStateByKey(queryKey);
+        return query && params(query.payload, query, queryKey)
+          ? { query, key: queryKey }
+          : false;
+      });
+    }
+
     const queryKeys = getQueriesKeyArray(params);
 
     return filterAndMap(queryKeys, ({ key }) => {
-      const query = store.state.queries[key];
+      const query = getQueryStateByKey(key);
       return query ? { query, key } : false;
     });
   }
@@ -647,9 +750,8 @@ export function createFetchApi<
   ): { query: Query; key: string }[] {
     const itemKey = getItemKey(itemPayload);
 
-    return getQueriesState((queryPayload) => {
-      const queryState = store.state.queries[getQueryKey(queryPayload)];
-      return !!queryState?.items.includes(itemKey);
+    return getQueriesState((_queryPayload, query) => {
+      return query.items.includes(itemKey);
     });
   }
 
@@ -667,16 +769,20 @@ export function createFetchApi<
     }
 
     if (typeof itemsPayload === 'function') {
-      return filterAndMap(
-        Object.entries(store.state.items),
-        ([itemKey, item]) => {
-          const payload = store.state.itemQueries[itemKey]?.payload;
+      const itemKeys = new Set([
+        ...Object.keys(store.state.items),
+        ...(persistence?.getHydratedItemKeys() ?? []),
+      ]);
 
-          if (item === null || !payload) return false;
+      return filterAndMap([...itemKeys], (itemKey) => {
+        const itemState = readItemState(itemKey);
+        const item = itemState?.item;
+        const payload = itemState?.itemQuery?.payload;
 
-          return itemsPayload(payload, item) ? { itemKey, payload } : false;
-        },
-      );
+        if (item == null || payload === undefined) return false;
+
+        return itemsPayload(payload, item) ? { itemKey, payload } : false;
+      });
     }
 
     return [{ payload: itemsPayload, itemKey: getItemKey(itemsPayload) }];
@@ -697,13 +803,19 @@ export function createFetchApi<
     | undefined
     | { payload: ItemPayload; data: ItemState }[] {
     if (typeof itemPayload === 'function') {
-      const itemsId = getItemsKeyArray(itemPayload);
+      const itemKeys = new Set([
+        ...Object.keys(store.state.items),
+        ...(persistence?.getHydratedItemKeys() ?? []),
+      ]);
 
-      return filterAndMap(itemsId, ({ itemKey }) => {
-        const item = store.state.items[itemKey];
-        const payload = store.state.itemQueries[itemKey]?.payload;
+      return filterAndMap([...itemKeys], (itemKey) => {
+        const itemState = readItemState(itemKey);
+        const item = itemState?.item;
+        const payload = itemState?.itemQuery?.payload;
 
-        return !item || !payload ? false : { payload, data: item };
+        if (item == null || payload === undefined) return false;
+
+        return itemPayload(payload, item) ? { payload, data: item } : false;
       });
     }
 
@@ -711,13 +823,15 @@ export function createFetchApi<
       const itemsId = getItemsKeyArray(itemPayload);
 
       return filterAndMap(itemsId, ({ itemKey, payload }) => {
-        const item = store.state.items[itemKey];
-        return !item ? false : { payload, data: item };
+        const item = readItemState(itemKey)?.item;
+        return item == null ? false : { payload, data: item };
       });
     }
 
     const itemKey = getItemKey(itemPayload);
-    return store.state.items[itemKey];
+    const itemState = readItemState(itemKey);
+    if (itemState?.itemQuery === null) return null;
+    return itemState?.item;
   }
 
   function scheduleListQueryFetch(

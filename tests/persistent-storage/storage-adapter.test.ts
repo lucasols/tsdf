@@ -1,3 +1,7 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { createLoggerStore } from '@ls-stack/utils/testUtils';
+import { renderHook } from '@testing-library/react';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -7,344 +11,281 @@ import {
   test,
   vi,
 } from 'vitest';
-import { murmur3 } from '@ls-stack/utils/hash';
+import { clearSessionStorage } from '../../src/main';
+import { resetManagedLocalStorageState } from '../../src/persistentStorage/localStorageMetadata';
+import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
+import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import {
-  localPersistentStorage,
-  opfsPersistentStorage,
-} from '../../src/persistentStorage/storageAdapter';
-import type { StorageAdapter } from '../../src/persistentStorage/types';
+  createListQueryStoreTestEnv,
+  type ListQueryParams,
+} from '../mocks/listQueryStoreTestEnv';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import { flushAllTimers } from '../utils/genericTestUtils';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
+
+const wrappedDocumentSchema = rc_object({
+  value: rc_object({ name: rc_string, value: rc_number }),
+});
+
+const wrappedCollectionItemSchema = rc_object({
+  value: rc_object({ id: rc_string, name: rc_string }),
+});
+
+type ListRow = { id: number; name: string };
+
+const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<ListRow>, unknown>(
+  rc_object({ id: rc_number, name: rc_string }),
+);
+const listQueryParamsSchema = rc_object({ tableId: rc_string });
+const persistentStore = createLocalStoragePersistentTestStore();
+
+function createDocumentEnv(options: {
+  storeName: string;
+  sessionKey: string;
+  serverData?: { name: string; value: number };
+}) {
+  return createDocumentStoreTestEnv(
+    options.serverData ?? { name: 'fresh', value: 42 },
+    {
+      getSessionKey: () => options.sessionKey,
+      persistentStorage: {
+        storeName: options.storeName,
+        adapter: 'local-sync',
+        schema: wrappedDocumentSchema,
+      },
+    },
+  );
+}
+
+function createCollectionEnv(options: {
+  storeName: string;
+  sessionKey: string;
+  serverData?: Record<string, { id: string; name: string }>;
+}) {
+  return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    getSessionKey: () => options.sessionKey,
+    persistentStorage: {
+      storeName: options.storeName,
+      adapter: 'local-sync',
+      schema: wrappedCollectionItemSchema,
+      payloadSchema: rc_string,
+    },
+  });
+}
+
+function createListQueryEnv(options: {
+  storeName: string;
+  sessionKey: string;
+  serverData?: Record<string, ListRow[]>;
+}) {
+  return createListQueryStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
+    getSessionKey: () => options.sessionKey,
+    persistentStorage: {
+      storeName: options.storeName,
+      adapter: 'local-sync',
+      schema: rowSchema,
+      itemPayloadSchema: rc_string,
+      queryPayloadSchema: listQueryParamsSchema,
+    },
+  });
+}
 
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
+beforeEach(() => {
+  vi.setSystemTime(TEST_INITIAL_TIME);
+});
+
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetManagedLocalStorageState();
 });
 
-describe('localStorage adapter', () => {
-  let adapter: StorageAdapter;
-
-  beforeEach(() => {
-    adapter = localPersistentStorage;
-  });
-
-  test('read returns null for missing key', async () => {
-    const result = await adapter.read('nonexistent');
-    expect(result).toBeNull();
-  });
-
-  test('write and read roundtrip', async () => {
-    await adapter.write('test-key', { name: 'Alice', age: 30 });
-    const result = await adapter.read('test-key');
-
-    expect(result).toMatchInlineSnapshot(`
-      age: 30
-      name: 'Alice'
-    `);
-  });
-
-  test('remove deletes key', async () => {
-    await adapter.write('to-remove', { value: 42 });
-    await adapter.remove('to-remove');
-
-    const result = await adapter.read('to-remove');
-    expect(result).toBeNull();
-  });
-
-  test('removeByPrefix removes all matching keys', async () => {
-    await adapter.write('tsdf.session1.store1', { a: 1 });
-    await adapter.write('tsdf.session1.store2', { b: 2 });
-    await adapter.write('tsdf.session2.store1', { c: 3 });
-
-    await adapter.removeByPrefix('tsdf.session1.');
-
-    const result1 = await adapter.read('tsdf.session1.store1');
-    const result2 = await adapter.read('tsdf.session1.store2');
-    const result3 = await adapter.read('tsdf.session2.store1');
-
-    expect(result1).toBeNull();
-    expect(result2).toBeNull();
-    expect(result3).toMatchInlineSnapshot(`c: 3`);
-  });
-
-  test('listKeys returns matching keys', async () => {
-    await adapter.write('tsdf.s1.a', 1);
-    await adapter.write('tsdf.s1.b', 2);
-    await adapter.write('tsdf.s2.a', 3);
-
-    const keys = await adapter.listKeys('tsdf.s1.');
-
-    expect(keys.sort()).toMatchInlineSnapshot(`['tsdf.s1.a', 'tsdf.s1.b']`);
-  });
-
-  test('read handles invalid JSON gracefully', async () => {
-    localStorage.setItem('bad-json', '{invalid');
-
-    const result = await adapter.read('bad-json');
-    expect(result).toBeNull();
-  });
-
-  test('write propagates quota exceeded error', () => {
-    const originalSetItem = localStorage.setItem.bind(localStorage);
-    const setItemSpy = vi
-      .spyOn(localStorage, 'setItem')
-      .mockImplementation((key: string, value: string) => {
-        if (key === 'quota-test') {
-          throw new DOMException('QuotaExceededError');
-        }
-        originalSetItem(key, value);
-      });
-
-    expect(() => adapter.write('quota-test', { large: 'data' })).toThrow(
-      'QuotaExceededError',
+describe('persistent storage integration', () => {
+  test('document persistence still hydrates and refetches when navigator.locks is unavailable', async () => {
+    const storeName = 'doc-without-locks';
+    const sessionKey = 'sess1';
+    const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis.navigator,
+      'locks',
     );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    setItemSpy.mockRestore();
-  });
-});
+    persistentStore
+      .scope(storeName, sessionKey)
+      .document.seed({ value: { name: 'cached', value: 1 } });
 
-describe('opfs adapter', () => {
-  /**
-   * Creates an in-memory mock of the OPFS filesystem APIs
-   * so we can test the real OPFS adapter logic (hashed buckets, prefix matching).
-   */
-  function setupMockOpfs(settings?: { maxFileNameLength?: number }) {
-    const files = new Map<string, string>();
-
-    const mockCacheDir = {
-      getFileHandle(name: string, options?: { create?: boolean }) {
-        if (
-          options?.create &&
-          settings?.maxFileNameLength !== undefined &&
-          name.length > settings.maxFileNameLength
-        ) {
-          return Promise.reject(
-            new DOMException('File name too long', 'InvalidModificationError'),
-          );
-        }
-        if (!files.has(name) && !options?.create) {
-          return Promise.reject(new DOMException('Not found', 'NotFoundError'));
-        }
-        if (!files.has(name)) {
-          files.set(name, '');
-        }
-        return Promise.resolve({
-          getFile: () =>
-            Promise.resolve({
-              text: () => Promise.resolve(files.get(name) ?? ''),
-            }),
-          createWritable: () => {
-            let content = '';
-            return Promise.resolve({
-              write: (data: string) => {
-                content = data;
-                return Promise.resolve();
-              },
-              close: () => {
-                files.set(name, content);
-                return Promise.resolve();
-              },
-            });
-          },
-        });
-      },
-      removeEntry(name: string) {
-        files.delete(name);
-        return Promise.resolve();
-      },
-      entries() {
-        const snapshot = [...files.keys()];
-        return (async function* (): AsyncGenerator<[string, unknown]> {
-          await Promise.resolve();
-          for (const name of snapshot) {
-            yield [name, {}];
-          }
-        })();
-      },
-    };
-
-    const mockRootDir = {
-      getDirectoryHandle: () => Promise.resolve(mockCacheDir),
-    };
-
-    const originalStorage = navigator.storage;
-
-    Object.defineProperty(navigator, 'storage', {
-      value: { getDirectory: () => Promise.resolve(mockRootDir) },
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      value: null,
       writable: true,
       configurable: true,
     });
 
-    return {
-      files,
-      cleanup: () => {
-        Object.defineProperty(navigator, 'storage', {
-          value: originalStorage,
-          writable: true,
-          configurable: true,
+    try {
+      const env = createDocumentEnv({
+        storeName,
+        sessionKey,
+        serverData: { name: 'fresh', value: 2 },
+      });
+      const renders = createLoggerStore();
+
+      // The real store should keep working even when lock coordination is unavailable.
+      renderHook(() => {
+        const { data, status } = env.apiStore.useDocument({
+          returnRefetchingStatus: true,
         });
-      },
-    };
-  }
 
-  test('read returns null for missing key', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = opfsPersistentStorage;
-      const result = await adapter.read('nonexistent');
-      expect(result).toBeNull();
-    } finally {
-      cleanup();
-    }
-  });
+        renders.add({ status, data: data?.value ?? null });
+      });
 
-  test('write and read roundtrip', async () => {
-    const { cleanup, files } = setupMockOpfs();
-    try {
-      const adapter = opfsPersistentStorage;
+      await flushAllTimers();
 
-      await adapter.write('my-key', { name: 'Alice', age: 30 });
-      const result = await adapter.read('my-key');
-
-      expect(result).toMatchInlineSnapshot(`
-        age: 30
-        name: 'Alice'
+      expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+        "
+        -> status: success ⋅ data: {name:cached, value:1}
+        -> status: refetching ⋅ data: {name:cached, value:1}
+        -> status: success ⋅ data: {name:fresh, value:2}
+        "
       `);
-      expect([...files.keys()]).toMatchInlineSnapshot(`
-        ['1844492593.json']
+      expect(warnSpy.mock.calls).toMatchInlineSnapshot(`
+        - - '[TSDF] navigator.locks is unavailable; localPersistentStorage is using unlocked localStorage coordination.'
       `);
     } finally {
-      cleanup();
+      warnSpy.mockRestore();
+
+      if (originalLocksDescriptor) {
+        Object.defineProperty(
+          globalThis.navigator,
+          'locks',
+          originalLocksDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(globalThis.navigator, 'locks');
+      }
     }
   });
 
-  test('very long keys roundtrip even when the filesystem rejects long filenames', async () => {
-    const { cleanup } = setupMockOpfs({ maxFileNameLength: 40 });
-    try {
-      const adapter = opfsPersistentStorage;
-      const longKey = `tsdf.session.store.${'query-segment.'.repeat(40)}`;
+  test('clearSessionStorage removes one session cache across document, collection, and list-query stores', async () => {
+    const clearedSession = 'sess-clear';
+    const keptSession = 'sess-keep';
+    const documentStoreName = 'clear-doc';
+    const collectionStoreName = 'clear-collection';
+    const listQueryStoreName = 'clear-list-query';
+    const usersQuery: ListQueryParams = { tableId: 'users' };
 
-      await adapter.write(longKey, { value: 42 });
+    // Seed two sessions so the assertion proves session-scoped clearing instead of global deletion.
+    persistentStore
+      .scope(documentStoreName, clearedSession)
+      .document.seed({ value: { name: 'Cleared document', value: 1 } });
+    persistentStore
+      .scope(documentStoreName, keptSession)
+      .document.seed({ value: { name: 'Kept document', value: 2 } });
 
-      expect(await adapter.read(longKey)).toMatchInlineSnapshot(`value: 42`);
-    } finally {
-      cleanup();
-    }
-  });
+    persistentStore
+      .scope(collectionStoreName, clearedSession)
+      .collection.seedItem('1', { value: { id: '1', name: 'Cleared item' } });
+    persistentStore
+      .scope(collectionStoreName, keptSession)
+      .collection.seedItem('1', { value: { id: '1', name: 'Kept item' } });
 
-  test('removeByPrefix correctly matches keys sharing a prefix', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = opfsPersistentStorage;
+    const clearedListScope = persistentStore.scope(
+      listQueryStoreName,
+      clearedSession,
+    );
+    const keptListScope = persistentStore.scope(
+      listQueryStoreName,
+      keptSession,
+    );
+    const clearedListItem = clearedListScope.listQuery.seedItem('users', 1, {
+      id: 1,
+      name: 'Cleared row',
+    });
+    const keptListItem = keptListScope.listQuery.seedItem('users', 1, {
+      id: 1,
+      name: 'Kept row',
+    });
 
-      await adapter.write('tsdf.session1.store1', { a: 1 });
-      await adapter.write('tsdf.session1.store2', { b: 2 });
-      await adapter.write('tsdf.session2.store1', { c: 3 });
+    clearedListScope.listQuery.seedQuery(usersQuery, [clearedListItem.itemKey]);
+    keptListScope.listQuery.seedQuery(usersQuery, [keptListItem.itemKey]);
 
-      await adapter.removeByPrefix('tsdf.session1.');
+    await clearSessionStorage(clearedSession, 'local-sync');
 
-      expect(await adapter.read('tsdf.session1.store1')).toBeNull();
-      expect(await adapter.read('tsdf.session1.store2')).toBeNull();
-      expect(await adapter.read('tsdf.session2.store1')).toMatchInlineSnapshot(
-        `c: 3`,
-      );
-    } finally {
-      cleanup();
-    }
-  });
+    // Each store type should now observe an empty cache for the cleared session.
+    const clearedDocumentEnv = createDocumentEnv({
+      storeName: documentStoreName,
+      sessionKey: clearedSession,
+    });
+    const clearedCollectionEnv = createCollectionEnv({
+      storeName: collectionStoreName,
+      sessionKey: clearedSession,
+    });
+    const clearedListQueryEnv = createListQueryEnv({
+      storeName: listQueryStoreName,
+      sessionKey: clearedSession,
+    });
 
-  test('remove deletes key', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = opfsPersistentStorage;
+    expect(clearedDocumentEnv.store.state).toMatchInlineSnapshot(`
+      data: null
+      error: null
+      refetchOnMount: '❌'
+      status: 'idle'
+    `);
+    expect(clearedCollectionEnv.apiStore.getItemState('1')).toBeUndefined();
+    expect(
+      clearedListQueryEnv.apiStore.getQueryState(usersQuery),
+    ).toBeUndefined();
 
-      await adapter.write('to-remove', { value: 42 });
-      await adapter.remove('to-remove');
+    // The untouched session should still hydrate normally from the same localStorage namespace family.
+    const keptDocumentEnv = createDocumentEnv({
+      storeName: documentStoreName,
+      sessionKey: keptSession,
+    });
+    const keptCollectionEnv = createCollectionEnv({
+      storeName: collectionStoreName,
+      sessionKey: keptSession,
+    });
+    const keptListQueryEnv = createListQueryEnv({
+      storeName: listQueryStoreName,
+      sessionKey: keptSession,
+    });
 
-      const result = await adapter.read('to-remove');
-      expect(result).toBeNull();
-    } finally {
-      cleanup();
-    }
-  });
+    expect(keptDocumentEnv.store.state).toMatchInlineSnapshot(`
+      data:
+        value: { name: 'Kept document', value: 2 }
 
-  test('listKeys returns decoded keys matching a prefix', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = opfsPersistentStorage;
+      error: null
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+    `);
+    expect(keptCollectionEnv.apiStore.getItemState('1')).toMatchInlineSnapshot(`
+      data:
+        value: { id: '1', name: 'Kept item' }
 
-      await adapter.write('tsdf.s1.a', 1);
-      await adapter.write('tsdf.s1.b', 2);
-      await adapter.write('tsdf.s2.a', 3);
-
-      const keys = await adapter.listKeys('tsdf.s1.');
-
-      expect(keys.sort()).toMatchInlineSnapshot(`['tsdf.s1.a', 'tsdf.s1.b']`);
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('colliding keys share a bucket without corrupting each other', async () => {
-    const { cleanup } = setupMockOpfs();
-    try {
-      const adapter = opfsPersistentStorage;
-      const firstKey = 'collision-key-1ndo-m1';
-      const secondKey = 'collision-key-2hwp-xd';
-
-      expect(murmur3(firstKey, 'uint32')).toBe(murmur3(secondKey, 'uint32'));
-
-      await adapter.write(firstKey, { name: 'first' });
-      await adapter.write(secondKey, { name: 'second' });
-
-      expect(await adapter.read(firstKey)).toMatchInlineSnapshot(
-        `name: 'first'`,
-      );
-      expect(await adapter.read(secondKey)).toMatchInlineSnapshot(
-        `name: 'second'`,
-      );
-      expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(`
-        ['collision-key-1ndo-m1', 'collision-key-2hwp-xd']
+      error: null
+      payload: '1'
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(keptListQueryEnv.apiStore.getQueryState(usersQuery))
+      .toMatchInlineSnapshot(`
+        error: null
+        hasMore: '❌'
+        items: ['"users||1']
+        payload: { tableId: 'users' }
+        refetchOnMount: 'lowPriority'
+        status: 'success'
+        wasLoaded: '✅'
       `);
-
-      await adapter.remove(firstKey);
-
-      expect(await adapter.read(firstKey)).toBeNull();
-      expect(await adapter.read(secondKey)).toMatchInlineSnapshot(
-        `name: 'second'`,
-      );
-
-      await adapter.removeByPrefix('collision-key-2hwp');
-
-      expect(await adapter.read(secondKey)).toBeNull();
-      expect(await adapter.listKeys('collision-key-')).toMatchInlineSnapshot(
-        `[]`,
-      );
-    } finally {
-      cleanup();
-    }
-  });
-
-  test('malformed buckets are ignored on read and replaced on write', async () => {
-    const { cleanup, files } = setupMockOpfs();
-    try {
-      const adapter = opfsPersistentStorage;
-      const key = 'broken-key';
-      files.set(`${murmur3(key, 'uint32')}.json`, '{broken');
-
-      expect(await adapter.read(key)).toBeNull();
-      expect(await adapter.listKeys('broken')).toMatchInlineSnapshot(`[]`);
-
-      await adapter.write(key, { restored: true });
-
-      expect(await adapter.read(key)).toMatchInlineSnapshot(`restored: '✅'`);
-      expect(files.get(`${murmur3(key, 'uint32')}.json`)).toBe(
-        '{"entries":[{"key":"broken-key","value":{"restored":true}}]}',
-      );
-    } finally {
-      cleanup();
-    }
+    expect(keptListQueryEnv.apiStore.getItemState('users||1'))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Kept row'
+      `);
   });
 });

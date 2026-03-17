@@ -1,6 +1,5 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { localPersistentStorage } from '../../src/main';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
@@ -53,7 +52,7 @@ describe('offline replay conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-conflict-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: { enabled: true },
@@ -216,7 +215,7 @@ describe('offline replay conflict handling', () => {
       testScenario: 'loaded',
       persistentStorage: {
         storeName: 'offline-conflict-requeue-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           network: network.config,

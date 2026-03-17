@@ -9,7 +9,9 @@ import {
   parsePersistedStoreData,
 } from './parsePersistedData';
 import {
+  assertValidPersistentStoreName,
   createPersistentStorageHandle,
+  getLocalStorageAdapter,
   getStorageKeyForStore,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
@@ -27,16 +29,15 @@ type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
 
 function readDocumentFromLocalStorageSync(
   key: string,
-  version: number,
+  version: number | undefined,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
-  const foundEntry = localStorage.getItem(key) !== null;
   const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
-  >(key, version);
-  if (!entry) return { persisted: null, foundEntry };
+  >(key, version, { metadata: 'single' });
+  if (!entry) return { persisted: null, foundEntry: false };
 
   const persisted = parsePersistedDocumentData(entry.data);
-  return { persisted, foundEntry };
+  return { persisted, foundEntry: true };
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {
@@ -62,12 +63,16 @@ export function setupDocumentPersistence<
     TOfflineOperations
   > & { getSessionKey: () => string | false },
 ): DocumentPersistenceSetup<State> {
-  const version = config.version ?? 1;
+  assertValidPersistentStoreName(config.storeName);
+
+  const version = config.version;
   const storageAdapter = config.adapter;
+  const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
-  const handle = createPersistentStorageHandle<
-    PersistedDocumentData<State | StorageState>
-  >(config);
+  const handle =
+    createPersistentStorageHandle<PersistedDocumentData<State | StorageState>>(
+      config,
+    );
 
   let storeRef: Store<DocumentStoreState<State>> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -76,6 +81,7 @@ export function setupDocumentPersistence<
 
   function hydrateFromLocalStorage(): void {
     if (!storeRef) return;
+    if (localStorageAdapter === null) return;
 
     const currentState = storeRef.state;
     if (currentState.status !== 'idle' || currentState.data !== null) return;
@@ -102,7 +108,9 @@ export function setupDocumentPersistence<
       return;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(key, { metadata: 'single' }),
+    );
 
     storeRef.setPartialState(
       { data: validated, status: 'success', refetchOnMount: 'lowPriority' },
@@ -121,7 +129,7 @@ export function setupDocumentPersistence<
       return baseState;
     }
 
-    if (storageAdapter.kind !== 'sync') return baseState;
+    if (localStorageAdapter === null) return baseState;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return baseState;
@@ -145,7 +153,9 @@ export function setupDocumentPersistence<
       return baseState;
     }
 
-    scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+    scheduleIdleCleanup(() =>
+      refreshLocalStorageTimestamp(key, { metadata: 'single' }),
+    );
 
     return {
       ...baseState,
@@ -156,7 +166,7 @@ export function setupDocumentPersistence<
   }
 
   async function preloadPersistentStorage(): Promise<void> {
-    if (storageAdapter.kind === 'sync' || !storeRef) return;
+    if (localStorageAdapter !== null || !storeRef) return;
     if (preloadPromise) return preloadPromise;
 
     const currentGeneration = generation;
@@ -191,7 +201,7 @@ export function setupDocumentPersistence<
   }
 
   async function maybeHydrateFromStorage(): Promise<void> {
-    if (storageAdapter.kind === 'sync') {
+    if (localStorageAdapter !== null) {
       hydrateFromLocalStorage();
       return;
     }
@@ -242,7 +252,7 @@ export function setupDocumentPersistence<
     attach,
     maybeHydrateFromStorage,
     preloadPersistentStorage,
-    hasAsyncPreload: storageAdapter.kind === 'async',
+    hasAsyncPreload: localStorageAdapter === null,
     dispose,
     clear,
   };

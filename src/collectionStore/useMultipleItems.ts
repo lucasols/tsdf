@@ -19,6 +19,7 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 import type {
   CollectionUseMultipleItemsQuery,
   TSFDCollectionItem,
@@ -73,9 +74,15 @@ export function useMultipleItems<
   getItemState: (
     payload: ItemPayload,
   ) => TSFDCollectionItem<ItemState, ItemPayload> | null | undefined,
+  readFallbackItemState:
+    | ((
+        itemKey: string,
+      ) => TSFDCollectionItem<ItemState, ItemPayload> | null | undefined)
+    | undefined,
   registerActiveItems: (itemKeys: string[]) => () => void,
   touchItems: (itemKeys: string[]) => void,
   preloadItems: ((payloads: ItemPayload[]) => Promise<boolean[]>) | undefined,
+  preloadItemsBeforePaint: boolean,
   scheduleAutomaticFetch: (fetchType: FetchType, payload: ItemPayload) => void,
   invalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
@@ -234,6 +241,63 @@ export function useMultipleItems<
   const storeState = store.useSelectorRC(resultSelector, {
     equalityFn: deepEqual,
   });
+  const visibleStoreState = useMemo(() => {
+    return storeState.map(
+      (
+        result,
+        index,
+      ): TSFDUseCollectionItemReturn<Selected, ItemPayload, QueryMetadata> => {
+        const query = queriesWithId[index];
+        if (result.status !== 'loading' && result.status !== 'idle') {
+          return result;
+        }
+
+        if (query && readFallbackItemState) {
+          const fallbackItem = readFallbackItemState(query.itemKey);
+
+          if (fallbackItem === null) {
+            return {
+              itemStateKey: result.itemStateKey,
+              status: 'deleted',
+              data: selector
+                ? selector(null)
+                : __LEGIT_CAST__<Selected, null>(null),
+              error: null,
+              payload: query.omitPayload ? undefined : query.payload,
+              isLoading: false,
+              isPendingOfflineSync: false,
+              queryMetadata: result.queryMetadata,
+            };
+          }
+
+          if (fallbackItem) {
+            let status = fallbackItem.status;
+
+            if (!query.returnRefetchingStatus && status === 'refetching') {
+              status = 'success';
+            }
+
+            return {
+              itemStateKey: result.itemStateKey,
+              status,
+              data: selector
+                ? selector(fallbackItem.data ?? null)
+                : __LEGIT_CAST__<Selected, ItemState | null>(
+                    fallbackItem.data ?? null,
+                  ),
+              error: fallbackItem.error,
+              payload: query.omitPayload ? undefined : fallbackItem.payload,
+              isLoading: status === 'loading',
+              isPendingOfflineSync: false,
+              queryMetadata: result.queryMetadata,
+            };
+          }
+        }
+
+        return result;
+      },
+    );
+  }, [queriesWithId, readFallbackItemState, selector, storeState]);
   useOnEvtmitterEvent(events, 'invalidateData', ({ payload: event }) => {
     for (const {
       itemKey,
@@ -263,11 +327,27 @@ export function useMultipleItems<
 
   const ignoreItemsInRefetchOnMount = useConst(() => new Set<string>());
 
+  useIsomorphicLayoutEffect(() => {
+    if (
+      !preloadItemsBeforePaint ||
+      !preloadItems ||
+      fetchQueriesWithId.length < 1
+    ) {
+      return;
+    }
+
+    void preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
+  }, [fetchQueriesWithId, preloadItems, preloadItemsBeforePaint]);
+
   useEffect(() => {
     const effectState = { cancelled: false };
 
     void (async () => {
-      if (preloadItems && fetchQueriesWithId.length > 0) {
+      if (
+        !preloadItemsBeforePaint &&
+        preloadItems &&
+        fetchQueriesWithId.length > 0
+      ) {
         await preloadItems(fetchQueriesWithId.map(({ payload }) => payload));
         if (effectState.cancelled) return;
       }
@@ -331,8 +411,9 @@ export function useMultipleItems<
     fetchQueriesWithId,
     ignoreItemsInRefetchOnMount,
     preloadItems,
+    preloadItemsBeforePaint,
     scheduleAutomaticFetch,
   ]);
 
-  return storeState;
+  return visibleStoreState;
 }

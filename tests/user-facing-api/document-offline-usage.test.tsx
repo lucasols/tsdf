@@ -9,7 +9,6 @@ import {
   type DefineOfflineOperation,
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,
-  localPersistentStorage,
 } from '../../src/main';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
@@ -99,7 +98,7 @@ test('direct document store offline public api supports the main operation hooks
     blockWindowClose: null,
     persistentStorage: {
       storeName: 'direct-document-offline',
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: docSchema,
       offlineMode: {
         network: network.config,

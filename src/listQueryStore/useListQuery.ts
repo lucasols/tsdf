@@ -183,7 +183,9 @@ export function useListQuery<
     }
 
     observe
-      .ifSelector((state) => state.queries[queryKey]?.status)
+      .ifSelector((state) => {
+        return state.queries[queryKey]?.status;
+      })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {
           emitIsLoadedEvt();

@@ -898,9 +898,9 @@ export function createListQueryStore<
   ): Promise<PersistentStoragePreloadResult<QueryPayload>[]> {
     const payloads = Array.isArray(payload) ? payload : [payload];
 
-    if (!persistence?.hasAsyncPreload) {
+    if (!persistence) {
       persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Async preload is not available'),
+        new Error('Persistent storage preload is not available'),
       );
       return payloads.map((queryPayload) => ({
         payload: queryPayload,
@@ -940,9 +940,9 @@ export function createListQueryStore<
   ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
     const payloads = Array.isArray(payload) ? payload : [payload];
 
-    if (!persistence?.hasAsyncPreload) {
+    if (!persistence) {
       persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Async preload is not available'),
+        new Error('Persistent storage preload is not available'),
       );
       return payloads.map((itemPayload) => ({
         payload: itemPayload,
@@ -1007,12 +1007,14 @@ export function createListQueryStore<
     getQueryKey,
     getItemKey,
     normalizeFieldsOption,
-    preloadQueries: persistence?.hasAsyncPreload
+    syncHydrationEnabled: !!persistence && !persistence.hasAsyncPreload,
+    preloadQueries: persistence
       ? (queryKeys) => persistence.preloadQueries(queryKeys)
       : undefined,
-    preloadItems: persistence?.hasAsyncPreload
+    preloadItems: persistence
       ? (itemKeys) => persistence.preloadItems(itemKeys)
       : undefined,
+    persistence,
     testInitialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
     noFetchItemFnError,
     offlineController: offlineFetchController,
@@ -1672,12 +1674,15 @@ export function createListQueryStore<
         registerActiveQueryRefs,
         touchQueries,
         getQueryState,
+        persistence?.readHydratedQuery,
         persistence
           ? (payloads) =>
               persistence.maybeHydrateQueries(
                 payloads.map((payload) => getQueryKey(payload)),
               )
           : undefined,
+        !!persistence && !persistence.hasAsyncPreload,
+        persistence?.readHydratedItem,
         scheduleAutomaticListQueryFetch,
         queryInvalidationWasTriggered,
         itemFieldInvalidationPriorities,
@@ -1792,6 +1797,8 @@ export function createListQueryStore<
               payloads.map((payload) => getItemKey(payload)),
             )
         : undefined,
+      !!persistence && !persistence.hasAsyncPreload,
+      persistence?.readHydratedItem,
       itemInvalidationWasTriggered,
       itemFieldInvalidationPriorities,
       itemPendingInvalidationFields,

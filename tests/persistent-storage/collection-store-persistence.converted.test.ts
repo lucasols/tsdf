@@ -16,7 +16,6 @@ import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -45,7 +44,7 @@ function createConvertedSchemaConfig(
 ): CollectionPersistentStorageConfig<ItemState, string, StoredItemState> {
   return {
     storeName: 'unused',
-    adapter: localPersistentStorage,
+    adapter: 'local-sync',
     schema: {
       storeSchema: itemSchema,
       storageSchema,

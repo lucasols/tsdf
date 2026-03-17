@@ -17,7 +17,6 @@ import type {
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -50,7 +49,7 @@ function createConvertedSchemaConfig(
 ): ListQueryPersistentStorageConfig<Row, ListQueryParams, string, StoredRow> {
   return {
     storeName: 'unused',
-    adapter: localPersistentStorage,
+    adapter: 'local-sync',
     schema: {
       storeSchema: rowSchema,
       storageSchema,

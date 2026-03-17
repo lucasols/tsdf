@@ -12,14 +12,13 @@ import {
   test,
   vi,
 } from 'vitest';
-import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import type {
-  PersistedListQueryData,
   PersistedListQueryItemData,
   PersistentStorageSchema,
   StorageCacheEntry,
@@ -78,7 +77,7 @@ function itemStorageKey(
   tableId: string,
   id: number,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.listQuery.item.${storeItemKey(tableId, id)}`;
+  return `tsdf.${sessionKey}.${storeName}.li.${storeItemKey(tableId, id)}`;
 }
 
 function queryStorageKey(
@@ -86,7 +85,7 @@ function queryStorageKey(
   sessionKey: string,
   params: ListQueryParams,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.listQuery.query.${storeQueryKey(params)}`;
+  return `tsdf.${sessionKey}.${storeName}.lq.${storeQueryKey(params)}`;
 }
 
 function setCachedItem(
@@ -95,11 +94,12 @@ function setCachedItem(
   tableId: string,
   id: number,
   data: Row,
-  version = 1,
+  version: number | undefined = undefined,
+  timestamp = Date.now(),
 ): string {
   return persistentStore
     .scope(storeName, sessionKey)
-    .listQuery.seedItem(tableId, id, data, { version }).storageKey;
+    .listQuery.seedItem(tableId, id, data, { version, timestamp }).storageKey;
 }
 
 function setCachedQuery(
@@ -108,11 +108,12 @@ function setCachedQuery(
   params: ListQueryParams,
   items: string[],
   hasMore = false,
-  version = 1,
+  version: number | undefined = undefined,
+  timestamp = Date.now(),
 ): string {
   return persistentStore
     .scope(storeName, sessionKey)
-    .listQuery.seedQuery(params, items, { hasMore, version });
+    .listQuery.seedQuery(params, items, { hasMore, version, timestamp });
 }
 
 function listStoredKeys(prefix: string): string[] {
@@ -129,7 +130,21 @@ function listStoredKeys(prefix: string): string[] {
 }
 
 function getStoredEntryTimestamp(key: string): number {
-  const entry = readManagedLocalStorageEntryByPayload(key);
+  const itemIndex = key.indexOf('.li.');
+  const queryIndex = key.indexOf('.lq.');
+  if (queryIndex !== -1) {
+    const raw = localStorage.getItem(key);
+    if (raw === null) {
+      throw new Error(`Missing localStorage entry for ${key}`);
+    }
+
+    const parsed = __LEGIT_CAST__<{ a: number }, unknown>(JSON.parse(raw));
+    return parsed.a;
+  }
+
+  const splitIndex = itemIndex;
+  const prefix = splitIndex === -1 ? `${key}.` : key.slice(0, splitIndex + 4);
+  const entry = readManagedLocalStorageNamespaceEntryByPayload(key, prefix);
   if (entry === null) {
     throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
@@ -149,11 +164,8 @@ function getStoredQueryItemKeys(
     throw new Error(`Missing localStorage entry for ${storeName}`);
   }
 
-  const parsed = __LEGIT_CAST__<
-    StorageCacheEntry<PersistedListQueryData>,
-    unknown
-  >(JSON.parse(raw));
-  return parsed.data.items;
+  const parsed = __LEGIT_CAST__<{ i: string[] }, unknown>(JSON.parse(raw));
+  return parsed.i;
 }
 
 function createEnv(options: {
@@ -193,7 +205,7 @@ function createEnv(options: {
     bindFocusController: options.bindFocusController,
     persistentStorage: {
       storeName: options.storeName,
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
@@ -223,6 +235,14 @@ afterEach(() => {
 });
 
 describe('localStorage: list query store persistence', () => {
+  test('dev-only check rejects store ids containing dots', () => {
+    expect(() =>
+      createEnv({ storeName: 'users.with-dot', sessionKey: 'sess1' }),
+    ).toThrowError(
+      '[tsdf] persistentStorage.storeName "users.with-dot" must not contain ".".',
+    );
+  });
+
   test('direct query reads lazily hydrate only the requested query and its items', () => {
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };
@@ -294,6 +314,92 @@ describe('localStorage: list query store persistence', () => {
       `);
   });
 
+  test('direct cold item reads materialize state and stop consulting localStorage', () => {
+    const storeName = 'lq-item-external-overwrite';
+    const sessionKey = 'sess1';
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached v1',
+    });
+
+    const env = createEnv({ storeName, sessionKey });
+
+    // First cold read hydrates from the persisted item entry.
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached v1'
+      `);
+    expect(env.store.state.items[storeItemKey('users', 1)])
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached v1'
+      `);
+
+    // Once the cached entry is read through into state, later storage changes
+    // should not silently replace the live in-memory state.
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached v2',
+    });
+
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached v1'
+      `);
+  });
+
+  test('direct cold query reads materialize state and stop consulting localStorage', () => {
+    const storeName = 'lq-query-external-overwrite';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const usersItem1 = storeItemKey('users', 1);
+    const usersItem2 = storeItemKey('users', 2);
+
+    setCachedItem(storeName, sessionKey, 'users', 1, { id: 1, name: 'Alice' });
+    setCachedQuery(storeName, sessionKey, usersQuery, [usersItem1]);
+
+    const env = createEnv({ storeName, sessionKey });
+
+    // First cold read hydrates the persisted query metadata.
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(env.store.state.queries[getCompositeKey(usersQuery)])
+      .toMatchInlineSnapshot(`
+        error: null
+        hasMore: '❌'
+        items: ['"users||1']
+        payload: { tableId: 'users' }
+        refetchOnMount: 'lowPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      `);
+
+    // Once the cached query is read through into state, later storage changes
+    // should not silently replace the live in-memory query snapshot.
+    setCachedItem(storeName, sessionKey, 'users', 2, { id: 2, name: 'Bob' });
+    setCachedQuery(storeName, sessionKey, usersQuery, [usersItem1, usersItem2]);
+
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+  });
+
   test('first item hook read returns cached data then refetches', async () => {
     setCachedItem('lq-item-hook', 'sess1', 'users', 1, {
       id: 1,
@@ -324,6 +430,41 @@ describe('localStorage: list query store persistence', () => {
       -> status: success ⋅ name: Cached
       -> status: refetching ⋅ name: Cached
       -> status: success ⋅ name: Fresh
+      "
+    `);
+  });
+
+  test('loadFromStateOnly ignores cold persisted items', async () => {
+    const storeName = 'lq-load-from-state-only';
+    const sessionKey = 'sess1';
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached only',
+    });
+
+    const env = createEnv({ storeName, sessionKey });
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status, error, isLoading } = env.apiStore.useItem(
+        rawItemPayload('users', 1),
+        { loadFromStateOnly: true },
+      );
+
+      renders.add({ status, data, error, isLoading });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      ┌─
+      ⋅ status: error
+      ⋅ data: null
+      ⋅ error: {code:460, id:cache-miss, message:Cache miss}
+      ⋅ isLoading: ❌
+      └─
       "
     `);
   });
@@ -364,15 +505,24 @@ describe('localStorage: list query store persistence', () => {
 
   test('disableRefetchOnMount keeps cached query data without refetching and refreshes stored timestamps', async () => {
     const usersQuery = { tableId: 'users' };
-    const usersItem = setCachedItem('lq-hook-no-refetch', 'sess1', 'users', 1, {
-      id: 1,
-      name: 'Cached',
-    });
+    const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
+    const usersItem = setCachedItem(
+      'lq-hook-no-refetch',
+      'sess1',
+      'users',
+      1,
+      { id: 1, name: 'Cached' },
+      undefined,
+      originalTimestamp,
+    );
     const usersQueryKey = setCachedQuery(
       'lq-hook-no-refetch',
       'sess1',
       usersQuery,
       [storeItemKey('users', 1)],
+      false,
+      undefined,
+      originalTimestamp,
     );
     const originalItemTimestamp = getStoredEntryTimestamp(usersItem);
     const originalQueryTimestamp = getStoredEntryTimestamp(usersQueryKey);
@@ -526,7 +676,7 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`
       - _type: 'item'
         payload:
-          fields: ['id', 'name', 'age', 'email']
+          fields: ['age', 'email', 'id', 'name']
           itemId: 'users||1'
     `);
     expect(readerEnv.store.state.itemLoadedFields[storeItemKey('users', 1)])
@@ -607,7 +757,7 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`
       - _type: 'list'
         payload:
-          fields: ['id', 'name', 'age', 'email']
+          fields: ['age', 'email', 'id', 'name']
           pos: { limit: 50, offset: 0 }
         returned_items: 1
     `);
@@ -1014,10 +1164,9 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`))
-      .toMatchInlineSnapshot(`
-        ['{tableId:"first"}', '{tableId:"third"}']
-      `);
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`),
+    ).toMatchInlineSnapshot(`['{tableId:"first"}', '{tableId:"third"}']`);
   });
 
   test('when maxItems is exceeded, the least recently read item is evicted first', async () => {
@@ -1062,9 +1211,50 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`))
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
+    ).toMatchInlineSnapshot(`['"users||1', '"users||3']`);
+  });
+
+  test('cold persisted query items survive unrelated writes and keep their query protection during maxItems cleanup', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-cold-query-items';
+    const sessionKey = 'sess1';
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Older cached',
+    });
+    await advanceTime(100);
+    setCachedItem(storeName, sessionKey, 'users', 2, {
+      id: 2,
+      name: 'Newer cached',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+      storeItemKey('users', 2),
+    ]);
+
+    const env = createEnv({ storeName, sessionKey, maxItems: 2 });
+
+    // Write an unrelated standalone item without ever hydrating the cached query.
+    env.apiStore.addItemToState(rawItemPayload('users', 3), {
+      id: 3,
+      name: 'Fresh standalone',
+    });
+
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The cold query stays persisted, and maintenance prefers its referenced
+    // cached items over the unrelated standalone item.
+    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`))
       .toMatchInlineSnapshot(`
-        ['"users||1', '"users||3']
+        ['{tableId:"users"}']
+      `);
+    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`))
+      .toMatchInlineSnapshot(`
+        ['"users||1', '"users||2']
       `);
   });
 
@@ -1093,14 +1283,12 @@ describe('localStorage: list query store persistence', () => {
 
     expect(localStorage.getItem('tsdf.sess1.lq-evict')).toBeNull();
 
-    expect(listStoredKeys('tsdf.sess1.lq-evict.listQuery.query.'))
-      .toMatchInlineSnapshot(`
-        ['{tableId:"second"}']
-      `);
-    expect(listStoredKeys('tsdf.sess1.lq-evict.listQuery.item.'))
-      .toMatchInlineSnapshot(`
-        ['"second||1']
-      `);
+    expect(listStoredKeys('tsdf.sess1.lq-evict.lq.')).toMatchInlineSnapshot(
+      `['{tableId:"second"}']`,
+    );
+    expect(listStoredKeys('tsdf.sess1.lq-evict.li.')).toMatchInlineSnapshot(
+      `['"second||1']`,
+    );
   });
 
   test('pinned items survive eviction even when their query is evicted', async () => {
@@ -1125,12 +1313,11 @@ describe('localStorage: list query store persistence', () => {
     await flushAllTimers();
 
     expect(
-      listStoredKeys('tsdf.sess1.lq-pinned-item-only.listQuery.query.').length,
+      listStoredKeys('tsdf.sess1.lq-pinned-item-only.lq.').length,
     ).toMatchInlineSnapshot(`1`);
-    expect(listStoredKeys('tsdf.sess1.lq-pinned-item-only.listQuery.item.'))
-      .toMatchInlineSnapshot(`
-        ['"second||1']
-      `);
+    expect(
+      listStoredKeys('tsdf.sess1.lq-pinned-item-only.li.'),
+    ).toMatchInlineSnapshot(`['"second||1']`);
   });
 
   test('default persistence limits keep up to 500 items and 100 queries', async () => {
@@ -1156,12 +1343,12 @@ describe('localStorage: list query store persistence', () => {
     await flushAllTimers();
 
     expect(
-      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.query.`).length,
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`).length,
     ).toMatchInlineSnapshot(`25`);
     expect(
-      listStoredKeys(`tsdf.${sessionKey}.${storeName}.listQuery.item.`).length,
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).length,
     ).toMatchInlineSnapshot(`125`);
-  });
+  }, 5_000);
 
   test('maxQuerySize persists only the first items from each query', async () => {
     const usersQuery = { tableId: 'users' };
@@ -1187,7 +1374,7 @@ describe('localStorage: list query store persistence', () => {
       .toMatchInlineSnapshot(`
         ['"users||1', '"users||2']
       `);
-    expect(listStoredKeys('tsdf.sess1.lq-max-query-size.listQuery.item.'))
+    expect(listStoredKeys('tsdf.sess1.lq-max-query-size.li.'))
       .toMatchInlineSnapshot(`
         ['"users||1', '"users||2']
       `);
@@ -1214,6 +1401,7 @@ describe('localStorage: list query store persistence', () => {
 
       renders.add({ status, names: items.map((item) => item.name) });
     });
+    await flushAllTimers();
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -1244,10 +1432,9 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listStoredKeys('tsdf.sess1.lq-ignore.listQuery.item.'))
-      .toMatchInlineSnapshot(`
-        ['"users||1']
-      `);
+    expect(listStoredKeys('tsdf.sess1.lq-ignore.li.')).toMatchInlineSnapshot(
+      `['"users||1']`,
+    );
     expect(getStoredQueryItemKeys('lq-ignore', 'sess1', usersQuery))
       .toMatchInlineSnapshot(`
         ['"users||1']
@@ -1274,6 +1461,7 @@ describe('localStorage: list query store persistence', () => {
 
       renders.add({ status, names: items.map((item) => item.name) });
     });
+    await flushAllTimers();
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -1283,8 +1471,15 @@ describe('localStorage: list query store persistence', () => {
     expect(readerEnv.serverTable.fetchHistory).toMatchInlineSnapshot(`[]`);
   });
 
-  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+  test('preload hydrates cached local queries and items without reporting an error', async () => {
     const onPersistentStorageError = vi.fn();
+    setCachedItem('lq-preload-local', 'sess1', 'users', 1, {
+      id: 1,
+      name: 'Cached',
+    });
+    setCachedQuery('lq-preload-local', 'sess1', { tableId: 'users' }, [
+      storeItemKey('users', 1),
+    ]);
     const env = createEnv({
       storeName: 'lq-preload-local',
       sessionKey: 'sess1',
@@ -1294,20 +1489,28 @@ describe('localStorage: list query store persistence', () => {
     await expect(env.apiStore.preloadQueryFromStorage({ tableId: 'users' }))
       .resolves.toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
-        preloaded: '❌'
+        preloaded: '✅'
     `);
     await expect(env.apiStore.preloadItemFromStorage('users||1')).resolves
       .toMatchInlineSnapshot(`
-      - { payload: 'users||1', preloaded: '❌' }
+      - { payload: 'users||1', preloaded: '✅' }
     `);
 
-    expect(onPersistentStorageError).toHaveBeenCalledTimes(2);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
-    expect(onPersistentStorageError.mock.calls[1]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(env.apiStore.getQueryState({ tableId: 'users' }))
+      .toMatchInlineSnapshot(`
+        error: null
+        hasMore: '❌'
+        items: ['"users||1']
+        payload: { tableId: 'users' }
+        refetchOnMount: 'lowPriority'
+        status: 'success'
+        wasLoaded: '✅'
+      `);
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Cached'
+    `);
+    expect(onPersistentStorageError).not.toHaveBeenCalled();
   });
 
   test('invalid cached query entries are cleaned up only after a direct read', async () => {
@@ -1360,6 +1563,7 @@ describe('localStorage: list query store persistence', () => {
         isOffScreen: true,
       });
     });
+    await flushAllTimers();
 
     await advanceTime(2100);
 
@@ -1413,22 +1617,18 @@ describe('localStorage: list query store persistence', () => {
     const scope = persistentStore.scope('lq-invalid-query-payload', 'sess1');
     scope.listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
     scope.listQuery.seedQuery(usersQuery, [{ tableId: 'users', id: 1 }]);
-    const entry =
-      persistentStore.storage.readEntry<
-        StorageCacheEntry<PersistedListQueryData>
-      >(queryKey);
+    const entry = persistentStore.storage.readEntry<{
+      a: number;
+      i: string[];
+      p: unknown;
+      h?: true;
+      o?: true;
+      v?: number;
+    }>(queryKey);
     if (entry === null) {
       throw new Error(`Missing seeded entry for ${queryKey}`);
     }
-    localStorage.setItem(
-      queryKey,
-      JSON.stringify({
-        ...entry,
-        data: { ...entry.data, payload: true },
-      } satisfies StorageCacheEntry<
-        PersistedListQueryData & { payload: boolean }
-      >),
-    );
+    localStorage.setItem(queryKey, JSON.stringify({ ...entry, p: true }));
 
     const env = createEnv({
       storeName: 'lq-invalid-query-payload',

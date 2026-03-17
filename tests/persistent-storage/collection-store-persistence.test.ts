@@ -15,8 +15,8 @@ import type {
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { readManagedLocalStorageEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
+import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
+import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
@@ -28,7 +28,7 @@ const wrappedItemSchema = rc_object({
 const cachedCollectionItemEntrySchema = rc_object({
   data: rc_object({ data: wrappedItemSchema, payload: rc_string }),
   timestamp: rc_number,
-  version: rc_number,
+  version: rc_number.optional(),
 });
 const persistentStore = createLocalStoragePersistentTestStore();
 
@@ -41,7 +41,11 @@ function itemStorageKey(
   sessionKey: string,
   payload: string,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.collection.item.${itemKey(payload)}`;
+  return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
+}
+
+function itemStoragePrefix(storeName: string, sessionKey: string): string {
+  return `tsdf.${sessionKey}.${storeName}.ci.`;
 }
 
 type ItemState = { id: string; name: string };
@@ -53,15 +57,16 @@ function setCachedCollectionItem(
   sessionKey: string,
   payload: string,
   data: PersistedItemState,
-  version = 1,
+  version: number | undefined = undefined,
+  timestamp = Date.now(),
 ): string {
   return persistentStore
     .scope(storeName, sessionKey)
-    .collection.seedItem(payload, data, { version });
+    .collection.seedItem(payload, data, { version, timestamp });
 }
 
 function listStoredItemKeys(storeName: string, sessionKey: string): string[] {
-  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
   const keys: string[] = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -78,7 +83,7 @@ function listStoredItemPayloads(
   storeName: string,
   sessionKey: string,
 ): string[] {
-  const prefix = `tsdf.${sessionKey}.${storeName}.collection.item.`;
+  const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
   const payloads: string[] = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -98,7 +103,11 @@ function listStoredItemPayloads(
 }
 
 function getStoredCollectionItemTimestamp(key: string): number {
-  const entry = readManagedLocalStorageEntryByPayload(key);
+  const [_, sessionKey = '', storeName = ''] = key.split('.');
+  const entry = readManagedLocalStorageNamespaceEntryByPayload(
+    key,
+    itemStoragePrefix(storeName, sessionKey),
+  );
   if (entry === null) {
     throw new Error(`Missing managed localStorage metadata for ${key}`);
   }
@@ -120,7 +129,7 @@ function createEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       storeName: options.storeName,
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
       version: options.version,
@@ -146,6 +155,14 @@ afterEach(() => {
 });
 
 describe('localStorage: collection store persistence', () => {
+  test('dev-only check rejects store ids containing dots', () => {
+    expect(() =>
+      createEnv({ storeName: 'collection.with-dot', sessionKey: 'sess1' }),
+    ).toThrowError(
+      '[tsdf] persistentStorage.storeName "collection.with-dot" must not contain ".".',
+    );
+  });
+
   test('direct key reads lazily hydrate only the requested cached items', () => {
     setCachedCollectionItem('col-local', 'sess1', '1', {
       value: { id: '1', name: 'Alice' },
@@ -182,6 +199,35 @@ describe('localStorage: collection store persistence', () => {
 
     expect(env.apiStore.getItemState('2')?.data).toMatchInlineSnapshot(`
       value: { id: '2', name: 'Bob' }
+    `);
+  });
+
+  test('direct cold key reads materialize state and stop consulting localStorage', () => {
+    const storeName = 'col-external-overwrite';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached v1' },
+    });
+
+    const env = createEnv({ storeName, sessionKey });
+
+    // First cold read hydrates from the persisted entry.
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
+    `);
+    expect(env.store.state[itemKey('1')]?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
+    `);
+
+    // Once the cached entry is read through into state, later storage changes
+    // should not silently replace the in-memory source of truth.
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached v2' },
+    });
+
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Cached v1' }
     `);
   });
 
@@ -234,10 +280,15 @@ describe('localStorage: collection store persistence', () => {
   });
 
   test('disableRefetchOnMount keeps cached data without refetching', async () => {
-    const key = setCachedCollectionItem('col-hook-no-refetch', 'sess1', '1', {
-      value: { id: '1', name: 'Cached' },
-    });
-    const originalTimestamp = getStoredCollectionItemTimestamp(key);
+    const originalTimestamp = Date.now() - SYNC_STORAGE_TOUCH_THROTTLE_MS - 1;
+    const key = setCachedCollectionItem(
+      'col-hook-no-refetch',
+      'sess1',
+      '1',
+      { value: { id: '1', name: 'Cached' } },
+      undefined,
+      originalTimestamp,
+    );
 
     const env = createEnv({
       storeName: 'col-hook-no-refetch',
@@ -405,8 +456,11 @@ describe('localStorage: collection store persistence', () => {
     ]);
   });
 
-  test('preload reports unavailable async preload through persistent storage error handler', async () => {
+  test('preload hydrates cached local items without reporting an error', async () => {
     const onPersistentStorageError = vi.fn();
+    setCachedCollectionItem('col-preload-local', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
     const env = createEnv({
       storeName: 'col-preload-local',
       sessionKey: 'sess1',
@@ -415,13 +469,20 @@ describe('localStorage: collection store persistence', () => {
 
     await expect(env.apiStore.preloadItemFromStorage('1')).resolves
       .toMatchInlineSnapshot(`
-      - { payload: '1', preloaded: '❌' }
+      - { payload: '1', preloaded: '✅' }
     `);
 
-    expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(onPersistentStorageError.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Async preload is not available',
-    });
+    expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
+      data:
+        value: { id: '1', name: 'Cached' }
+
+      error: null
+      payload: '1'
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(onPersistentStorageError).not.toHaveBeenCalled();
   });
 
   test('invalid cached entries are cleaned up only after the item is read', async () => {

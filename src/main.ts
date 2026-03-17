@@ -69,7 +69,6 @@ export type {
   CollectionPersistentStorageConfig,
   ListQueryPersistentStorageConfig,
   StorageAdapter,
-  SyncStorageAdapter,
 } from './persistentStorage/types';
 
 export type {

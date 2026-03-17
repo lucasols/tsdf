@@ -89,6 +89,7 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
   - `range(start, end)`: creates an array of numbers from start to end (inclusive)
   - `pick(obj, keys)`: picks specific keys from an object
 - Add comments to explain the purpose of different phases of the test, especially when using `expect` statements, to make it easier for future readers to understand the intent of the test
+- After updating snapshots automatically via `vitest --update-snapshots` or `vitest -u`, check the diff to ensure that the updates are expected and not regressions.
 
 ## General Guidelines
 
@@ -101,6 +102,15 @@ Do not manually wire up fetch functions, error normalizers, or event handlers â€
 - This library is still in a major-version alpha stage and is not in production yet; prioritize a clean, coherent API over backward compatibility
 - Do not add fallback behavior, legacy code paths, compatibility shims, optional support for old shapes, or migration-oriented branching unless the user explicitly asks for it
 - When changing an API or stored data shape, prefer replacing the old behavior outright instead of preserving both the old and new forms
+
+### Major rewrite mode
+
+This codebase is undergoing a major rewrite. Assume the current implementation is wrong until proven otherwise â€” read the tests to understand intended behavior, not the code.
+
+- **Tests are the source of truth.** Write the simplest code that satisfies them. If a test encodes a bad design, flag it instead of working around it.
+- **Be suspicious of existing code.** Actively look for unnecessary complexity, dead paths, poor naming, and over-engineering. Call out issues even outside your immediate task scope. Consider that current code is suboptimal until proven otherwise.
+- **Rewrite freely.** Large diffs are expected. Don't preserve patterns for consistency with bad code.
+- **Public API changes are allowed.** Don't hesitate to rename exports, change hook signatures, or restructure config objects if it results in a better and simpler API.
 
 ## Feature implementation
 
@@ -130,3 +140,4 @@ When fixing a bug:
 ## Bad patterns to avoid
 
 - Avoid as much as possible using `__LEGIT_CAST__`, it should be the ultimate last resort when properly typing the code is not possible.
+  - As alternative consider using `runcheck` schemas when dealing with unsafe data parsing.
