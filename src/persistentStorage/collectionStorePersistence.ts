@@ -29,6 +29,7 @@ import {
   readManifestPayloadMeta,
   readProtectedStorageKeys,
   scheduleLocalStorageRemoval,
+  scheduleLocalStorageMaintenance,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
@@ -783,7 +784,9 @@ export function setupCollectionPersistence<
         const needsMaintenance =
           hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
         if (needsMaintenance) {
-          await localStorageAdapter.runMaintenance([maintenanceManifestKey]);
+          scheduleLocalStorageMaintenance({
+            forceManifestKeys: [maintenanceManifestKey],
+          });
         }
         return;
       }

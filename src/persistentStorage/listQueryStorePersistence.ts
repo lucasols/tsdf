@@ -39,6 +39,7 @@ import {
   readManifestPayloadMeta,
   readProtectedStorageKeys,
   scheduleLocalStorageRemoval,
+  scheduleLocalStorageMaintenance,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
   touchLocalStorageKeyWithThrottle,
@@ -1802,8 +1803,10 @@ export function setupListQueryPersistence<
         hasIgnoreItemFilter ||
         knownPersistedItemKeys.size > maxItems ||
         knownPersistedQueryKeys.size > maxQueries;
-      if (needsMaintenance) {
-        await localStorageAdapter.runLocked(runSyncMaintenance);
+      if (needsMaintenance && maintenanceCallbackKey !== null) {
+        scheduleLocalStorageMaintenance({
+          forceManifestKeys: [maintenanceCallbackKey],
+        });
       }
       return;
     }

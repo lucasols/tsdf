@@ -118,11 +118,12 @@ describe('sync storage efficiency: collection', () => {
     // Drain the startup-scheduled global scan before capturing the maxItems flush.
     await settleStartupBackgroundScan();
 
-    // Adding a third item should capture the complete write and cleanup sequence.
+    // Adding a third item should capture the write path plus the idle-scheduled cleanup sequence.
     const readCapture = startPersistentStorageOperationCapture();
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Fresh' } });
     await advanceTime(1100);
     await flushAllTimers();
+    await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
@@ -136,8 +137,66 @@ describe('sync storage efficiency: collection', () => {
       time |
       1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.16 kb
       .    | ✍️ ❌->✅ #2 tsdf.sess1.col-max-items-metadata.ci."c (collection entry) | ❌ -> 0.18 kb
+      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.16 kb -> 0.24 kb
+      3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.24 kb
       .    | 🗑️ ✅->❌ #3 tsdf.sess1.col-max-items-metadata.ci."a (collection entry)
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.16 kb -> 0.16 kb
+      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m (root, namespace, manifest) | 0.24 kb -> 0.16 kb
+      "
+    `);
+  });
+
+  test('multiple overflowing collection updates before idle maintenance trigger a single cleanup pass', async () => {
+    setCachedCollectionItem('col-coalesced-maintenance', 'sess1', 'a', {
+      value: { id: 'a', name: 'Oldest cached' },
+    });
+    await advanceTime(100);
+    setCachedCollectionItem('col-coalesced-maintenance', 'sess1', 'b', {
+      value: { id: 'b', name: 'Newer cached' },
+    });
+
+    const env = createCollectionEnv({
+      storeName: 'col-coalesced-maintenance',
+      sessionKey: 'sess1',
+      maxItems: 2,
+    });
+
+    // Drain the startup maintenance so the capture only covers the coalesced overflow path.
+    await settleStartupBackgroundScan();
+
+    const readCapture = startPersistentStorageOperationCapture();
+
+    // First overflow schedules idle maintenance, but does not run it yet.
+    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Third' } });
+    await advanceTime(1100);
+
+    // A second overflow lands before the idle callback fires and should reuse that same cleanup.
+    env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fourth' } });
+    await advanceTime(1100);
+
+    // Advance just far enough to fire the already-scheduled idle maintenance once.
+    await advanceTime(900);
+    await flushAllTimers();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(
+      listStoredCollectionItemPayloads(
+        'col-coalesced-maintenance',
+        'sess1',
+      ).sort(),
+    ).toMatchInlineSnapshot(`['c', 'd']`);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m (root, namespace, manifest) | 0.16 kb
+      .    | ✍️ ❌->✅ #2 tsdf.sess1.col-coalesced-maintenance.ci."c (collection entry) | ❌ -> 0.18 kb
+      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m (root, namespace, manifest) | 0.16 kb -> 0.24 kb
+      2.1s | ✍️ ❌->✅ #3 tsdf.sess1.col-coalesced-maintenance.ci."d (collection entry) | ❌ -> 0.18 kb
+      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m (root, namespace, manifest) | 0.24 kb
+      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m (root, namespace, manifest) | 0.24 kb -> 0.31 kb
+      3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m (root, namespace, manifest) | 0.31 kb
+      .    | 🗑️ ✅->❌ #4 tsdf.sess1.col-coalesced-maintenance.ci."b (collection entry)
+      .    | 🗑️ ✅->❌ #5 tsdf.sess1.col-coalesced-maintenance.ci."a (collection entry)
+      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m (root, namespace, manifest) | 0.31 kb -> 0.16 kb
       "
     `);
   });
@@ -306,8 +365,8 @@ describe('sync storage efficiency: collection', () => {
     expect(localStorage.getItem(deletedItemStorageKey)).toBeNull();
     expect(listStoredCollectionItemPayloads(storeName, sessionKey).sort())
       .toMatchInlineSnapshot(`
-      ['2']
-    `);
+        ['2']
+      `);
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time |

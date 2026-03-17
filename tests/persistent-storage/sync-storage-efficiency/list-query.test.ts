@@ -100,7 +100,7 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
-  test('maxQueries cleanup snapshots the full manifest history', async () => {
+  test('when maxQueries limit is reached a full store cleanup occurs', async () => {
     const firstQuery = { tableId: 'first' };
     const secondQuery = { tableId: 'second' };
     const thirdQuery = { tableId: 'third' };
@@ -121,12 +121,13 @@ describe('sync storage efficiency: list-query', () => {
     // Drain the startup-scheduled global scan before capturing the query fetch/eviction flow.
     await settleStartupBackgroundScan();
 
-    // Fetching a third query should show the write path and the query eviction path together.
+    // Fetching a third query should show the write path plus the idle-scheduled query eviction path.
     const readCapture = startPersistentStorageOperationCapture();
     env.scheduleFetch('highPriority', thirdQuery);
     await flushAllTimers();
     await advanceTime(1100);
     await flushAllTimers();
+    await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
@@ -142,6 +143,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 ❌ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
       .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry) | ❌ -> 0.17 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.12 kb
+      3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.12 kb
       .     | 🔑[0] ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
       .     | 🔑[1] ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (query entry)
       .     | 🔑[2] ✅ #6 tsdf._m.g (global maintenance)
@@ -152,7 +154,6 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (query entry) | 0.10 kb
       .     | 📖 ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry) | 0.12 kb
       .     | 🗑️ ✅->❌ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.12 kb
       "
     `);
 
@@ -172,6 +173,88 @@ describe('sync storage efficiency: list-query', () => {
       a: 1735689604010
       i: ['"third||1']
       p: { tableId: 'third' }
+    `);
+  });
+
+  test('multiple overflowing query writes before idle maintenance trigger a single cleanup pass', async () => {
+    const firstQuery = { tableId: 'first' };
+    const secondQuery = { tableId: 'second' };
+    const thirdQuery = { tableId: 'third' };
+    const fourthQuery = { tableId: 'fourth' };
+    const storeName = 'lq-coalesced-query-maintenance';
+    const sessionKey = 'sess1';
+
+    setCachedQuery(storeName, sessionKey, firstQuery, []);
+    await advanceTime(100);
+    setCachedQuery(storeName, sessionKey, secondQuery, []);
+
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      maxQueries: 2,
+      serverData: {
+        third: [{ id: 1, name: 'Third' }],
+        fourth: [{ id: 2, name: 'Fourth' }],
+      },
+    });
+
+    // Drain the startup maintenance so the capture only covers coalesced query eviction.
+    await settleStartupBackgroundScan();
+
+    const readCapture = startPersistentStorageOperationCapture();
+
+    // The third query persists and schedules idle maintenance.
+    env.scheduleFetch('highPriority', thirdQuery);
+    await advanceTime(810);
+    await advanceTime(1000);
+
+    // The fourth query persists before that idle callback fires, so cleanup should still run once.
+    env.scheduleFetch('highPriority', fourthQuery);
+    await advanceTime(810);
+    await advanceTime(1000);
+
+    // Advance only to the first scheduled idle cleanup boundary.
+    await advanceTime(200);
+    await flushAllTimers();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`).sort(),
+    ).toMatchInlineSnapshot(`['{tableId:"fourth"}', '{tableId:"third"}']`);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time  |
+      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest)
+      .     | 📖 ❌ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry)
+      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry) | ❌ -> 0.12 kb
+      .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest)
+      .     | 📖 ❌ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry)
+      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry) | ❌ -> 0.17 kb
+      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | ❌ -> 0.12 kb
+      3.62s | 📖 ❌ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry)
+      .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry) | ❌ -> 0.13 kb
+      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.12 kb
+      .     | 📖 ✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry) | 0.17 kb
+      .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry) | 0.17 kb -> 0.26 kb
+      .     | 📖 ❌ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry)
+      .     | ✍️ ❌->✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry) | ❌ -> 0.18 kb
+      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.12 kb -> 0.22 kb
+      3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.22 kb
+      .     | 🔑[0] ✅ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (query entry)
+      .     | 🔑[1] ✅ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (query entry)
+      .     | 🔑[2] ✅ #8 tsdf._m.g (global maintenance)
+      .     | 🔑[3] ✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry)
+      .     | 🔑[4] ✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry)
+      .     | 🔑[5] ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest)
+      .     | 🔑[6] ✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry)
+      .     | 🔑[7] ✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry)
+      .     | 📖 ✅ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (query entry) | 0.10 kb
+      .     | 📖 ✅ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (query entry) | 0.10 kb
+      .     | 📖 ✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry) | 0.12 kb
+      .     | 📖 ✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry) | 0.13 kb
+      .     | 🗑️ ✅->❌ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (query entry)
+      .     | 🗑️ ✅->❌ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (query entry)
+      "
     `);
   });
 
@@ -313,7 +396,7 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
-  test('maxItems cleanup snapshots the full manifest history', async () => {
+  test('when maxItems limit is reached a full store cleanup occurs', async () => {
     const storeName = 'lq-item-metadata';
     const sessionKey = 'sess1';
 
@@ -336,7 +419,7 @@ describe('sync storage efficiency: list-query', () => {
     // Drain the startup-scheduled global scan before capturing the maxItems flush.
     await settleStartupBackgroundScan();
 
-    // Adding a third item should snapshot the write plus eviction sequence end-to-end.
+    // Adding a third item should snapshot the write plus idle-scheduled eviction sequence end-to-end.
     const readCapture = startPersistentStorageOperationCapture();
     env.apiStore.addItemToState(rawItemPayload('users', 3), {
       id: 3,
@@ -344,6 +427,7 @@ describe('sync storage efficiency: list-query', () => {
     });
     await advanceTime(1100);
     await flushAllTimers();
+    await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
@@ -358,6 +442,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry) | ❌ -> 0.17 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb -> 0.32 kb
+      3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb
       .    | 🔑[0] ✅ #3 tsdf.sess1.lq-item-metadata.li."users||1 (item entry)
       .    | 🔑[1] ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest)
       .    | 🔑[2] ✅ #4 tsdf.sess1.lq-item-metadata.li."users||2 (item entry)
@@ -365,7 +450,6 @@ describe('sync storage efficiency: list-query', () => {
       .    | 🔑[4] ✅ #6 tsdf._m.g (global maintenance)
       .    | 🔑[5] ✅ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
       .    | 📖 ✅ #5 tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (query entry) | 0.15 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb
       .    | 🗑️ ✅->❌ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb -> 0.22 kb
       "

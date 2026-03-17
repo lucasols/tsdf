@@ -40,6 +40,9 @@ const timestampSchema = rc_object({ timestamp: rc_number });
 let localStorageExpirationScanScheduled = false;
 let scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
 let localStorageTouchTimestamps = new Map<string, number>();
+let cancelScheduledLocalStorageMaintenance: (() => void) | null = null;
+let localStorageGlobalMaintenanceRequested = false;
+let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
 
 export function getLocalStorageAdapter(
   adapter: StorageAdapter,
@@ -64,6 +67,8 @@ function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
   if (adapter === 'local-sync') {
     if (localStorageExpirationScanScheduled) return;
     localStorageExpirationScanScheduled = true;
+    scheduleLocalStorageMaintenance();
+    return;
   } else {
     if (scannedAsyncAdapters.has(adapter)) return;
     scannedAsyncAdapters.add(adapter);
@@ -73,6 +78,42 @@ function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
       adapter,
       getManagedLocalStorageRuntimeConfig().maxAgeMs,
     );
+  });
+}
+
+/**
+ * Schedules managed localStorage maintenance during idle time.
+ *
+ * When multiple callers enqueue maintenance before the idle callback runs,
+ * forced manifest keys are coalesced and a global sweep request wins over
+ * targeted maintenance because it already covers the full cleanup pass.
+ */
+export function scheduleLocalStorageMaintenance(
+  options: { forceManifestKeys?: Iterable<string> } = {},
+): void {
+  if (options.forceManifestKeys === undefined) {
+    localStorageGlobalMaintenanceRequested = true;
+    scheduledLocalStorageMaintenanceManifestKeys.clear();
+  } else if (!localStorageGlobalMaintenanceRequested) {
+    for (const manifestKey of options.forceManifestKeys) {
+      scheduledLocalStorageMaintenanceManifestKeys.add(manifestKey);
+    }
+  }
+
+  if (cancelScheduledLocalStorageMaintenance !== null) return;
+
+  cancelScheduledLocalStorageMaintenance = scheduleIdleCleanup(() => {
+    cancelScheduledLocalStorageMaintenance = null;
+
+    const runGlobalMaintenance = localStorageGlobalMaintenanceRequested;
+    const forceManifestKeys = runGlobalMaintenance
+      ? undefined
+      : [...scheduledLocalStorageMaintenanceManifestKeys];
+
+    localStorageGlobalMaintenanceRequested = false;
+    scheduledLocalStorageMaintenanceManifestKeys.clear();
+
+    void localPersistentStorage.runMaintenance(forceManifestKeys);
   });
 }
 
@@ -727,6 +768,10 @@ async function runExpirationScan(
 
 /** Resets expiration scan tracking. Exported for test cleanup. */
 export function resetExpirationScanTracking(): void {
+  cancelScheduledLocalStorageMaintenance?.();
+  cancelScheduledLocalStorageMaintenance = null;
+  localStorageGlobalMaintenanceRequested = false;
+  scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
   localStorageExpirationScanScheduled = false;
   scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
   localStorageTouchTimestamps = new Map<string, number>();
