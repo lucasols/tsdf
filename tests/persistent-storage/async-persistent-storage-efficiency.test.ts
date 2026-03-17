@@ -121,7 +121,7 @@ function collectionStorageKey(
   sessionKey: string,
   payload: string,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.collection.item.${getCompositeKey(payload)}`;
+  return `tsdf.${sessionKey}.${storeName}.ci.${getCompositeKey(payload)}`;
 }
 
 function listQueryItemStorageKey(
@@ -130,7 +130,7 @@ function listQueryItemStorageKey(
   tableId: string,
   id: number,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.listQuery.item.${getCompositeKey(`${tableId}||${id}`)}`;
+  return `tsdf.${sessionKey}.${storeName}.li.${getCompositeKey(`${tableId}||${id}`)}`;
 }
 
 function listQueryStorageKey(
@@ -138,7 +138,7 @@ function listQueryStorageKey(
   sessionKey: string,
   params: ListQueryParams,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.listQuery.query.${getCompositeKey(params)}`;
+  return `tsdf.${sessionKey}.${storeName}.lq.${getCompositeKey(params)}`;
 }
 
 async function settleStartupCleanup(
@@ -191,15 +191,15 @@ describe('async persistent storage efficiency', () => {
     await preloadPromise;
 
     expect(readCapture.finish()).toMatchInlineSnapshot(`
-        breakdown:
-          externalPayloadReads: []
-          legacyFallbackReads: []
-          metadataReads: []
-          payloadBatchReads: []
-          scopedPayloadReads: ['document payload']
+      breakdown:
+        externalPayloadReads: []
+        legacyFallbackReads: []
+        metadataReads: []
+        payloadBatchReads: []
+        scopedPayloadReads: ['document payload']
 
-        operations: ['📖 ✅ document payload | touch=coarse']
-      `);
+      operations: ['📖 ✅ document payload | touch=coarse']
+    `);
 
     expect(mockAdapter.has(documentStorageKey(storeName, sessionKey))).toBe(
       true,
@@ -247,15 +247,15 @@ describe('async persistent storage efficiency', () => {
     await preloadPromise;
 
     expect(readCapture.finish()).toMatchInlineSnapshot(`
-        breakdown:
-          externalPayloadReads: []
-          legacyFallbackReads: []
-          metadataReads: []
-          payloadBatchReads: []
-          scopedPayloadReads: ['collection.item."1 (payload)']
+      breakdown:
+        externalPayloadReads: []
+        legacyFallbackReads: []
+        metadataReads: []
+        payloadBatchReads: []
+        scopedPayloadReads: ['ci."1 (payload)']
 
-        operations: ['📖 ✅ collection.item."1 (payload) | touch=coarse']
-      `);
+      operations: ['📖 ✅ ci."1 (payload) | touch=coarse']
+    `);
 
     expect(mockAdapter.payloadGetRequests).toContain(hotKey);
     expect(mockAdapter.payloadGetRequests).not.toContain(coldKey);
@@ -288,20 +288,20 @@ describe('async persistent storage efficiency', () => {
     await flushAllTimers();
 
     expect(readCapture.finish()).toMatchInlineSnapshot(`
-        breakdown:
-          externalPayloadReads: ['tsdf.sess1.__offline__.protected (protected registry payload)']
-          legacyFallbackReads: []
-          metadataReads:
-            - 'sess1/collection-opfs-eviction-efficiency/collection.item (metadata order=lru-desc cursor=null limit=100)'
-          payloadBatchReads: []
-          scopedPayloadReads: []
+      breakdown:
+        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        legacyFallbackReads: []
+        metadataReads:
+          - 'sess1/collection-opfs-eviction-efficiency/collection.item (metadata order=lru-desc cursor=null limit=100)'
+        payloadBatchReads: []
+        scopedPayloadReads: []
 
-        operations:
-          - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item upserts=["collection.item.\\"3 (payload)"] removes=[] touches=[]'
-          - '📇 sess1/collection-opfs-eviction-efficiency/collection.item (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
-          - '📖 ❌ tsdf.sess1.__offline__.protected (protected registry payload) | touch=never'
-          - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item upserts=[] removes=["collection.item.\\"2 (payload)"] touches=[]'
-      `);
+      operations:
+        - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item upserts=["collection.item.\\"3 (payload)"] removes=[] touches=[]'
+        - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
+        - '📇 sess1/collection-opfs-eviction-efficiency/collection.item (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
+        - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item upserts=[] removes=["collection.item.\\"2 (payload)"] touches=[]'
+    `);
   });
 
   test('list query preload reads only the requested query and its referenced items', async () => {
@@ -365,19 +365,17 @@ describe('async persistent storage efficiency', () => {
     await preloadPromise;
 
     expect(readCapture.finish()).toMatchInlineSnapshot(`
-        breakdown:
-          externalPayloadReads: []
-          legacyFallbackReads: []
-          metadataReads: []
-          payloadBatchReads: []
-          scopedPayloadReads:
-            - 'listQuery.query.{tableId:"users"} (payload)'
-            - 'listQuery.item."users||1 (payload)'
+      breakdown:
+        externalPayloadReads: []
+        legacyFallbackReads: []
+        metadataReads: []
+        payloadBatchReads: []
+        scopedPayloadReads: ['lq.{tableId:"users"} (payload)', 'li."users||1 (payload)']
 
-        operations:
-          - '📖 ✅ listQuery.query.{tableId:"users"} (payload) | touch=coarse'
-          - '📖 ✅ listQuery.item."users||1 (payload) | touch=coarse'
-      `);
+      operations:
+        - '📖 ✅ lq.{tableId:"users"} (payload) | touch=coarse'
+        - '📖 ✅ li."users||1 (payload) | touch=coarse'
+    `);
 
     expect(mockAdapter.payloadGetRequests).toContain(usersQueryKey);
     expect(mockAdapter.payloadGetRequests).toContain(usersItemKey);
@@ -427,26 +425,27 @@ describe('async persistent storage efficiency', () => {
     await flushAllTimers();
 
     expect(readCapture.finish()).toMatchInlineSnapshot(`
-        breakdown:
-          externalPayloadReads:
-            - 'tsdf.sess1.__offline__.protected (protected registry payload)'
-            - 'tsdf.sess1.__offline__.protected (protected registry payload)'
-          legacyFallbackReads: []
-          metadataReads:
-            - 'sess1/list-query-opfs-eviction-efficiency/listQuery.query (metadata order=lru-desc cursor=null limit=100)'
-            - 'sess1/list-query-opfs-eviction-efficiency/listQuery.item (metadata order=lru-desc cursor=null limit=100)'
-          payloadBatchReads: []
-          scopedPayloadReads: []
+      breakdown:
+        externalPayloadReads:
+          - 'tsdf.sess1._o_.p (protected registry payload)'
+          - 'tsdf.sess1._o_.p (protected registry payload)'
+        legacyFallbackReads: []
+        metadataReads:
+          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.query (metadata order=lru-desc cursor=null limit=100)'
+          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.item (metadata order=lru-desc cursor=null limit=100)'
+        payloadBatchReads: []
+        scopedPayloadReads: []
 
-        operations:
-          - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=["listQuery.query.{tableId:\\"tasks\\"} (payload)"] removes=[] touches=[]'
-          - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=["listQuery.item.\\"tasks||1 (payload)"] removes=[] touches=[]'
-          - '📖 ❌ tsdf.sess1.__offline__.protected (protected registry payload) | touch=never'
-          - '📇 sess1/list-query-opfs-eviction-efficiency/listQuery.query (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
-          - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=[] removes=["listQuery.query.{tableId:\\"users\\"} (payload)"] touches=[]'
-          - '📖 ❌ tsdf.sess1.__offline__.protected (protected registry payload) | touch=never'
-          - '📇 sess1/list-query-opfs-eviction-efficiency/listQuery.item (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
-          - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=[] removes=["listQuery.item.\\"users||1 (payload)"] touches=[]'
-      `);
+      operations:
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=["listQuery.query.{tableId:\\"tasks\\"} (payload)"] removes=[] touches=[]'
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=["listQuery.item.\\"projects||1 (payload)"] removes=[] touches=[]'
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=["listQuery.item.\\"tasks||1 (payload)"] removes=[] touches=[]'
+        - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
+        - '📇 sess1/list-query-opfs-eviction-efficiency/listQuery.query (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=[] removes=["listQuery.query.{tableId:\\"users\\"} (payload)"] touches=[]'
+        - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
+        - '📇 sess1/list-query-opfs-eviction-efficiency/listQuery.item (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=[] removes=["listQuery.item.\\"users||1 (payload)"] touches=[]'
+    `);
   });
 });

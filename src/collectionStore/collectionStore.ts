@@ -63,6 +63,7 @@ import {
   performMutationWithLifecycle,
   type BlockWindowCloseHandler,
 } from '../utils/performMutation';
+
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
   fetchTypePriority,
@@ -463,7 +464,7 @@ export function createCollectionStore<
             return entityRefs.map((ref) =>
               createProtectedStorageKey({
                 backend:
-                  persistentStorageConfig.adapter.kind === 'async'
+                  persistentStorageConfig.adapter !== 'local-sync'
                     ? 'opfs'
                     : 'localStorage',
                 sessionKey,
@@ -1140,15 +1141,45 @@ export function createCollectionStore<
     return { data: item.data, error: null };
   }
 
+  function getItemFromStateOrPersistence(
+    itemKey: string,
+    options: { materializeSyncState?: boolean } = {},
+  ): CollectionItem | null | undefined {
+    const item = store.state[itemKey];
+    if (Object.hasOwn(store.state, itemKey)) return item;
+    const hydratedItem = persistence?.readHydratedItem(itemKey);
+
+    if (
+      hydratedItem &&
+      options.materializeSyncState &&
+      persistence &&
+      !persistence.hasAsyncPreload
+    ) {
+      void persistence.preloadItems([itemKey]);
+
+      if (Object.hasOwn(store.state, itemKey)) {
+        return store.state[itemKey];
+      }
+    }
+
+    return hydratedItem;
+  }
+
   function getItemsKeyArray(
     params: ItemPayload[] | FilterItemsFn | ItemPayload,
   ): { itemKey: string; payload: ItemPayload }[] {
-    const items = store.state;
-
     if (Array.isArray(params)) {
       return params.map((p) => ({ itemKey: getItemKey(p), payload: p }));
     } else if (typeof params === 'function') {
-      return filterAndMap(Object.entries(items), ([itemKey, item]) => {
+      const itemKeys = new Set([
+        ...Object.keys(store.state),
+        ...(persistence?.getHydratedItemKeys() ?? []),
+      ]);
+
+      return filterAndMap([...itemKeys], (itemKey) => {
+        const item = getItemFromStateOrPersistence(itemKey, {
+          materializeSyncState: true,
+        });
         return item && params(item.payload, item.data)
           ? { itemKey, payload: item.payload }
           : false;
@@ -1214,23 +1245,26 @@ export function createCollectionStore<
       const itemsId = getItemsKeyArray(params);
 
       return filterAndMap(itemsId, ({ itemKey }) => {
-        return store.state[itemKey] || false;
+        return getItemFromStateOrPersistence(itemKey) || false;
       });
     }
 
     if (Array.isArray(params)) {
-      const itemKeys = params.map((payload) => ({
-        itemKey: getItemKey(payload),
-        payload,
-      }));
+      const itemKeys = getItemsKeyArray(params);
 
       return filterAndMap(itemKeys, ({ itemKey }) => {
-        return store.state[itemKey] || false;
+        return (
+          getItemFromStateOrPersistence(itemKey, {
+            materializeSyncState: true,
+          }) || false
+        );
       });
     }
 
     const itemKey = getItemKey(params);
-    return store.state[itemKey];
+    return getItemFromStateOrPersistence(itemKey, {
+      materializeSyncState: true,
+    });
   }
 
   /**
@@ -1242,9 +1276,9 @@ export function createCollectionStore<
   ): Promise<PersistentStoragePreloadResult<ItemPayload>[]> {
     const payloads = Array.isArray(params) ? params : [params];
 
-    if (!persistence?.hasAsyncPreload) {
+    if (!persistence) {
       persistentStorageConfig?.onPersistentStorageError?.(
-        new Error('Async preload is not available'),
+        new Error('Persistent storage preload is not available'),
       );
       return payloads.map((payload) => ({ payload, preloaded: false }));
     }
@@ -1286,6 +1320,7 @@ export function createCollectionStore<
       events,
       getItemKey,
       getItemState,
+      persistence?.readHydratedItem,
       registerActiveItems,
       touchItems,
       persistence
@@ -1294,6 +1329,7 @@ export function createCollectionStore<
               payloads.map((payload) => getItemKey(payload)),
             )
         : undefined,
+      !!persistence && !persistence.hasAsyncPreload,
       scheduleAutomaticFetch,
       invalidationWasTriggered,
       globalDisableRefetchOnMount,

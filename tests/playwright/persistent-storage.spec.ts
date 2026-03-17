@@ -2,8 +2,6 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 const SAVE_DEBOUNCE_MS = 1000;
 
-
-
 async function openScenario(
   context: BrowserContext,
   scenario: 'persist-document' | 'persist-collection' | 'persist-list',

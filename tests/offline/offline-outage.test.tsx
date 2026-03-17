@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { getGlobalOfflineStatus, localPersistentStorage } from '../../src/main';
+import { getGlobalOfflineStatus } from '../../src/main';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
@@ -26,7 +26,7 @@ describe('offline mode outage and recovery', () => {
       getSessionKey: () => sessionKey,
       persistentStorage: {
         storeName: 'outage-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           outage: {
@@ -71,7 +71,7 @@ describe('offline mode outage and recovery', () => {
       getSessionKey: () => sessionKey,
       persistentStorage: {
         storeName: 'recovery-probe-doc',
-        adapter: localPersistentStorage,
+        adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
           outage: {
@@ -144,7 +144,7 @@ describe('offline mode outage and recovery', () => {
         getSessionKey: () => sessionKey,
         persistentStorage: {
           storeName,
-          adapter: localPersistentStorage,
+          adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
             outage: { enabled: true, classifyFailure, recoveryCheck },

@@ -55,14 +55,13 @@ function populateStorage(
   storeName: string,
   sessionKey: string,
   data: TestData,
-  version = 1,
+  version: number | undefined = undefined,
 ) {
   const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> = {
-    data: { data: { value: data } },
-    timestamp: Date.now(),
-    version,
-  };
+  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
+    version === undefined
+      ? { data: { data: { value: data } }, timestamp: Date.now() }
+      : { data: { data: { value: data } }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 

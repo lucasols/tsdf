@@ -9,37 +9,71 @@ import {
   vi,
 } from 'vitest';
 import {
-  getManagedLocalStorageRootKeyForSingle,
-  readManagedLocalStorageRoot,
+  getManagedLocalStorageManifestKeyForSingle,
+  resetManagedLocalStorageState,
+  setManagedLocalStorageRuntimeConfigForTests,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../src/persistentStorage/persistentStorageManager';
-import {
-  localPersistentStorage,
-  opfsPersistentStorage,
-} from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import {
-  createLocalStoragePersistentTestStore,
-  TEST_MAX_AGE_MS,
-} from '../utils/persistentStorageTestStore';
+  advanceTime,
+  waitForScheduledCleanup,
+} from '../utils/genericTestUtils';
+import { createLocalStoragePersistentTestStore } from '../utils/persistentStorageTestStore';
 
 const wrappedSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
 });
 
-async function waitForScheduledCleanup(delayMs = 2100): Promise<void> {
-  await advanceTime(delayMs);
-  await flushAllTimers();
+const persistentStore = createLocalStoragePersistentTestStore();
+
+function readGlobalLastCleanupAt(): number | null {
+  return (
+    persistentStore.storage.getGlobalMaintenanceRaw()?.lastCleanupAt ?? null
+  );
 }
 
-function getSingleRootKey(sessionKey: string, storeName: string): string {
-  return getManagedLocalStorageRootKeyForSingle(
-    `tsdf.${sessionKey}.${storeName}`,
+function createTriggerEnv(
+  storeName = 'trigger-doc',
+  sessionKey = 'sess-trigger',
+  ignoreInitialTimeCheck = false,
+) {
+  return createDocumentStoreTestEnv(
+    { name: 'trigger', value: 1 },
+    {
+      __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: ignoreInitialTimeCheck,
+      getSessionKey: () => sessionKey,
+      persistentStorage: {
+        storeName,
+        adapter: 'local-sync',
+        schema: wrappedSchema,
+      },
+    },
   );
+}
+
+async function runTriggerCleanup(
+  options: {
+    storeName?: string;
+    sessionKey?: string;
+    ignoreInitialTimeCheck?: boolean;
+    cleanupIntervalMs?: number;
+  } = {},
+): Promise<void> {
+  if (options.cleanupIntervalMs !== undefined) {
+    setManagedLocalStorageRuntimeConfigForTests({
+      cleanupIntervalMs: options.cleanupIntervalMs,
+    });
+  }
+
+  createTriggerEnv(
+    options.storeName,
+    options.sessionKey,
+    options.ignoreInitialTimeCheck,
+  );
+  await waitForScheduledCleanup();
 }
 
 beforeAll(() => {
@@ -54,221 +88,73 @@ beforeEach(() => {
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetManagedLocalStorageState();
 });
 
-const persistentStore = createLocalStoragePersistentTestStore();
-
 describe('expiration scan', () => {
-  test('entries older than maxAge are removed', async () => {
-    const oneWeekAgo = Date.now() - 8 * 24 * 60 * 60 * 1000; // 8 days ago
+  test('global sweep removes expired entries, keeps fresh entries, and records one global timestamp', async () => {
+    const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const expiredDoc = persistentStore.scope('expired-doc', 'sess1');
     const freshDoc = persistentStore.scope('fresh-doc', 'sess1');
 
-    // Create an expired entry
     expiredDoc.document.seed(
       { value: { name: 'old', value: 1 } },
-      { timestamp: oneWeekAgo },
+      { timestamp: expiredTimestamp },
     );
-
-    // Create a fresh entry that triggers the expiration scan
     freshDoc.document.seed({ value: { name: 'fresh', value: 2 } });
 
-    // Create the store — triggers load → schedules expiration scan
-    createDocumentStoreTestEnv(
-      { name: 'fresh', value: 2 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'fresh-doc',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    // Advance past idle cleanup timeout to trigger the expiration scan
-    // Allow async scan operations to complete
+    createTriggerEnv();
     await waitForScheduledCleanup();
 
-    // Expired entry should be removed
-    expect(localStorage.getItem(expiredDoc.document.storageKey())).toBeNull();
-
-    // Fresh entry should still exist (it was refreshed by the load)
-    expect(localStorage.getItem(freshDoc.document.storageKey())).not.toBeNull();
+    expect({
+      expiredEntryExists:
+        localStorage.getItem(expiredDoc.document.storageKey()) !== null,
+      freshEntryExists:
+        localStorage.getItem(freshDoc.document.storageKey()) !== null,
+      globalMaintenance: persistentStore.storage.getGlobalMaintenanceRaw(),
+    }).toMatchInlineSnapshot(`
+      expiredEntryExists: '❌'
+      freshEntryExists: '✅'
+      globalMaintenance: { lastCleanupAt: 1735689602000 }
+    `);
   });
 
-  test('entries with recent timestamps are kept', async () => {
-    const keepADoc = persistentStore.scope('keep-a', 'sess1');
-    const keepBDoc = persistentStore.scope('keep-b', 'sess1');
+  test('global sweep triggered from one session cleans expired entries across other sessions too', async () => {
+    const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const staleDocInSess1 = persistentStore.scope('stale-doc', 'sess1');
+    const staleDocInSess2 = persistentStore.scope('stale-doc', 'sess2');
+    const freshDocInSess2 = persistentStore.scope('fresh-doc', 'sess2');
 
-    // Both entries are fresh
-    keepADoc.document.seed({ value: { name: 'a', value: 1 } });
-    keepBDoc.document.seed({ value: { name: 'b', value: 2 } });
-
-    createDocumentStoreTestEnv(
-      { name: 'a', value: 1 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'keep-a',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
+    staleDocInSess1.document.seed(
+      { value: { name: 'stale-1', value: 1 } },
+      { timestamp: expiredTimestamp },
     );
+    staleDocInSess2.document.seed(
+      { value: { name: 'stale-2', value: 2 } },
+      { timestamp: expiredTimestamp },
+    );
+    freshDocInSess2.document.seed({ value: { name: 'fresh', value: 3 } });
 
+    createTriggerEnv('trigger-doc', 'sess-trigger');
     await waitForScheduledCleanup();
 
-    // Both entries should still exist
-    expect(localStorage.getItem(keepADoc.document.storageKey())).not.toBeNull();
-    expect(localStorage.getItem(keepBDoc.document.storageKey())).not.toBeNull();
+    expect({
+      sess1ExpiredEntryExists:
+        localStorage.getItem(staleDocInSess1.document.storageKey()) !== null,
+      sess2ExpiredEntryExists:
+        localStorage.getItem(staleDocInSess2.document.storageKey()) !== null,
+      sess2FreshEntryExists:
+        localStorage.getItem(freshDocInSess2.document.storageKey()) !== null,
+      globalMaintenance: persistentStore.storage.getGlobalMaintenanceRaw(),
+    }).toMatchInlineSnapshot(`
+      globalMaintenance: { lastCleanupAt: 1735689602000 }
+      sess1ExpiredEntryExists: '❌'
+      sess2ExpiredEntryExists: '❌'
+      sess2FreshEntryExists: '✅'
+    `);
   });
 
-  test('entries without valid timestamp are removed', async () => {
-    const triggerDoc = persistentStore.scope('trigger', 'sess1');
-
-    // Create an entry with corrupted structure (no timestamp)
-    localStorage.setItem(
-      'tsdf.sess1.corrupted',
-      JSON.stringify({ data: 'bad', version: 1 }),
-    );
-    upsertManagedLocalStorageSingleEntry({
-      sessionKey: 'sess1',
-      storeName: 'corrupted',
-      storageKey: 'tsdf.sess1.corrupted',
-      maxAgeMs: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    // Create a valid entry that triggers the scan
-    triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
-
-    createDocumentStoreTestEnv(
-      { name: 'ok', value: 1 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'trigger',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup();
-
-    // Corrupted entry should be removed
-    expect(localStorage.getItem('tsdf.sess1.corrupted')).toBeNull();
-  });
-
-  test('scan runs only once per adapter per session', async () => {
-    const scanOnceA = persistentStore.scope('scan-once-a', 'sess1');
-    const scanOnceB = persistentStore.scope('scan-once-b', 'sess1');
-    const shouldStay = persistentStore.scope('should-stay', 'sess1');
-
-    scanOnceA.document.seed({ value: { name: 'a', value: 1 } });
-    scanOnceB.document.seed({ value: { name: 'b', value: 2 } });
-
-    const removeItemSpy = vi.spyOn(localStorage, 'removeItem');
-
-    // First store creation — triggers scan
-    createDocumentStoreTestEnv(
-      { name: 'a', value: 1 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'scan-once-a',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup();
-
-    const firstScanRemoveCalls = removeItemSpy.mock.calls.length;
-
-    // Add an expired entry between scans
-    const twoWeeksAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
-    shouldStay.document.seed(
-      { value: { name: 'stale', value: 99 } },
-      { timestamp: twoWeeksAgo },
-    );
-
-    // Second store creation — should NOT trigger another scan
-    createDocumentStoreTestEnv(
-      { name: 'b', value: 2 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'scan-once-b',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup();
-
-    // The expired entry should still be there (second scan didn't run)
-    expect(
-      localStorage.getItem(shouldStay.document.storageKey()),
-    ).not.toBeNull();
-
-    // No additional remove calls from a second scan
-    expect(removeItemSpy.mock.calls.length).toBe(firstScanRemoveCalls);
-
-    removeItemSpy.mockRestore();
-  });
-
-  test('expired entries from previous sessions are cleaned on the next app runtime', async () => {
-    const initialTime = new Date('2026-01-01T12:00:00Z');
-    vi.setSystemTime(initialTime);
-    const accountADoc = persistentStore.scope('account-a-doc', 'sess-a');
-
-    accountADoc.document.seed({ value: { name: 'account-a', value: 1 } });
-
-    createDocumentStoreTestEnv(
-      { name: 'account-a', value: 1 },
-      {
-        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
-        getSessionKey: () => 'sess-a',
-        persistentStorage: {
-          storeName: 'account-a-doc',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup();
-
-    expect(
-      localStorage.getItem(accountADoc.document.storageKey()),
-    ).not.toBeNull();
-
-    // Simulate closing and reopening the app in a different session.
-    resetExpirationScanTracking();
-    vi.setSystemTime(initialTime.getTime() + 8 * 24 * 60 * 60 * 1000);
-
-    createDocumentStoreTestEnv(
-      { name: 'account-b', value: 2 },
-      {
-        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
-        getSessionKey: () => 'sess-b',
-        persistentStorage: {
-          storeName: 'account-b-doc',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup();
-
-    expect(localStorage.getItem(accountADoc.document.storageKey())).toBeNull();
-  });
-
-  test('protected entries are preserved for dotted session keys while sibling stale entries are cleaned', async () => {
+  test('protected dotted-session entries survive the sweep via manifest metadata', async () => {
     const staleTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';
     const protectedDoc = persistentStore.scope(
@@ -279,14 +165,7 @@ describe('expiration scan', () => {
       'unprotected-doc',
       dottedSessionKey,
     );
-    const triggerDoc = persistentStore.scope('trigger-doc', 'sess-trigger');
-    const protectedKeysStorageKey = `tsdf.${dottedSessionKey}.__offline__.protected`;
-    const protectedRootKey = getManagedLocalStorageRootKeyForSingle(
-      protectedKeysStorageKey,
-    );
 
-    // Seed two stale entries for the dotted session so the scan has to decide
-    // which one to keep based on the protected-keys manifest.
     protectedDoc.document.seed(
       { value: { name: 'protected', value: 1 } },
       { timestamp: staleTimestamp },
@@ -296,33 +175,13 @@ describe('expiration scan', () => {
       { timestamp: staleTimestamp },
     );
 
-    persistentStore.storage.writeValue(protectedKeysStorageKey, {
-      data: { keys: [protectedDoc.document.storageKey()] },
-      timestamp: Date.now(),
-      version: 1,
+    upsertManagedLocalStorageSingleEntry({
+      storageKey: protectedDoc.document.storageKey(),
+      lastAccessAt: staleTimestamp,
+      meta: { o: true },
     });
 
-    // The managed metadata must keep the full dotted session key so cleanup
-    // can match protected keys back to the correct session.
-    expect(readManagedLocalStorageRoot(protectedRootKey)?.sessionKey).toBe(
-      dottedSessionKey,
-    );
-
-    // Trigger cleanup from another session to mirror a later app runtime.
-    triggerDoc.document.seed({ value: { name: 'trigger', value: 3 } });
-
-    createDocumentStoreTestEnv(
-      { name: 'trigger', value: 3 },
-      {
-        getSessionKey: () => 'sess-trigger',
-        persistentStorage: {
-          storeName: 'trigger-doc',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
+    createTriggerEnv();
     await waitForScheduledCleanup();
 
     expect({
@@ -330,191 +189,32 @@ describe('expiration scan', () => {
         localStorage.getItem(protectedDoc.document.storageKey()) !== null,
       unprotectedEntryExists:
         localStorage.getItem(unprotectedDoc.document.storageKey()) !== null,
-      protectedRootSession:
-        readManagedLocalStorageRoot(protectedRootKey)?.sessionKey,
+      globalLastCleanupAt: readGlobalLastCleanupAt(),
     }).toMatchInlineSnapshot(`
+      globalLastCleanupAt: 1735689602000
       protectedEntryExists: '✅'
-      protectedRootSession: 'user@example.com'
       unprotectedEntryExists: '❌'
     `);
   });
 
-  test('opfs startup cleanup expires stale entries via metadata pages without payload reads', async () => {
-    const oldTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
-    const key = 'tsdf.sess1.old-entry';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      storeName: 'adapter-test',
-      sessionKey: 'sess1',
-      initialState: {
-        rawEntries: {
-          [key]: {
-            data: { data: { value: { name: 'old', value: 1 } } },
-            timestamp: oldTimestamp,
-            version: 1,
-          },
-        },
-        document: { data: { value: { name: 'ok', value: 1 } } },
-      },
-    });
-
-    // Ignore fixture seeding and observe only the startup cleanup work.
-    mockAdapter.clearInstrumentation();
-
-    createDocumentStoreTestEnv(
-      { name: 'ok', value: 1 },
-      {
-        getSessionKey: () => 'sess1',
-        storageAdapter: mockAdapter.adapter,
-        persistentStorage: {
-          storeName: 'adapter-test',
-          adapter: opfsPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup(3000);
-
-    expect({
-      expiredEntryExists: mockAdapter.has(key),
-      legacyListKeysFallbackRequests:
-        mockAdapter.legacyListKeysFallbackRequests,
-      metadataListScopes: mockAdapter.metadataListRequests.map((request) => [
-        request.scope.sessionKey,
-        request.scope.storeName,
-        request.scope.kind,
-      ]),
-      payloadGetManyRequests: mockAdapter.payloadGetManyRequests,
-      payloadGetRequests: mockAdapter.payloadGetRequests,
-    }).toMatchInlineSnapshot(`
-      expiredEntryExists: '❌'
-      legacyListKeysFallbackRequests: []
-      metadataListScopes:
-        - ['sess1', 'old-entry', 'document']
-        - ['sess1', 'adapter-test', 'document']
-      payloadGetManyRequests: []
-      payloadGetRequests: []
-    `);
-  });
-
-  test('opfs cleanup preserves protected stale entries without reading their payloads', async () => {
-    const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
-    const protectedKey = 'tsdf.sess1.protected-entry';
-    const unprotectedKey = 'tsdf.sess1.unprotected-entry';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      storeName: 'cleanup-trigger',
-      sessionKey: 'sess1',
-      initialState: {
-        rawEntries: {
-          [protectedKey]: {
-            data: { data: { value: { name: 'protected', value: 1 } } },
-            timestamp: staleTimestamp,
-            version: 1,
-          },
-          [unprotectedKey]: {
-            data: { data: { value: { name: 'stale', value: 2 } } },
-            timestamp: staleTimestamp,
-            version: 1,
-          },
-          'tsdf.sess1.__offline__.protected': {
-            data: { keys: [protectedKey] },
-            timestamp: Date.now(),
-            version: 1,
-          },
-          'tsdf.sess1.cleanup-trigger': {
-            data: { data: { value: { name: 'trigger', value: 3 } } },
-            timestamp: Date.now(),
-            version: 1,
-          },
-        },
-      },
-    });
-
-    // Ignore fixture seeding and observe only the startup cleanup work.
-    mockAdapter.clearInstrumentation();
-
-    createDocumentStoreTestEnv(
-      { name: 'trigger', value: 3 },
-      {
-        getSessionKey: () => 'sess1',
-        storageAdapter: mockAdapter.adapter,
-        persistentStorage: {
-          storeName: 'cleanup-trigger',
-          adapter: opfsPersistentStorage,
-          schema: wrappedSchema,
-        },
-      },
-    );
-
-    await waitForScheduledCleanup(3000);
-
-    expect({
-      legacyListKeysFallbackRequests:
-        mockAdapter.legacyListKeysFallbackRequests,
-      payloadReadsTouchedProtectedEntry:
-        mockAdapter.payloadGetRequests.includes(protectedKey),
-      payloadReadsTouchedUnprotectedEntry:
-        mockAdapter.payloadGetRequests.includes(unprotectedKey),
-      protectedEntryExists: mockAdapter.has(protectedKey),
-      protectedRegistryReads: mockAdapter.payloadGetRequests.filter(
-        (key) => key === 'tsdf.sess1.__offline__.protected',
-      ).length,
-      unprotectedEntryExists: mockAdapter.has(unprotectedKey),
-    }).toMatchInlineSnapshot(`
-      legacyListKeysFallbackRequests: []
-      payloadReadsTouchedProtectedEntry: '❌'
-      payloadReadsTouchedUnprotectedEntry: '❌'
-      protectedEntryExists: '✅'
-      protectedRegistryReads: 1
-      unprotectedEntryExists: '❌'
-    `);
-  });
-
-  test('automatic cleanup is throttled by cleanupIntervalMs until the interval elapses', async () => {
+  test('global maintenance is throttled by the shared cleanup timestamp until the interval elapses', async () => {
     const cleanupIntervalMs = 24 * 60 * 60 * 1000;
     const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const staleDoc = persistentStore.scope('throttle-stale', 'sess1');
-    const triggerRootKey = getSingleRootKey('sess1', 'throttle-trigger');
 
-    // First eligible init should clean the stale entry immediately and stamp the root.
     staleDoc.document.seed(
       { value: { name: 'old', value: 1 } },
       { timestamp: expiredTimestamp },
     );
 
-    createDocumentStoreTestEnv(
-      { name: 'trigger', value: 2 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'throttle-trigger',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-          cleanupIntervalMs,
-        },
-      },
-    );
+    await runTriggerCleanup({
+      cleanupIntervalMs,
+      storeName: 'throttle-trigger',
+      sessionKey: 'sess1',
+    });
 
-    await waitForScheduledCleanup();
+    const firstCleanupAt = readGlobalLastCleanupAt();
 
-    const firstCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
-
-    expect({
-      staleEntryExists:
-        localStorage.getItem(staleDoc.document.storageKey()) !== null,
-      triggerCleanupIntervalMs:
-        readManagedLocalStorageRoot(triggerRootKey)?.cleanupIntervalMs,
-      triggerLastCleanupRecorded: firstCleanupAt !== null,
-    }).toMatchInlineSnapshot(`
-      staleEntryExists: '❌'
-      triggerCleanupIntervalMs: 86400000
-      triggerLastCleanupRecorded: '✅'
-    `);
-
-    // Re-add stale data, then re-open the app before the interval has elapsed.
-    // Cleanup should stay throttled, so the stale entry should still be present and
-    // the root should keep the previous cleanup timestamp.
     staleDoc.document.seed(
       { value: { name: 'old-again', value: 3 } },
       { timestamp: expiredTimestamp },
@@ -523,23 +223,14 @@ describe('expiration scan', () => {
     resetExpirationScanTracking();
     await advanceTime(60 * 60 * 1000);
 
-    createDocumentStoreTestEnv(
-      { name: 'trigger', value: 2 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'throttle-trigger',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-          cleanupIntervalMs,
-        },
-      },
-    );
+    await runTriggerCleanup({
+      cleanupIntervalMs,
+      storeName: 'throttle-trigger',
+      sessionKey: 'sess1',
+      ignoreInitialTimeCheck: true,
+    });
 
-    await waitForScheduledCleanup();
-
-    const throttledCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const throttledCleanupAt = readGlobalLastCleanupAt();
 
     expect({
       cleanupRanAgain: throttledCleanupAt !== firstCleanupAt,
@@ -550,31 +241,23 @@ describe('expiration scan', () => {
       staleEntryExists: '✅'
     `);
 
-    // Once the full interval has passed, the next eligible init should clean again.
     resetExpirationScanTracking();
     await advanceTime(cleanupIntervalMs);
 
-    createDocumentStoreTestEnv(
-      { name: 'trigger', value: 2 },
-      {
-        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'throttle-trigger',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-          cleanupIntervalMs,
-        },
-      },
-    );
+    await runTriggerCleanup({
+      cleanupIntervalMs,
+      storeName: 'throttle-trigger',
+      sessionKey: 'sess1',
+      ignoreInitialTimeCheck: true,
+    });
 
-    await waitForScheduledCleanup();
-
-    const finalCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const finalCleanupAt = readGlobalLastCleanupAt();
 
     expect({
-      cleanupRanAgain: finalCleanupAt !== throttledCleanupAt,
+      cleanupRanAgain:
+        finalCleanupAt != null &&
+        throttledCleanupAt != null &&
+        finalCleanupAt !== throttledCleanupAt,
       staleEntryExists:
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
     }).toMatchInlineSnapshot(`
@@ -583,92 +266,45 @@ describe('expiration scan', () => {
     `);
   });
 
-  test('cleanupIntervalMs 0 allows cleanup on every eligible init', async () => {
+  test('cleanup interval 0 runs on every eligible init', async () => {
     const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const staleDoc = persistentStore.scope('eager-stale', 'sess1');
-    const triggerRootKey = getSingleRootKey('sess1', 'eager-trigger');
 
-    // The first eligible init should remove stale data immediately.
     staleDoc.document.seed(
       { value: { name: 'first', value: 1 } },
       { timestamp: expiredTimestamp },
     );
-    upsertManagedLocalStorageSingleEntry({
-      sessionKey: 'sess1',
-      storeName: 'eager-stale',
-      storageKey: staleDoc.document.storageKey(),
+
+    await runTriggerCleanup({
       cleanupIntervalMs: 0,
-      maxAgeMs: TEST_MAX_AGE_MS,
-      lastAccessAt: expiredTimestamp,
+      storeName: 'eager-trigger',
+      sessionKey: 'sess1',
     });
 
-    createDocumentStoreTestEnv(
-      { name: 'trigger', value: 2 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'eager-trigger',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-          cleanupIntervalMs: 0,
-        },
-      },
-    );
+    const firstCleanupAt = readGlobalLastCleanupAt();
 
-    await waitForScheduledCleanup();
-
-    const firstCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
-
-    expect({
-      cleanupIntervalMs:
-        readManagedLocalStorageRoot(triggerRootKey)?.cleanupIntervalMs,
-      staleEntryExists:
-        localStorage.getItem(staleDoc.document.storageKey()) !== null,
-      triggerLastCleanupRecorded: firstCleanupAt !== null,
-    }).toMatchInlineSnapshot(`
-      cleanupIntervalMs: 0
-      staleEntryExists: '❌'
-      triggerLastCleanupRecorded: '✅'
-    `);
-
-    // Re-add stale data and re-open immediately. With interval 0, cleanup should
-    // run again on the very next eligible init.
     staleDoc.document.seed(
       { value: { name: 'second', value: 2 } },
       { timestamp: expiredTimestamp },
     );
-    upsertManagedLocalStorageSingleEntry({
-      sessionKey: 'sess1',
-      storeName: 'eager-stale',
-      storageKey: staleDoc.document.storageKey(),
-      cleanupIntervalMs: 0,
-      maxAgeMs: TEST_MAX_AGE_MS,
-      lastAccessAt: expiredTimestamp,
-    });
 
     resetExpirationScanTracking();
+    await advanceTime(1);
 
-    createDocumentStoreTestEnv(
-      { name: 'trigger', value: 2 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'eager-trigger',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-          cleanupIntervalMs: 0,
-        },
-      },
-    );
+    await runTriggerCleanup({
+      cleanupIntervalMs: 0,
+      storeName: 'eager-trigger',
+      sessionKey: 'sess1',
+      ignoreInitialTimeCheck: true,
+    });
 
-    await waitForScheduledCleanup();
-
-    const secondCleanupAt =
-      readManagedLocalStorageRoot(triggerRootKey)?.lastCleanupAt;
+    const secondCleanupAt = readGlobalLastCleanupAt();
 
     expect({
-      cleanupRanAgain: secondCleanupAt !== firstCleanupAt,
+      cleanupRanAgain:
+        secondCleanupAt != null &&
+        firstCleanupAt != null &&
+        secondCleanupAt !== firstCleanupAt,
       staleEntryExists:
         localStorage.getItem(staleDoc.document.storageKey()) !== null,
     }).toMatchInlineSnapshot(`
@@ -677,61 +313,44 @@ describe('expiration scan', () => {
     `);
   });
 
-  test('cleanup interval config is stored and updated per root', () => {
-    const rootKey = getSingleRootKey('sess1', 'interval-config');
+  test('targeted discard cleanup removes bad data without mutating the global maintenance timestamp', async () => {
+    const badDoc = persistentStore.scope('bad-doc', 'sess1');
+    const storageKey = badDoc.document.seed({
+      value: { name: 'cached', value: 1 },
+    });
+    const manifestKey = getManagedLocalStorageManifestKeyForSingle(storageKey);
 
-    createDocumentStoreTestEnv(
-      { name: 'config', value: 1 },
+    createTriggerEnv();
+    await waitForScheduledCleanup();
+
+    const cleanupBeforeTargetedRemoval = readGlobalLastCleanupAt();
+
+    localStorage.setItem(storageKey, '{invalid');
+
+    const env = createDocumentStoreTestEnv(
+      { name: 'server', value: 2 },
       {
         getSessionKey: () => 'sess1',
         persistentStorage: {
-          storeName: 'interval-config',
-          adapter: localPersistentStorage,
+          storeName: 'bad-doc',
+          adapter: 'local-sync',
           schema: wrappedSchema,
-          cleanupIntervalMs: 1_000,
         },
       },
     );
+    expect(env.store.state.status).toBe('idle');
 
-    // The managed metadata key should use the new root format and keep the configured interval.
+    await waitForScheduledCleanup();
+
     expect({
-      cleanupIntervalMs:
-        readManagedLocalStorageRoot(rootKey)?.cleanupIntervalMs,
-      rootKeyUsesManagedPrefix: rootKey.startsWith('tsdf.__lsm__.r.'),
-      rootKeyUsesLegacyPrefix: rootKey.includes('__localStorageMeta__'),
-      sessionKey: readManagedLocalStorageRoot(rootKey)?.sessionKey,
-      storeName: readManagedLocalStorageRoot(rootKey)?.storeName,
+      globalCleanupUnchanged:
+        readGlobalLastCleanupAt() === cleanupBeforeTargetedRemoval,
+      manifestExists: localStorage.getItem(manifestKey) !== null,
+      payloadExists: localStorage.getItem(storageKey) !== null,
     }).toMatchInlineSnapshot(`
-      cleanupIntervalMs: 1000
-      rootKeyUsesLegacyPrefix: '❌'
-      rootKeyUsesManagedPrefix: '✅'
-      sessionKey: 'sess1'
-      storeName: 'interval-config'
-    `);
-
-    createDocumentStoreTestEnv(
-      { name: 'config', value: 1 },
-      {
-        getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'interval-config',
-          adapter: localPersistentStorage,
-          schema: wrappedSchema,
-          cleanupIntervalMs: 5_000,
-        },
-      },
-    );
-
-    // Re-registering the same root should update the stored interval instead of keeping stale config.
-    expect({
-      cleanupIntervalMs:
-        readManagedLocalStorageRoot(rootKey)?.cleanupIntervalMs,
-      sessionKey: readManagedLocalStorageRoot(rootKey)?.sessionKey,
-      storeName: readManagedLocalStorageRoot(rootKey)?.storeName,
-    }).toMatchInlineSnapshot(`
-      cleanupIntervalMs: 5000
-      sessionKey: 'sess1'
-      storeName: 'interval-config'
+      globalCleanupUnchanged: '✅'
+      manifestExists: '❌'
+      payloadExists: '❌'
     `);
   });
 });

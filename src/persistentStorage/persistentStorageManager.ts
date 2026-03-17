@@ -1,106 +1,80 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { rc_number, rc_object, rc_parse_json, rc_unknown } from 'runcheck';
 import {
-  clearManagedLocalStorageRoot,
-  clearManagedLocalStorageSession,
-  getManagedLocalStorageRootKeyForPrefix,
-  getManagedLocalStorageRootKeyForSingle,
-  listManagedLocalStorageKeysSync,
-  readManagedLocalStorageEntryByPayload,
-  registerManagedLocalStorageRoot,
-  removeManagedLocalStoragePayload,
+  getManagedLocalStorageRuntimeConfig,
+  isManagedLocalStorageEntryOfflineProtected,
   resetManagedLocalStorageState,
-  runManagedLocalStorageMaintenance,
-  touchManagedLocalStoragePayload,
-  upsertManagedLocalStorageNamespaceEntry,
-  upsertManagedLocalStorageSingleEntry,
+  setManagedLocalStorageEntryOfflineProtected,
 } from './localStorageMetadata';
 import {
   OpfsAsyncStorageAdapter,
   serializeProtectedRef,
 } from './opfsAsyncStorageAdapter';
+import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
   isAsyncStorageAdapter,
   localPersistentStorage,
   opfsPersistentStorage,
+  type LocalStorageMetadataOptions,
 } from './storageAdapter';
 import type {
+  AsyncStorageAdapter,
   AsyncStorageMetadataOrder,
   AsyncStorageNamespaceKind,
   AsyncStorageNamespaceScope,
   AsyncStorageProtectedEntryRef,
   PersistentStorageBaseConfig,
-  PersistentStorageSchema,
   StorageAdapter,
   StorageCacheEntry,
 } from './types';
-import { validateWithSchema } from './validateWithSchema';
 
 const DEBOUNCE_MS = 1000;
-const LOCAL_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ASYNC_STORAGE_METADATA_PAGE_LIMIT = 100;
+export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
 
 const cacheEntrySchema = rc_object({
   data: rc_unknown,
   timestamp: rc_number,
-  version: rc_number,
+  version: rc_number.optional(),
 });
 
-let scannedAdapters = new WeakSet<StorageAdapter>();
+let localStorageExpirationScanScheduled = false;
+let scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
+let localStorageTouchTimestamps = new Map<string, number>();
+let cancelScheduledLocalStorageMaintenance: (() => void) | null = null;
+let localStorageGlobalMaintenanceRequested = false;
+let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
+
+export function getLocalStorageAdapter(
+  adapter: StorageAdapter,
+): typeof localPersistentStorage | null {
+  return adapter === 'local-sync' ? localPersistentStorage : null;
+}
 
 function getStorageKey(sessionKey: string, storeName: string): string {
   return `tsdf.${sessionKey}.${storeName}`;
 }
 
-function registerManagedSingleRoot(
-  adapter: StorageAdapter,
-  config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
-  key: string,
-): void {
-  if (adapter !== localPersistentStorage) return;
+export function assertValidPersistentStoreName(storeName: string): void {
+  if (import.meta.env.PROD) return;
+  if (!storeName.includes('.')) return;
 
-  const sessionKey = config.getSessionKey();
-  if (sessionKey === false) return;
-
-  registerManagedLocalStorageRoot({
-    sessionKey,
-    storeName: config.storeName,
-    mode: 'single',
-    storageKey: key,
-    cleanupIntervalMs: config.cleanupIntervalMs,
-    maxAgeMs: LOCAL_STORAGE_MAX_AGE_MS,
-  });
+  throw new Error(
+    `[tsdf] persistentStorage.storeName "${storeName}" must not contain ".".`,
+  );
 }
 
-function registerManagedNamespaceRoot(
-  adapter: StorageAdapter,
-  config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
-  prefix: string,
-): void {
-  if (adapter !== localPersistentStorage) return;
+function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
+  if (adapter === 'local-sync') {
+    if (localStorageExpirationScanScheduled) return;
+    localStorageExpirationScanScheduled = true;
+    scheduleLocalStorageMaintenance();
+    return;
+  }
 
-  const sessionKey = config.getSessionKey();
-  if (sessionKey === false) return;
-
-  registerManagedLocalStorageRoot({
-    sessionKey,
-    storeName: config.storeName,
-    mode: 'namespace',
-    storagePrefix: prefix,
-    cleanupIntervalMs: config.cleanupIntervalMs,
-    maxAgeMs: LOCAL_STORAGE_MAX_AGE_MS,
-  });
-}
-
-function scheduleLocalStorageExpirationScanIfNeeded(adapter: StorageAdapter) {
-  if (adapter !== localPersistentStorage) return;
-  if (scannedAdapters.has(adapter)) return;
-
-  scannedAdapters.add(adapter);
-  scheduleIdleCleanup(() => {
-    void runManagedLocalStorageMaintenance();
-  });
+  if (scannedAsyncAdapters.has(adapter)) return;
+  scannedAsyncAdapters.add(adapter);
 }
 
 function ensureAsyncNamespaceKind(
@@ -108,14 +82,27 @@ function ensureAsyncNamespaceKind(
 ): AsyncStorageNamespaceKind {
   switch (entryPrefix) {
     case 'document':
+      return 'document';
+    case 'ci':
     case 'collection.item':
+      return 'collection.item';
+    case 'li':
     case 'listQuery.item':
+      return 'listQuery.item';
+    case 'lq':
     case 'listQuery.query':
+      return 'listQuery.query';
+    case 'oq':
     case 'offline.queue':
+      return 'offline.queue';
+    case 'oc':
     case 'offline.conflict':
+      return 'offline.conflict';
+    case 'oe':
     case 'offline.entity':
+      return 'offline.entity';
     case '__internal.protected':
-      return entryPrefix;
+      return '__internal.protected';
     default:
       throw new Error(
         `[tsdf] Unsupported async namespace kind: ${entryPrefix}`,
@@ -123,14 +110,163 @@ function ensureAsyncNamespaceKind(
   }
 }
 
+/**
+ * Schedules managed localStorage maintenance during idle time.
+ *
+ * When multiple callers enqueue maintenance before the idle callback runs,
+ * forced manifest keys are coalesced and a global sweep request wins over
+ * targeted maintenance because it already covers the full cleanup pass.
+ */
+export function scheduleLocalStorageMaintenance(
+  options: { forceManifestKeys?: Iterable<string> } = {},
+): void {
+  if (options.forceManifestKeys === undefined) {
+    localStorageGlobalMaintenanceRequested = true;
+    scheduledLocalStorageMaintenanceManifestKeys.clear();
+  } else if (!localStorageGlobalMaintenanceRequested) {
+    for (const manifestKey of options.forceManifestKeys) {
+      scheduledLocalStorageMaintenanceManifestKeys.add(manifestKey);
+    }
+  }
+
+  if (cancelScheduledLocalStorageMaintenance !== null) return;
+
+  cancelScheduledLocalStorageMaintenance = scheduleIdleCleanup(() => {
+    cancelScheduledLocalStorageMaintenance = null;
+
+    const runGlobalMaintenance = localStorageGlobalMaintenanceRequested;
+    const forceManifestKeys = runGlobalMaintenance
+      ? undefined
+      : [...scheduledLocalStorageMaintenanceManifestKeys];
+
+    localStorageGlobalMaintenanceRequested = false;
+    scheduledLocalStorageMaintenanceManifestKeys.clear();
+
+    void localPersistentStorage.runMaintenance(forceManifestKeys);
+  });
+}
+
+function preserveOfflineProtectionFlag(
+  sessionKey: string,
+  storageKey: string,
+  nextMeta: unknown,
+  getCurrentMeta: () => unknown,
+): unknown {
+  const currentMetaProtected =
+    isManagedLocalStorageEntryOfflineProtected(getCurrentMeta());
+  const protectedKeys = getSessionProtectedKeysSnapshot(sessionKey);
+  if (protectedKeys !== null) {
+    return setManagedLocalStorageEntryOfflineProtected(
+      nextMeta,
+      protectedKeys.has(storageKey) || currentMetaProtected,
+    );
+  }
+
+  return currentMetaProtected
+    ? setManagedLocalStorageEntryOfflineProtected(nextMeta, true)
+    : nextMeta;
+}
+
+async function runLocalStorageMutation<T>(
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  return localPersistentStorage.runLocked(callback);
+}
+
+export function recordLocalStorageTouch(key: string, timestamp: number): void {
+  localStorageTouchTimestamps.set(key, timestamp);
+}
+
+function shouldThrottleLocalStorageTouch(
+  key: string,
+  timestamp: number,
+): boolean {
+  const previousTimestamp = localStorageTouchTimestamps.get(key);
+  return (
+    previousTimestamp !== undefined &&
+    timestamp - previousTimestamp < SYNC_STORAGE_TOUCH_THROTTLE_MS
+  );
+}
+
+export async function touchLocalStorageKeyWithThrottle(
+  key: string,
+  touch: () => boolean | Promise<boolean>,
+): Promise<void> {
+  await localPersistentStorage.runLocked(async () => {
+    const now = Date.now();
+    if (shouldThrottleLocalStorageTouch(key, now)) return;
+
+    if (await touch()) {
+      recordLocalStorageTouch(key, now);
+    }
+  });
+}
+
+export function getLocalStorageMaxAgeMs(): number {
+  return getManagedLocalStorageRuntimeConfig().maxAgeMs;
+}
+
+export function mergeLocalStorageOfflineProtection(
+  sessionKey: string,
+  storageKey: string,
+  currentOfflineProtected: boolean,
+): boolean {
+  const protectedKeys = getSessionProtectedKeysSnapshot(sessionKey);
+  return protectedKeys?.has(storageKey) === true || currentOfflineProtected;
+}
+
+export function scheduleLocalStorageRemoval(
+  key: string,
+  options: LocalStorageMetadataOptions | undefined,
+): void {
+  scheduleIdleCleanup(() => {
+    void runLocalStorageMutation(() => {
+      localPersistentStorage.remove(key, options);
+    });
+  });
+}
+
+function refreshLocalStorageTimestampUnlocked(
+  key: string,
+  options: LocalStorageMetadataOptions,
+): void {
+  const now = Date.now();
+  if (shouldThrottleLocalStorageTouch(key, now)) return;
+
+  const touched =
+    options.metadata === 'single'
+      ? localPersistentStorage.touchSingleEntry(key)
+      : localPersistentStorage.touchNamespaceEntry(
+          key,
+          options.namespacePrefix,
+        );
+
+  if (touched) {
+    recordLocalStorageTouch(key, now);
+  }
+}
+
 export type PersistentStorageHandle<T> = {
+  /** Loads persisted data, validating version and schema. Returns null if not found or invalid. */
   load(): Promise<T | null>;
+  /** Schedules a debounced save. getData is called at save time to capture latest state. */
   scheduleSave(getData: () => T): void;
+  /** Immediately saves data, canceling any pending debounce. */
   saveNow(data: T): Promise<void>;
+  /** Removes the persisted entry and cancels any pending debounce. */
   clear(): Promise<void>;
+  /** Cancels any pending debounce timer without saving. */
   dispose(): void;
 };
 
+/**
+ * Creates a handle for reading/writing a single persisted storage entry.
+ *
+ * @param config - Storage configuration including the injected adapter, schema, and version.
+ * @param itemValidator - Optional per-item validator for compound data structures.
+ *   Called after the overall cache entry is loaded. Use this to validate individual
+ *   items within collections/queries.
+ */
 export function createPersistentStorageHandle<T>(
   config: Omit<PersistentStorageBaseConfig<never>, 'schema'>,
   {
@@ -145,18 +281,19 @@ export function createPersistentStorageHandle<T>(
     };
   } = {},
 ): PersistentStorageHandle<T> {
-  const version = config.version ?? 1;
+  const version = config.version;
+  const asyncVersion = version ?? 1;
+  const { onPersistentStorageError } = config;
   const adapter = config.adapter;
   const asyncEntryKey = asyncNamespace?.entryKey ?? 'document';
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  scheduleAdapterExpirationScan(adapter);
+
   function getKey(): string | false {
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return false;
-
-    const key = getStorageKey(sessionKey, config.storeName);
-    registerManagedSingleRoot(adapter, config, key);
-    return key;
+    return getStorageKey(sessionKey, config.storeName);
   }
 
   function getAsyncNamespace() {
@@ -165,23 +302,18 @@ export function createPersistentStorageHandle<T>(
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
 
-    const scope: AsyncStorageNamespaceScope = {
+    return adapter.openNamespace<T, Record<string, unknown>>({
       sessionKey,
       storeName: asyncNamespace?.storeName ?? config.storeName,
       kind: asyncNamespace?.kind ?? 'document',
-    };
-
-    return adapter.openNamespace<T, Record<string, unknown>>(scope);
+    });
   }
 
   if (isAsyncStorageAdapter(adapter)) {
     void getAsyncNamespace();
-  } else if (adapter === localPersistentStorage) {
-    scheduleLocalStorageExpirationScanIfNeeded(adapter);
-    void getKey();
   }
 
-  function clearTimer(): void {
+  function clearTimer() {
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
@@ -197,7 +329,7 @@ export function createPersistentStorageHandle<T>(
         const entry = await namespace.get(asyncEntryKey, { touch: 'coarse' });
         if (!entry) return null;
 
-        if (entry.metadata.version !== version) {
+        if (entry.metadata.version !== asyncVersion) {
           await namespace.commit({ removes: [asyncEntryKey] });
           return null;
         }
@@ -207,28 +339,29 @@ export function createPersistentStorageHandle<T>(
 
       const key = getKey();
       if (key === false) return null;
-      if (readManagedLocalStorageEntryByPayload(key) === null) return null;
 
-      const entry = adapter.read<StorageCacheEntry<T>>(key);
-      if (!entry) return null;
-
-      if (entry.version !== version) {
-        scheduleIdleCleanup(() => {
-          adapter.remove(key);
-          removeManagedLocalStoragePayload(key);
+      if (adapter === 'local-sync') {
+        const entry = readStorageEntryFromLocalStorageSync<T>(key, version, {
+          metadata: 'single',
         });
-        return null;
+        if (!entry) return null;
+
+        scheduleIdleCleanup(() =>
+          refreshLocalStorageTimestamp(key, { metadata: 'single' }),
+        );
+        return entry.data;
       }
 
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
-      return entry.data;
+      return null;
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
       return null;
     }
   }
 
   async function writeEntry(data: T): Promise<void> {
+    const key = getKey();
+
     try {
       if (isAsyncStorageAdapter(adapter)) {
         const namespace = getAsyncNamespace();
@@ -239,7 +372,7 @@ export function createPersistentStorageHandle<T>(
             {
               key: asyncEntryKey,
               value: data,
-              version,
+              version: asyncVersion,
               metadata: getManifestMeta?.(data),
             },
           ],
@@ -247,42 +380,45 @@ export function createPersistentStorageHandle<T>(
         return;
       }
 
-      const key = getKey();
       if (key === false) return;
-
-      const entry: StorageCacheEntry<T> = {
-        data,
-        timestamp: Date.now(),
-        version,
-      };
-      adapter.write(key, entry);
-
       const sessionKey = config.getSessionKey();
-      if (sessionKey !== false) {
-        upsertManagedLocalStorageSingleEntry({
-          sessionKey,
-          storeName: config.storeName,
-          storageKey: key,
-          cleanupIntervalMs: config.cleanupIntervalMs,
-          maxAgeMs: LOCAL_STORAGE_MAX_AGE_MS,
-          lastAccessAt: entry.timestamp,
-          meta: getManifestMeta?.(data),
+      if (sessionKey === false) return;
+      const entry = createStorageCacheEntry(data, Date.now(), version);
+
+      if (adapter === 'local-sync') {
+        await runLocalStorageMutation(() => {
+          localPersistentStorage.write(key, entry);
+          localPersistentStorage.upsertSingleEntry({
+            storageKey: key,
+            lastAccessAt: entry.timestamp,
+            meta: preserveOfflineProtectionFlag(
+              sessionKey,
+              key,
+              getManifestMeta?.(data),
+              () =>
+                localPersistentStorage.readSingleEntryMetadataByPayload(key)
+                  ?.meta,
+            ),
+          });
+          recordLocalStorageTouch(key, entry.timestamp);
         });
+        return;
       }
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
     }
   }
 
   function scheduleSave(getData: () => T): void {
     clearTimer();
+
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
 
       try {
         void writeEntry(getData());
       } catch (error) {
-        config.onPersistentStorageError?.(error);
+        onPersistentStorageError?.(error);
       }
     }, DEBOUNCE_MS);
   }
@@ -305,10 +441,16 @@ export function createPersistentStorageHandle<T>(
 
       const key = getKey();
       if (key === false) return;
-      adapter.remove(key);
-      clearManagedLocalStorageRoot(getManagedLocalStorageRootKeyForSingle(key));
+
+      if (adapter === 'local-sync') {
+        await runLocalStorageMutation(() => {
+          localPersistentStorage.clearManifest(
+            localPersistentStorage.getManifestKeyForSingle(key),
+          );
+        });
+      }
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
     }
   }
 
@@ -388,17 +530,18 @@ export function createPersistentStorageNamespaceHandle<
     getManifestMeta?: (data: T, entryKey: string) => TMetadata | undefined;
   } = {},
 ): PersistentStorageNamespaceHandle<T, TMetadata> {
-  const version = config.version ?? 1;
+  const version = config.version;
+  const asyncVersion = version ?? 1;
+  const { onPersistentStorageError } = config;
   const adapter = config.adapter;
   const asyncNamespaceKind = ensureAsyncNamespaceKind(config.entryPrefix);
+  scheduleAdapterExpirationScan(adapter);
 
   function getPrefix(): string | false {
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return false;
 
-    const prefix = `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
-    registerManagedNamespaceRoot(adapter, config, prefix);
-    return prefix;
+    return `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
   }
 
   function getKey(entryKey: string): string | false {
@@ -422,9 +565,6 @@ export function createPersistentStorageNamespaceHandle<
 
   if (isAsyncStorageAdapter(adapter)) {
     void getAsyncNamespace();
-  } else if (adapter === localPersistentStorage) {
-    scheduleLocalStorageExpirationScanIfNeeded(adapter);
-    void getPrefix();
   }
 
   async function readEntry(
@@ -438,7 +578,7 @@ export function createPersistentStorageNamespaceHandle<
         const entry = await namespace.get(entryKey, { touch: 'never' });
         if (!entry) return null;
 
-        if (entry.metadata.version !== version) {
+        if (entry.metadata.version !== asyncVersion) {
           await namespace.commit({ removes: [entryKey] });
           return null;
         }
@@ -450,24 +590,20 @@ export function createPersistentStorageNamespaceHandle<
         };
       }
 
-      const key = getKey(entryKey);
-      if (key === false) return null;
-      if (readManagedLocalStorageEntryByPayload(key) === null) return null;
+      const prefix = getPrefix();
+      if (prefix === false) return null;
+      const key = `${prefix}${entryKey}`;
 
-      const entry = adapter.read<StorageCacheEntry<T>>(key);
-      if (!entry) return null;
-
-      if (entry.version !== version) {
-        scheduleIdleCleanup(() => {
-          adapter.remove(key);
-          removeManagedLocalStoragePayload(key);
+      if (adapter === 'local-sync') {
+        return readStorageEntryFromLocalStorageSync<T>(key, version, {
+          metadata: 'namespace',
+          namespacePrefix: prefix,
         });
-        return null;
       }
 
-      return entry;
+      return null;
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
       return null;
     }
   }
@@ -481,7 +617,7 @@ export function createPersistentStorageNamespaceHandle<
         const entry = await namespace.get(entryKey, { touch: 'coarse' });
         if (!entry) return null;
 
-        if (entry.metadata.version !== version) {
+        if (entry.metadata.version !== asyncVersion) {
           await namespace.commit({ removes: [entryKey] });
           return null;
         }
@@ -489,14 +625,25 @@ export function createPersistentStorageNamespaceHandle<
         return entry.value;
       }
 
-      const key = getKey(entryKey);
-      const entry = await readEntry(entryKey);
-      if (!key || !entry) return null;
+      const prefix = getPrefix();
+      if (prefix === false) return null;
 
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
+      const key = `${prefix}${entryKey}`;
+      const entry = await readEntry(entryKey);
+      if (!entry) return null;
+
+      if (adapter === 'local-sync') {
+        scheduleIdleCleanup(() =>
+          refreshLocalStorageTimestamp(key, {
+            metadata: 'namespace',
+            namespacePrefix: prefix,
+          }),
+        );
+      }
+
       return entry.data;
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
       return null;
     }
   }
@@ -514,7 +661,7 @@ export function createPersistentStorageNamespaceHandle<
 
         const values = entries.map((entry, index) => {
           if (!entry) return null;
-          if (entry.metadata.version !== version) {
+          if (entry.metadata.version !== asyncVersion) {
             const key = entryKeys[index];
             if (key !== undefined) {
               staleKeys.push(key);
@@ -533,12 +680,14 @@ export function createPersistentStorageNamespaceHandle<
 
       return Promise.all(entryKeys.map((entryKey) => load(entryKey)));
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
       return entryKeys.map(() => null);
     }
   }
 
   async function save(entryKey: string, data: T): Promise<void> {
+    const key = getKey(entryKey);
+
     try {
       if (isAsyncStorageAdapter(adapter)) {
         const namespace = getAsyncNamespace();
@@ -549,7 +698,7 @@ export function createPersistentStorageNamespaceHandle<
             {
               key: entryKey,
               value: data,
-              version,
+              version: asyncVersion,
               metadata: getManifestMeta?.(data, entryKey),
             },
           ],
@@ -557,33 +706,38 @@ export function createPersistentStorageNamespaceHandle<
         return;
       }
 
-      const key = getKey(entryKey);
-      const prefix = getPrefix();
-      if (key === false || prefix === false) return;
-
-      const entry: StorageCacheEntry<T> = {
-        data,
-        timestamp: Date.now(),
-        version,
-      };
-      adapter.write(key, entry);
-
+      if (key === false) return;
       const sessionKey = config.getSessionKey();
-      if (sessionKey !== false) {
-        upsertManagedLocalStorageNamespaceEntry({
-          sessionKey,
-          storeName: config.storeName,
-          storagePrefix: prefix,
-          entryKey,
-          payloadKey: key,
-          cleanupIntervalMs: config.cleanupIntervalMs,
-          maxAgeMs: LOCAL_STORAGE_MAX_AGE_MS,
-          lastAccessAt: entry.timestamp,
-          meta: getManifestMeta?.(data, entryKey),
+      if (sessionKey === false) return;
+      const entry = createStorageCacheEntry(data, Date.now(), version);
+
+      if (adapter === 'local-sync') {
+        await runLocalStorageMutation(() => {
+          localPersistentStorage.write(key, entry);
+          const prefix = getPrefix();
+          if (prefix === false) return;
+
+          localPersistentStorage.upsertNamespaceEntry({
+            storagePrefix: prefix,
+            entryKey,
+            lastAccessAt: entry.timestamp,
+            meta: preserveOfflineProtectionFlag(
+              sessionKey,
+              key,
+              getManifestMeta?.(data, entryKey),
+              () =>
+                localPersistentStorage.readNamespaceEntryMetadataByPayload(
+                  key,
+                  prefix,
+                )?.meta,
+            ),
+          });
+          recordLocalStorageTouch(key, entry.timestamp);
         });
+        return;
       }
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
     }
   }
 
@@ -596,12 +750,21 @@ export function createPersistentStorageNamespaceHandle<
         return;
       }
 
-      const key = getKey(entryKey);
-      if (key === false) return;
-      adapter.remove(key);
-      removeManagedLocalStoragePayload(key);
+      const prefix = getPrefix();
+      if (prefix === false) return;
+      const key = `${prefix}${entryKey}`;
+
+      if (adapter === 'local-sync') {
+        await runLocalStorageMutation(() => {
+          localPersistentStorage.remove(key, {
+            metadata: 'namespace',
+            namespacePrefix: prefix,
+          });
+        });
+        return;
+      }
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
     }
   }
 
@@ -637,40 +800,39 @@ export function createPersistentStorageNamespaceHandle<
           ? 0
           : Number(args.cursor) || 0;
 
-      const sortedEntries =
-        listManagedLocalStorageKeysSync(prefix)
-          ?.map((storageKey) => ({
-            key: storageKey.slice(prefix.length),
-            manifest: readManagedLocalStorageEntryByPayload(storageKey),
-          }))
-          .filter((entry) => entry.manifest !== null)
-          .sort((left, right) => {
-            if (order === 'key') {
-              return left.key.localeCompare(right.key);
-            }
+      const sortedEntries = localPersistentStorage
+        .listManifestEntries(prefix)
+        .filter((entry) => entry.entryKey !== undefined)
+        .sort((left, right) => {
+          if (order === 'key') {
+            return (left.entryKey ?? '').localeCompare(right.entryKey ?? '');
+          }
 
-            const direction = order === 'lru-asc' ? 1 : -1;
-            const leftLastAccessAt = left.manifest?.lastAccessAt ?? 0;
-            const rightLastAccessAt = right.manifest?.lastAccessAt ?? 0;
+          const direction = order === 'lru-asc' ? 1 : -1;
+          if (left.lastAccessAt !== right.lastAccessAt) {
+            return direction * (left.lastAccessAt - right.lastAccessAt);
+          }
 
-            if (leftLastAccessAt !== rightLastAccessAt) {
-              return direction * (leftLastAccessAt - rightLastAccessAt);
-            }
-
-            return left.key.localeCompare(right.key);
-          }) ?? [];
+          return (left.entryKey ?? '').localeCompare(right.entryKey ?? '');
+        });
 
       const pageEntries = sortedEntries
         .slice(offset, offset + limit)
-        .map(({ key, manifest }) => ({
-          ...(manifest?.meta
-            ? __LEGIT_CAST__<TMetadata, unknown>(manifest.meta)
-            : __LEGIT_CAST__<TMetadata, Record<string, never>>({})),
-          key,
-          lastAccessAt: manifest?.lastAccessAt ?? 0,
-          writtenAt: manifest?.lastAccessAt ?? 0,
-          version,
-        }));
+        .flatMap((entry) => {
+          if (entry.entryKey === undefined) return [];
+
+          return [
+            {
+              ...(entry.meta
+                ? __LEGIT_CAST__<TMetadata, unknown>(entry.meta)
+                : __LEGIT_CAST__<TMetadata, Record<string, never>>({})),
+              key: entry.entryKey,
+              lastAccessAt: entry.lastAccessAt,
+              writtenAt: entry.lastAccessAt,
+              version: asyncVersion,
+            },
+          ];
+        });
 
       return {
         entries: pageEntries,
@@ -680,7 +842,7 @@ export function createPersistentStorageNamespaceHandle<
             : String(offset + pageEntries.length),
       };
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
       return { entries: [], cursor: null };
     }
   }
@@ -703,6 +865,8 @@ export function createPersistentStorageNamespaceHandle<
   }
 
   async function clear(): Promise<void> {
+    const prefix = getPrefix();
+
     try {
       if (isAsyncStorageAdapter(adapter)) {
         const namespace = getAsyncNamespace();
@@ -711,18 +875,20 @@ export function createPersistentStorageNamespaceHandle<
         return;
       }
 
-      const prefix = getPrefix();
       if (prefix === false) return;
-      clearManagedLocalStorageRoot(
-        getManagedLocalStorageRootKeyForPrefix(prefix),
-      );
+
+      await runLocalStorageMutation(() => {
+        localPersistentStorage.clearManifest(
+          localPersistentStorage.getManifestKeyForPrefix(prefix),
+        );
+      });
     } catch (error) {
-      config.onPersistentStorageError?.(error);
+      onPersistentStorageError?.(error);
     }
   }
 
   function dispose(): void {
-    // No-op for namespaced handles.
+    // No-op for namespaced handles: debouncing lives in the store integrations.
   }
 
   return {
@@ -738,93 +904,82 @@ export function createPersistentStorageNamespaceHandle<
   };
 }
 
-export function readFromLocalStorageSync<T>(
-  key: string,
-  version: number,
-  schema: PersistentStorageSchema<T>,
-): T | null {
-  if (readManagedLocalStorageEntryByPayload(key) === null) {
-    return null;
-  }
-
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
-
-    const entryResult = rc_parse_json(raw, cacheEntrySchema);
-    if (!entryResult.ok) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
-      return null;
-    }
-
-    const entry = entryResult.value;
-    if (entry.version !== version) {
-      scheduleIdleCleanup(() => {
-        localStorage.removeItem(key);
-        removeManagedLocalStoragePayload(key);
-      });
-      return null;
-    }
-
-    const validated = validateWithSchema(schema, entry.data);
-    if (validated !== null) {
-      scheduleIdleCleanup(() => refreshLocalStorageTimestamp(key));
-    } else {
-      scheduleIdleCleanup(() => {
-        localStorage.removeItem(key);
-        removeManagedLocalStoragePayload(key);
-      });
-    }
-
-    return validated;
-  } catch {
-    scheduleIdleCleanup(() => {
-      localStorage.removeItem(key);
-      removeManagedLocalStoragePayload(key);
-    });
-    return null;
-  }
-}
-
 export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
-  version: number,
+  version: number | undefined,
+  options: LocalStorageMetadataOptions,
 ): StorageCacheEntry<T> | null {
-  if (readManagedLocalStorageEntryByPayload(key) === null) {
+  const metadata =
+    options.metadata === 'single'
+      ? localPersistentStorage.readSingleEntryMetadataByPayload(key)
+      : localPersistentStorage.readNamespaceEntryMetadataByPayload(
+          key,
+          options.namespacePrefix,
+        );
+  const raw = localPersistentStorage.readRaw(key);
+
+  function removeAndReturnNull(): null {
+    scheduleLocalStorageRemoval(key, options);
     return null;
   }
 
+  if (metadata === null) {
+    if (raw !== null) return removeAndReturnNull();
+    return null;
+  }
+
+  if (
+    Date.now() - metadata.lastAccessAt >
+    getManagedLocalStorageRuntimeConfig().maxAgeMs
+  ) {
+    return removeAndReturnNull();
+  }
+
+  if (raw === null) return removeAndReturnNull();
+
   try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return null;
-
     const result = rc_parse_json(raw, cacheEntrySchema);
-    if (!result.ok) {
-      scheduleIdleCleanup(() => localStorage.removeItem(key));
-      return null;
-    }
-
+    if (!result.ok) return removeAndReturnNull();
     const entry = result.value;
-    if (entry.version !== version) {
-      scheduleIdleCleanup(() => {
-        localStorage.removeItem(key);
-        removeManagedLocalStoragePayload(key);
-      });
-      return null;
+    if (!doesStorageEntryVersionMatch(entry.version, version)) {
+      return removeAndReturnNull();
     }
 
     return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
       entry,
     );
   } catch {
-    scheduleIdleCleanup(() => {
-      localStorage.removeItem(key);
-      removeManagedLocalStoragePayload(key);
-    });
-    return null;
+    return removeAndReturnNull();
   }
 }
 
+function doesStorageEntryVersionMatch(
+  entryVersion: number | undefined,
+  expectedVersion: number | undefined,
+): boolean {
+  if (expectedVersion === undefined) {
+    return entryVersion === undefined;
+  }
+
+  return entryVersion === expectedVersion;
+}
+
+function createStorageCacheEntry<T>(
+  data: T,
+  timestamp: number,
+  version: number | undefined,
+): StorageCacheEntry<T> {
+  if (version === undefined) {
+    return { data, timestamp };
+  }
+
+  return { data, timestamp, version };
+}
+
+/**
+ * Gets the storage key for a given session and store name.
+ * Exported for use by store persistence integrations.
+ */
 export function getStorageKeyForStore(
   sessionKey: string,
   storeName: string,
@@ -867,15 +1022,95 @@ export function createProtectedStorageKey(args: {
   });
 }
 
-export function listProtectedLocalStorageNamespaceKeys(
-  protectedStorageKeys: Set<string>,
-  prefix: string,
-): Set<string> {
-  return new Set(
-    [...protectedStorageKeys]
-      .filter((key) => key.startsWith(prefix))
-      .map((key) => key.slice(prefix.length)),
-  );
+export function readManifestPayloadMeta(meta: unknown): unknown {
+  if (typeof meta !== 'object' || meta === null || !('p' in meta)) {
+    return undefined;
+  }
+
+  return meta.p;
+}
+
+/** Clears all persistent storage entries for a given session key and adapter. */
+export async function clearSessionStorage(
+  sessionKey: string,
+  adapter: StorageAdapter,
+): Promise<void> {
+  if (adapter === 'local-sync') {
+    localPersistentStorage.clearSession(sessionKey);
+    return;
+  }
+
+  if (adapter instanceof OpfsAsyncStorageAdapter) {
+    await adapter.clearSession(sessionKey);
+  }
+}
+
+/** Clears all persistent storage entries for a given session key across built-in adapters. */
+export async function clearAllSessionStorage(
+  sessionKey: string,
+): Promise<void> {
+  await Promise.all([
+    clearSessionStorage(sessionKey, 'local-sync'),
+    clearSessionStorage(sessionKey, opfsPersistentStorage),
+  ]);
+}
+
+/**
+ * Refreshes the timestamp of a localStorage cache entry to track last access time.
+ * Used by store persistence setup functions after successful sync reads.
+ */
+export function refreshLocalStorageTimestamp(
+  key: string,
+  options: LocalStorageMetadataOptions,
+): void {
+  void localPersistentStorage.runLocked(() => {
+    refreshLocalStorageTimestampUnlocked(key, options);
+  });
+}
+
+async function runExpirationScan(
+  adapter: StorageAdapter,
+  _maxAgeMs: number,
+): Promise<void> {
+  if (adapter === 'local-sync') {
+    await localPersistentStorage.runMaintenance();
+  }
+}
+
+/** Resets expiration scan tracking. Exported for test cleanup. */
+export function resetExpirationScanTracking(): void {
+  cancelScheduledLocalStorageMaintenance?.();
+  cancelScheduledLocalStorageMaintenance = null;
+  localStorageGlobalMaintenanceRequested = false;
+  scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
+  localStorageExpirationScanScheduled = false;
+  scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
+  localStorageTouchTimestamps = new Map<string, number>();
+  resetManagedLocalStorageState();
+  if (opfsPersistentStorage instanceof OpfsAsyncStorageAdapter) {
+    opfsPersistentStorage.resetForTests();
+  }
+}
+
+export async function readProtectedStorageKeys(
+  adapter: StorageAdapter,
+  sessionKey: string,
+): Promise<Set<string>> {
+  if (adapter === 'local-sync') {
+    return localPersistentStorage.readProtectedStorageKeys(sessionKey);
+  }
+
+  if (!isAsyncStorageAdapter(adapter)) {
+    return new Set<string>();
+  }
+
+  const namespace = adapter.openNamespace<{ keys: string[] }>({
+    sessionKey,
+    storeName: '_o_.p',
+    kind: 'document',
+  });
+  const entry = await namespace.get('document', { touch: 'never' });
+  return new Set(entry?.value.keys ?? []);
 }
 
 function parseProtectedAsyncStorageKey(
@@ -903,97 +1138,6 @@ function parseProtectedAsyncStorageKey(
   }
 }
 
-export function listLocalStorageNamespaceEntryKeys(prefix: string): string[] {
-  return listLocalStorageKeysSync(prefix).map((storageKey) =>
-    storageKey.slice(prefix.length),
-  );
-}
-
-export function readLocalStorageNamespaceEntries<T>(
-  prefix: string,
-  version: number,
-): Array<{ key: string; entry: StorageCacheEntry<T> }> {
-  const entries: Array<{ key: string; entry: StorageCacheEntry<T> }> = [];
-
-  for (const storageKey of listLocalStorageKeysSync(prefix)) {
-    const entry = readStorageEntryFromLocalStorageSync<T>(storageKey, version);
-    if (!entry) continue;
-    entries.push({ key: storageKey.slice(prefix.length), entry });
-  }
-
-  return entries;
-}
-
-export function listLocalStorageKeysSync(prefix: string): string[] {
-  return listManagedLocalStorageKeysSync(prefix) ?? [];
-}
-
-export async function clearSessionStorage(
-  sessionKey: string,
-  adapter: StorageAdapter,
-): Promise<void> {
-  if (adapter === localPersistentStorage) {
-    clearManagedLocalStorageSession(sessionKey);
-    return;
-  }
-
-  if (adapter instanceof OpfsAsyncStorageAdapter) {
-    await adapter.clearSession(sessionKey);
-  }
-}
-
-export async function clearAllSessionStorage(
-  sessionKey: string,
-): Promise<void> {
-  await Promise.all([
-    clearSessionStorage(sessionKey, localPersistentStorage),
-    clearSessionStorage(sessionKey, opfsPersistentStorage),
-  ]);
-}
-
-export function refreshLocalStorageTimestamp(key: string): void {
-  if (touchManagedLocalStoragePayload(key)) return;
-
-  const raw = localStorage.getItem(key);
-  if (raw === null) return;
-
-  const result = rc_parse_json(raw, cacheEntrySchema);
-  if (!result.ok) return;
-
-  localStorage.setItem(
-    key,
-    JSON.stringify({ ...result.value, timestamp: Date.now() }),
-  );
-}
-
-export function resetExpirationScanTracking(): void {
-  scannedAdapters = new WeakSet<StorageAdapter>();
-  resetManagedLocalStorageState();
-  if (opfsPersistentStorage instanceof OpfsAsyncStorageAdapter) {
-    opfsPersistentStorage.resetForTests();
-  }
-}
-
-export async function readProtectedStorageKeys(
-  adapter: StorageAdapter,
-  sessionKey: string,
-): Promise<Set<string>> {
-  if (isAsyncStorageAdapter(adapter)) {
-    const namespace = adapter.openNamespace<{ keys: string[] }>({
-      sessionKey,
-      storeName: '__offline__',
-      kind: '__internal.protected',
-    });
-    const entry = await namespace.get('registry', { touch: 'never' });
-    return new Set(entry?.value.keys ?? []);
-  }
-
-  const entry = adapter.read<StorageCacheEntry<{ keys: string[] }>>(
-    `tsdf.${sessionKey}.__offline__.protected`,
-  );
-  return new Set(entry?.data.keys ?? []);
-}
-
 export async function readProtectedStorageNamespaceKeys(
   adapter: StorageAdapter,
   sessionKey: string | false,
@@ -1010,6 +1154,7 @@ export async function readProtectedStorageNamespaceKeys(
     adapter,
     sessionKey,
   );
+
   if (isAsyncStorageAdapter(adapter)) {
     const scope = args.asyncScope;
     if (!scope) return new Set<string>();
@@ -1034,8 +1179,11 @@ export async function readProtectedStorageNamespaceKeys(
     return new Set<string>();
   }
 
-  return listProtectedLocalStorageNamespaceKeys(
-    protectedStorageKeys,
-    args.localStoragePrefix,
+  const localStoragePrefix = args.localStoragePrefix;
+
+  return new Set(
+    [...protectedStorageKeys]
+      .filter((key) => key.startsWith(localStoragePrefix))
+      .map((key) => key.slice(localStoragePrefix.length)),
   );
 }

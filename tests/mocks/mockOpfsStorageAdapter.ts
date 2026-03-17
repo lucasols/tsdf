@@ -165,18 +165,19 @@ function buildCustomMetadata(
 
   switch (scope.kind) {
     case 'collection.item':
-      return 'payload' in value ? { payload: value.payload } : {};
+      return 'payload' in value ? { p: value.payload } : {};
     case 'listQuery.item':
-      return 'payload' in value ? { payload: value.payload } : {};
+      return 'payload' in value ? { p: value.payload } : {};
     case 'listQuery.query':
       return {
-        payload: 'payload' in value ? value.payload : undefined,
-        items: Array.isArray((value as PersistedListQueryData).items)
-          ? (value as PersistedListQueryData).items
-          : [],
-        hasMore:
-          'hasMore' in value &&
-          (value as PersistedListQueryData).hasMore === true,
+        ...('payload' in value ? { p: value.payload } : {}),
+        ...(Array.isArray((value as PersistedListQueryData).items)
+          ? { i: (value as PersistedListQueryData).items }
+          : {}),
+        ...('hasMore' in value &&
+        (value as PersistedListQueryData).hasMore === true
+          ? { h: true }
+          : {}),
       };
     default:
       return {};
@@ -188,11 +189,17 @@ type ParsedFlatKey = { scope: AsyncStorageNamespaceScope; key: string };
 function parseFlatStorageKey(key: string): ParsedFlatKey | null {
   let match =
     /^tsdf\.([^.]+)\.(.+?)\.collection\.item\.(.+)$/.exec(key) ??
+    /^tsdf\.([^.]+)\.(.+?)\.ci\.(.+)$/.exec(key) ??
     /^tsdf\.([^.]+)\.(.+?)\.listQuery\.item\.(.+)$/.exec(key) ??
+    /^tsdf\.([^.]+)\.(.+?)\.li\.(.+)$/.exec(key) ??
     /^tsdf\.([^.]+)\.(.+?)\.listQuery\.query\.(.+)$/.exec(key) ??
+    /^tsdf\.([^.]+)\.(.+?)\.lq\.(.+)$/.exec(key) ??
     /^tsdf\.([^.]+)\.(.+?)\.offline\.queue\.(.+)$/.exec(key) ??
+    /^tsdf\.([^.]+)\.(.+?)\.oq\.(.+)$/.exec(key) ??
     /^tsdf\.([^.]+)\.(.+?)\.offline\.conflict\.(.+)$/.exec(key) ??
-    /^tsdf\.([^.]+)\.(.+?)\.offline\.entity\.(.+)$/.exec(key);
+    /^tsdf\.([^.]+)\.(.+?)\.oc\.(.+)$/.exec(key) ??
+    /^tsdf\.([^.]+)\.(.+?)\.offline\.entity\.(.+)$/.exec(key) ??
+    /^tsdf\.([^.]+)\.(.+?)\.oe\.(.+)$/.exec(key);
 
   if (match) {
     const [fullMatch, sessionKey, storeName, entryKey] = match;
@@ -200,22 +207,28 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
       return null;
     }
 
-    const kind = fullMatch.includes('.collection.item.')
-      ? 'collection.item'
-      : fullMatch.includes('.listQuery.item.')
-        ? 'listQuery.item'
-        : fullMatch.includes('.listQuery.query.')
-          ? 'listQuery.query'
-          : fullMatch.includes('.offline.queue.')
-            ? 'offline.queue'
-            : fullMatch.includes('.offline.conflict.')
-              ? 'offline.conflict'
-              : 'offline.entity';
+    const kind =
+      fullMatch.includes('.collection.item.') || fullMatch.includes('.ci.')
+        ? 'collection.item'
+        : fullMatch.includes('.listQuery.item.') || fullMatch.includes('.li.')
+          ? 'listQuery.item'
+          : fullMatch.includes('.listQuery.query.') ||
+              fullMatch.includes('.lq.')
+            ? 'listQuery.query'
+            : fullMatch.includes('.offline.queue.') ||
+                fullMatch.includes('.oq.')
+              ? 'offline.queue'
+              : fullMatch.includes('.offline.conflict.') ||
+                  fullMatch.includes('.oc.')
+                ? 'offline.conflict'
+                : 'offline.entity';
 
     return { scope: { sessionKey, storeName, kind }, key: entryKey };
   }
 
-  match = /^tsdf\.([^.]+)\.__offline__\.protected$/.exec(key);
+  match =
+    /^tsdf\.([^.]+)\._o_\.p$/.exec(key) ??
+    /^tsdf\.([^.]+)\.__offline__\.protected$/.exec(key);
   if (match?.[1]) {
     return {
       scope: {
@@ -255,19 +268,19 @@ function getFlatKey(scope: AsyncStorageNamespaceScope, key: string): string {
         ? `tsdf.${scope.sessionKey}.__offline__.session`
         : `tsdf.${scope.sessionKey}.${scope.storeName}`;
     case 'collection.item':
-      return `tsdf.${scope.sessionKey}.${scope.storeName}.collection.item.${key}`;
+      return `tsdf.${scope.sessionKey}.${scope.storeName}.ci.${key}`;
     case 'listQuery.item':
-      return `tsdf.${scope.sessionKey}.${scope.storeName}.listQuery.item.${key}`;
+      return `tsdf.${scope.sessionKey}.${scope.storeName}.li.${key}`;
     case 'listQuery.query':
-      return `tsdf.${scope.sessionKey}.${scope.storeName}.listQuery.query.${key}`;
+      return `tsdf.${scope.sessionKey}.${scope.storeName}.lq.${key}`;
     case 'offline.queue':
-      return `tsdf.${scope.sessionKey}.${scope.storeName}.offline.queue.${key}`;
+      return `tsdf.${scope.sessionKey}.${scope.storeName}.oq.${key}`;
     case 'offline.conflict':
-      return `tsdf.${scope.sessionKey}.${scope.storeName}.offline.conflict.${key}`;
+      return `tsdf.${scope.sessionKey}.${scope.storeName}.oc.${key}`;
     case 'offline.entity':
-      return `tsdf.${scope.sessionKey}.${scope.storeName}.offline.entity.${key}`;
+      return `tsdf.${scope.sessionKey}.${scope.storeName}.oe.${key}`;
     case '__internal.protected':
-      return `tsdf.${scope.sessionKey}.__offline__.protected`;
+      return `tsdf.${scope.sessionKey}._o_.p`;
   }
 }
 
@@ -278,9 +291,9 @@ function getNamespacePrefix(scope: AsyncStorageNamespaceScope): string {
         ? `tsdf.${scope.sessionKey}.__offline__.`
         : `tsdf.${scope.sessionKey}.${scope.storeName}`;
     case '__internal.protected':
-      return `tsdf.${scope.sessionKey}.__offline__.protected`;
+      return `tsdf.${scope.sessionKey}._o_.p`;
     default:
-      return `tsdf.${scope.sessionKey}.${scope.storeName}.${scope.kind}.`;
+      return getFlatKey(scope, '');
   }
 }
 
@@ -314,7 +327,7 @@ function createScopeHelpers(
   }
 
   function collectionItemStorageKey(payload: string): string {
-    return `tsdf.${sessionKey}.${storeName}.collection.item.${collectionItemKey(payload)}`;
+    return `tsdf.${sessionKey}.${storeName}.ci.${collectionItemKey(payload)}`;
   }
 
   function listQueryItemPayload(tableId: string, id: number | string): string {
@@ -329,11 +342,11 @@ function createScopeHelpers(
     tableId: string,
     id: number | string,
   ): string {
-    return `tsdf.${sessionKey}.${storeName}.listQuery.item.${listQueryItemKey(tableId, id)}`;
+    return `tsdf.${sessionKey}.${storeName}.li.${listQueryItemKey(tableId, id)}`;
   }
 
   function listQueryStorageKey(params: unknown): string {
-    return `tsdf.${sessionKey}.${storeName}.listQuery.query.${getCompositeKey(params)}`;
+    return `tsdf.${sessionKey}.${storeName}.lq.${getCompositeKey(params)}`;
   }
 
   function readRequiredEntry<T>(key: string): T {
@@ -367,7 +380,15 @@ function createScopeHelpers(
           )?.data.data ?? null
         );
       },
+      getRawData(kind: 'entry' | 'manifest') {
+        if (kind === 'entry') {
+          return parseJson(storage.getRaw(documentStorageKey) ?? 'null');
+        }
+
+        return null;
+      },
     },
+    storage,
     collection: {
       itemKey: collectionItemKey,
       itemStorageKey: collectionItemStorageKey,
@@ -517,14 +538,6 @@ function applyInitialScope(
   }
 }
 
-type MetadataState = {
-  version: number;
-  writtenAt: number;
-  lastAccessAt: number;
-  sizeBytes: number;
-  customMetadata: Record<string, unknown>;
-};
-
 export function createMockOpfsStorageAdapter(
   options: MockOpfsStorageAdapterOptions & {
     storeName: string;
@@ -534,6 +547,15 @@ export function createMockOpfsStorageAdapter(
 export function createMockOpfsStorageAdapter(
   options?: MockOpfsStorageAdapterOptions,
 ): MockOpfsStorageAdapterBase;
+
+type MetadataState = {
+  version: number;
+  writtenAt: number;
+  lastAccessAt: number;
+  sizeBytes: number;
+  customMetadata: Record<string, unknown>;
+};
+
 export function createMockOpfsStorageAdapter({
   readDelayMs = 0,
   storeName,
@@ -565,7 +587,7 @@ export function createMockOpfsStorageAdapter({
   }
 
   async function readProtectedRefs(sessionKey: string): Promise<Set<string>> {
-    const registryKey = `tsdf.${sessionKey}.__offline__.protected`;
+    const registryKey = `tsdf.${sessionKey}._o_.p`;
     if (!persistentStore.storage.has(registryKey)) {
       return new Set();
     }
@@ -682,8 +704,7 @@ export function createMockOpfsStorageAdapter({
     if (
       !entry ||
       typeof entry !== 'object' ||
-      typeof entry.timestamp !== 'number' ||
-      typeof entry.version !== 'number'
+      typeof entry.timestamp !== 'number'
     ) {
       metadataByFlatKey.delete(flatKey);
       return;
@@ -691,7 +712,7 @@ export function createMockOpfsStorageAdapter({
 
     const raw = persistentStore.storage.getRaw(flatKey) ?? 'null';
     metadataByFlatKey.set(flatKey, {
-      version: entry.version,
+      version: typeof entry.version === 'number' ? entry.version : 1,
       writtenAt: entry.timestamp,
       lastAccessAt:
         metadataByFlatKey.get(flatKey)?.lastAccessAt ?? entry.timestamp,

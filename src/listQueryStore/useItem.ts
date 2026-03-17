@@ -171,7 +171,9 @@ export function useItem<
     }
 
     observe
-      .ifSelector((state) => state.itemQueries[result.itemStateKey]?.status)
+      .ifSelector((state) => {
+        return state.itemQueries[result.itemStateKey]?.status;
+      })
       .change.then(({ current }) => {
         if (current === 'success' || current === 'error') {
           emitIsLoadedEvt();

@@ -1,6 +1,12 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  createCompactListQueryLocalStorageEntry,
+  parseCompactListQueryLocalStorageEntry,
+} from '../../src/persistentStorage/compactListQueryLocalStorageEntry';
+import {
+  getManagedLocalStorageManifestKeyForSingle,
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
@@ -20,7 +26,27 @@ type ListQuerySeedItemOptions = StorageSeedOptions & {
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
 
-export const TEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+type GlobalMaintenanceState = { lastCleanupAt: number | null };
+
+function parseGlobalMaintenanceRaw(
+  raw: string | null,
+): GlobalMaintenanceState | null {
+  const maintenance = safeJsonParse(raw ?? 'null');
+  if (
+    typeof maintenance !== 'object' ||
+    maintenance === null ||
+    !('lca' in maintenance)
+  ) {
+    return null;
+  }
+
+  const { lca } = maintenance;
+  if (typeof lca !== 'number' && lca !== null) {
+    return null;
+  }
+
+  return { lastCleanupAt: lca };
+}
 
 type PersistentTestStoreStorage = {
   writeRaw: (key: string, raw: string) => void;
@@ -30,6 +56,7 @@ type PersistentTestStoreStorage = {
   listKeys: (prefix: string) => string[];
   has: (key: string) => boolean;
   getRaw: (key: string) => string | null;
+  getGlobalMaintenanceRaw: () => GlobalMaintenanceState | null;
   storageKind?: 'localStorage' | 'memory';
 };
 
@@ -51,7 +78,9 @@ export type PersistentTestStoreScope = {
     seed: <T>(data: T, options?: StorageSeedOptions) => string;
     readEntry: <T>() => StorageCacheEntry<PersistedDocumentData<T>>;
     readData: <T>() => T | null;
+    getRawData: (kind: 'entry' | 'manifest') => unknown;
   };
+  storage: PersistentTestStoreStorage;
   collection: {
     itemKey: (payload: string) => string;
     itemStorageKey: (payload: string) => string;
@@ -103,10 +132,14 @@ function createPersistentTestStore(
     data: T,
     options: StorageSeedOptions = {},
   ): StorageCacheEntry<T> {
+    if (options.version === undefined) {
+      return { data, timestamp: options.timestamp ?? Date.now() };
+    }
+
     return {
       data,
       timestamp: options.timestamp ?? Date.now(),
-      version: options.version ?? 1,
+      version: options.version,
     };
   }
 
@@ -121,7 +154,7 @@ function createPersistentTestStore(
     }
 
     function collectionItemStorageKey(payload: string): string {
-      return `tsdf.${sessionKey}.${storeName}.collection.item.${collectionItemKey(payload)}`;
+      return `tsdf.${sessionKey}.${storeName}.ci.${collectionItemKey(payload)}`;
     }
 
     function rawListQueryItemPayload(
@@ -139,11 +172,11 @@ function createPersistentTestStore(
       tableId: string,
       id: number | string,
     ): string {
-      return `tsdf.${sessionKey}.${storeName}.listQuery.item.${listQueryItemKey(tableId, id)}`;
+      return `tsdf.${sessionKey}.${storeName}.li.${listQueryItemKey(tableId, id)}`;
     }
 
     function listQueryStorageKey(params: unknown): string {
-      return `tsdf.${sessionKey}.${storeName}.listQuery.query.${getCompositeKey(params)}`;
+      return `tsdf.${sessionKey}.${storeName}.lq.${getCompositeKey(params)}`;
     }
 
     function normalizeQueryItemRef(item: ListQueryItemRef): string {
@@ -163,10 +196,7 @@ function createPersistentTestStore(
           storage.writeValue(documentStorageKey, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageSingleEntry({
-              sessionKey,
-              storeName,
               storageKey: documentStorageKey,
-              maxAgeMs: TEST_MAX_AGE_MS,
               lastAccessAt: entry.timestamp,
             });
           }
@@ -186,7 +216,19 @@ function createPersistentTestStore(
             )?.data.data ?? null
           );
         },
+        getRawData(kind: 'entry' | 'manifest') {
+          if (kind === 'entry') {
+            return safeJsonParse(storage.getRaw(documentStorageKey) ?? 'null');
+          }
+
+          return safeJsonParse(
+            storage.getRaw(
+              getManagedLocalStorageManifestKeyForSingle(documentStorageKey),
+            ) ?? 'null',
+          );
+        },
       },
+      storage,
       collection: {
         itemKey: collectionItemKey,
         itemStorageKey: collectionItemStorageKey,
@@ -199,14 +241,10 @@ function createPersistentTestStore(
           storage.writeValue(key, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
-              sessionKey,
-              storeName,
-              storagePrefix: `tsdf.${sessionKey}.${storeName}.collection.item.`,
+              storagePrefix: `tsdf.${sessionKey}.${storeName}.ci.`,
               entryKey: collectionItemKey(payload),
-              payloadKey: key,
-              maxAgeMs: TEST_MAX_AGE_MS,
               lastAccessAt: entry.timestamp,
-              meta: { payload },
+              meta: { p: payload },
             });
           }
 
@@ -246,14 +284,10 @@ function createPersistentTestStore(
           storage.writeValue(storageKey, entry);
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
-              sessionKey,
-              storeName,
-              storagePrefix: `tsdf.${sessionKey}.${storeName}.listQuery.item.`,
+              storagePrefix: `tsdf.${sessionKey}.${storeName}.li.`,
               entryKey: itemKey,
-              payloadKey: storageKey,
-              maxAgeMs: TEST_MAX_AGE_MS,
               lastAccessAt: entry.timestamp,
-              meta: { payload },
+              meta: { p: payload },
             });
           }
 
@@ -265,30 +299,30 @@ function createPersistentTestStore(
           options?: StorageSeedOptions & { hasMore?: boolean },
         ) {
           const key = listQueryStorageKey(params);
-          const entry = createCacheEntry<PersistedListQueryData>(
-            {
-              payload: params,
-              items: items.map(normalizeQueryItemRef),
-              hasMore: options?.hasMore ?? false,
-            },
-            options,
-          );
-          storage.writeValue(key, entry);
+          const persistedData = {
+            payload: params,
+            items: items.map(normalizeQueryItemRef),
+            hasMore: options?.hasMore ?? false,
+          } satisfies PersistedListQueryData;
+
           if (storage.storageKind === 'localStorage') {
-            upsertManagedLocalStorageNamespaceEntry({
-              sessionKey,
-              storeName,
-              storagePrefix: `tsdf.${sessionKey}.${storeName}.listQuery.query.`,
-              entryKey: getCompositeKey(params),
-              payloadKey: key,
-              maxAgeMs: TEST_MAX_AGE_MS,
-              lastAccessAt: entry.timestamp,
-              meta: {
-                payload: params,
-                items: entry.data.items,
-                hasMore: entry.data.hasMore,
-              },
-            });
+            storage.writeValue(
+              key,
+              createCompactListQueryLocalStorageEntry({
+                lastAccessAt: options?.timestamp ?? Date.now(),
+                items: persistedData.items,
+                payload: persistedData.payload,
+                hasMore: persistedData.hasMore,
+                offlineProtected: false,
+                version: options?.version,
+              }),
+            );
+          } else {
+            const entry = createCacheEntry<PersistedListQueryData>(
+              persistedData,
+              options,
+            );
+            storage.writeValue(key, entry);
           }
 
           return key;
@@ -306,10 +340,30 @@ function createPersistentTestStore(
           );
         },
         readQueryEntry(params: unknown) {
-          return readRequiredEntry<StorageCacheEntry<PersistedListQueryData>>(
-            storage,
-            listQueryStorageKey(params),
+          if (storage.storageKind !== 'localStorage') {
+            return readRequiredEntry<StorageCacheEntry<PersistedListQueryData>>(
+              storage,
+              listQueryStorageKey(params),
+            );
+          }
+
+          const storageKey = listQueryStorageKey(params);
+          const entry = parseCompactListQueryLocalStorageEntry(
+            storage.getRaw(storageKey),
           );
+          if (entry === null) {
+            throw new Error(`Missing persistent test entry for ${storageKey}`);
+          }
+
+          return {
+            data: {
+              payload: entry.payload,
+              items: entry.items,
+              hasMore: entry.hasMore,
+            },
+            timestamp: entry.lastAccessAt,
+            ...(entry.version !== undefined ? { version: entry.version } : {}),
+          };
         },
       },
     };
@@ -325,18 +379,6 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
     },
     writeValue<T>(key: string, value: T) {
       localStorage.setItem(key, JSON.stringify(value));
-      if (key.endsWith('.__offline__.protected')) {
-        const sessionKey = key.slice(
-          'tsdf.'.length,
-          -'.__offline__.protected'.length,
-        );
-        upsertManagedLocalStorageSingleEntry({
-          sessionKey,
-          storeName: '__offline__.protected',
-          storageKey: key,
-          maxAgeMs: TEST_MAX_AGE_MS,
-        });
-      }
     },
     readEntry<T>(key: string): T | null {
       const raw = localStorage.getItem(key);
@@ -364,6 +406,9 @@ export function createLocalStoragePersistentTestStore(): PersistentTestStore {
     },
     getRaw(key: string) {
       return localStorage.getItem(key);
+    },
+    getGlobalMaintenanceRaw() {
+      return parseGlobalMaintenanceRaw(localStorage.getItem('tsdf._m.g'));
     },
     storageKind: 'localStorage',
   });
@@ -396,6 +441,9 @@ export function createInMemoryPersistentTestStore(
     },
     getRaw(key: string) {
       return storageMap.get(key) ?? null;
+    },
+    getGlobalMaintenanceRaw() {
+      return parseGlobalMaintenanceRaw(storageMap.get('tsdf._m.g') ?? null);
     },
     storageKind: 'memory',
   });

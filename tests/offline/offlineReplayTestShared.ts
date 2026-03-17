@@ -74,9 +74,7 @@ export function getOfflineQueueEntries(
   storeName: string,
 ): Array<Record<string, unknown>> {
   return getLocalStorageKeys()
-    .filter((key) =>
-      key.startsWith(`tsdf.${sessionKey}.${storeName}.offline.queue.`),
-    )
+    .filter((key) => key.startsWith(`tsdf.${sessionKey}.${storeName}.oq.`))
     .map((key) => {
       const persistedValue = localStorage.getItem(key);
       if (!persistedValue) {

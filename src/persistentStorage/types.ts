@@ -9,24 +9,6 @@ import type {
   OfflineModeConfig,
 } from './offline/types';
 
-// --- Storage Adapter ---
-
-/** Sync adapter used when storage can be read during store initialization. */
-export type SyncStorageAdapter = {
-  /** Adapter mode marker used by persistence internals to pick sync behavior. */
-  kind: 'sync';
-  /** Read an entry immediately from storage. */
-  read<T>(key: string): T | null;
-  /** Persist an entry immediately to storage. */
-  write<T>(key: string, value: T): void;
-  /** Remove a single key from storage. */
-  remove(key: string): void;
-  /** Remove all keys that start with a prefix. */
-  removeByPrefix(prefix: string): void;
-  /** Return all matching keys in storage. */
-  listKeys(prefix: string): string[];
-};
-
 export type AsyncStorageNamespaceKind =
   | 'document'
   | 'collection.item'
@@ -153,7 +135,7 @@ export type AsyncStorageAdapter = {
 };
 
 /** Injected persistent storage adapter. */
-export type StorageAdapter = SyncStorageAdapter | AsyncStorageAdapter;
+export type StorageAdapter = 'local-sync' | AsyncStorageAdapter;
 
 export type StorageBackend = 'localStorage' | 'opfs';
 
@@ -195,8 +177,8 @@ export type StorageCacheEntry<T> = {
   data: T;
   /** Epoch timestamp used for age-based maintenance. */
   timestamp: number;
-  /** Persisted schema version for migration-safe hydration. */
-  version: number;
+  /** Optional user-configured cache version used for migration-safe hydration. */
+  version?: number;
 };
 
 /** Result entry returned by explicit persistent-storage preload APIs. */
@@ -213,20 +195,14 @@ export type PersistentStoragePreloadResult<
 
 /** Base config shared by all store types. */
 export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
-  /** Unique name for this store's persistent storage key. */
+  /** Unique name for this store's persistent storage key. Must not contain `.`. */
   storeName: string;
-  /** Injected adapter used to save and restore persistent data. */
+  /** Injected adapter used to save and restore persistent data. Use `'local-sync'` for built-in localStorage or provide a custom async adapter. */
   adapter: StorageAdapter;
   /** Schema used to validate cached data on load and optionally convert persisted data. */
   schema: PersistentStorageDataSchema<TFinal, TStorage>;
-  /** Version number for cache invalidation. Defaults to 1. */
+  /** Optional version number for cache invalidation. When omitted, no version is persisted or checked. */
   version?: number;
-  /**
-   * Throttles automatic background cleanup for the built-in localStorage adapter.
-   * Direct cleanup caused by malformed or version-mismatched entries is not delayed.
-   * Defaults to 24 hours. Use `0` to allow maintenance on every eligible init.
-   */
-  cleanupIntervalMs?: number;
   /**
    * Returns a session key scoping storage per org/tenant.
    * Return `false` to indicate the session is not ready — all storage

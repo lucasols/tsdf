@@ -12,7 +12,6 @@ import {
   vi,
 } from 'vitest';
 import type { ConvertedPersistentStorageDataSchema } from '../../src/persistentStorage/types';
-import { localPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -66,7 +65,7 @@ function createEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       storeName: options.storeName,
-      adapter: localPersistentStorage,
+      adapter: 'local-sync',
       schema: options.schema ?? createConvertedSchema(),
       onPersistentStorageError: options.onPersistentStorageError,
     },

@@ -34,7 +34,7 @@ function itemStorageKey(
   sessionKey: string,
   payload: string,
 ): string {
-  return `tsdf.${sessionKey}.${storeName}.collection.item.${itemKey(payload)}`;
+  return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
 }
 
 type ItemState = { id: string; name: string };
@@ -47,12 +47,15 @@ function setCachedCollectionItem(
   sessionKey: string,
   payload: string,
   data: PersistedItemState,
-  version = 1,
+  version: number | undefined = undefined,
 ): string {
   const key = itemStorageKey(storeName, sessionKey, payload);
   const entry: StorageCacheEntry<
     PersistedCollectionItemData<PersistedItemState>
-  > = { data: { data, payload }, timestamp: Date.now(), version };
+  > =
+    version === undefined
+      ? { data: { data, payload }, timestamp: Date.now() }
+      : { data: { data, payload }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 
@@ -95,20 +98,12 @@ afterEach(() => {
 describe('opfs: collection store persistence', () => {
   test('first hook read hydrates only the requested cached item and refetches', async () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
-    const hotKey = setCachedCollectionItem(
-      mockAdapter,
-      'col-opfs-hook',
-      'sess1',
-      '1',
-      { value: { id: '1', name: 'Cached' } },
-    );
-    const coldKey = setCachedCollectionItem(
-      mockAdapter,
-      'col-opfs-hook',
-      'sess1',
-      '2',
-      { value: { id: '2', name: 'Cold' } },
-    );
+    setCachedCollectionItem(mockAdapter, 'col-opfs-hook', 'sess1', '1', {
+      value: { id: '1', name: 'Cached' },
+    });
+    setCachedCollectionItem(mockAdapter, 'col-opfs-hook', 'sess1', '2', {
+      value: { id: '2', name: 'Cold' },
+    });
 
     const env = createEnv({
       storeName: 'col-opfs-hook',
@@ -136,8 +131,12 @@ describe('opfs: collection store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toContain(hotKey);
-    expect(mockAdapter.readRequests).not.toContain(coldKey);
+    expect(mockAdapter.readRequests).toContain(
+      'tsdf.sess1.col-opfs-hook.ci."1',
+    );
+    expect(mockAdapter.readRequests).not.toContain(
+      'tsdf.sess1.col-opfs-hook.ci."2',
+    );
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
