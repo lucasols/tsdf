@@ -320,32 +320,23 @@ export const localPersistentStorage: LocalPersistentStorage = {
   },
 
   /**
-   * Removes all keys beginning with the provided prefix from `localStorage`.
+   * Removes all manifest-managed keys for the provided namespace prefix.
    */
   removeByPrefix(prefix: string): void {
     const io = getManagedLocalStorageIoWithWarning();
     const manifestKey = getManagedLocalStorageManifestKeyForPrefix(prefix);
-    if (io.getItem(manifestKey) !== null) {
-      clearManagedLocalStorageManifest(manifestKey, io);
-      return;
-    }
+    if (io.getItem(manifestKey) === null) return;
 
-    for (const key of io.listKeys()) {
-      if (key.startsWith(prefix)) {
-        localPersistentStorage.remove(key);
-      }
-    }
+    clearManagedLocalStorageManifest(manifestKey, io);
   },
 
   /**
-   * Returns all keys in `localStorage` that start with the provided prefix.
+   * Returns all manifest-managed keys for the provided namespace prefix.
    */
   listKeys(prefix: string): string[] {
     const io = getManagedLocalStorageIoWithWarning();
     const managedKeys = listManagedLocalStorageKeysSync(prefix, io);
-    if (managedKeys !== null) return managedKeys;
-
-    return io.listKeys().filter((key) => key.startsWith(prefix));
+    return managedKeys ?? [];
   },
   getManifestKeyForSingle(storageKey: string): string {
     return getManagedLocalStorageManifestKeyForSingle(storageKey);

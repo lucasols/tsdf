@@ -137,27 +137,23 @@ describe('sync storage efficiency: list-query', () => {
       "
       time  |
       1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | 🔑[0] ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
-      .     | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)
-      .     | 🔑[2] ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)
-      .     | 🔑[3] ✅ #5 tsdf._m.g (global maintenance)
-      .     | ✍️ ❌->✅ #6 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry) | ❌ -> 0.21 kb
+      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry) | ❌ -> 0.21 kb
       .     | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.36 kb
       .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #7 tsdf.sess1.lq-query-metadata.li."third||1 (entry)
-      .     | ✍️ ❌->✅ #7 tsdf.sess1.lq-query-metadata.li."third||1 (entry) | ❌ -> 0.17 kb
+      .     | 📖 ❌ #4 tsdf.sess1.lq-query-metadata.li."third||1 (entry)
+      .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-query-metadata.li."third||1 (entry) | ❌ -> 0.17 kb
       .     | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.36 kb -> 0.55 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.12 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.12 kb
-      .     | 🔑[0] ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
+      .     | 🔑[0] ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
       .     | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)
-      .     | 🔑[2] ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)
-      .     | 🔑[3] ✅ #5 tsdf._m.g (global maintenance)
-      .     | 🔑[4] ✅ #6 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry)
-      .     | 🔑[5] ✅ #7 tsdf.sess1.lq-query-metadata.li."third||1 (entry)
+      .     | 🔑[2] ✅ #6 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (entry)
+      .     | 🔑[3] ✅ #7 tsdf._m.g (global maintenance)
+      .     | 🔑[4] ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (entry)
+      .     | 🔑[5] ✅ #4 tsdf.sess1.lq-query-metadata.li."third||1 (entry)
       .     | 🔑[6] ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
       .     | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.55 kb
-      .     | 🗑️ ✅->❌ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
+      .     | 🗑️ ✅->❌ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (entry)
       .     | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb
       "
     `);
