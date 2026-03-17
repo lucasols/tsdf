@@ -41,6 +41,7 @@ export type ManagedLocalStorageIo = {
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
   listKeys(): string[];
+  queueManifestWrite?(key: string, value: string | null): void;
 };
 
 export const directManagedLocalStorageIo: ManagedLocalStorageIo = {
@@ -112,6 +113,33 @@ function writeMetadataJson(
 
 function removeMetadataJson(key: string, io: ManagedLocalStorageIo): void {
   io.removeItem(key);
+}
+
+function writeManifestJson(
+  manifestKey: string,
+  value: unknown,
+  io: ManagedLocalStorageIo,
+): void {
+  const rawValue = JSON.stringify(value);
+
+  if (io.queueManifestWrite) {
+    io.queueManifestWrite(manifestKey, rawValue);
+    return;
+  }
+
+  io.setItem(manifestKey, rawValue);
+}
+
+function removeManifestJson(
+  manifestKey: string,
+  io: ManagedLocalStorageIo,
+): void {
+  if (io.queueManifestWrite) {
+    io.queueManifestWrite(manifestKey, null);
+    return;
+  }
+
+  io.removeItem(manifestKey);
 }
 
 function normalizeRootIdentityValue(value: string): string {
@@ -301,11 +329,11 @@ function writeManifest(
   io: ManagedLocalStorageIo,
 ): void {
   if (manifest.entries.length === 0) {
-    removeMetadataJson(manifestKey, io);
+    removeManifestJson(manifestKey, io);
     return;
   }
 
-  writeMetadataJson(
+  writeManifestJson(
     manifestKey,
     { e: manifest.entries.map(serializeStoredManifestEntry) },
     io,
@@ -885,7 +913,7 @@ function isOfflinePayloadKey(payloadKey: string): boolean {
 
 function runGenericCleanupForManifest(
   manifestKey: string,
-  knownKeys: Set<string>,
+  knownKeys: Set<string> | null,
   io: ManagedLocalStorageIo,
 ): void {
   const manifestLocation = parseManagedLocalStorageManifestKey(manifestKey);
@@ -912,7 +940,7 @@ function runGenericCleanupForManifest(
     );
     if (payloadKey === null) continue;
 
-    if (!knownKeys.has(payloadKey)) continue;
+    if (knownKeys !== null && !knownKeys.has(payloadKey)) continue;
 
     if (
       !isOfflinePayloadKey(payloadKey) &&
@@ -943,10 +971,7 @@ export async function runManagedLocalStorageMaintenance(
 
   const { manifestKeys, knownKeys } = runGlobalSweep
     ? collectManagedLocalStorageSweepTargets(io)
-    : {
-        manifestKeys: [...forcedManifestKeys],
-        knownKeys: new Set(io.listKeys()),
-      };
+    : { manifestKeys: [...forcedManifestKeys], knownKeys: null };
   const invokedCallbacks = new Set<() => Promise<void>>();
 
   for (const manifestKey of manifestKeys) {

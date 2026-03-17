@@ -10,6 +10,7 @@ import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
 } from './offline/types';
+import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import { readOwnMaterializedValue } from '../utils/readOwnMaterializedValue';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
@@ -173,6 +174,7 @@ export function setupCollectionPersistence<
   let unsubscribe: (() => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
+  let suppressedPersistedStateFlushes = 0;
   const pendingPreloads = new Map<string, Promise<boolean>>();
   const persistedSnapshotByKey = new Map<string, string>();
   const hydratedPersistedKeys = new Set<string>();
@@ -237,6 +239,18 @@ export function setupCollectionPersistence<
     hydratedPersistedKeys.delete(itemKey);
     persistedSnapshotByKey.delete(itemKey);
     knownPersistedKeys?.delete(itemKey);
+  }
+
+  function materializeHydratedItem(
+    itemKey: string,
+    item: TSFDCollectionItem<ItemState, ItemPayload>,
+  ): void {
+    if (!storeRef) return;
+
+    suppressedPersistedStateFlushes++;
+    storeRef.setState(
+      materializeCollectionStateEntry(storeRef.state, itemKey, item),
+    );
   }
 
   function parseHydratedItemSnapshot(
@@ -368,9 +382,7 @@ export function setupCollectionPersistence<
         return currentEntry.value !== null;
       }
 
-      storeRef.setState(
-        materializeCollectionStateEntry(storeRef.state, itemKey, validated),
-      );
+      materializeHydratedItem(itemKey, validated);
 
       return true;
     }
@@ -417,9 +429,7 @@ export function setupCollectionPersistence<
           return currentEntry.value !== null;
         }
 
-        storeRef.setState(
-          materializeCollectionStateEntry(storeRef.state, itemKey, validated),
-        );
+        materializeHydratedItem(itemKey, validated);
 
         return true;
       })
@@ -446,19 +456,17 @@ export function setupCollectionPersistence<
     const sessionKey = config.getSessionKey();
     const prefix = getCollectionPrefix();
     if (sessionKey === false || prefix === false) return;
-    const protectedStorageKeys = await readProtectedStorageKeys(
-      storageAdapter,
-      sessionKey,
-    );
-    const protectedItemKeys = new Set(
-      [...protectedStorageKeys]
-        .filter((key) => key.startsWith(prefix))
-        .map((key) => key.slice(prefix.length)),
-    );
 
     if (localStorageAdapter !== null) {
       const metadataEntries = localStorageAdapter.listManifestEntries(prefix);
       if (metadataEntries.length === 0) return;
+      const protectedItemKeys = new Set(
+        metadataEntries.flatMap((entry) =>
+          isManagedLocalStorageEntryOfflineProtected(entry.meta)
+            ? [entry.entryKey]
+            : [],
+        ),
+      );
 
       if (
         !hasIgnoreItemFilter &&
@@ -556,6 +564,16 @@ export function setupCollectionPersistence<
       );
       return;
     }
+
+    const protectedStorageKeys = await readProtectedStorageKeys(
+      storageAdapter,
+      sessionKey,
+    );
+    const protectedItemKeys = new Set(
+      [...protectedStorageKeys]
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => key.slice(prefix.length)),
+    );
 
     const keys = await namespace.listKeys();
     if (keys.length === 0) return;
@@ -795,6 +813,11 @@ export function setupCollectionPersistence<
     syncMaintenanceRegistration();
     storeRef = store;
     unsubscribe = store.subscribe(() => {
+      if (suppressedPersistedStateFlushes > 0) {
+        suppressedPersistedStateFlushes--;
+        return;
+      }
+
       schedulePersistedStateFlush();
     });
   }
@@ -804,6 +827,7 @@ export function setupCollectionPersistence<
     pendingPreloads.clear();
     hydratedPersistedKeys.clear();
     knownPersistedKeys = null;
+    suppressedPersistedStateFlushes = 0;
     clearSaveTimer();
     unsubscribe?.();
     unsubscribe = null;
@@ -818,6 +842,7 @@ export function setupCollectionPersistence<
   async function clear(): Promise<void> {
     clearSaveTimer();
     knownPersistedKeys = null;
+    suppressedPersistedStateFlushes = 0;
     persistedSnapshotByKey.clear();
     hydratedPersistedKeys.clear();
     await namespace.clear();

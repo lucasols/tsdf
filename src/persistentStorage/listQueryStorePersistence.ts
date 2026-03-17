@@ -357,6 +357,7 @@ export function setupListQueryPersistence<
   let unsubscribe: (() => void) | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
+  let suppressedPersistedStateFlushes = 0;
   const pendingItemPreloads = new Map<string, Promise<boolean>>();
   const pendingQueryPreloads = new Map<string, Promise<boolean>>();
   const itemSnapshotByKey = new Map<string, string>();
@@ -475,6 +476,34 @@ export function setupListQueryPersistence<
     hydratedPersistedQueryKeys.delete(queryKey);
     querySnapshotByKey.delete(queryKey);
     knownPersistedQueryKeys?.delete(queryKey);
+  }
+
+  function materializeHydratedItemState(
+    itemKey: string,
+    itemState: {
+      item: ItemState;
+      itemQuery: TSDFItemQuery<ItemPayload>;
+      loadedFields: string[];
+    },
+  ): void {
+    if (!storeRef) return;
+
+    suppressedPersistedStateFlushes++;
+    storeRef.setState(
+      materializeListQueryItemState(storeRef.state, itemKey, itemState),
+    );
+  }
+
+  function materializeHydratedQueryState(
+    queryKey: string,
+    query: TSFDListQuery<QueryPayload>,
+  ): void {
+    if (!storeRef) return;
+
+    suppressedPersistedStateFlushes++;
+    storeRef.setState(
+      materializeListQueryQueryState(storeRef.state, queryKey, query),
+    );
   }
 
   function parseHydratedItemSnapshot(
@@ -758,9 +787,7 @@ export function setupListQueryPersistence<
         readRememberedHydratedItem(itemKey) ?? readHydratedItem(itemKey);
       if (!itemState) return false;
 
-      storeRef.setState(
-        materializeListQueryItemState(storeRef.state, itemKey, itemState),
-      );
+      materializeHydratedItemState(itemKey, itemState);
 
       return true;
     }
@@ -800,9 +827,7 @@ export function setupListQueryPersistence<
           );
         }
 
-        storeRef.setState(
-          materializeListQueryItemState(storeRef.state, itemKey, itemState),
-        );
+        materializeHydratedItemState(itemKey, itemState);
 
         return true;
       })
@@ -852,17 +877,15 @@ export function setupListQueryPersistence<
         maxQuerySize,
       );
 
-      activeStore.setState(
-        materializeListQueryQueryState(activeStore.state, queryKey, {
-          error: null,
-          hasMore: limitedQuery.hasMore,
-          items: limitedQuery.itemKeys,
-          payload: persistedQuery.payload,
-          refetchOnMount: 'lowPriority',
-          status: 'success',
-          wasLoaded: true,
-        }),
-      );
+      materializeHydratedQueryState(queryKey, {
+        error: null,
+        hasMore: limitedQuery.hasMore,
+        items: limitedQuery.itemKeys,
+        payload: persistedQuery.payload,
+        refetchOnMount: 'lowPriority',
+        status: 'success',
+        wasLoaded: true,
+      });
 
       return true;
     }
@@ -909,6 +932,7 @@ export function setupListQueryPersistence<
           maxQuerySize,
         );
 
+        suppressedPersistedStateFlushes++;
         activeStore.setState(
           materializeListQueryQueryState(activeStore.state, queryKey, {
             error: null,
@@ -1676,6 +1700,11 @@ export function setupListQueryPersistence<
     syncMaintenanceRegistration();
     storeRef = store;
     unsubscribe = store.subscribe(() => {
+      if (suppressedPersistedStateFlushes > 0) {
+        suppressedPersistedStateFlushes--;
+        return;
+      }
+
       schedulePersistedStateFlush();
     });
   }
@@ -1688,6 +1717,7 @@ export function setupListQueryPersistence<
     hydratedPersistedQueryKeys.clear();
     knownPersistedItemKeys = null;
     knownPersistedQueryKeys = null;
+    suppressedPersistedStateFlushes = 0;
     clearSaveTimer();
     unsubscribe?.();
     unsubscribe = null;
@@ -1706,6 +1736,7 @@ export function setupListQueryPersistence<
     clearSaveTimer();
     knownPersistedItemKeys = null;
     knownPersistedQueryKeys = null;
+    suppressedPersistedStateFlushes = 0;
     itemSnapshotByKey.clear();
     querySnapshotByKey.clear();
     hydratedPersistedItemKeys.clear();

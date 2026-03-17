@@ -199,10 +199,10 @@ describe('localStorage adapter', () => {
     expect(timelineString).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
-      .    | ✍️ ✅->✅ tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb -> 0.05 kb ⚠️ UNCHANGED
+      0    | 📖 ✅ #1 tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ #1 tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ #1 tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.single-fast-path.m (root, single, manifest) | 0.05 kb -> 0.05 kb ⚠️ UNCHANGED
       "
     `);
     expect(globalMaintenanceReads).toHaveLength(0);

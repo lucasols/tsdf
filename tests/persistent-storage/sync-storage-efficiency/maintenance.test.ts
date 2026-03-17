@@ -66,18 +66,18 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ tsdf.sess1.expired-doc (entry)
-      .    | 🔑[1] ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
-      .    | 🔑[2] ✅ tsdf.sess1.fresh-doc (entry)
-      .    | 🔑[3] ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest)
-      .    | 🔑[4] ✅ external-cache
-      .    | 🔑[5] ✅ feature-flag
-      .    | 📖 ✅ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.05 kb
-      .    | 🗑️ ✅->❌ tsdf.sess1.expired-doc (entry)
-      .    | 🗑️ ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
-      .    | 📖 ✅ tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.05 kb
-      .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
+      .    | 🔑[0] ✅ #2 tsdf.sess1.expired-doc (entry)
+      .    | 🔑[1] ✅ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
+      .    | 🔑[2] ✅ #4 tsdf.sess1.fresh-doc (entry)
+      .    | 🔑[3] ✅ #5 tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest)
+      .    | 🔑[4] ✅ #6 external-cache
+      .    | 🔑[5] ✅ #7 feature-flag
+      .    | 📖 ✅ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.05 kb
+      .    | 🗑️ ✅->❌ #2 tsdf.sess1.expired-doc (entry)
+      .    | 📖 ✅ #5 tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | 🗑️ ✅->❌ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
       "
     `);
 
@@ -109,14 +109,14 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ tsdf.sess1.corrupted (entry)
-      .    | 🔑[1] ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)
-      .    | 🔑[2] ✅ tsdf.sess1.trigger (entry)
-      .    | 🔑[3] ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest)
-      .    | 📖 ✅ tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.05 kb
-      .    | ✍️ ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
+      .    | 🔑[0] ✅ #2 tsdf.sess1.corrupted (entry)
+      .    | 🔑[1] ✅ #3 tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)
+      .    | 🔑[2] ✅ #4 tsdf.sess1.trigger (entry)
+      .    | 🔑[3] ✅ #5 tsdf._m.r.s:sess1.trigger.m (root, single, manifest)
+      .    | 📖 ✅ #3 tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ #5 tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.05 kb
+      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
   });
@@ -229,26 +229,26 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      190ms | 📖 ✅ tsdf._m.g (global maintenance) | 0.04 kb
-      .     | 🔑[0] ✅ tsdf.user@example.com.protected-doc (entry)
-      .     | 🔑[1] ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest)
-      .     | 🔑[2] ✅ tsdf._m.g (global maintenance)
-      .     | 🔑[3] ✅ tsdf.user@example.com.unprotected-doc (entry)
-      .     | 🔑[4] ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 🔑[5] ✅ tsdf.user@example.com._o_.s (entry, offline session status)
-      .     | 🔑[6] ✅ tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status)
-      .     | 🔑[7] ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue)
-      .     | 🔑[8] ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue)
-      .     | 🔑[9] ✅ tsdf.user@example.com.protected-doc.oe.document (entry, offline entity)
-      .     | 🔑[10] ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
-      .     | 🔑[11] ✅ tsdf.sess-trigger.trigger-doc (entry)
-      .     | 🔑[12] ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.07 kb
-      .     | 📖 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.05 kb
-      .     | 🗑️ ✅->❌ tsdf.user@example.com.unprotected-doc (entry)
-      .     | 🗑️ ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 📖 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.05 kb
-      .     | ✍️ ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
+      190ms | 📖 ✅ #1 tsdf._m.g (global maintenance) | 0.04 kb
+      .     | 🔑[0] ✅ #2 tsdf.user@example.com.protected-doc (entry)
+      .     | 🔑[1] ✅ #3 tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest)
+      .     | 🔑[2] ✅ #1 tsdf._m.g (global maintenance)
+      .     | 🔑[3] ✅ #4 tsdf.user@example.com.unprotected-doc (entry)
+      .     | 🔑[4] ✅ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
+      .     | 🔑[5] ✅ #6 tsdf.user@example.com._o_.s (entry, offline session status)
+      .     | 🔑[6] ✅ #7 tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status)
+      .     | 🔑[7] ✅ #8 tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue)
+      .     | 🔑[8] ✅ #9 tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue)
+      .     | 🔑[9] ✅ #10 tsdf.user@example.com.protected-doc.oe.document (entry, offline entity)
+      .     | 🔑[10] ✅ #11 tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
+      .     | 🔑[11] ✅ #12 tsdf.sess-trigger.trigger-doc (entry)
+      .     | 🔑[12] ✅ #13 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
+      .     | 📖 ✅ #3 tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.07 kb
+      .     | 📖 ✅ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.05 kb
+      .     | 🗑️ ✅->❌ #4 tsdf.user@example.com.unprotected-doc (entry)
+      .     | 📖 ✅ #13 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.05 kb
+      .     | ✍️ ✅->✅ #1 tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
+      .     | 🗑️ ✅->❌ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
       "
     `);
     expect(

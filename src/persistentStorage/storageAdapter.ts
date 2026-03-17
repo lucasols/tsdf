@@ -30,6 +30,7 @@ import {
   upsertManagedLocalStorageSingleEntry,
   type ManagedLocalStorageIo,
 } from './localStorageMetadata';
+import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type { AsyncStorageAdapter } from './types';
 
 const MANAGED_LOCAL_STORAGE_LOCK_NAME = 'tsdf-local-storage-metadata';
@@ -44,6 +45,8 @@ function createCachedManagedLocalStorageIo(): {
 } {
   const VALUE_NOT_LOADED = Symbol('VALUE_NOT_LOADED');
   const cache = new Map<string, string | null | typeof VALUE_NOT_LOADED>();
+  const pendingManifestWrites = new Map<string, string | null>();
+  let cancelPendingManifestFlush: (() => void) | null = null;
   let active = true;
   let allKeysLoaded = false;
 
@@ -58,8 +61,37 @@ function createCachedManagedLocalStorageIo(): {
     }
   }
 
+  function flushPendingManifestWrites(): void {
+    if (cancelPendingManifestFlush !== null) {
+      cancelPendingManifestFlush();
+      cancelPendingManifestFlush = null;
+    }
+
+    if (pendingManifestWrites.size === 0) return;
+
+    for (const [key, value] of pendingManifestWrites) {
+      if (value === null) {
+        localStorage.removeItem(key);
+      } else {
+        localStorage.setItem(key, value);
+      }
+    }
+
+    pendingManifestWrites.clear();
+  }
+
+  function schedulePendingManifestFlush(): void {
+    if (!active || cancelPendingManifestFlush !== null) return;
+
+    cancelPendingManifestFlush = scheduleIdleCleanup(() => {
+      cancelPendingManifestFlush = null;
+      flushPendingManifestWrites();
+    });
+  }
+
   return {
     deactivate() {
+      flushPendingManifestWrites();
       active = false;
       cache.clear();
     },
@@ -105,6 +137,20 @@ function createCachedManagedLocalStorageIo(): {
         }
 
         return keys;
+      },
+      queueManifestWrite(key, value) {
+        if (!active) {
+          if (value === null) {
+            localStorage.removeItem(key);
+          } else {
+            localStorage.setItem(key, value);
+          }
+          return;
+        }
+
+        cache.set(key, value);
+        pendingManifestWrites.set(key, value);
+        schedulePendingManifestFlush();
       },
     },
   };

@@ -90,13 +90,17 @@ function describeOfflineStorageType(value: string): string | null {
   return null;
 }
 
-function formatPersistentStorageKey(key: string | null): string {
+function formatPersistentStorageKey(
+  key: string | null,
+  keyId: number | undefined,
+): string {
   if (typeof key !== 'string') return '<non-string>';
 
+  const idPrefix = keyId !== undefined ? `#${keyId} ` : '';
   const description = describePersistentStorageKey(key);
-  if (description === null) return key;
+  if (description === null) return `${idPrefix}${key}`;
 
-  return `${key} (${description})`;
+  return `${idPrefix}${key} (${description})`;
 }
 
 function formatByteSize(byteSize: number): string {
@@ -142,12 +146,21 @@ export type PersistentStorageOperation =
   | { time: number; type: 'key'; index: number; key: string | null }
   | { time: number; type: 'clear' };
 
+function getOperationKey(operation: PersistentStorageOperation): string | null {
+  if (operation.type === 'clear') return null;
+  return operation.key;
+}
+
 function formatPersistentStorageOperation(
   operation: PersistentStorageOperation,
+  keyIdMap: Map<string, number>,
 ): string {
+  const key = getOperationKey(operation);
+  const keyId = key !== null ? keyIdMap.get(key) : undefined;
+
   switch (operation.type) {
     case 'getItem': {
-      const base = `📖 ${operation.exists ? '✅' : '❌'} ${formatPersistentStorageKey(operation.key)}`;
+      const base = `📖 ${operation.exists ? '✅' : '❌'} ${formatPersistentStorageKey(operation.key, keyId)}`;
       if (operation.valueByteSize !== null) {
         return `${base} | ${formatByteSize(operation.valueByteSize)}`;
       }
@@ -155,7 +168,7 @@ function formatPersistentStorageOperation(
     }
     case 'setItem': {
       const unchangedFlag = !operation.valueChanged ? ' ⚠️ UNCHANGED' : '';
-      const base = `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅ ${formatPersistentStorageKey(operation.key)}`;
+      const base = `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅ ${formatPersistentStorageKey(operation.key, keyId)}`;
       const before =
         operation.valueByteSizeBefore !== null
           ? formatByteSize(operation.valueByteSizeBefore)
@@ -163,9 +176,9 @@ function formatPersistentStorageOperation(
       return `${base} | ${before} -> ${formatByteSize(operation.valueByteSizeAfter)}${unchangedFlag}`;
     }
     case 'removeItem':
-      return `🗑️ ${operation.existsBefore ? '✅' : '❌'}->❌ ${formatPersistentStorageKey(operation.key)}`;
+      return `🗑️ ${operation.existsBefore ? '✅' : '❌'}->❌ ${formatPersistentStorageKey(operation.key, keyId)}`;
     case 'key':
-      return `🔑[${operation.index}] ${operation.key === null ? '❌' : '✅'} ${formatPersistentStorageKey(operation.key)}`;
+      return `🔑[${operation.index}] ${operation.key === null ? '❌' : '✅'} ${formatPersistentStorageKey(operation.key, keyId)}`;
     case 'clear':
       return '🧹';
   }
@@ -196,6 +209,16 @@ export function getPersistentStorageOperationTimelineString(
 ): string {
   if (operations.length === 0) return 'empty';
 
+  const keyIdMap = new Map<string, number>();
+  let nextKeyId = 1;
+
+  for (const operation of operations) {
+    const key = getOperationKey(operation);
+    if (key !== null && !keyIdMap.has(key)) {
+      keyIdMap.set(key, nextKeyId++);
+    }
+  }
+
   const rows: Array<{ cols: string[] }> = [{ cols: ['time', ''] }];
   let previousTime: number | undefined;
 
@@ -203,7 +226,7 @@ export function getPersistentStorageOperationTimelineString(
     rows.push({
       cols: [
         formatRelativeTime(operation.time, previousTime),
-        formatPersistentStorageOperation(operation),
+        formatPersistentStorageOperation(operation, keyIdMap),
       ],
     });
     previousTime = operation.time;
