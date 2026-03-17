@@ -855,13 +855,13 @@ describe('sync storage efficiency: list-query', () => {
       - { id: 1, name: 'Fresh user' }
     `);
     expect(
-      persistentStore
-        .scope(storeName, sessionKey)
-        .listQuery.readQueryEntry(usersQuery).data,
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"}',
+      ),
     ).toMatchInlineSnapshot(`
-      hasMore: '❌'
-      items: ['"users||1']
-      payload: { tableId: 'users' }
+      a: 1735689604100
+      i: ['"users||1']
+      p: { tableId: 'users' }
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
@@ -870,6 +870,89 @@ describe('sync storage efficiency: list-query', () => {
       .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-invalidation-flow.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      "
+    `);
+  });
+
+  test('repeated invalidations within the debounce window coalesce list-query persistence writes', async () => {
+    const storeName = 'lq-coalesced-invalidations';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fresh user 1' }] },
+    });
+
+    // Hydrate cached data first so only the invalidation writes are counted below.
+    await settleStartupBackgroundScan();
+    const hook = renderHook(() =>
+      env.apiStore.useListQuery(usersQuery, {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+
+    // Let the first refetch finish, but stay inside the debounced persistence window.
+    const firstInvalidationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.serverTable.updateItem('users||1', { name: 'Fresh user 1' });
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: usersQuery,
+        itemPayload: false,
+      });
+    });
+    await advanceTime(900);
+    const firstInvalidationOperations =
+      firstInvalidationCapture.finish().timelineString;
+
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      - { id: 1, name: 'Fresh user 1' }
+    `);
+    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+
+    // A second invalidation before the first debounce flush should replace the pending save.
+    const secondInvalidationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.serverTable.updateItem('users||1', { name: 'Fresh user 2' });
+      env.apiStore.invalidateQueryAndItems({
+        queryPayload: usersQuery,
+        itemPayload: false,
+      });
+    });
+    await advanceTime(1900);
+    await flushAllTimers();
+    const secondInvalidationOperations =
+      secondInvalidationCapture.finish().timelineString;
+
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      - { id: 1, name: 'Fresh user 2' }
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readItemData('users', 1),
+    ).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Fresh user 2'
+    `);
+    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m (root, namespace, manifest) | 0.12 kb
+      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-coalesced-invalidations.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
+      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m (root, namespace, manifest) | 0.12 kb
+      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
       "
     `);
   });

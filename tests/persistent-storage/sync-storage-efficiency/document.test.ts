@@ -247,6 +247,73 @@ describe('sync storage efficiency: document', () => {
     `);
   });
 
+  test('repeated invalidations within the debounce window coalesce document persistence writes', async () => {
+    const storeName = 'doc-coalesced-invalidations';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 8,
+    });
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Hydrate cached data first so only the invalidation writes are counted below.
+    await settleStartupBackgroundScan();
+    const hook = renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+
+    // Let the first refetch finish, but stay inside the debounced persistence window.
+    const firstInvalidationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.setServerData({ name: 'Fresh document 1', value: 41 });
+      env.apiStore.invalidateData('highPriority');
+    });
+    await advanceTime(900);
+    const firstInvalidationOperations =
+      firstInvalidationCapture.finish().timelineString;
+
+    expect(hook.result.current.data).toMatchInlineSnapshot(`
+      value: { name: 'Fresh document 1', value: 41 }
+    `);
+    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+
+    // A second invalidation before the first debounce flush should replace the pending save.
+    const secondInvalidationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.setServerData({ name: 'Fresh document 2', value: 42 });
+      env.apiStore.invalidateData('highPriority');
+    });
+    await advanceTime(1900);
+    await flushAllTimers();
+    const secondInvalidationOperations =
+      secondInvalidationCapture.finish().timelineString;
+
+    expect(hook.result.current.data).toMatchInlineSnapshot(`
+      value: { name: 'Fresh document 2', value: 42 }
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .document.readData<{ value: { name: string; value: number } }>(),
+    ).toMatchInlineSnapshot(`
+      value: { name: 'Fresh document 2', value: 42 }
+    `);
+    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      1.81s | ✍️ ✅->✅ #1 tsdf.sess1.doc-coalesced-invalidations (entry) | 0.18 kb -> 0.18 kb
+      .     | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m (root, single, manifest) | 0.05 kb
+      .     | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m (root, single, manifest) | 0.05 kb -> 0.05 kb
+      "
+    `);
+  });
+
   test('document invalidation preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'doc-offline-marker-flow';
     const sessionKey = 'sess1';

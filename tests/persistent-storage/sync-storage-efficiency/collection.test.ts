@@ -506,6 +506,76 @@ describe('sync storage efficiency: collection', () => {
     `);
   });
 
+  test('repeated invalidations within the debounce window coalesce collection persistence writes', async () => {
+    const storeName = 'col-coalesced-invalidations';
+    const sessionKey = 'sess1';
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached user' },
+    });
+
+    const env = createCollectionEnv({
+      storeName,
+      sessionKey,
+      serverData: { '1': { id: '1', name: 'Fresh user 1' } },
+    });
+
+    // Hydrate cached data first so only the invalidation writes are counted below.
+    await settleStartupBackgroundScan();
+    const hook = renderHook(() =>
+      env.apiStore.useItem('1', {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushInvalidationPersistence(0);
+
+    // Let the first refetch finish, but stay inside the debounced persistence window.
+    const firstInvalidationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.serverTable.setItem('1', { id: '1', name: 'Fresh user 1' });
+      env.apiStore.invalidateItem('1');
+    });
+    await advanceTime(900);
+    const firstInvalidationOperations =
+      firstInvalidationCapture.finish().timelineString;
+
+    expect(hook.result.current.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Fresh user 1' }
+    `);
+    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
+
+    // A second invalidation before the first debounce flush should replace the pending save.
+    const secondInvalidationCapture = startPersistentStorageOperationCapture();
+    act(() => {
+      env.serverTable.setItem('1', { id: '1', name: 'Fresh user 2' });
+      env.apiStore.invalidateItem('1');
+    });
+    await advanceTime(1900);
+    await flushAllTimers();
+    const secondInvalidationOperations =
+      secondInvalidationCapture.finish().timelineString;
+
+    expect(hook.result.current.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Fresh user 2' }
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .collection.readItemData<{ value: { id: string; name: string } }>('1'),
+    ).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Fresh user 2' }
+    `);
+    expect(secondInvalidationOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m (root, namespace, manifest) | 0.09 kb
+      .     | ✍️ ✅->✅ #2 tsdf.sess1.col-coalesced-invalidations.ci."1 (collection entry) | 0.19 kb -> 0.20 kb
+      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m (root, namespace, manifest) | 0.09 kb -> 0.09 kb
+      "
+    `);
+  });
+
   test('hook remount reuses hydrated collection state without touching localStorage again', async () => {
     const storeName = 'col-remount-flow';
     const sessionKey = 'sess1';
