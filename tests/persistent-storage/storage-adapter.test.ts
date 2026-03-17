@@ -289,6 +289,34 @@ describe('localStorage adapter', () => {
       `);
   });
 
+  test('single-entry metadata reads pick up external manifest updates instead of serving stale cached data', () => {
+    const storageKey = createLocalStoragePersistentTestStore()
+      .scope('single-external-sync', 'sess1')
+      .document.seed({ value: { name: 'cached', value: 1 } });
+    const manifestKey =
+      localPersistentStorage.getManifestKeyForSingle(storageKey);
+
+    // First read warms the current runtime's metadata path.
+    expect(localPersistentStorage.readSingleEntryMetadataByPayload(storageKey))
+      .toMatchInlineSnapshot(`
+        lastAccessAt: 1735689600000
+        payloadKey: 'tsdf.sess1.single-external-sync'
+      `);
+
+    // Simulate another tab rewriting the manifest directly in localStorage.
+    localStorage.setItem(
+      manifestKey,
+      JSON.stringify({ e: [{ a: 2, o: true }] }),
+    );
+
+    expect(localPersistentStorage.readSingleEntryMetadataByPayload(storageKey))
+      .toMatchInlineSnapshot(`
+        lastAccessAt: 2
+        meta: { o: '✅' }
+        payloadKey: 'tsdf.sess1.single-external-sync'
+      `);
+  });
+
   test('locked metadata cache stays coherent across awaits until the lock is released', async () => {
     const prefix = 'tsdf.sess1.awaited-lock.ci.';
     const manifestKey = localPersistentStorage.getManifestKeyForPrefix(prefix);

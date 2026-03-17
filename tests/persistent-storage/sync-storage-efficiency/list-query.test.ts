@@ -285,6 +285,110 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
+  test('direct getQueryState touch preserves offline markers added by another tab before item and query manifest updates', async () => {
+    const storeName = 'lq-direct-touch-offline-marker';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const listQueryScope = persistentStore.scope(storeName, sessionKey);
+    const itemStorageKey = listQueryScope.listQuery.itemStorageKey('users', 1);
+    const queryStorageKey =
+      listQueryScope.listQuery.queryStorageKey(usersQuery);
+    const itemManifestKey = localPersistentStorage.getManifestKeyForPrefix(
+      `tsdf.${sessionKey}.${storeName}.li.`,
+    );
+    const queryManifestKey = localPersistentStorage.getManifestKeyForPrefix(
+      `tsdf.${sessionKey}.${storeName}.lq.`,
+    );
+
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the later touches only come from the direct read path.
+    await settleStartupBackgroundScan();
+
+    // Reading the query schedules timestamp touches for both the query and its hydrated item.
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+
+    // Simulate another tab marking both manifests as offline-protected before the touches run.
+    const currentItemManifest = getParsedLocalStorageValue<{
+      e: Array<Record<string, unknown>>;
+      v: number;
+    }>(itemManifestKey);
+    const currentQueryManifest = getParsedLocalStorageValue<{
+      e: Array<Record<string, unknown>>;
+      v: number;
+    }>(queryManifestKey);
+
+    localStorage.setItem(
+      itemManifestKey,
+      JSON.stringify({
+        ...currentItemManifest,
+        e: currentItemManifest?.e.map((entry) => ({ ...entry, o: true })),
+      }),
+    );
+    localStorage.setItem(
+      queryManifestKey,
+      JSON.stringify({
+        ...currentQueryManifest,
+        e: currentQueryManifest?.e.map((entry) => ({ ...entry, o: true })),
+      }),
+    );
+
+    await flushAllTimers();
+
+    expect(
+      localPersistentStorage.readNamespaceEntryMetadataByPayload(
+        itemStorageKey,
+        `tsdf.${sessionKey}.${storeName}.li.`,
+      )?.meta,
+    ).toMatchInlineSnapshot(`
+      o: '✅'
+      p: 'users||1'
+    `);
+    expect(
+      localPersistentStorage.readNamespaceEntryMetadataByPayload(
+        queryStorageKey,
+        `tsdf.${sessionKey}.${storeName}.lq.`,
+      )?.meta,
+    ).toMatchInlineSnapshot(`
+      h: '❌'
+      i: ['"users||1']
+      o: '✅'
+      p: { tableId: 'users' }
+    `);
+    expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
+      e:
+        - a: 1735689604100
+          k: '"users||1'
+          o: '✅'
+          p: 'users||1'
+    `);
+    expect(getParsedLocalStorageValue(queryManifestKey)).toMatchInlineSnapshot(`
+      e:
+        - a: 1735689604100
+          h: '❌'
+          i: ['"users||1']
+          k: '{tableId:"users"}'
+          o: '✅'
+          p: { tableId: 'users' }
+    `);
+  });
+
   test('useListQuery invalidation snapshots the full query persistence timeline through the refetch save', async () => {
     const storeName = 'lq-query-invalidation-flow';
     const sessionKey = 'sess1';

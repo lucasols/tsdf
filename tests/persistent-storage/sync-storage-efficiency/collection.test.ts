@@ -180,6 +180,64 @@ describe('sync storage efficiency: collection', () => {
     `);
   });
 
+  test('direct getItemState touch preserves an offline marker added by another tab before the batched manifest update', async () => {
+    const storeName = 'col-direct-touch-offline-marker';
+    const sessionKey = 'sess1';
+    const storageKey = persistentStore
+      .scope(storeName, sessionKey)
+      .collection.itemStorageKey('1');
+    const manifestKey = localPersistentStorage.getManifestKeyForPrefix(
+      `tsdf.${sessionKey}.${storeName}.ci.`,
+    );
+
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached user' },
+    });
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the later touch only comes from the direct read path.
+    await settleStartupBackgroundScan();
+
+    // The direct read schedules a batched timestamp touch for the cached item.
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
+      `value: { id: '1', name: 'Cached user' }`,
+    );
+
+    // Simulate another tab marking the item as offline-protected before the touch runs.
+    const currentManifest = getParsedLocalStorageValue<{
+      e: Array<Record<string, unknown>>;
+      v: number;
+    }>(manifestKey);
+
+    localStorage.setItem(
+      manifestKey,
+      JSON.stringify({
+        ...currentManifest,
+        e: currentManifest?.e.map((entry) => ({ ...entry, o: true })),
+      }),
+    );
+
+    await flushAllTimers();
+
+    expect(
+      localPersistentStorage.readNamespaceEntryMetadataByPayload(
+        storageKey,
+        `tsdf.${sessionKey}.${storeName}.ci.`,
+      )?.meta,
+    ).toMatchInlineSnapshot(`
+      o: '✅'
+      p: '1'
+    `);
+    expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
+      e:
+        - a: 1735689604100
+          k: '"1'
+          o: '✅'
+          p: '1'
+    `);
+  });
+
   test('updating a hydrated collection item writes the mutation without rereading cached entries', async () => {
     const storeName = 'col-mutation-flow';
     const sessionKey = 'sess1';

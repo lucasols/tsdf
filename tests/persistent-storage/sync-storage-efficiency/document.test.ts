@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { flushAllTimers } from '../../utils/genericTestUtils';
 import {
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
@@ -91,6 +92,60 @@ describe('sync storage efficiency: document', () => {
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
+    const storeName = 'doc-startup-touch-offline-marker';
+    const sessionKey = 'sess1';
+
+    setCachedDocumentData(storeName, sessionKey, {
+      name: 'Cached document',
+      value: 8,
+    });
+
+    // Startup hydration schedules a touch to refresh the cached timestamp.
+    const env = createDocumentEnv({ storeName, sessionKey });
+    const storageKey = persistentStore
+      .scope(storeName, sessionKey)
+      .document.storageKey();
+    const manifestKey =
+      localPersistentStorage.getManifestKeyForSingle(storageKey);
+
+    expect(env.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'Cached document', value: 8 }
+    `);
+
+    // Simulate another tab marking the document as offline-protected before the touch runs.
+    const currentManifest = getParsedLocalStorageValue<{
+      e: Array<{ a: number; m?: unknown }>;
+      v: number;
+    }>(manifestKey);
+
+    localStorage.setItem(
+      manifestKey,
+      JSON.stringify({
+        ...currentManifest,
+        e: currentManifest?.e.map((entry) => ({
+          ...entry,
+          m: {
+            ...(typeof entry.m === 'object' && entry.m !== null ? entry.m : {}),
+            o: true,
+          },
+        })),
+      }),
+    );
+
+    await flushAllTimers();
+
+    expect(
+      localPersistentStorage.readSingleEntryMetadataByPayload(storageKey)?.meta,
+    ).toMatchInlineSnapshot(`
+      o: '✅'
+    `);
+    expect(getParsedLocalStorageValue(manifestKey)).toMatchInlineSnapshot(`
+      e:
+        - { a: 1735689602000, o: '✅' }
+    `);
   });
 
   test('updating a hydrated document writes the mutation without rereading cached entries', async () => {
