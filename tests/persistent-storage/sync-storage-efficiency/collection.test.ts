@@ -282,6 +282,42 @@ describe('sync storage efficiency: collection', () => {
     `);
   });
 
+  test('deleteItemState removes the persisted collection entry through the namespace manifest only', async () => {
+    const storeName = 'col-delete-flow';
+    const sessionKey = 'sess1';
+    const collectionScope = persistentStore.scope(storeName, sessionKey);
+    const deletedItemStorageKey =
+      collectionScope.collection.itemStorageKey('1');
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
+    env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // The delete capture should only include the debounced storage cleanup path.
+    const deleteCapture = startPersistentStorageOperationCapture();
+    env.apiStore.deleteItemState('1');
+    await advanceTime(1100);
+    await flushAllTimers();
+    const deleteOperations = deleteCapture.finish().timelineString;
+
+    expect(localStorage.getItem(deletedItemStorageKey)).toBeNull();
+    expect(listStoredCollectionItemPayloads(storeName, sessionKey).sort())
+      .toMatchInlineSnapshot(`
+      ['2']
+    `);
+    expect(deleteOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      1s   | 🗑️ ✅->❌ #1 tsdf.sess1.col-delete-flow.ci."1 (collection entry)
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.col-delete-flow.ci.m (root, namespace, manifest) | 0.16 kb
+      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.col-delete-flow.ci.m (root, namespace, manifest) | 0.16 kb -> 0.09 kb
+      "
+    `);
+  });
+
   test('useItem invalidation snapshots the full persistence timeline through the refetch save', async () => {
     const storeName = 'col-invalidation-flow';
     const sessionKey = 'sess1';

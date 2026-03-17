@@ -220,15 +220,12 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
-  test('query that becomes empty after invalidation cleans up orphaned items from persistence', async () => {
+  test('query that becomes empty after invalidation do not clean up orphaned items from persistence', async () => {
     const storeName = 'lq-query-becomes-empty';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const itemManifestKey = localPersistentStorage.getManifestKeyForPrefix(
       `tsdf.${sessionKey}.${storeName}.li.`,
-    );
-    const queryManifestKey = localPersistentStorage.getManifestKeyForPrefix(
-      `tsdf.${sessionKey}.${storeName}.lq.`,
     );
 
     // Seed the cache with a query that has one item.
@@ -294,9 +291,15 @@ describe('sync storage efficiency: list-query', () => {
             p: 'users||1'
       `,
     );
-    expect(getParsedLocalStorageValue(queryManifestKey)).toMatchInlineSnapshot(
-      `null`,
-    );
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689605910
+      i: []
+      p: { tableId: 'users' }
+    `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
@@ -365,6 +368,68 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb
       .    | 🗑️ ✅->❌ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb -> 0.22 kb
+      "
+    `);
+  });
+
+  test('deleteItemState removes the persisted list item and rewrites related query and item entries', async () => {
+    const storeName = 'lq-delete-flow';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const listQueryScope = persistentStore.scope(storeName, sessionKey);
+    const deletedItemStorageKey = listQueryScope.listQuery.itemStorageKey(
+      'users',
+      1,
+    );
+
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      serverData: {
+        users: [
+          { id: 1, name: 'Alice' },
+          { id: 2, name: 'Bob' },
+        ],
+      },
+    });
+
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // Capture the explicit delete path after the initial query+item persistence has settled.
+    const deleteCapture = startPersistentStorageOperationCapture();
+    env.apiStore.deleteItemState('users||1');
+    await advanceTime(1100);
+    await flushAllTimers();
+    const deleteOperations = deleteCapture.finish().timelineString;
+
+    expect(localStorage.getItem(deletedItemStorageKey)).toBeNull();
+    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`))
+      .toMatchInlineSnapshot(`
+        ['"users||2']
+      `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry(usersQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||2']
+      payload: { tableId: 'users' }
+    `);
+    expect(deleteOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      1s   | 📖 ✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (query entry) | 0.15 kb
+      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (query entry) | 0.15 kb -> 0.12 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb
+      .    | 📖 ✅ #3 tsdf.sess1.lq-delete-flow.li."users||1 (item entry) | 0.17 kb
+      .    | 🗑️ ✅->❌ #3 tsdf.sess1.lq-delete-flow.li."users||1 (item entry)
+      .    | 📖 ✅ #4 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb
+      .    | ✍️ ✅->✅ #4 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb -> 0.25 kb
+      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.12 kb
       "
     `);
   });
