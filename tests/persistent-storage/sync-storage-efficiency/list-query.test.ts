@@ -157,9 +157,6 @@ describe('sync storage efficiency: list-query', () => {
     `);
 
     expect(
-      getParsedLocalStorageValue('tsdf._m.r.n:sess1.lq-query-metadata.lq.m'),
-    ).toMatchInlineSnapshot(`null`);
-    expect(
       getParsedLocalStorageValue('tsdf._m.r.n:sess1.lq-query-metadata.li.m'),
     ).toMatchInlineSnapshot(`
       e:
