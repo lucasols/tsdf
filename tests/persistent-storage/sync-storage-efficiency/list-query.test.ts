@@ -90,9 +90,9 @@ describe('sync storage efficiency: list-query', () => {
       .    | 🔑[3] ✅ #5 tsdf.sess1.list-query-expiration.li."fresh-users||2 (item entry)
       .    | 🔑[4] ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (query entry)
       .    | 📖 ✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.27 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.list-query-expiration.li."expired-users||1 (item entry)
       .    | 📖 ✅ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry) | 0.15 kb
       .    | 📖 ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (query entry) | 0.14 kb
+      .    | 🗑️ ✅->❌ #2 tsdf.sess1.list-query-expiration.li."expired-users||1 (item entry)
       .    | 🗑️ ✅->❌ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry)
       .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.27 kb -> 0.14 kb

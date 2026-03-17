@@ -1,6 +1,7 @@
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
+import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
 import { upsertManagedLocalStorageSingleEntry } from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
@@ -74,8 +75,8 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[4] ✅ #6 external-cache
       .    | 🔑[5] ✅ #7 feature-flag
       .    | 📖 ✅ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.05 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.expired-doc (entry)
       .    | 📖 ✅ #5 tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.05 kb
+      .    | 🗑️ ✅->❌ #2 tsdf.sess1.expired-doc (entry)
       .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | 🗑️ ✅->❌ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
       "
@@ -118,6 +119,79 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 📖 ✅ #5 tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.05 kb
       .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
+    `);
+  });
+
+  test('global cleanup removes invalid tsdf keys while preserving valid managed entries and compact queries', async () => {
+    const validDoc = persistentStore.scope('valid-doc', 'sess1');
+    const validSingleKey = validDoc.document.seed({
+      value: { name: 'valid', value: 1 },
+    });
+    const straySingleKey = 'tsdf.sess1.stray-doc';
+    const strayNamespaceKey = 'tsdf.sess1.stray-store.li."users||99';
+    const malformedManifestKey = 'tsdf._m.r.s:sess1.bad-manifest.m';
+    const malformedCompactQueryKey =
+      'tsdf.sess1.bad-query.lq.{tableId:"users"}';
+    const validCompactQueryKey = 'tsdf.sess1.valid-query.lq.{tableId:"users"}';
+
+    localStorage.setItem(straySingleKey, JSON.stringify({ timestamp: 1 }));
+    localStorage.setItem(strayNamespaceKey, JSON.stringify({ timestamp: 1 }));
+    localStorage.setItem('tsdf._m.g', '{invalid');
+    localStorage.setItem(malformedManifestKey, '{invalid');
+    localStorage.setItem(malformedCompactQueryKey, '{invalid');
+    localStorage.setItem(
+      validCompactQueryKey,
+      JSON.stringify(
+        createCompactListQueryLocalStorageEntry({
+          lastAccessAt: Date.now(),
+          items: ['users||1'],
+          hasMore: false,
+          offlineProtected: false,
+          payload: { tableId: 'users' },
+        }),
+      ),
+    );
+    localStorage.setItem('external-cache', JSON.stringify({ keep: true }));
+
+    createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
+
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const removedKeys = readCapture
+      .finish()
+      .operations.filter((operation) => operation.type === 'removeItem')
+      .map((operation) => operation.key);
+
+    expect(removedKeys).toMatchInlineSnapshot(`
+      - 'tsdf._m.g'
+      - 'tsdf._m.r.s:sess1.bad-manifest.m'
+      - 'tsdf.sess1.bad-query.lq.{tableId:"users"}'
+      - 'tsdf.sess1.stray-doc'
+      - 'tsdf.sess1.stray-store.li."users||99'
+    `);
+
+    expect({
+      validSinglePayloadExists: localStorage.getItem(validSingleKey) !== null,
+      straySinglePayloadExists: localStorage.getItem(straySingleKey) !== null,
+      strayNamespacePayloadExists:
+        localStorage.getItem(strayNamespaceKey) !== null,
+      malformedManifestExists:
+        localStorage.getItem(malformedManifestKey) !== null,
+      malformedCompactQueryExists:
+        localStorage.getItem(malformedCompactQueryKey) !== null,
+      validCompactQueryExists:
+        localStorage.getItem(validCompactQueryKey) !== null,
+      externalCache: localStorage.getItem('external-cache'),
+      globalMaintenance: getParsedLocalStorageValue('tsdf._m.g'),
+    }).toMatchInlineSnapshot(`
+      externalCache: '{"keep":true}'
+      globalMaintenance: { lca: 1735689602000 }
+      malformedCompactQueryExists: '❌'
+      malformedManifestExists: '❌'
+      strayNamespacePayloadExists: '❌'
+      straySinglePayloadExists: '❌'
+      validCompactQueryExists: '✅'
+      validSinglePayloadExists: '✅'
     `);
   });
 
@@ -189,6 +263,7 @@ describe('sync storage efficiency: maintenance', () => {
         offline: { operation: 'markProtected', input: { value: 1 } },
       });
     randomSpy.mockRestore();
+    localStorage.setItem('tsdf.user@example.com.invalid-stray', '{invalid');
 
     expect(protectMutationResult.ok).toBe(true);
 
@@ -218,11 +293,14 @@ describe('sync storage efficiency: maintenance', () => {
 
     // The protected dotted-session entry should survive, while the unprotected stale entry is discarded.
     expect({
+      invalidStrayExists:
+        localStorage.getItem('tsdf.user@example.com.invalid-stray') !== null,
       protectedEntryExists:
         localStorage.getItem(protectedDocStorageKey) !== null,
       unprotectedEntryExists:
         localStorage.getItem(unprotectedDocStorageKey) !== null,
     }).toMatchInlineSnapshot(`
+      invalidStrayExists: '❌'
       protectedEntryExists: '✅'
       unprotectedEntryExists: '❌'
     `);
@@ -241,12 +319,17 @@ describe('sync storage efficiency: maintenance', () => {
       .     | 🔑[8] ✅ #9 tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue)
       .     | 🔑[9] ✅ #10 tsdf.user@example.com.protected-doc.oe.document (entry, offline entity)
       .     | 🔑[10] ✅ #11 tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
-      .     | 🔑[11] ✅ #12 tsdf.sess-trigger.trigger-doc (entry)
-      .     | 🔑[12] ✅ #13 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
+      .     | 🔑[11] ✅ #12 tsdf.user@example.com.invalid-stray (entry)
+      .     | 🔑[12] ✅ #13 tsdf.sess-trigger.trigger-doc (entry)
+      .     | 🔑[13] ✅ #14 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
       .     | 📖 ✅ #3 tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.07 kb
       .     | 📖 ✅ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.05 kb
+      .     | 📖 ✅ #7 tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status) | 0.05 kb
+      .     | 📖 ✅ #9 tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue) | 0.14 kb
+      .     | 📖 ✅ #11 tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity) | 0.08 kb
+      .     | 📖 ✅ #14 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.05 kb
+      .     | 🗑️ ✅->❌ #12 tsdf.user@example.com.invalid-stray (entry)
       .     | 🗑️ ✅->❌ #4 tsdf.user@example.com.unprotected-doc (entry)
-      .     | 📖 ✅ #13 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.05 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
       .     | 🗑️ ✅->❌ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
       "

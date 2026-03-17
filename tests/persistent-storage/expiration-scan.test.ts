@@ -119,6 +119,41 @@ describe('expiration scan', () => {
     `);
   });
 
+  test('global sweep triggered from one session cleans expired entries across other sessions too', async () => {
+    const expiredTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const staleDocInSess1 = persistentStore.scope('stale-doc', 'sess1');
+    const staleDocInSess2 = persistentStore.scope('stale-doc', 'sess2');
+    const freshDocInSess2 = persistentStore.scope('fresh-doc', 'sess2');
+
+    staleDocInSess1.document.seed(
+      { value: { name: 'stale-1', value: 1 } },
+      { timestamp: expiredTimestamp },
+    );
+    staleDocInSess2.document.seed(
+      { value: { name: 'stale-2', value: 2 } },
+      { timestamp: expiredTimestamp },
+    );
+    freshDocInSess2.document.seed({ value: { name: 'fresh', value: 3 } });
+
+    createTriggerEnv('trigger-doc', 'sess-trigger');
+    await waitForScheduledCleanup();
+
+    expect({
+      sess1ExpiredEntryExists:
+        localStorage.getItem(staleDocInSess1.document.storageKey()) !== null,
+      sess2ExpiredEntryExists:
+        localStorage.getItem(staleDocInSess2.document.storageKey()) !== null,
+      sess2FreshEntryExists:
+        localStorage.getItem(freshDocInSess2.document.storageKey()) !== null,
+      globalMaintenance: persistentStore.storage.getGlobalMaintenanceRaw(),
+    }).toMatchInlineSnapshot(`
+      globalMaintenance: { lastCleanupAt: 1735689602000 }
+      sess1ExpiredEntryExists: '❌'
+      sess2ExpiredEntryExists: '❌'
+      sess2FreshEntryExists: '✅'
+    `);
+  });
+
   test('protected dotted-session entries survive the sweep via manifest metadata', async () => {
     const staleTimestamp = Date.now() - 8 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';

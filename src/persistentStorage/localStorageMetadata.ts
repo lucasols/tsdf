@@ -257,6 +257,37 @@ function isManagedLocalStorageManifestKey(key: string): boolean {
   return parseManagedLocalStorageManifestKey(key) !== null;
 }
 
+type TsdfLocalStorageKeyClassification =
+  | { kind: 'global-maintenance' }
+  | { kind: 'manifest'; manifestLocation: ManagedLocalStorageManifestLocation }
+  | { kind: 'compact-list-query' }
+  | { kind: 'manifest-backed-payload' }
+  | { kind: 'unknown-tsdf' };
+
+function classifyTsdfLocalStorageKey(
+  key: string,
+): TsdfLocalStorageKeyClassification | null {
+  if (!key.startsWith('tsdf.')) return null;
+  if (key === GLOBAL_MAINTENANCE_KEY) {
+    return { kind: 'global-maintenance' };
+  }
+
+  const manifestLocation = parseManagedLocalStorageManifestKey(key);
+  if (manifestLocation !== null) {
+    return { kind: 'manifest', manifestLocation };
+  }
+
+  if (key.startsWith(METADATA_KEY_PREFIX)) {
+    return { kind: 'unknown-tsdf' };
+  }
+
+  if (isCompactListQueryLocalStorageKey(key)) {
+    return { kind: 'compact-list-query' };
+  }
+
+  return { kind: 'manifest-backed-payload' };
+}
+
 function readStoredManifestEntryMeta(entry: Record<string, unknown>): unknown {
   if ('m' in entry) {
     return entry.m;
@@ -933,6 +964,70 @@ function isMaintenanceDue(
   );
 }
 
+function runStrictTsdfLocalStorageCleanup(io: ManagedLocalStorageIo): void {
+  const tsdfKeys = io.listKeys().filter((key) => key.startsWith('tsdf.'));
+  const manifestOwnedPayloadKeys = new Set<string>();
+  const manifestBackedPayloadKeys: string[] = [];
+
+  for (const key of tsdfKeys) {
+    const classification = classifyTsdfLocalStorageKey(key);
+    if (classification === null) continue;
+
+    switch (classification.kind) {
+      case 'global-maintenance': {
+        if (
+          readParsedMetadataJson(
+            key,
+            managedLocalStorageGlobalMaintenanceSchema,
+            io,
+          ) === null
+        ) {
+          removeMetadataJson(key, io);
+        }
+        break;
+      }
+      case 'manifest': {
+        const manifest = readParsedManifest(key, io);
+        if (manifest === null) {
+          removeMetadataJson(key, io);
+          break;
+        }
+
+        for (const entry of manifest.entries) {
+          const payloadKey = getPayloadKeyForManifestEntry(
+            classification.manifestLocation,
+            entry.entryKey,
+          );
+          if (payloadKey !== null) {
+            manifestOwnedPayloadKeys.add(payloadKey);
+          }
+        }
+        break;
+      }
+      case 'compact-list-query': {
+        if (readCompactListQueryEntry(key, io) === null) {
+          io.removeItem(key);
+        }
+        break;
+      }
+      case 'manifest-backed-payload': {
+        manifestBackedPayloadKeys.push(key);
+        break;
+      }
+      case 'unknown-tsdf': {
+        io.removeItem(key);
+        break;
+      }
+    }
+  }
+
+  for (const payloadKey of manifestBackedPayloadKeys) {
+    if (!manifestOwnedPayloadKeys.has(payloadKey)) {
+      io.removeItem(payloadKey);
+    }
+  }
+}
+
 function collectManagedLocalStorageSweepTargets(io: ManagedLocalStorageIo): {
   manifestKeys: string[];
   knownKeys: Set<string>;
@@ -1025,6 +1120,10 @@ export async function runManagedLocalStorageMaintenance(
   const runGlobalSweep = forcedManifestKeys.size === 0;
   if (runGlobalSweep && !isMaintenanceDue(readGlobalMaintenanceState(io))) {
     return;
+  }
+
+  if (runGlobalSweep) {
+    runStrictTsdfLocalStorageCleanup(io);
   }
 
   const { manifestKeys, knownKeys } = runGlobalSweep
