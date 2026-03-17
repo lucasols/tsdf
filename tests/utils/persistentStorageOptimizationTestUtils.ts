@@ -2,6 +2,9 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 
+const LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX = 'li';
+const LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX = 'lq';
+const COLLECTION_STORAGE_ENTRY_PREFIX = 'ci';
 const OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX = 'oq';
 const OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX = 'oc';
 const OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX = 'oe';
@@ -22,7 +25,10 @@ function describePersistentStorageKey(key: string): string | null {
   );
   if (managedPrefix === undefined) {
     return key.startsWith('tsdf.')
-      ? withOfflinePrefix('entry', describeOfflineStorageType(key))
+      ? withOfflinePrefix(
+          describeEntryKind(key),
+          describeOfflineStorageType(key),
+        )
       : null;
   }
 
@@ -52,6 +58,22 @@ function describePersistentStorageKey(key: string): string | null {
     `root, ${describeRootKind(identity)}`,
     describeOfflineStorageType(identity),
   );
+}
+
+function describeEntryKind(key: string): string {
+  if (key.includes(`.${LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX}.`)) {
+    return 'query entry';
+  }
+
+  if (key.includes(`.${LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX}.`)) {
+    return 'item entry';
+  }
+
+  if (key.includes(`.${COLLECTION_STORAGE_ENTRY_PREFIX}.`)) {
+    return 'collection entry';
+  }
+
+  return 'entry';
 }
 
 function describeRootKind(identity: string): 'single' | 'namespace' | 'root' {

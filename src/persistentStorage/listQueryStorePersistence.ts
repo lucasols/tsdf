@@ -1657,6 +1657,7 @@ export function setupListQueryPersistence<
     }
 
     await Promise.all(tasks);
+
     knownPersistedItemKeys = new Set(previousItemKeys);
     for (const itemKey of removedItemKeys) {
       knownPersistedItemKeys.delete(itemKey);
