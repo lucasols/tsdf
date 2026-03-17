@@ -1,8 +1,8 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
-  rc_parse,
   rc_number,
   rc_object,
+  rc_parse,
   rc_parse_json,
   rc_unknown,
 } from 'runcheck';
@@ -188,7 +188,7 @@ export function mergeLocalStorageOfflineProtection(
 
 export function scheduleLocalStorageRemoval(
   key: string,
-  options: LocalStorageMetadataOptions,
+  options: LocalStorageMetadataOptions | undefined,
 ): void {
   scheduleIdleCleanup(() => {
     void runLocalStorageMutation(() => {

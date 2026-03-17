@@ -536,17 +536,10 @@ export function setupListQueryPersistence<
     if (!storeRef) return;
 
     suppressedPersistedStateFlushes++;
-    storeRef.setState({
-      ...storeRef.state,
-      items: { ...storeRef.state.items, [itemKey]: itemState.item },
-      itemQueries: {
-        ...storeRef.state.itemQueries,
-        [itemKey]: itemState.itemQuery,
-      },
-      itemLoadedFields: {
-        ...storeRef.state.itemLoadedFields,
-        [itemKey]: itemState.loadedFields,
-      },
+    storeRef.produceState((draft) => {
+      draft.items[itemKey] = itemState.item;
+      draft.itemQueries[itemKey] = itemState.itemQuery;
+      draft.itemLoadedFields[itemKey] = itemState.loadedFields;
     });
   }
 
@@ -557,9 +550,8 @@ export function setupListQueryPersistence<
     if (!storeRef) return;
 
     suppressedPersistedStateFlushes++;
-    storeRef.setState({
-      ...storeRef.state,
-      queries: { ...storeRef.state.queries, [queryKey]: query },
+    storeRef.produceState((draft) => {
+      draft.queries[queryKey] = query;
     });
   }
 
@@ -708,16 +700,6 @@ export function setupListQueryPersistence<
     return snapshot ? parseHydratedQuerySnapshot(snapshot) : undefined;
   }
 
-  function scheduleLocalStorageQueryRemoval(storageKey: string): void {
-    if (localStorageAdapter === null) return;
-    const adapter = localStorageAdapter;
-    scheduleIdleCleanup(() => {
-      void adapter.runLocked(() => {
-        adapter.remove(storageKey);
-      });
-    });
-  }
-
   function readHydratedLocalStorageQuery(
     queryKey: string,
   ): ParsedPersistedListQueryData<QueryPayload> | undefined {
@@ -730,7 +712,7 @@ export function setupListQueryPersistence<
         localStorageAdapter !== null &&
         localStorageAdapter.readRaw(storageKey) !== null
       ) {
-        scheduleLocalStorageQueryRemoval(storageKey);
+        scheduleLocalStorageRemoval(storageKey, undefined);
       }
       forgetPersistedQuery(queryKey);
       return undefined;
@@ -743,7 +725,7 @@ export function setupListQueryPersistence<
     if (!persistedQuery) {
       const storageKey = getLocalStorageQueryStorageKey(queryKey);
       if (storageKey !== false) {
-        scheduleLocalStorageQueryRemoval(storageKey);
+        scheduleLocalStorageRemoval(storageKey, undefined);
       }
       forgetPersistedQuery(queryKey);
       return undefined;

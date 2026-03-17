@@ -354,26 +354,11 @@ export function useMultipleListQueries<
               );
             });
 
-            const hasAffectedFieldInvalidation = query.items.some((itemKey) => {
-              const itemFieldInvalidationFields =
-                state.itemFieldInvalidationFields[itemKey];
-
-              return (
-                !!itemFieldInvalidationFields &&
-                fields.some((f) => itemFieldInvalidationFields.includes(f))
-              );
-            });
-
             if (someItemMissingFields) {
               if (!hasCachedItemsInState) {
                 status = 'loading';
               } else if (someItemMissingFieldsInState) {
                 status = showPartialAsRefetching ? 'refetching' : 'loading';
-              } else if (
-                hasAffectedFieldInvalidation ||
-                showPartialAsRefetching
-              ) {
-                status = 'refetching';
               } else {
                 // Requested fields are present in cached items; keep stale data
                 // visible and expose a refetching status while metadata catches up.
@@ -484,13 +469,16 @@ export function useMultipleListQueries<
             const requestedFields = Array.isArray(queryConfig.fields)
               ? queryConfig.fields
               : undefined;
+            const fallbackItemStates = fallbackQuery.items.map((itemKey) => ({
+              itemKey,
+              fallbackItemState: readFallbackItemState(itemKey),
+            }));
             const canUseFallbackItems =
               !partialResources ||
               queryConfig.fields === undefined ||
               queryConfig.fields === '*' ||
               (requestedFields &&
-                fallbackQuery.items.every((itemKey) => {
-                  const fallbackItemState = readFallbackItemState(itemKey);
+                fallbackItemStates.every(({ fallbackItemState }) => {
                   const loadedFields = fallbackItemState?.loadedFields ?? [];
 
                   return requestedFields.every((field) =>
@@ -501,9 +489,8 @@ export function useMultipleListQueries<
             if (!canUseFallbackItems) return result;
 
             const fallbackItems = filterAndMap(
-              fallbackQuery.items,
-              (itemKey): SelectedItem | false => {
-                const fallbackItemState = readFallbackItemState(itemKey);
+              fallbackItemStates,
+              ({ itemKey, fallbackItemState }): SelectedItem | false => {
                 const item = fallbackItemState?.item;
                 const itemPayload = fallbackItemState?.itemQuery?.payload;
 
@@ -553,12 +540,12 @@ export function useMultipleListQueries<
       },
     );
   }, [
-    itemSelector,
-    partialResources,
+    storeState,
     queriesWithId,
     readFallbackQueryState,
     readFallbackItemState,
-    storeState,
+    partialResources,
+    itemSelector,
   ]);
   const autoFetchSignals = store.useSelectorRC(
     useCallback(

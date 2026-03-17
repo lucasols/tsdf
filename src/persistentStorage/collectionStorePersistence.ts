@@ -228,7 +228,9 @@ export function setupCollectionPersistence<
     if (!storeRef) return;
 
     suppressedPersistedStateFlushes++;
-    storeRef.setState({ ...storeRef.state, [itemKey]: item });
+    storeRef.produceState((draft) => {
+      draft[itemKey] = item;
+    });
   }
 
   function parseHydratedItemSnapshot(

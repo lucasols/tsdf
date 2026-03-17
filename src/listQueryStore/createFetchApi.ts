@@ -715,14 +715,28 @@ export function createFetchApi<
           ? { key: queryKey, payload: query.payload }
           : false;
       });
-    } else {
-      return [{ key: getQueryKey(payloads), payload: payloads }];
     }
+
+    return [{ key: getQueryKey(payloads), payload: payloads }];
   }
 
   function getQueriesState(
     params: QueryPayload[] | FilterQueryFn<QueryPayload>,
   ): { query: Query; key: string }[] {
+    if (typeof params === 'function') {
+      const queryKeys = new Set([
+        ...Object.keys(store.state.queries),
+        ...(persistence?.getHydratedQueryKeys() ?? []),
+      ]);
+
+      return filterAndMap([...queryKeys], (queryKey) => {
+        const query = getQueryStateByKey(queryKey);
+        return query && params(query.payload, query, queryKey)
+          ? { query, key: queryKey }
+          : false;
+      });
+    }
+
     const queryKeys = getQueriesKeyArray(params);
 
     return filterAndMap(queryKeys, ({ key }) => {
@@ -736,9 +750,8 @@ export function createFetchApi<
   ): { query: Query; key: string }[] {
     const itemKey = getItemKey(itemPayload);
 
-    return getQueriesState((queryPayload) => {
-      const queryState = getQueryStateByKey(getQueryKey(queryPayload));
-      return !!queryState?.items.includes(itemKey);
+    return getQueriesState((_queryPayload, query) => {
+      return query.items.includes(itemKey);
     });
   }
 
@@ -790,16 +803,19 @@ export function createFetchApi<
     | undefined
     | { payload: ItemPayload; data: ItemState }[] {
     if (typeof itemPayload === 'function') {
-      const itemsId = getItemsKeyArray(itemPayload);
+      const itemKeys = new Set([
+        ...Object.keys(store.state.items),
+        ...(persistence?.getHydratedItemKeys() ?? []),
+      ]);
 
-      return filterAndMap(itemsId, ({ itemKey }) => {
+      return filterAndMap([...itemKeys], (itemKey) => {
         const itemState = readItemState(itemKey);
         const item = itemState?.item;
         const payload = itemState?.itemQuery?.payload;
 
-        return item == null || payload === undefined
-          ? false
-          : { payload, data: item };
+        if (item == null || payload === undefined) return false;
+
+        return itemPayload(payload, item) ? { payload, data: item } : false;
       });
     }
 
