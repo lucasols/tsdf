@@ -11,6 +11,10 @@ import {
   vi,
 } from 'vitest';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
+import {
+  clearSessionProtectedKeysSnapshot,
+  setSessionProtectedKeysSnapshot,
+} from '../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -160,9 +164,99 @@ beforeEach(() => {
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  clearSessionProtectedKeysSnapshot('sess1');
+  clearSessionProtectedKeysSnapshot('session1');
 });
 
 describe('async persistent storage efficiency', () => {
+  test('namespace commits coalesce and pending writes flush before reads', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({
+      storeName: 'coalesced-opfs',
+      sessionKey: 'sess1',
+    });
+    const namespace = mockAdapter.adapter.openNamespace<
+      { value: string },
+      Record<string, never>
+    >({ sessionKey: 'sess1', storeName: 'coalesced-opfs', kind: 'document' });
+
+    const firstCommit = namespace.commit({
+      upserts: [{ key: 'document', value: { value: 'first' }, version: 1 }],
+    });
+    const secondCommit = namespace.commit({
+      upserts: [{ key: 'document', value: { value: 'second' }, version: 1 }],
+    });
+
+    await advanceTime(39);
+    expect(
+      mockAdapter.operations.filter((operation) => operation.type === 'commit'),
+    ).toMatchInlineSnapshot(`[]`);
+
+    const readPromise = namespace.get('document', { touch: 'never' });
+    const entry = await readPromise;
+    await Promise.all([firstCommit, secondCommit]);
+
+    expect(entry?.value).toMatchInlineSnapshot(`
+      value: 'second'
+    `);
+    expect(
+      mockAdapter.operations.filter((operation) => operation.type === 'commit'),
+    ).toMatchInlineSnapshot(`
+      - removes: []
+        scope: { kind: 'document', sessionKey: 'sess1', storeName: 'coalesced-opfs' }
+        touches: []
+        type: 'commit'
+        upserts: ['document']
+    `);
+  });
+
+  test('live async reads suppress redundant touch commits in the same recency bucket', async () => {
+    const mockAdapter = createMockOpfsStorageAdapter({
+      storeName: 'touch-guard-opfs',
+      sessionKey: 'sess1',
+    });
+    const namespace = mockAdapter.adapter.openNamespace<
+      { value: string },
+      Record<string, never>
+    >({ sessionKey: 'sess1', storeName: 'touch-guard-opfs', kind: 'document' });
+
+    const seedCommit = namespace.commit({
+      upserts: [{ key: 'document', value: { value: 'cached' }, version: 1 }],
+    });
+    await advanceTime(40);
+    await seedCommit;
+    mockAdapter.clearInstrumentation();
+    await advanceTime(6 * 60 * 60 * 1000);
+
+    const firstReadPromise = namespace.get('document', { touch: 'coarse' });
+    await advanceTime(40);
+    const firstRead = await firstReadPromise;
+    const secondRead = await namespace.get('document', { touch: 'coarse' });
+
+    expect(firstRead?.value).toMatchInlineSnapshot(`
+      value: 'cached'
+    `);
+    expect(secondRead?.value).toMatchInlineSnapshot(`
+      value: 'cached'
+    `);
+    expect(
+      mockAdapter.operations
+        .filter((operation) => operation.type === 'commit')
+        .map((operation) => ({
+          type: operation.type,
+          scope: operation.scope,
+          upserts: operation.upserts,
+          removes: operation.removes,
+          touches: operation.touches.map((touch) => touch.key),
+        })),
+    ).toMatchInlineSnapshot(`
+      - removes: []
+        scope: { kind: 'document', sessionKey: 'sess1', storeName: 'touch-guard-opfs' }
+        touches: ['document']
+        type: 'commit'
+        upserts: []
+    `);
+  });
+
   test('document preload performs one targeted payload read without metadata scans', async () => {
     const storeName = 'doc-opfs-efficiency';
     const sessionKey = 'sess1';
@@ -198,7 +292,7 @@ describe('async persistent storage efficiency', () => {
         payloadBatchReads: []
         scopedPayloadReads: ['document payload']
 
-      operations: ['📖 ✅ document payload | touch=coarse']
+      operations: ['📖 ✅ document payload | touch=never']
     `);
 
     expect(mockAdapter.has(documentStorageKey(storeName, sessionKey))).toBe(
@@ -254,7 +348,7 @@ describe('async persistent storage efficiency', () => {
         payloadBatchReads: []
         scopedPayloadReads: ['ci."1 (payload)']
 
-      operations: ['📖 ✅ ci."1 (payload) | touch=coarse']
+      operations: ['📖 ✅ ci."1 (payload) | touch=never']
     `);
 
     expect(mockAdapter.payloadGetRequests).toContain(hotKey);
@@ -301,6 +395,44 @@ describe('async persistent storage efficiency', () => {
         - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
         - '📇 sess1/collection-opfs-eviction-efficiency/collection.item (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
         - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item upserts=[] removes=["collection.item.\\"2 (payload)"] touches=[]'
+    `);
+  });
+
+  test('protected snapshot reuse avoids rereading the async protected registry during eviction', async () => {
+    const storeName = 'collection-opfs-protected-snapshot';
+    const sessionKey = 'sess1';
+    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const env = createCollectionEnv({
+      storeName,
+      sessionKey,
+      storageAdapter: mockAdapter.adapter,
+      maxItems: 2,
+    });
+
+    await settleStartupCleanup(mockAdapter);
+    setSessionProtectedKeysSnapshot(sessionKey, [
+      collectionStorageKey(storeName, sessionKey, '1'),
+    ]);
+
+    env.apiStore.addItemToState('1', { value: { id: '1', name: 'One' } });
+    env.apiStore.addItemToState('2', { value: { id: '2', name: 'Two' } });
+    await advanceTime(1100);
+    await flushAllTimers();
+    mockAdapter.clearInstrumentation();
+
+    env.apiStore.addItemToState('3', { value: { id: '3', name: 'Three' } });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.metadataListRequests).toMatchInlineSnapshot(`
+      - cursor: null
+        limit: 100
+        order: 'lru-desc'
+        scope:
+          kind: 'collection.item'
+          sessionKey: 'sess1'
+          storeName: 'collection-opfs-protected-snapshot'
     `);
   });
 
@@ -373,8 +505,8 @@ describe('async persistent storage efficiency', () => {
         scopedPayloadReads: ['lq.{tableId:"users"} (payload)', 'li."users||1 (payload)']
 
       operations:
-        - '📖 ✅ lq.{tableId:"users"} (payload) | touch=coarse'
-        - '📖 ✅ li."users||1 (payload) | touch=coarse'
+        - '📖 ✅ lq.{tableId:"users"} (payload) | touch=never'
+        - '📖 ✅ li."users||1 (payload) | touch=never'
     `);
 
     expect(mockAdapter.payloadGetRequests).toContain(usersQueryKey);
@@ -438,8 +570,7 @@ describe('async persistent storage efficiency', () => {
 
       operations:
         - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=["listQuery.query.{tableId:\\"tasks\\"} (payload)"] removes=[] touches=[]'
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=["listQuery.item.\\"projects||1 (payload)"] removes=[] touches=[]'
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=["listQuery.item.\\"tasks||1 (payload)"] removes=[] touches=[]'
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=["listQuery.item.\\"projects||1 (payload)","listQuery.item.\\"tasks||1 (payload)"] removes=[] touches=[]'
         - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
         - '📇 sess1/list-query-opfs-eviction-efficiency/listQuery.query (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
         - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=[] removes=["listQuery.query.{tableId:\\"users\\"} (payload)"] touches=[]'

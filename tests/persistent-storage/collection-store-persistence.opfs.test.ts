@@ -50,12 +50,10 @@ function setCachedCollectionItem(
   version: number | undefined = undefined,
 ): string {
   const key = itemStorageKey(storeName, sessionKey, payload);
-  const entry: StorageCacheEntry<
-    PersistedCollectionItemData<PersistedItemState>
-  > =
+  const entry: StorageCacheEntry<{ d: PersistedItemState; p: string }> =
     version === undefined
-      ? { data: { data, payload }, timestamp: Date.now() }
-      : { data: { data, payload }, timestamp: Date.now(), version };
+      ? { data: { d: data, p: payload }, timestamp: Date.now() }
+      : { data: { d: data, p: payload }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 
@@ -211,11 +209,10 @@ describe('opfs: collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
-    await advanceTime(50);
+    await advanceTime(100);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'bad', preloaded: '❌' }
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);
@@ -240,11 +237,10 @@ describe('opfs: collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
-    await advanceTime(50);
+    await advanceTime(100);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'bad', preloaded: '❌' }
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);

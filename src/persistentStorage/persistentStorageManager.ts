@@ -10,10 +10,14 @@ import {
   OpfsAsyncStorageAdapter,
   serializeProtectedRef,
 } from './opfsAsyncStorageAdapter';
+import {
+  getProtectedKeysStorageScope,
+  parseProtectedKeys,
+  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
+} from './offline/protectedKeysPersistence';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
-  isAsyncStorageAdapter,
   localPersistentStorage,
   opfsPersistentStorage,
   type LocalStorageMetadataOptions,
@@ -24,6 +28,7 @@ import type {
   AsyncStorageNamespaceKind,
   AsyncStorageNamespaceScope,
   AsyncStorageProtectedEntryRef,
+  AsyncStorageTouchMode,
   PersistentStorageBaseConfig,
   StorageAdapter,
   StorageCacheEntry,
@@ -45,6 +50,15 @@ let localStorageTouchTimestamps = new Map<string, number>();
 let cancelScheduledLocalStorageMaintenance: (() => void) | null = null;
 let localStorageGlobalMaintenanceRequested = false;
 let scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
+const scheduledAsyncMaintenance = new Map<
+  string,
+  {
+    cancel: (() => void) | null;
+    callback: () => Promise<void>;
+    running: boolean;
+    rerunRequested: boolean;
+  }
+>();
 
 export function getLocalStorageAdapter(
   adapter: StorageAdapter,
@@ -248,7 +262,7 @@ function refreshLocalStorageTimestampUnlocked(
 
 export type PersistentStorageHandle<T> = {
   /** Loads persisted data, validating version and schema. Returns null if not found or invalid. */
-  load(): Promise<T | null>;
+  load(options?: { touch?: AsyncStorageTouchMode }): Promise<T | null>;
   /** Schedules a debounced save. getData is called at save time to capture latest state. */
   scheduleSave(getData: () => T): void;
   /** Immediately saves data, canceling any pending debounce. */
@@ -257,6 +271,11 @@ export type PersistentStorageHandle<T> = {
   clear(): Promise<void>;
   /** Cancels any pending debounce timer without saving. */
   dispose(): void;
+};
+
+type AsyncStorageValueCodec<T, TSerialized = unknown> = {
+  serialize(data: T): TSerialized;
+  deserialize(data: TSerialized): T | null;
 };
 
 /**
@@ -272,6 +291,7 @@ export function createPersistentStorageHandle<T>(
   {
     getManifestMeta,
     asyncNamespace,
+    asyncValueCodec,
   }: {
     getManifestMeta?: (data: T) => Record<string, unknown> | undefined;
     asyncNamespace?: {
@@ -279,12 +299,14 @@ export function createPersistentStorageHandle<T>(
       kind?: AsyncStorageNamespaceKind;
       entryKey?: string;
     };
+    asyncValueCodec?: AsyncStorageValueCodec<T>;
   } = {},
 ): PersistentStorageHandle<T> {
   const version = config.version;
   const asyncVersion = version ?? 1;
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
+  const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncEntryKey = asyncNamespace?.entryKey ?? 'document';
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -297,19 +319,19 @@ export function createPersistentStorageHandle<T>(
   }
 
   function getAsyncNamespace() {
-    if (!isAsyncStorageAdapter(adapter)) return null;
+    if (asyncAdapter === null) return null;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
 
-    return adapter.openNamespace<T, Record<string, unknown>>({
+    return asyncAdapter.openNamespace<unknown, Record<string, unknown>>({
       sessionKey,
       storeName: asyncNamespace?.storeName ?? config.storeName,
       kind: asyncNamespace?.kind ?? 'document',
     });
   }
 
-  if (isAsyncStorageAdapter(adapter)) {
+  if (asyncAdapter !== null) {
     void getAsyncNamespace();
   }
 
@@ -320,13 +342,17 @@ export function createPersistentStorageHandle<T>(
     }
   }
 
-  async function load(): Promise<T | null> {
+  async function load(
+    options: { touch?: AsyncStorageTouchMode } = {},
+  ): Promise<T | null> {
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return null;
 
-        const entry = await namespace.get(asyncEntryKey, { touch: 'coarse' });
+        const entry = await namespace.get(asyncEntryKey, {
+          touch: options.touch ?? 'coarse',
+        });
         if (!entry) return null;
 
         if (entry.metadata.version !== asyncVersion) {
@@ -334,25 +360,29 @@ export function createPersistentStorageHandle<T>(
           return null;
         }
 
-        return entry.value;
+        const decoded = asyncValueCodec
+          ? asyncValueCodec.deserialize(entry.value)
+          : __LEGIT_CAST__<T, unknown>(entry.value);
+        if (decoded === null) {
+          await namespace.commit({ removes: [asyncEntryKey] });
+          return null;
+        }
+
+        return decoded;
       }
 
       const key = getKey();
       if (key === false) return null;
 
-      if (adapter === 'local-sync') {
-        const entry = readStorageEntryFromLocalStorageSync<T>(key, version, {
-          metadata: 'single',
-        });
-        if (!entry) return null;
+      const entry = readStorageEntryFromLocalStorageSync<T>(key, version, {
+        metadata: 'single',
+      });
+      if (!entry) return null;
 
-        scheduleIdleCleanup(() =>
-          refreshLocalStorageTimestamp(key, { metadata: 'single' }),
-        );
-        return entry.data;
-      }
-
-      return null;
+      scheduleIdleCleanup(() =>
+        refreshLocalStorageTimestamp(key, { metadata: 'single' }),
+      );
+      return entry.data;
     } catch (error) {
       onPersistentStorageError?.(error);
       return null;
@@ -363,7 +393,7 @@ export function createPersistentStorageHandle<T>(
     const key = getKey();
 
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return;
 
@@ -371,7 +401,7 @@ export function createPersistentStorageHandle<T>(
           upserts: [
             {
               key: asyncEntryKey,
-              value: data,
+              value: asyncValueCodec ? asyncValueCodec.serialize(data) : data,
               version: asyncVersion,
               metadata: getManifestMeta?.(data),
             },
@@ -385,25 +415,22 @@ export function createPersistentStorageHandle<T>(
       if (sessionKey === false) return;
       const entry = createStorageCacheEntry(data, Date.now(), version);
 
-      if (adapter === 'local-sync') {
-        await runLocalStorageMutation(() => {
-          localPersistentStorage.write(key, entry);
-          localPersistentStorage.upsertSingleEntry({
-            storageKey: key,
-            lastAccessAt: entry.timestamp,
-            meta: preserveOfflineProtectionFlag(
-              sessionKey,
-              key,
-              getManifestMeta?.(data),
-              () =>
-                localPersistentStorage.readSingleEntryMetadataByPayload(key)
-                  ?.meta,
-            ),
-          });
-          recordLocalStorageTouch(key, entry.timestamp);
+      await runLocalStorageMutation(() => {
+        localPersistentStorage.write(key, entry);
+        localPersistentStorage.upsertSingleEntry({
+          storageKey: key,
+          lastAccessAt: entry.timestamp,
+          meta: preserveOfflineProtectionFlag(
+            sessionKey,
+            key,
+            getManifestMeta?.(data),
+            () =>
+              localPersistentStorage.readSingleEntryMetadataByPayload(key)
+                ?.meta,
+          ),
         });
-        return;
-      }
+        recordLocalStorageTouch(key, entry.timestamp);
+      });
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -432,7 +459,7 @@ export function createPersistentStorageHandle<T>(
     clearTimer();
 
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return;
         await namespace.commit({ removes: [asyncEntryKey] });
@@ -442,13 +469,11 @@ export function createPersistentStorageHandle<T>(
       const key = getKey();
       if (key === false) return;
 
-      if (adapter === 'local-sync') {
-        await runLocalStorageMutation(() => {
-          localPersistentStorage.clearManifest(
-            localPersistentStorage.getManifestKeyForSingle(key),
-          );
-        });
-      }
+      await runLocalStorageMutation(() => {
+        localPersistentStorage.clearManifest(
+          localPersistentStorage.getManifestKeyForSingle(key),
+        );
+      });
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -474,9 +499,18 @@ export type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
-  readEntry(entryKey: string): Promise<StorageCacheEntry<T> | null>;
-  load(entryKey: string): Promise<T | null>;
-  loadMany(entryKeys: string[]): Promise<Array<T | null>>;
+  readEntry(
+    entryKey: string,
+    options?: { touch?: AsyncStorageTouchMode },
+  ): Promise<StorageCacheEntry<T> | null>;
+  load(
+    entryKey: string,
+    options?: { touch?: AsyncStorageTouchMode },
+  ): Promise<T | null>;
+  loadMany(
+    entryKeys: string[],
+    options?: { touch?: AsyncStorageTouchMode },
+  ): Promise<Array<T | null>>;
   save(entryKey: string, data: T): Promise<void>;
   remove(entryKey: string): Promise<void>;
   listKeys(): Promise<string[]>;
@@ -526,14 +560,17 @@ export function createPersistentStorageNamespaceHandle<
   },
   {
     getManifestMeta,
+    asyncValueCodec,
   }: {
     getManifestMeta?: (data: T, entryKey: string) => TMetadata | undefined;
+    asyncValueCodec?: AsyncStorageValueCodec<T>;
   } = {},
 ): PersistentStorageNamespaceHandle<T, TMetadata> {
   const version = config.version;
   const asyncVersion = version ?? 1;
   const { onPersistentStorageError } = config;
   const adapter = config.adapter;
+  const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncNamespaceKind = ensureAsyncNamespaceKind(config.entryPrefix);
   scheduleAdapterExpirationScan(adapter);
 
@@ -551,31 +588,34 @@ export function createPersistentStorageNamespaceHandle<
   }
 
   function getAsyncNamespace() {
-    if (!isAsyncStorageAdapter(adapter)) return null;
+    if (asyncAdapter === null) return null;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return null;
 
-    return adapter.openNamespace<T, TMetadata>({
+    return asyncAdapter.openNamespace<unknown, TMetadata>({
       sessionKey,
       storeName: config.storeName,
       kind: asyncNamespaceKind,
     });
   }
 
-  if (isAsyncStorageAdapter(adapter)) {
+  if (asyncAdapter !== null) {
     void getAsyncNamespace();
   }
 
   async function readEntry(
     entryKey: string,
+    options: { touch?: AsyncStorageTouchMode } = {},
   ): Promise<StorageCacheEntry<T> | null> {
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return null;
 
-        const entry = await namespace.get(entryKey, { touch: 'never' });
+        const entry = await namespace.get(entryKey, {
+          touch: options.touch ?? 'never',
+        });
         if (!entry) return null;
 
         if (entry.metadata.version !== asyncVersion) {
@@ -583,8 +623,16 @@ export function createPersistentStorageNamespaceHandle<
           return null;
         }
 
+        const decoded = asyncValueCodec
+          ? asyncValueCodec.deserialize(entry.value)
+          : __LEGIT_CAST__<T, unknown>(entry.value);
+        if (decoded === null) {
+          await namespace.commit({ removes: [entryKey] });
+          return null;
+        }
+
         return {
-          data: entry.value,
+          data: decoded,
           timestamp: entry.metadata.lastAccessAt,
           version: entry.metadata.version,
         };
@@ -594,27 +642,28 @@ export function createPersistentStorageNamespaceHandle<
       if (prefix === false) return null;
       const key = `${prefix}${entryKey}`;
 
-      if (adapter === 'local-sync') {
-        return readStorageEntryFromLocalStorageSync<T>(key, version, {
-          metadata: 'namespace',
-          namespacePrefix: prefix,
-        });
-      }
-
-      return null;
+      return readStorageEntryFromLocalStorageSync<T>(key, version, {
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      });
     } catch (error) {
       onPersistentStorageError?.(error);
       return null;
     }
   }
 
-  async function load(entryKey: string): Promise<T | null> {
+  async function load(
+    entryKey: string,
+    options: { touch?: AsyncStorageTouchMode } = {},
+  ): Promise<T | null> {
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return null;
 
-        const entry = await namespace.get(entryKey, { touch: 'coarse' });
+        const entry = await namespace.get(entryKey, {
+          touch: options.touch ?? 'coarse',
+        });
         if (!entry) return null;
 
         if (entry.metadata.version !== asyncVersion) {
@@ -622,7 +671,15 @@ export function createPersistentStorageNamespaceHandle<
           return null;
         }
 
-        return entry.value;
+        const decoded = asyncValueCodec
+          ? asyncValueCodec.deserialize(entry.value)
+          : __LEGIT_CAST__<T, unknown>(entry.value);
+        if (decoded === null) {
+          await namespace.commit({ removes: [entryKey] });
+          return null;
+        }
+
+        return decoded;
       }
 
       const prefix = getPrefix();
@@ -632,14 +689,12 @@ export function createPersistentStorageNamespaceHandle<
       const entry = await readEntry(entryKey);
       if (!entry) return null;
 
-      if (adapter === 'local-sync') {
-        scheduleIdleCleanup(() =>
-          refreshLocalStorageTimestamp(key, {
-            metadata: 'namespace',
-            namespacePrefix: prefix,
-          }),
-        );
-      }
+      scheduleIdleCleanup(() =>
+        refreshLocalStorageTimestamp(key, {
+          metadata: 'namespace',
+          namespacePrefix: prefix,
+        }),
+      );
 
       return entry.data;
     } catch (error) {
@@ -648,15 +703,20 @@ export function createPersistentStorageNamespaceHandle<
     }
   }
 
-  async function loadMany(entryKeys: string[]): Promise<Array<T | null>> {
+  async function loadMany(
+    entryKeys: string[],
+    options: { touch?: AsyncStorageTouchMode } = {},
+  ): Promise<Array<T | null>> {
     if (entryKeys.length === 0) return [];
 
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return entryKeys.map(() => null);
 
-        const entries = await namespace.getMany(entryKeys, { touch: 'coarse' });
+        const entries = await namespace.getMany(entryKeys, {
+          touch: options.touch ?? 'coarse',
+        });
         const staleKeys: string[] = [];
 
         const values = entries.map((entry, index) => {
@@ -668,7 +728,18 @@ export function createPersistentStorageNamespaceHandle<
             }
             return null;
           }
-          return entry.value;
+          const decoded = asyncValueCodec
+            ? asyncValueCodec.deserialize(entry.value)
+            : __LEGIT_CAST__<T, unknown>(entry.value);
+          if (decoded === null) {
+            const key = entryKeys[index];
+            if (key !== undefined) {
+              staleKeys.push(key);
+            }
+            return null;
+          }
+
+          return decoded;
         });
 
         if (staleKeys.length > 0) {
@@ -689,7 +760,7 @@ export function createPersistentStorageNamespaceHandle<
     const key = getKey(entryKey);
 
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return;
 
@@ -697,7 +768,7 @@ export function createPersistentStorageNamespaceHandle<
           upserts: [
             {
               key: entryKey,
-              value: data,
+              value: asyncValueCodec ? asyncValueCodec.serialize(data) : data,
               version: asyncVersion,
               metadata: getManifestMeta?.(data, entryKey),
             },
@@ -711,31 +782,28 @@ export function createPersistentStorageNamespaceHandle<
       if (sessionKey === false) return;
       const entry = createStorageCacheEntry(data, Date.now(), version);
 
-      if (adapter === 'local-sync') {
-        await runLocalStorageMutation(() => {
-          localPersistentStorage.write(key, entry);
-          const prefix = getPrefix();
-          if (prefix === false) return;
+      await runLocalStorageMutation(() => {
+        const prefix = getPrefix();
+        if (prefix === false) return;
 
-          localPersistentStorage.upsertNamespaceEntry({
-            storagePrefix: prefix,
-            entryKey,
-            lastAccessAt: entry.timestamp,
-            meta: preserveOfflineProtectionFlag(
-              sessionKey,
-              key,
-              getManifestMeta?.(data, entryKey),
-              () =>
-                localPersistentStorage.readNamespaceEntryMetadataByPayload(
-                  key,
-                  prefix,
-                )?.meta,
-            ),
-          });
-          recordLocalStorageTouch(key, entry.timestamp);
+        localPersistentStorage.write(key, entry);
+        localPersistentStorage.upsertNamespaceEntry({
+          storagePrefix: prefix,
+          entryKey,
+          lastAccessAt: entry.timestamp,
+          meta: preserveOfflineProtectionFlag(
+            sessionKey,
+            key,
+            getManifestMeta?.(data, entryKey),
+            () =>
+              localPersistentStorage.readNamespaceEntryMetadataByPayload(
+                key,
+                prefix,
+              )?.meta,
+          ),
         });
-        return;
-      }
+        recordLocalStorageTouch(key, entry.timestamp);
+      });
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -743,7 +811,7 @@ export function createPersistentStorageNamespaceHandle<
 
   async function remove(entryKey: string): Promise<void> {
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return;
         await namespace.commit({ removes: [entryKey] });
@@ -754,15 +822,12 @@ export function createPersistentStorageNamespaceHandle<
       if (prefix === false) return;
       const key = `${prefix}${entryKey}`;
 
-      if (adapter === 'local-sync') {
-        await runLocalStorageMutation(() => {
-          localPersistentStorage.remove(key, {
-            metadata: 'namespace',
-            namespacePrefix: prefix,
-          });
+      await runLocalStorageMutation(() => {
+        localPersistentStorage.remove(key, {
+          metadata: 'namespace',
+          namespacePrefix: prefix,
         });
-        return;
-      }
+      });
     } catch (error) {
       onPersistentStorageError?.(error);
     }
@@ -779,7 +844,7 @@ export function createPersistentStorageNamespaceHandle<
     cursor: string | null;
   }> {
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) {
           return { entries: [], cursor: null };
@@ -802,10 +867,9 @@ export function createPersistentStorageNamespaceHandle<
 
       const sortedEntries = localPersistentStorage
         .listManifestEntries(prefix)
-        .filter((entry) => entry.entryKey !== undefined)
         .sort((left, right) => {
           if (order === 'key') {
-            return (left.entryKey ?? '').localeCompare(right.entryKey ?? '');
+            return left.entryKey.localeCompare(right.entryKey);
           }
 
           const direction = order === 'lru-asc' ? 1 : -1;
@@ -813,26 +877,20 @@ export function createPersistentStorageNamespaceHandle<
             return direction * (left.lastAccessAt - right.lastAccessAt);
           }
 
-          return (left.entryKey ?? '').localeCompare(right.entryKey ?? '');
+          return left.entryKey.localeCompare(right.entryKey);
         });
 
       const pageEntries = sortedEntries
         .slice(offset, offset + limit)
-        .flatMap((entry) => {
-          if (entry.entryKey === undefined) return [];
-
-          return [
-            {
-              ...(entry.meta
-                ? __LEGIT_CAST__<TMetadata, unknown>(entry.meta)
-                : __LEGIT_CAST__<TMetadata, Record<string, never>>({})),
-              key: entry.entryKey,
-              lastAccessAt: entry.lastAccessAt,
-              writtenAt: entry.lastAccessAt,
-              version: asyncVersion,
-            },
-          ];
-        });
+        .map((entry) => ({
+          ...(entry.meta
+            ? __LEGIT_CAST__<TMetadata, unknown>(entry.meta)
+            : __LEGIT_CAST__<TMetadata, Record<string, never>>({})),
+          key: entry.entryKey,
+          lastAccessAt: entry.lastAccessAt,
+          writtenAt: entry.lastAccessAt,
+          version: asyncVersion,
+        }));
 
       return {
         entries: pageEntries,
@@ -868,7 +926,7 @@ export function createPersistentStorageNamespaceHandle<
     const prefix = getPrefix();
 
     try {
-      if (isAsyncStorageAdapter(adapter)) {
+      if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
         if (!namespace) return;
         await namespace.clear();
@@ -1068,19 +1126,14 @@ export function refreshLocalStorageTimestamp(
   });
 }
 
-async function runExpirationScan(
-  adapter: StorageAdapter,
-  _maxAgeMs: number,
-): Promise<void> {
-  if (adapter === 'local-sync') {
-    await localPersistentStorage.runMaintenance();
-  }
-}
-
 /** Resets expiration scan tracking. Exported for test cleanup. */
 export function resetExpirationScanTracking(): void {
   cancelScheduledLocalStorageMaintenance?.();
   cancelScheduledLocalStorageMaintenance = null;
+  for (const entry of scheduledAsyncMaintenance.values()) {
+    entry.cancel?.();
+  }
+  scheduledAsyncMaintenance.clear();
   localStorageGlobalMaintenanceRequested = false;
   scheduledLocalStorageMaintenanceManifestKeys = new Set<string>();
   localStorageExpirationScanScheduled = false;
@@ -1096,21 +1149,22 @@ export async function readProtectedStorageKeys(
   adapter: StorageAdapter,
   sessionKey: string,
 ): Promise<Set<string>> {
+  const protectedKeysSnapshot = getSessionProtectedKeysSnapshot(sessionKey);
+  if (protectedKeysSnapshot !== null) {
+    return new Set(protectedKeysSnapshot);
+  }
+
   if (adapter === 'local-sync') {
     return localPersistentStorage.readProtectedStorageKeys(sessionKey);
   }
 
-  if (!isAsyncStorageAdapter(adapter)) {
-    return new Set<string>();
-  }
-
-  const namespace = adapter.openNamespace<{ keys: string[] }>({
-    sessionKey,
-    storeName: '_o_.p',
-    kind: 'document',
+  const namespace = adapter.openNamespace<unknown>(
+    getProtectedKeysStorageScope(sessionKey),
+  );
+  const entry = await namespace.get(PROTECTED_KEYS_STORAGE_ENTRY_KEY, {
+    touch: 'never',
   });
-  const entry = await namespace.get('document', { touch: 'never' });
-  return new Set(entry?.value.keys ?? []);
+  return new Set(parseProtectedKeys(entry?.value)?.keys ?? []);
 }
 
 function parseProtectedAsyncStorageKey(
@@ -1155,7 +1209,7 @@ export async function readProtectedStorageNamespaceKeys(
     sessionKey,
   );
 
-  if (isAsyncStorageAdapter(adapter)) {
+  if (adapter !== 'local-sync') {
     const scope = args.asyncScope;
     if (!scope) return new Set<string>();
 
@@ -1186,4 +1240,44 @@ export async function readProtectedStorageNamespaceKeys(
       .filter((key) => key.startsWith(localStoragePrefix))
       .map((key) => key.slice(localStoragePrefix.length)),
   );
+}
+
+export function scheduleAsyncStorageMaintenance(
+  maintenanceKey: string,
+  callback: () => Promise<void>,
+): void {
+  const existing = scheduledAsyncMaintenance.get(maintenanceKey);
+  if (existing) {
+    existing.callback = callback;
+    if (existing.running) {
+      existing.rerunRequested = true;
+      return;
+    }
+    if (existing.cancel !== null) return;
+  }
+
+  const entry = existing ?? {
+    cancel: null,
+    callback,
+    running: false,
+    rerunRequested: false,
+  };
+  entry.callback = callback;
+  scheduledAsyncMaintenance.set(maintenanceKey, entry);
+
+  entry.cancel = scheduleIdleCleanup(() => {
+    entry.cancel = null;
+    entry.running = true;
+
+    void entry.callback().finally(() => {
+      entry.running = false;
+      if (entry.rerunRequested) {
+        entry.rerunRequested = false;
+        scheduleAsyncStorageMaintenance(maintenanceKey, entry.callback);
+        return;
+      }
+
+      scheduledAsyncMaintenance.delete(maintenanceKey);
+    });
+  });
 }

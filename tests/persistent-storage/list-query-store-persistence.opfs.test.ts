@@ -932,11 +932,10 @@ describe('opfs: list query store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(50);
+    await advanceTime(100);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);
@@ -967,11 +966,10 @@ describe('opfs: list query store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(50);
+    await advanceTime(100);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);
@@ -1008,12 +1006,11 @@ describe('opfs: list query store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(50);
+    await advanceTime(100);
     await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
         preloaded: '❌'
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);

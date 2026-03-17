@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/consistent-type-assertions, @typescript-eslint/require-await, @ls-stack/use-top-level-regex, @ls-stack/improved-no-unnecessary-condition -- This in-memory test adapter intentionally favors concise fixture code over production-style lint constraints. */
+import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import type {
   AsyncStorageAdapter,
+  AsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitUpsert,
   AsyncStorageEntryMetadata,
   AsyncStorageMaintenanceState,
   AsyncStorageMetadataOrder,
@@ -12,8 +15,13 @@ import type {
   PersistedListQueryData,
   PersistedListQueryItemData,
   StorageCacheEntry,
-  StorageAdapter,
 } from '../../src/persistentStorage/types';
+import { getSessionProtectedKeysSnapshot } from '../../src/persistentStorage/offline/sessionProtectionRegistry';
+import {
+  getProtectedKeysStorageScope,
+  parseProtectedKeys,
+  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
+} from '../../src/persistentStorage/offline/protectedKeysPersistence';
 import { scheduleIdleCleanup } from '../../src/persistentStorage/scheduleIdleCleanup';
 import type { PersistentTestStoreScope } from '../utils/persistentStorageTestStore';
 import { createInMemoryPersistentTestStore } from '../utils/persistentStorageTestStore';
@@ -81,7 +89,7 @@ export type MockOpfsOperation =
   | { type: 'finishStartupCleanup'; holderId: string; finishedAt: number };
 
 type MockOpfsStorageAdapterBase = {
-  adapter: StorageAdapter;
+  adapter: AsyncStorageAdapter;
   storage: ReturnType<typeof createInMemoryPersistentTestStore>['storage'];
   scope: ReturnType<typeof createInMemoryPersistentTestStore>['scope'];
   readRequests: string[];
@@ -108,6 +116,7 @@ const OPFS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const OPFS_STARTUP_CLEANUP_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const OPFS_STARTUP_CLEANUP_LEASE_TTL_MS = 60 * 1000;
 const OPFS_RECENCY_BUCKET_MS = 6 * 60 * 60 * 1000;
+const ASYNC_COMMIT_DEBOUNCE_MS = 40;
 
 type ListQueryItemRef = string | { tableId: string; id: number | string };
 
@@ -133,6 +142,82 @@ function createCacheEntry<T>(
     timestamp: options.timestamp ?? Date.now(),
     version: options.version ?? 1,
   };
+}
+
+function normalizeDocumentEntry<T>(
+  entry: StorageCacheEntry<unknown>,
+): StorageCacheEntry<PersistedDocumentData<T>> {
+  const value = entry.data;
+  if (typeof value === 'object' && value !== null && 'd' in value) {
+    return { ...entry, data: { data: value.d as T } };
+  }
+
+  return entry as StorageCacheEntry<PersistedDocumentData<T>>;
+}
+
+function normalizeCollectionItemEntry<T>(
+  entry: StorageCacheEntry<unknown>,
+): StorageCacheEntry<PersistedCollectionItemData<T>> {
+  const value = entry.data;
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'd' in value &&
+    'p' in value
+  ) {
+    return { ...entry, data: { data: value.d as T, payload: value.p } };
+  }
+
+  return entry as StorageCacheEntry<PersistedCollectionItemData<T>>;
+}
+
+function normalizeListQueryItemEntry<T>(
+  entry: StorageCacheEntry<unknown>,
+): StorageCacheEntry<PersistedListQueryItemData<T>> {
+  const value = entry.data;
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'd' in value &&
+    'p' in value
+  ) {
+    return {
+      ...entry,
+      data: {
+        data: value.d as T,
+        payload: value.p,
+        ...('lf' in value && Array.isArray(value.lf)
+          ? { loadedFields: value.lf }
+          : {}),
+      },
+    };
+  }
+
+  return entry as StorageCacheEntry<PersistedListQueryItemData<T>>;
+}
+
+function normalizeListQueryEntry(
+  entry: StorageCacheEntry<unknown>,
+): StorageCacheEntry<PersistedListQueryData> {
+  const value = entry.data;
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'p' in value &&
+    'i' in value &&
+    Array.isArray(value.i)
+  ) {
+    return {
+      ...entry,
+      data: {
+        payload: value.p,
+        items: value.i,
+        hasMore: 'h' in value && value.h === true,
+      },
+    };
+  }
+
+  return entry as StorageCacheEntry<PersistedListQueryData>;
 }
 
 function bucketId(timestamp: number): number {
@@ -165,19 +250,35 @@ function buildCustomMetadata(
 
   switch (scope.kind) {
     case 'collection.item':
-      return 'payload' in value ? { p: value.payload } : {};
+      return 'p' in value
+        ? { p: value.p }
+        : 'payload' in value
+          ? { p: value.payload }
+          : {};
     case 'listQuery.item':
-      return 'payload' in value ? { p: value.payload } : {};
+      return 'p' in value
+        ? { p: value.p }
+        : 'payload' in value
+          ? { p: value.payload }
+          : {};
     case 'listQuery.query':
       return {
-        ...('payload' in value ? { p: value.payload } : {}),
-        ...(Array.isArray((value as PersistedListQueryData).items)
-          ? { i: (value as PersistedListQueryData).items }
-          : {}),
-        ...('hasMore' in value &&
-        (value as PersistedListQueryData).hasMore === true
+        ...('p' in value
+          ? { p: value.p }
+          : 'payload' in value
+            ? { p: value.payload }
+            : {}),
+        ...(Array.isArray((value as { i?: unknown }).i)
+          ? { i: (value as { i: string[] }).i }
+          : Array.isArray((value as PersistedListQueryData).items)
+            ? { i: (value as PersistedListQueryData).items }
+            : {}),
+        ...('h' in value && value.h === true
           ? { h: true }
-          : {}),
+          : 'hasMore' in value &&
+              (value as PersistedListQueryData).hasMore === true
+            ? { h: true }
+            : {}),
       };
     default:
       return {};
@@ -364,21 +465,19 @@ function createScopeHelpers(
       seed<T>(data: T, options?: { timestamp?: number; version?: number }) {
         storage.writeValue(
           documentStorageKey,
-          createCacheEntry<PersistedDocumentData<T>>({ data }, options),
+          createCacheEntry({ d: data }, options),
         );
         return documentStorageKey;
       },
       readEntry<T>() {
-        return readRequiredEntry<StorageCacheEntry<PersistedDocumentData<T>>>(
-          documentStorageKey,
+        return normalizeDocumentEntry<T>(
+          readRequiredEntry<StorageCacheEntry<unknown>>(documentStorageKey),
         );
       },
       readData<T>() {
-        return (
-          storage.readEntry<StorageCacheEntry<PersistedDocumentData<T>>>(
-            documentStorageKey,
-          )?.data.data ?? null
-        );
+        const entry =
+          storage.readEntry<StorageCacheEntry<unknown>>(documentStorageKey);
+        return entry ? normalizeDocumentEntry<T>(entry).data.data : null;
       },
       getRawData(kind: 'entry' | 'manifest') {
         if (kind === 'entry') {
@@ -400,24 +499,22 @@ function createScopeHelpers(
         const key = collectionItemStorageKey(payload);
         storage.writeValue(
           key,
-          createCacheEntry<PersistedCollectionItemData<T>>(
-            { data, payload },
-            options,
-          ),
+          createCacheEntry({ d: data, p: payload }, options),
         );
         return key;
       },
       readItemEntry<T>(payload: string) {
-        return readRequiredEntry<
-          StorageCacheEntry<PersistedCollectionItemData<T>>
-        >(collectionItemStorageKey(payload));
+        return normalizeCollectionItemEntry<T>(
+          readRequiredEntry<StorageCacheEntry<unknown>>(
+            collectionItemStorageKey(payload),
+          ),
+        );
       },
       readItemData<T>(payload: string) {
-        return (
-          storage.readEntry<StorageCacheEntry<PersistedCollectionItemData<T>>>(
-            collectionItemStorageKey(payload),
-          )?.data.data ?? null
+        const entry = storage.readEntry<StorageCacheEntry<unknown>>(
+          collectionItemStorageKey(payload),
         );
+        return entry ? normalizeCollectionItemEntry<T>(entry).data.data : null;
       },
     },
     listQuery: {
@@ -440,8 +537,12 @@ function createScopeHelpers(
 
         storage.writeValue(
           storageKey,
-          createCacheEntry<PersistedListQueryItemData<T>>(
-            { data, payload, loadedFields: options?.loadedFields },
+          createCacheEntry(
+            {
+              d: data,
+              p: payload,
+              ...(options?.loadedFields ? { lf: options.loadedFields } : {}),
+            },
             options,
           ),
         );
@@ -456,11 +557,11 @@ function createScopeHelpers(
         const key = listQueryStorageKey(params);
         storage.writeValue(
           key,
-          createCacheEntry<PersistedListQueryData>(
+          createCacheEntry(
             {
-              payload: params,
-              items: items.map(normalizeListQueryItemRef),
-              hasMore: options?.hasMore ?? false,
+              p: params,
+              i: items.map(normalizeListQueryItemRef),
+              ...(options?.hasMore ? { h: true } : {}),
             },
             options,
           ),
@@ -468,20 +569,23 @@ function createScopeHelpers(
         return key;
       },
       readItemEntry<T>(tableId: string, id: number | string) {
-        return readRequiredEntry<
-          StorageCacheEntry<PersistedListQueryItemData<T>>
-        >(listQueryItemStorageKey(tableId, id));
-      },
-      readItemData<T>(tableId: string, id: number | string) {
-        return (
-          storage.readEntry<StorageCacheEntry<PersistedListQueryItemData<T>>>(
+        return normalizeListQueryItemEntry<T>(
+          readRequiredEntry<StorageCacheEntry<unknown>>(
             listQueryItemStorageKey(tableId, id),
-          )?.data.data ?? null
+          ),
         );
       },
+      readItemData<T>(tableId: string, id: number | string) {
+        const entry = storage.readEntry<StorageCacheEntry<unknown>>(
+          listQueryItemStorageKey(tableId, id),
+        );
+        return entry ? normalizeListQueryItemEntry<T>(entry).data.data : null;
+      },
       readQueryEntry(params: unknown) {
-        return readRequiredEntry<StorageCacheEntry<PersistedListQueryData>>(
-          listQueryStorageKey(params),
+        return normalizeListQueryEntry(
+          readRequiredEntry<StorageCacheEntry<unknown>>(
+            listQueryStorageKey(params),
+          ),
         );
       },
     },
@@ -538,6 +642,27 @@ function applyInitialScope(
   }
 }
 
+type MetadataState = {
+  version: number;
+  writtenAt: number;
+  lastAccessAt: number;
+  sizeBytes: number;
+  customMetadata: Record<string, unknown>;
+};
+
+type PendingNamespaceCommit = {
+  scope: AsyncStorageNamespaceScope;
+  cancelFlush: (() => void) | null;
+  flushPromise: Promise<void> | null;
+  removes: Set<string>;
+  touches: Map<string, number>;
+  upserts: Map<
+    string,
+    AsyncStorageNamespaceCommitUpsert<unknown, Record<string, unknown>>
+  >;
+  waiters: Array<{ reject: (error: unknown) => void; resolve: () => void }>;
+};
+
 export function createMockOpfsStorageAdapter(
   options: MockOpfsStorageAdapterOptions & {
     storeName: string;
@@ -547,14 +672,6 @@ export function createMockOpfsStorageAdapter(
 export function createMockOpfsStorageAdapter(
   options?: MockOpfsStorageAdapterOptions,
 ): MockOpfsStorageAdapterBase;
-
-type MetadataState = {
-  version: number;
-  writtenAt: number;
-  lastAccessAt: number;
-  sizeBytes: number;
-  customMetadata: Record<string, unknown>;
-};
 
 export function createMockOpfsStorageAdapter({
   readDelayMs = 0,
@@ -574,6 +691,8 @@ export function createMockOpfsStorageAdapter({
     ...DEFAULT_MAINTENANCE_STATE,
   };
   let startupCleanupScheduled = false;
+  const pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
+  const recentTouchedBuckets = new Map<string, string>();
 
   const scopePrefix =
     storeName && sessionKey ? `tsdf.${sessionKey}.${storeName}.` : null;
@@ -586,22 +705,271 @@ export function createMockOpfsStorageAdapter({
     });
   }
 
-  async function readProtectedRefs(sessionKey: string): Promise<Set<string>> {
-    const registryKey = `tsdf.${sessionKey}._o_.p`;
+  function getNamespaceCommitKey(scope: AsyncStorageNamespaceScope): string {
+    return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
+  }
+
+  function getTouchGuardKey(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+  ): string {
+    return `${getNamespaceCommitKey(scope)}::${key}`;
+  }
+
+  function getOrCreatePendingNamespaceCommit(
+    scope: AsyncStorageNamespaceScope,
+  ): PendingNamespaceCommit {
+    const commitKey = getNamespaceCommitKey(scope);
+    const existing = pendingNamespaceCommits.get(commitKey);
+    if (existing) return existing;
+
+    const created: PendingNamespaceCommit = {
+      scope,
+      cancelFlush: null,
+      flushPromise: null,
+      removes: new Set(),
+      touches: new Map(),
+      upserts: new Map(),
+      waiters: [],
+    };
+    pendingNamespaceCommits.set(commitKey, created);
+    return created;
+  }
+
+  function schedulePendingNamespaceFlush(
+    pending: PendingNamespaceCommit,
+  ): void {
+    if (pending.cancelFlush !== null || pending.flushPromise !== null) return;
+
+    const timeoutId = setTimeout(() => {
+      pending.cancelFlush = null;
+      void flushPendingNamespaceCommit(pending.scope);
+    }, ASYNC_COMMIT_DEBOUNCE_MS);
+
+    pending.cancelFlush = () => clearTimeout(timeoutId);
+  }
+
+  async function applyCommitToNamespace(
+    scope: AsyncStorageNamespaceScope,
+    {
+      upserts = [],
+      removes = [],
+      touches = [],
+    }: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+  ): Promise<void> {
+    const now = Date.now();
+    const touchesByKey = new Map(
+      touches.map((touch) => [touch.key, touch.lastAccessAt ?? now]),
+    );
+
+    for (const key of removes) {
+      removeFlatKey(getFlatKey(scope, key));
+    }
+
+    for (const upsert of upserts) {
+      const flatKey = getFlatKey(scope, upsert.key);
+      setFlatValue(
+        flatKey,
+        createCacheEntry(upsert.value, {
+          timestamp: now,
+          version: upsert.version,
+        }),
+      );
+
+      const metadata = metadataByFlatKey.get(flatKey);
+      if (!metadata) continue;
+      metadata.customMetadata = {
+        ...metadata.customMetadata,
+        ...(upsert.metadata ?? {}),
+      };
+      metadata.lastAccessAt = touchesByKey.get(upsert.key) ?? now;
+      metadata.writtenAt = now;
+      metadata.version = upsert.version;
+      metadataByFlatKey.set(flatKey, metadata);
+    }
+
+    for (const [key, lastAccessAt] of touchesByKey) {
+      touchMetadata(scope, key, lastAccessAt);
+    }
+
+    operations.push({
+      type: 'commit',
+      scope,
+      upserts: upserts.map((upsert) => upsert.key),
+      removes: [...removes],
+      touches: touches.map((touch) => ({
+        key: touch.key,
+        lastAccessAt: touch.lastAccessAt ?? null,
+      })),
+    });
+  }
+
+  async function flushPendingNamespaceCommit(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<void> {
+    const commitKey = getNamespaceCommitKey(scope);
+    const pending = pendingNamespaceCommits.get(commitKey);
+    if (!pending) return;
+    if (pending.flushPromise) {
+      await pending.flushPromise;
+      return;
+    }
+
+    pending.cancelFlush?.();
+    pending.cancelFlush = null;
+
+    const upserts = [...pending.upserts.values()];
+    const removes = [...pending.removes];
+    const touches = [...pending.touches.entries()].map(
+      ([key, lastAccessAt]) => ({ key, lastAccessAt }),
+    );
+    const waiters = [...pending.waiters];
+    pending.upserts = new Map();
+    pending.removes = new Set();
+    pending.touches = new Map();
+    pending.waiters = [];
+
+    if (upserts.length === 0 && removes.length === 0 && touches.length === 0) {
+      pendingNamespaceCommits.delete(commitKey);
+      for (const waiter of waiters) {
+        waiter.resolve();
+      }
+      return;
+    }
+
+    pending.flushPromise = applyCommitToNamespace(scope, {
+      upserts,
+      removes,
+      touches,
+    })
+      .then(() => {
+        const currentBucket = String(bucketId(Date.now()));
+        for (const touch of touches) {
+          recentTouchedBuckets.set(
+            getTouchGuardKey(scope, touch.key),
+            String(bucketId(touch.lastAccessAt)),
+          );
+        }
+        for (const upsert of upserts) {
+          recentTouchedBuckets.set(
+            getTouchGuardKey(scope, upsert.key),
+            currentBucket,
+          );
+        }
+        for (const waiter of waiters) {
+          waiter.resolve();
+        }
+      })
+      .catch((error) => {
+        for (const waiter of waiters) {
+          waiter.reject(error);
+        }
+        throw error;
+      })
+      .finally(() => {
+        pending.flushPromise = null;
+        if (pending.waiters.length === 0) {
+          pendingNamespaceCommits.delete(commitKey);
+          return;
+        }
+        schedulePendingNamespaceFlush(pending);
+      });
+
+    await pending.flushPromise;
+  }
+
+  async function flushAllPendingNamespaceCommits(): Promise<void> {
+    await Promise.all(
+      [...pendingNamespaceCommits.values()].map(async (pending) =>
+        flushPendingNamespaceCommit(pending.scope),
+      ),
+    );
+  }
+
+  function shouldEnqueueTouch(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+    lastAccessAt: number,
+    touchMode: 'never' | 'coarse' | 'force',
+    now: number,
+  ): boolean {
+    if (touchMode === 'never') return false;
+
+    const currentBucket = String(bucketId(now));
+    if (
+      touchMode !== 'force' &&
+      String(bucketId(lastAccessAt)) === currentBucket
+    ) {
+      return false;
+    }
+
+    const touchKey = getTouchGuardKey(scope, key);
+    if (recentTouchedBuckets.get(touchKey) === currentBucket) {
+      return false;
+    }
+
+    const pending = pendingNamespaceCommits.get(getNamespaceCommitKey(scope));
+    const pendingTouch = pending?.touches.get(key);
+    return (
+      pendingTouch === undefined ||
+      String(bucketId(pendingTouch)) !== currentBucket
+    );
+  }
+
+  function queueCommitToNamespace(
+    scope: AsyncStorageNamespaceScope,
+    args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
+  ): Promise<void> {
+    const pending = getOrCreatePendingNamespaceCommit(scope);
+    const now = Date.now();
+
+    for (const touch of args.touches ?? []) {
+      pending.touches.set(touch.key, touch.lastAccessAt ?? now);
+    }
+
+    for (const remove of args.removes ?? []) {
+      pending.upserts.delete(remove);
+      pending.touches.delete(remove);
+      pending.removes.add(remove);
+    }
+
+    for (const upsert of args.upserts ?? []) {
+      pending.removes.delete(upsert.key);
+      pending.upserts.set(upsert.key, upsert);
+    }
+
+    schedulePendingNamespaceFlush(pending);
+
+    return new Promise<void>((resolve, reject) => {
+      pending.waiters.push({ resolve, reject });
+    });
+  }
+
+  async function readProtectedRefs(
+    targetSessionKey: string,
+  ): Promise<Set<string>> {
+    const protectedKeysSnapshot =
+      getSessionProtectedKeysSnapshot(targetSessionKey);
+    if (protectedKeysSnapshot !== null) {
+      return new Set(protectedKeysSnapshot);
+    }
+
+    const registryKey = `tsdf.${targetSessionKey}._o_.p`;
     if (!persistentStore.storage.has(registryKey)) {
       return new Set();
     }
 
-    const namespace = createNamespaceHandle<{ keys: string[] }>({
-      sessionKey,
-      storeName: '__offline__',
-      kind: '__internal.protected',
+    const namespace = createNamespaceHandle<unknown>(
+      getProtectedKeysStorageScope(targetSessionKey),
+    );
+    const entry = await namespace.get(PROTECTED_KEYS_STORAGE_ENTRY_KEY, {
+      touch: 'never',
     });
-    const entry = await namespace.get('registry', { touch: 'never' });
-    return new Set(entry?.value.keys ?? []);
+    return new Set(parseProtectedKeys(entry?.value)?.keys ?? []);
   }
 
   async function performStartupCleanup(): Promise<void> {
+    await flushAllPendingNamespaceCommits();
     const protectedRefsBySession = new Map<string, Set<string>>();
 
     for (const scope of getAllScopes()) {
@@ -753,40 +1121,33 @@ export function createMockOpfsStorageAdapter({
 
   function getNamespaceKeys(scope: AsyncStorageNamespaceScope): string[] {
     const prefix = getNamespacePrefix(scope);
-    return persistentStore.storage
-      .listKeys(prefix)
-      .map((flatKey) => parseFlatStorageKey(flatKey))
-      .filter(
-        (entry): entry is ParsedFlatKey => entry?.scope.kind === scope.kind,
-      )
-      .filter((entry) => {
-        return (
-          entry.scope.sessionKey === scope.sessionKey &&
-          entry.scope.storeName === scope.storeName
-        );
-      })
-      .map((entry) => entry.key);
+    return filterAndMap(persistentStore.storage.listKeys(prefix), (flatKey) => {
+      const entry = parseFlatStorageKey(flatKey);
+      return entry &&
+        entry.scope.kind === scope.kind &&
+        entry.scope.sessionKey === scope.sessionKey &&
+        entry.scope.storeName === scope.storeName
+        ? entry.key
+        : false;
+    });
   }
 
   function getAllScopes(): AsyncStorageNamespaceScope[] {
-    return [...persistentStore.storage.listKeys('tsdf.')]
-      .map((flatKey) => parseFlatStorageKey(flatKey))
-      .filter((entry): entry is ParsedFlatKey => entry !== null)
-      .reduce<AsyncStorageNamespaceScope[]>((scopes, entry) => {
-        if (
-          scopes.some(
-            (scope) =>
-              scope.sessionKey === entry.scope.sessionKey &&
-              scope.storeName === entry.scope.storeName &&
-              scope.kind === entry.scope.kind,
-          )
-        ) {
-          return scopes;
-        }
+    const parsedEntries = filterAndMap(
+      persistentStore.storage.listKeys('tsdf.'),
+      (flatKey) => parseFlatStorageKey(flatKey) ?? false,
+    );
+    const scopes: AsyncStorageNamespaceScope[] = [];
+    const seenScopes = new Set<string>();
 
-        scopes.push(entry.scope);
-        return scopes;
-      }, []);
+    for (const entry of parsedEntries) {
+      const scopeKey = `${entry.scope.sessionKey}::${entry.scope.storeName}::${entry.scope.kind}`;
+      if (seenScopes.has(scopeKey)) continue;
+      seenScopes.add(scopeKey);
+      scopes.push(entry.scope);
+    }
+
+    return scopes;
   }
 
   function touchMetadata(
@@ -841,6 +1202,7 @@ export function createMockOpfsStorageAdapter({
       options: { touch?: 'never' | 'coarse' | 'force' } = {},
       recordRequest = true,
     ) {
+      await flushPendingNamespaceCommit(scope);
       const flatKey = getFlatKey(scope, key);
       const touchMode = options.touch ?? 'coarse';
       if (recordRequest) {
@@ -863,22 +1225,21 @@ export function createMockOpfsStorageAdapter({
       if (!entry || !metadata) return null;
 
       const now = Date.now();
-      const shouldTouch =
-        touchMode === 'force' ||
-        (touchMode === 'coarse' &&
-          bucketId(metadata.lastAccessAt) !== bucketId(now));
+      const shouldTouch = shouldEnqueueTouch(
+        scope,
+        key,
+        metadata.lastAccessAt,
+        touchMode,
+        now,
+      );
 
       if (shouldTouch) {
-        touchMetadata(scope, key, now);
+        void queueCommitToNamespace(scope, {
+          touches: [{ key, lastAccessAt: now }],
+        });
       }
 
-      return {
-        value: entry.data,
-        metadata: {
-          ...metadata,
-          ...(shouldTouch ? { lastAccessAt: now } : {}),
-        },
-      };
+      return { value: entry.data, metadata };
     }
 
     return {
@@ -902,71 +1263,18 @@ export function createMockOpfsStorageAdapter({
         return entries;
       },
       async commit({ upserts = [], removes = [], touches = [] }) {
-        const now = Date.now();
-        const touchesByKey = new Map(
-          touches.map((touch) => [touch.key, touch.lastAccessAt ?? now]),
-        );
-
-        for (const key of removes) {
-          removeFlatKey(getFlatKey(scope, key));
-        }
-
-        for (const upsert of upserts) {
-          const flatKey = getFlatKey(scope, upsert.key);
-          setFlatValue(
-            flatKey,
-            createCacheEntry(upsert.value, {
-              timestamp: now,
-              version: upsert.version,
-            }),
-          );
-
-          const metadata = metadataByFlatKey.get(flatKey);
-          if (!metadata) continue;
-          metadata.customMetadata = {
-            ...metadata.customMetadata,
-            ...(upsert.metadata ?? {}),
-          };
-          if (touchesByKey.has(upsert.key)) {
-            metadata.lastAccessAt =
-              touchesByKey.get(upsert.key) ?? metadata.lastAccessAt;
-          } else {
-            metadata.lastAccessAt = now;
-          }
-          metadata.writtenAt = now;
-          metadata.version = upsert.version;
-          metadataByFlatKey.set(flatKey, metadata);
-        }
-
-        for (const [key, lastAccessAt] of touchesByKey) {
-          touchMetadata(scope, key, lastAccessAt);
-        }
-
-        operations.push({
-          type: 'commit',
-          scope,
-          upserts: upserts.map((upsert) => upsert.key),
-          removes: [...removes],
-          touches: touches.map((touch) => ({
-            key: touch.key,
-            lastAccessAt: touch.lastAccessAt ?? null,
-          })),
-        });
+        await queueCommitToNamespace(scope, { upserts, removes, touches });
       },
       async listMetadata({ cursor = null, limit = null, order = 'key' } = {}) {
+        await flushPendingNamespaceCommit(scope);
         metadataListRequests.push({ scope, cursor, limit, order });
 
         const offset = decodeCursor(cursor);
         const keys = getNamespaceKeys(scope);
-        const entries = keys
-          .map((key) => getMetadataEntry(scope, key))
-          .filter(
-            (
-              entry,
-            ): entry is AsyncStorageEntryMetadata<Record<string, unknown>> =>
-              entry !== null,
-          )
-          .sort((left, right) => compareMetadata(left, right, order));
+        const entries = filterAndMap(
+          keys,
+          (key) => getMetadataEntry(scope, key) ?? false,
+        ).sort((left, right) => compareMetadata(left, right, order));
 
         const pageSize = Math.max(1, (limit ?? entries.length) || 1);
         const nextEntries = entries.slice(offset, offset + pageSize);
@@ -988,6 +1296,7 @@ export function createMockOpfsStorageAdapter({
         return { entries: nextEntries, cursor: nextCursor };
       },
       async clear() {
+        await flushPendingNamespaceCommit(scope);
         const removedKeys = getNamespaceKeys(scope);
         operations.push({ type: 'clear', scope, removedKeys });
         for (const key of removedKeys) {
@@ -1069,6 +1378,8 @@ export function createMockOpfsStorageAdapter({
     resetForTests() {
       startupCleanupScheduled = false;
       maintenanceState = { ...DEFAULT_MAINTENANCE_STATE };
+      pendingNamespaceCommits.clear();
+      recentTouchedBuckets.clear();
     },
   } as AsyncStorageAdapter;
 

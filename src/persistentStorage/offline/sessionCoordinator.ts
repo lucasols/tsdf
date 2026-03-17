@@ -22,6 +22,10 @@ import type {
   OfflineRecoveryProbeConfig,
 } from './types';
 import {
+  parseProtectedKeys,
+  serializeProtectedKeys,
+} from './protectedKeysPersistence';
+import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
 } from './sessionProtectionRegistry';
@@ -218,7 +222,13 @@ function createSessionPersistenceHandles(args: {
               getSessionKey: () => args.sessionKey,
               onPersistentStorageError: args.onPersistentStorageError,
             },
-            { getManifestMeta: (data) => ({ keys: data.keys }) },
+            {
+              getManifestMeta: (data) => ({ keys: data.keys }),
+              asyncValueCodec: {
+                serialize: serializeProtectedKeys,
+                deserialize: parseProtectedKeys,
+              },
+            },
           ),
   };
 }
@@ -318,8 +328,8 @@ export class SessionOfflineCoordinator {
     const hydrationToken = this.hydrationToken;
 
     const [persistedStatus, protectedKeysEntry] = await Promise.all([
-      this.sessionHandle.load(),
-      this.protectedKeysHandle.load(),
+      this.sessionHandle.load({ touch: 'never' }),
+      this.protectedKeysHandle.load({ touch: 'never' }),
     ]);
 
     if (hydrationToken !== this.hydrationToken) return;
@@ -338,6 +348,7 @@ export class SessionOfflineCoordinator {
     }
 
     this.protectedKeys = protectedKeysEntry?.keys ?? [];
+    setSessionProtectedKeysSnapshot(this.sessionKey, this.protectedKeys);
   }
 
   configure(options: {

@@ -183,7 +183,9 @@ export function createOfflineStoreController<
     namespace: NamespacePersistenceHandle<T>,
   ): Promise<Map<string, T>> {
     const keys = await namespace.listKeys();
-    const records = await Promise.all(keys.map((key) => namespace.load(key)));
+    const records = await Promise.all(
+      keys.map((key) => namespace.load(key, { touch: 'never' })),
+    );
     const loadedRecords = new Map<string, T>();
 
     for (const record of records) {

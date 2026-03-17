@@ -1,6 +1,9 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import {
+  __LEGIT_CAST__,
+  type __LEGIT_ANY__,
+} from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
   TSDFItemQuery,
@@ -44,6 +47,7 @@ import {
   readStorageEntryFromLocalStorageSync,
   recordLocalStorageTouch,
   refreshLocalStorageTimestamp,
+  scheduleAsyncStorageMaintenance,
   scheduleLocalStorageMaintenance,
   scheduleLocalStorageRemoval,
   touchLocalStorageKeyWithThrottle,
@@ -237,7 +241,45 @@ export function setupListQueryPersistence<
     ItemNamespaceMetadata
   >(
     { ...persistentConfig, entryPrefix: LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX },
-    { getManifestMeta: (data) => ({ p: data.payload }) },
+    {
+      getManifestMeta: (data) => ({ p: data.payload }),
+      asyncValueCodec: {
+        serialize: (data) => ({
+          d: data.data,
+          p: data.payload,
+          ...(data.loadedFields !== undefined ? { lf: data.loadedFields } : {}),
+        }),
+        deserialize: (value) =>
+          typeof value === 'object' &&
+          value !== null &&
+          'd' in value &&
+          'p' in value
+            ? (() => {
+                const parsed = parsePersistedListQueryItemData(
+                  {
+                    data: value.d,
+                    payload: value.p,
+                    ...('lf' in value && Array.isArray(value.lf)
+                      ? { loadedFields: value.lf }
+                      : {}),
+                  },
+                  config.itemPayloadSchema,
+                );
+                return parsed
+                  ? {
+                      data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
+                        parsed.data,
+                      ),
+                      payload: parsed.payload,
+                      ...(parsed.loadedFields
+                        ? { loadedFields: parsed.loadedFields }
+                        : {}),
+                    }
+                  : null;
+              })()
+            : null,
+      },
+    },
   );
   const queryNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryData,
@@ -245,6 +287,28 @@ export function setupListQueryPersistence<
   >(
     { ...persistentConfig, entryPrefix: LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX },
     {
+      asyncValueCodec: {
+        serialize: (data) => ({
+          p: data.payload,
+          i: data.items,
+          ...(data.hasMore ? { h: true } : {}),
+        }),
+        deserialize: (value) =>
+          typeof value === 'object' &&
+          value !== null &&
+          'p' in value &&
+          'i' in value &&
+          Array.isArray(value.i)
+            ? parsePersistedListQueryData(
+                {
+                  payload: value.p,
+                  items: value.i,
+                  hasMore: 'h' in value && value.h === true,
+                },
+                config.queryPayloadSchema,
+              )
+            : null,
+      },
       getManifestMeta: (data) => ({
         p: data.payload,
         i: data.items,
@@ -839,7 +903,7 @@ export function setupListQueryPersistence<
 
     const currentGeneration = generation;
     const promise = itemNamespace
-      .load(itemKey)
+      .load(itemKey, { touch: 'never' })
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;
@@ -931,7 +995,7 @@ export function setupListQueryPersistence<
 
     const currentGeneration = generation;
     const promise = queryNamespace
-      .load(queryKey)
+      .load(queryKey, { touch: 'never' })
       .then(async (cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;
@@ -1727,9 +1791,17 @@ export function setupListQueryPersistence<
       return;
     }
 
-    const { keptQueryKeys, managedQueryEntriesByKey } =
-      await evictStoredQueries();
-    await evictStoredItems(keptQueryKeys, managedQueryEntriesByKey);
+    const sessionKey = config.getSessionKey();
+    if (sessionKey !== false) {
+      scheduleAsyncStorageMaintenance(
+        `list-query:${sessionKey}:${config.storeName}`,
+        async () => {
+          const { keptQueryKeys, managedQueryEntriesByKey } =
+            await evictStoredQueries();
+          await evictStoredItems(keptQueryKeys, managedQueryEntriesByKey);
+        },
+      );
+    }
   }
 
   function schedulePersistedStateFlush(): void {

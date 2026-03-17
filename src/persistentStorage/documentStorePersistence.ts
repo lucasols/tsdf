@@ -1,3 +1,4 @@
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type { DocumentStoreState } from '../documentStore';
 import type { AnyOfflineOperationDefinition } from './offline/types';
@@ -71,7 +72,24 @@ export function setupDocumentPersistence<
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
   const handle = createPersistentStorageHandle<
     PersistedDocumentData<State | StorageState>
-  >(config);
+  >(config, {
+    asyncValueCodec: {
+      serialize: (data) => ({ d: data.data }),
+      deserialize: (value) =>
+        typeof value === 'object' && value !== null && 'd' in value
+          ? (() => {
+              const parsed = parsePersistedDocumentData({ data: value.d });
+              return parsed
+                ? {
+                    data: __LEGIT_CAST__<State | StorageState, unknown>(
+                      parsed.data,
+                    ),
+                  }
+                : null;
+            })()
+          : null,
+    },
+  });
 
   let storeRef: Store<DocumentStoreState<State>> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -170,7 +188,7 @@ export function setupDocumentPersistence<
 
     const currentGeneration = generation;
     preloadPromise = handle
-      .load()
+      .load({ touch: 'never' })
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 

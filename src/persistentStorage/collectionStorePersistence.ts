@@ -1,6 +1,9 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import {
+  __LEGIT_CAST__,
+  type __LEGIT_ANY__,
+} from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 import type {
   TSFDCollectionItem,
@@ -28,6 +31,7 @@ import {
   listAllPersistentStorageNamespaceMetadata,
   readManifestPayloadMeta,
   readProtectedStorageNamespaceKeys,
+  scheduleAsyncStorageMaintenance,
   scheduleLocalStorageRemoval,
   scheduleLocalStorageMaintenance,
   readStorageEntryFromLocalStorageSync,
@@ -148,7 +152,32 @@ export function setupCollectionPersistence<
     { p?: unknown }
   >(
     { ...persistentConfig, entryPrefix: COLLECTION_STORAGE_ENTRY_PREFIX },
-    { getManifestMeta: (data) => ({ p: data.payload }) },
+    {
+      getManifestMeta: (data) => ({ p: data.payload }),
+      asyncValueCodec: {
+        serialize: (data) => ({ d: data.data, p: data.payload }),
+        deserialize: (value) =>
+          typeof value === 'object' &&
+          value !== null &&
+          'd' in value &&
+          'p' in value
+            ? (() => {
+                const parsed = parsePersistedCollectionItemData(
+                  { data: value.d, payload: value.p },
+                  config.payloadSchema,
+                );
+                return parsed
+                  ? {
+                      data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
+                        parsed.data,
+                      ),
+                      payload: parsed.payload,
+                    }
+                  : null;
+              })()
+            : null,
+      },
+    },
   );
 
   let storeRef: Store<TSFDCollectionState<ItemState, ItemPayload>> | null =
@@ -368,7 +397,7 @@ export function setupCollectionPersistence<
 
     const currentGeneration = generation;
     const promise = namespace
-      .load(itemKey)
+      .load(itemKey, { touch: 'never' })
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;
@@ -742,7 +771,13 @@ export function setupCollectionPersistence<
         return;
       }
 
-      await evictStoredItems();
+      const sessionKey = config.getSessionKey();
+      if (sessionKey !== false && localStorageAdapter === null) {
+        scheduleAsyncStorageMaintenance(
+          `collection:${sessionKey}:${config.storeName}`,
+          evictStoredItems,
+        );
+      }
     }
 
     if (localStorageAdapter !== null) {

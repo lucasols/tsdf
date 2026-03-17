@@ -8,12 +8,20 @@ import type {
   AsyncStorageMetadataOrder,
   AsyncStorageMetadataPage,
   AsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitUpsert,
   AsyncStorageNamespaceGetResult,
   AsyncStorageNamespaceHandle,
+  AsyncStorageNamespaceKind,
   AsyncStorageNamespaceScope,
   AsyncStorageProtectedEntryRef,
   AsyncStorageReadOptions,
 } from './types';
+import {
+  getProtectedKeysStorageScope,
+  parseProtectedKeys,
+  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
+} from './offline/protectedKeysPersistence';
+import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 
 const OPFS_CACHE_DIR = 'tsdf-cache-v2';
@@ -29,14 +37,55 @@ const WRITE_BUCKETS_DIR = 'write';
 const PAYLOADS_DIR = 'payloads';
 const LOOKUP_SHARD_COUNT = 32;
 const DEFAULT_METADATA_PAGE_LIMIT = 100;
+const ASYNC_COMMIT_DEBOUNCE_MS = 40;
 
 export const OPFS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 export const OPFS_STARTUP_CLEANUP_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 export const OPFS_STARTUP_CLEANUP_LEASE_TTL_MS = 60 * 1000;
 export const OPFS_RECENCY_BUCKET_MS = 6 * 60 * 60 * 1000;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
+function getRecord(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const record: Record<string, unknown> = {};
+  for (const [key, entryValue] of Object.entries(value)) {
+    record[key] = entryValue;
+  }
+
+  return record;
+}
+
+function parseStringRecord(value: unknown): Record<string, string> | null {
+  const record = getRecord(value);
+  if (!record) return null;
+
+  const parsed: Record<string, string> = {};
+  for (const [key, entryValue] of Object.entries(record)) {
+    if (typeof entryValue !== 'string') return null;
+    parsed[key] = entryValue;
+  }
+
+  return parsed;
+}
+
+function parseNamespaceKind(value: unknown): AsyncStorageNamespaceKind | null {
+  switch (value) {
+    case 'document':
+    case 'collection.item':
+    case 'listQuery.item':
+    case 'listQuery.query':
+    case 'offline.queue':
+    case 'offline.conflict':
+    case 'offline.entity':
+    case '__internal.protected': {
+      return value;
+    }
+    default: {
+      return null;
+    }
+  }
 }
 
 function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
@@ -62,28 +111,53 @@ function createDefaultMaintenanceState(): AsyncStorageMaintenanceState {
   return { lastSuccessfulCleanupAt: null, startupCleanupLease: null };
 }
 
-function isMaintenanceState(
+function parseMaintenanceState(
   value: unknown,
-): value is AsyncStorageMaintenanceState {
-  return (
-    isRecord(value) &&
-    (value.lastSuccessfulCleanupAt === null ||
-      typeof value.lastSuccessfulCleanupAt === 'number') &&
-    (value.startupCleanupLease === null ||
-      (isRecord(value.startupCleanupLease) &&
-        typeof value.startupCleanupLease.holderId === 'string' &&
-        typeof value.startupCleanupLease.expiresAt === 'number'))
-  );
+): AsyncStorageMaintenanceState | null {
+  const record = getRecord(value);
+  if (!record) return null;
+
+  const lastSuccessfulCleanupAt = record.lastSuccessfulCleanupAt;
+  if (
+    lastSuccessfulCleanupAt !== null &&
+    typeof lastSuccessfulCleanupAt !== 'number'
+  ) {
+    return null;
+  }
+
+  const lease = record.startupCleanupLease;
+  if (lease === null) {
+    return { lastSuccessfulCleanupAt, startupCleanupLease: null };
+  }
+
+  const leaseRecord = getRecord(lease);
+  if (
+    leaseRecord === null ||
+    typeof leaseRecord.holderId !== 'string' ||
+    typeof leaseRecord.expiresAt !== 'number'
+  ) {
+    return null;
+  }
+
+  return {
+    lastSuccessfulCleanupAt,
+    startupCleanupLease: {
+      holderId: leaseRecord.holderId,
+      expiresAt: leaseRecord.expiresAt,
+    },
+  };
 }
 
-function isNamespaceManifest(value: unknown): value is NamespaceManifest {
-  return (
-    isRecord(value) &&
-    typeof value.sequence === 'number' &&
-    isRecord(value.lookup) &&
-    isRecord(value.accessBuckets) &&
-    isRecord(value.writeBuckets)
-  );
+function parseNamespaceManifest(value: unknown): NamespaceManifest | null {
+  const record = getRecord(value);
+  if (!record || typeof record.sequence !== 'number') return null;
+
+  const lookup = parseStringRecord(record.lookup);
+  const accessBuckets = parseStringRecord(record.accessBuckets);
+  const writeBuckets = parseStringRecord(record.writeBuckets);
+  if (!lookup || !accessBuckets || !writeBuckets) return null;
+
+  return { sequence: record.sequence, lookup, accessBuckets, writeBuckets };
 }
 
 type NamespaceRegistryEntry = AsyncStorageNamespaceScope & {
@@ -92,62 +166,104 @@ type NamespaceRegistryEntry = AsyncStorageNamespaceScope & {
   updatedAt: number;
 };
 
-function isNamespaceRegistryEntry(
+function parseNamespaceRegistryEntry(
   value: unknown,
-): value is NamespaceRegistryEntry {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.dirName === 'string' &&
-    typeof value.sessionKey === 'string' &&
-    typeof value.storeName === 'string' &&
-    typeof value.kind === 'string' &&
-    typeof value.updatedAt === 'number'
-  );
+): NamespaceRegistryEntry | null {
+  const record = getRecord(value);
+  if (!record) return null;
+
+  const kind = parseNamespaceKind(record.kind);
+  if (
+    typeof record.id !== 'string' ||
+    typeof record.dirName !== 'string' ||
+    typeof record.sessionKey !== 'string' ||
+    typeof record.storeName !== 'string' ||
+    kind === null ||
+    typeof record.updatedAt !== 'number'
+  ) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    dirName: record.dirName,
+    sessionKey: record.sessionKey,
+    storeName: record.storeName,
+    kind,
+    updatedAt: record.updatedAt,
+  };
 }
 
 type NamespaceRegistryFile = { entries: NamespaceRegistryEntry[] };
 
-function isNamespaceRegistryFile(
+function parseNamespaceRegistryFile(
   value: unknown,
-): value is NamespaceRegistryFile {
-  return (
-    isRecord(value) &&
-    Array.isArray(value.entries) &&
-    value.entries.every(isNamespaceRegistryEntry)
-  );
+): NamespaceRegistryFile | null {
+  const record = getRecord(value);
+  if (!record || !Array.isArray(record.entries)) {
+    return null;
+  }
+
+  const entries: NamespaceRegistryEntry[] = [];
+  for (const entry of record.entries) {
+    const parsedEntry = parseNamespaceRegistryEntry(entry);
+    if (!parsedEntry) return null;
+    entries.push(parsedEntry);
+  }
+
+  return { entries };
 }
 
-type LookupShardFile = {
-  entries: Record<string, AsyncStorageEntryMetadata<Record<string, unknown>>>;
-};
+type LookupShardFile = { entries: Record<string, unknown> };
 
-function isLookupShardFile(value: unknown): value is LookupShardFile {
-  return isRecord(value) && isRecord(value.entries);
+function parseLookupShardFile(value: unknown): LookupShardFile | null {
+  const record = getRecord(value);
+  const entries = record ? getRecord(record.entries) : null;
+  if (!entries) return null;
+
+  return { entries };
 }
 
 type BucketFile = { keys: string[] };
 
-function isBucketFile(value: unknown): value is BucketFile {
-  return (
-    isRecord(value) &&
-    Array.isArray(value.keys) &&
-    value.keys.every((key) => typeof key === 'string')
-  );
+function parseBucketFile(value: unknown): BucketFile | null {
+  const record = getRecord(value);
+  if (
+    record &&
+    Array.isArray(record.keys) &&
+    record.keys.every((key) => typeof key === 'string')
+  ) {
+    return { keys: [...record.keys] };
+  }
+
+  return null;
 }
 
-function isMetadataBase(
+function parseMetadataBase(
   value: unknown,
-): value is AsyncStorageEntryMetadataBase {
-  return (
-    isRecord(value) &&
-    typeof value.key === 'string' &&
-    typeof value.payloadRef === 'string' &&
-    typeof value.writtenAt === 'number' &&
-    typeof value.lastAccessAt === 'number' &&
-    typeof value.version === 'number' &&
-    (value.sizeBytes === undefined || typeof value.sizeBytes === 'number')
-  );
+): AsyncStorageEntryMetadataBase | null {
+  const record = getRecord(value);
+  if (!record) return null;
+
+  if (
+    typeof record.key !== 'string' ||
+    typeof record.payloadRef !== 'string' ||
+    typeof record.writtenAt !== 'number' ||
+    typeof record.lastAccessAt !== 'number' ||
+    typeof record.version !== 'number' ||
+    (record.sizeBytes !== undefined && typeof record.sizeBytes !== 'number')
+  ) {
+    return null;
+  }
+
+  return {
+    key: record.key,
+    payloadRef: record.payloadRef,
+    writtenAt: record.writtenAt,
+    lastAccessAt: record.lastAccessAt,
+    version: record.version,
+    ...(record.sizeBytes !== undefined ? { sizeBytes: record.sizeBytes } : {}),
+  };
 }
 
 function getLookupShardId(key: string): string {
@@ -173,7 +289,7 @@ function decodeCursor(
 
   try {
     const parsed: unknown = JSON.parse(cursor);
-    return isRecord(parsed) ? parsed : null;
+    return getRecord(parsed);
   } catch {
     return null;
   }
@@ -268,10 +384,13 @@ class OpfsNamespaceHandle<
         }
 
         const touchMode = options.touch ?? 'coarse';
-        const shouldTouch =
-          touchMode === 'force' ||
-          (touchMode === 'coarse' &&
-            getBucketId(metadata.lastAccessAt) !== getBucketId(now));
+        const shouldTouch = this.adapter.shouldEnqueueTouch(
+          this.scope,
+          key,
+          metadata.lastAccessAt,
+          touchMode,
+          now,
+        );
 
         if (shouldTouch) {
           touches.push(key);
@@ -282,13 +401,17 @@ class OpfsNamespaceHandle<
           metadata: __LEGIT_CAST__<
             AsyncStorageEntryMetadata<TCustomMetadata>,
             AsyncStorageEntryMetadata<Record<string, unknown>>
-          >({ ...metadata, ...(shouldTouch ? { lastAccessAt: now } : {}) }),
+          >(metadata),
         });
       }
 
-      if (removals.length > 0 || touches.length > 0) {
+      if (removals.length > 0) {
         await this.commit({
           removes: removals,
+          touches: touches.map((key) => ({ key, lastAccessAt: now })),
+        });
+      } else if (touches.length > 0) {
+        void this.commit({
           touches: touches.map((key) => ({ key, lastAccessAt: now })),
         });
       }
@@ -302,7 +425,9 @@ class OpfsNamespaceHandle<
   commit(
     args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<void> {
-    return this.adapter.commitToNamespace(this.scope, args).catch(() => {});
+    return this.adapter
+      .queueCommitToNamespace(this.scope, args)
+      .catch(() => {});
   }
 
   async listMetadata(
@@ -362,12 +487,27 @@ type CachedNamespace = {
   dir: Promise<FileSystemDirectoryHandle>;
 };
 
+type PendingNamespaceCommit = {
+  scope: AsyncStorageNamespaceScope;
+  cancelFlush: (() => void) | null;
+  flushPromise: Promise<void> | null;
+  removes: Set<string>;
+  touches: Map<string, number>;
+  upserts: Map<
+    string,
+    AsyncStorageNamespaceCommitUpsert<unknown, Record<string, unknown>>
+  >;
+  waiters: Array<{ reject: (error: unknown) => void; resolve: () => void }>;
+};
+
 export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
   private rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
   private registryPromise: Promise<NamespaceRegistryFile> | null = null;
   private namespaceCache = new Map<string, CachedNamespace>();
+  private pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
+  private recentTouchedBuckets = new Map<string, string>();
   private startupCleanupScheduled = false;
 
   openNamespace<
@@ -386,9 +526,9 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
       root,
       MAINTENANCE_FILE,
     );
-    return isMaintenanceState(maintenance)
-      ? maintenance
-      : createDefaultMaintenanceState();
+    return (
+      parseMaintenanceState(maintenance) ?? createDefaultMaintenanceState()
+    );
   }
 
   async tryAcquireStartupCleanupLease(args: {
@@ -436,6 +576,7 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   async clearSession(sessionKey: string): Promise<void> {
+    await this.flushAllPendingNamespaceCommits();
     const registry = await this.readRegistry();
     const remaining: NamespaceRegistryEntry[] = [];
 
@@ -452,6 +593,8 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
         // Ignore missing directories.
       }
       this.namespaceCache.delete(entry.id);
+      this.pendingNamespaceCommits.delete(entry.id);
+      this.clearRecentTouchedBucketsForNamespace(entry.id);
     }
 
     await this.writeRegistry({ entries: remaining });
@@ -461,16 +604,184 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
     this.rootDirPromise = null;
     this.registryPromise = null;
     this.namespaceCache.clear();
+    this.pendingNamespaceCommits.clear();
+    this.recentTouchedBuckets.clear();
     this.startupCleanupScheduled = false;
+  }
+
+  private getOrCreatePendingNamespaceCommit(
+    scope: AsyncStorageNamespaceScope,
+  ): PendingNamespaceCommit {
+    const namespaceKey = getNamespaceId(scope);
+    const existing = this.pendingNamespaceCommits.get(namespaceKey);
+    if (existing) return existing;
+
+    const created: PendingNamespaceCommit = {
+      scope,
+      cancelFlush: null,
+      flushPromise: null,
+      removes: new Set(),
+      touches: new Map(),
+      upserts: new Map(),
+      waiters: [],
+    };
+    this.pendingNamespaceCommits.set(namespaceKey, created);
+    return created;
+  }
+
+  private schedulePendingNamespaceFlush(pending: PendingNamespaceCommit): void {
+    if (pending.cancelFlush !== null || pending.flushPromise !== null) return;
+
+    const timeoutId = setTimeout(() => {
+      pending.cancelFlush = null;
+      void this.flushPendingNamespaceCommit(pending.scope);
+    }, ASYNC_COMMIT_DEBOUNCE_MS);
+
+    pending.cancelFlush = () => clearTimeout(timeoutId);
+  }
+
+  private async flushAllPendingNamespaceCommits(): Promise<void> {
+    const tasks: Promise<void>[] = [];
+    for (const pending of this.pendingNamespaceCommits.values()) {
+      tasks.push(this.flushPendingNamespaceCommit(pending.scope));
+    }
+
+    await Promise.all(tasks);
+  }
+
+  private async flushPendingNamespaceCommit(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<void> {
+    const namespaceKey = getNamespaceId(scope);
+    const pending = this.pendingNamespaceCommits.get(namespaceKey);
+    if (!pending) return;
+    if (pending.flushPromise) {
+      await pending.flushPromise;
+      return;
+    }
+
+    pending.cancelFlush?.();
+    pending.cancelFlush = null;
+
+    const upserts = [...pending.upserts.values()];
+    const removes = [...pending.removes];
+    const touches = [...pending.touches.entries()].map(
+      ([key, lastAccessAt]) => ({ key, lastAccessAt }),
+    );
+    const waiters = [...pending.waiters];
+    pending.upserts = new Map();
+    pending.removes = new Set();
+    pending.touches = new Map();
+    pending.waiters = [];
+
+    if (upserts.length === 0 && removes.length === 0 && touches.length === 0) {
+      this.pendingNamespaceCommits.delete(namespaceKey);
+      for (const waiter of waiters) {
+        waiter.resolve();
+      }
+      return;
+    }
+
+    pending.flushPromise = this.commitToNamespaceInternal(scope, {
+      upserts,
+      removes,
+      touches,
+    })
+      .then(() => {
+        const now = Date.now();
+        const currentBucket = getBucketId(now);
+        for (const touch of touches) {
+          const touchBucket = getBucketId(touch.lastAccessAt);
+          this.recentTouchedBuckets.set(
+            `${namespaceKey}::${touch.key}`,
+            touchBucket,
+          );
+        }
+        for (const upsert of upserts) {
+          this.recentTouchedBuckets.set(
+            `${namespaceKey}::${upsert.key}`,
+            currentBucket,
+          );
+        }
+        this.pruneRecentTouchedBuckets(currentBucket);
+        for (const waiter of waiters) {
+          waiter.resolve();
+        }
+      })
+      .catch((error) => {
+        for (const waiter of waiters) {
+          waiter.reject(error);
+        }
+        throw error;
+      })
+      .finally(() => {
+        pending.flushPromise = null;
+        if (pending.waiters.length === 0) {
+          this.pendingNamespaceCommits.delete(namespaceKey);
+          return;
+        }
+        this.schedulePendingNamespaceFlush(pending);
+      });
+
+    await pending.flushPromise;
+  }
+
+  shouldEnqueueTouch(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+    lastAccessAt: number,
+    touchMode: AsyncStorageReadOptions['touch'],
+    now: number,
+  ): boolean {
+    if (touchMode === 'never') return false;
+
+    const currentBucket = getBucketId(now);
+    if (touchMode !== 'force' && getBucketId(lastAccessAt) === currentBucket) {
+      return false;
+    }
+
+    const namespaceKey = getNamespaceId(scope);
+    const touchGuardKey = `${namespaceKey}::${key}`;
+    if (this.recentTouchedBuckets.get(touchGuardKey) === currentBucket) {
+      return false;
+    }
+
+    const pending = this.pendingNamespaceCommits.get(namespaceKey);
+    const pendingTouch = pending?.touches.get(key);
+    return (
+      pendingTouch === undefined || getBucketId(pendingTouch) !== currentBucket
+    );
+  }
+
+  private pruneRecentTouchedBuckets(currentBucket: string): void {
+    for (const [key, bucket] of this.recentTouchedBuckets) {
+      if (bucket !== currentBucket) {
+        this.recentTouchedBuckets.delete(key);
+      }
+    }
+  }
+
+  private clearRecentTouchedBucketsForNamespace(namespaceKey: string): void {
+    const keyPrefix = `${namespaceKey}::`;
+    for (const key of this.recentTouchedBuckets.keys()) {
+      if (key.startsWith(keyPrefix)) {
+        this.recentTouchedBuckets.delete(key);
+      }
+    }
   }
 
   async loadNamespaceContext(
     scope: AsyncStorageNamespaceScope,
+    options: { skipPendingFlush?: boolean } = {},
   ): Promise<{
     entry: NamespaceRegistryEntry;
     dir: FileSystemDirectoryHandle;
     manifest: NamespaceManifest;
   }> {
+    if (!options.skipPendingFlush) {
+      await this.flushPendingNamespaceCommit(scope);
+    }
+
     const entry = await this.ensureNamespaceEntry(scope);
     const dir = await this.getNamespaceDir(entry);
     const manifest = await this.readManifest(dir);
@@ -493,11 +804,13 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
         lookupDir,
         fileName,
       );
-      if (!isLookupShardFile(shard)) continue;
+      const parsedShard = parseLookupShardFile(shard);
+      if (!parsedShard) continue;
 
-      for (const entry of Object.values(shard.entries)) {
-        if (isMetadataBase(entry)) {
-          entries.push(entry);
+      for (const entry of Object.values(parsedShard.entries)) {
+        const parsedEntry = parseMetadataBase(entry);
+        if (parsedEntry) {
+          entries.push(parsedEntry);
         }
       }
     }
@@ -528,11 +841,15 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
         lookupDir,
         fileName,
       );
-      if (!isLookupShardFile(shard)) continue;
+      const parsedShard = parseLookupShardFile(shard);
+      if (!parsedShard) continue;
 
       const validEntries = Object.fromEntries(
-        Object.entries(shard.entries).filter((entry) =>
-          isMetadataBase(entry[1]),
+        Object.entries(parsedShard.entries).flatMap(
+          ([entryKey, entryValue]) => {
+            const parsedEntry = parseMetadataBase(entryValue);
+            return parsedEntry ? [[entryKey, parsedEntry]] : [];
+          },
         ),
       );
       shardEntries.set(shardId, validEntries);
@@ -566,7 +883,45 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
     return this.readJsonFile<TValue>(payloadsDir, `${payloadRef}.json`);
   }
 
-  async commitToNamespace<
+  async queueCommitToNamespace<
+    TValue,
+    TCustomMetadata extends Record<string, unknown>,
+  >(
+    scope: AsyncStorageNamespaceScope,
+    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+  ): Promise<void> {
+    const pending = this.getOrCreatePendingNamespaceCommit(scope);
+    const now = Date.now();
+
+    for (const touch of args.touches ?? []) {
+      pending.touches.set(touch.key, touch.lastAccessAt ?? now);
+    }
+
+    for (const remove of args.removes ?? []) {
+      pending.upserts.delete(remove);
+      pending.touches.delete(remove);
+      pending.removes.add(remove);
+    }
+
+    for (const upsert of args.upserts ?? []) {
+      pending.removes.delete(upsert.key);
+      pending.upserts.set(
+        upsert.key,
+        __LEGIT_CAST__<
+          AsyncStorageNamespaceCommitUpsert<unknown, Record<string, unknown>>,
+          AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>
+        >(upsert),
+      );
+    }
+
+    this.schedulePendingNamespaceFlush(pending);
+
+    return new Promise<void>((resolve, reject) => {
+      pending.waiters.push({ resolve, reject });
+    });
+  }
+
+  async commitToNamespaceInternal<
     TValue,
     TCustomMetadata extends Record<string, unknown>,
   >(
@@ -585,7 +940,9 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
     ]);
     if (keys.length === 0) return;
 
-    const context = await this.loadNamespaceContext(scope);
+    const context = await this.loadNamespaceContext(scope, {
+      skipPendingFlush: true,
+    });
     const now = Date.now();
     const lookupDir = await context.dir.getDirectoryHandle(LOOKUP_DIR, {
       create: true,
@@ -625,7 +982,8 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
         lookupDir,
         fileName,
       );
-      if (!isLookupShardFile(shard)) {
+      const parsedShard = parseLookupShardFile(shard);
+      if (!parsedShard) {
         shardEntries.set(shardId, {});
         continue;
       }
@@ -633,8 +991,11 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
       shardEntries.set(
         shardId,
         Object.fromEntries(
-          Object.entries(shard.entries).filter((entry) =>
-            isMetadataBase(entry[1]),
+          Object.entries(parsedShard.entries).flatMap(
+            ([entryKey, entryValue]) => {
+              const parsedEntry = parseMetadataBase(entryValue);
+              return parsedEntry ? [[entryKey, parsedEntry]] : [];
+            },
           ),
         ),
       );
@@ -642,13 +1003,14 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
 
     const touchedBucketIds = new Set<string>();
 
-    const loadBucketSet = async (
+    async function loadBucketSet(
+      adapter: OpfsAsyncStorageAdapter,
       dir: FileSystemDirectoryHandle,
       fileName: string | undefined,
       cache: Map<string, Set<string>>,
       bucketId: string,
       fallback = new Set<string>(),
-    ): Promise<Set<string>> => {
+    ): Promise<Set<string>> {
       if (cache.has(bucketId)) {
         return cache.get(bucketId) ?? fallback;
       }
@@ -658,11 +1020,11 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
         return cache.get(bucketId) ?? fallback;
       }
 
-      const bucket = await this.readJsonFile<BucketFile>(dir, fileName);
-      const set = new Set(isBucketFile(bucket) ? bucket.keys : []);
+      const bucket = await adapter.readJsonFile<BucketFile>(dir, fileName);
+      const set = new Set(parseBucketFile(bucket)?.keys ?? []);
       cache.set(bucketId, set);
       return set;
-    };
+    }
 
     for (const key of keys) {
       const existing = existingMetadata.get(key);
@@ -672,12 +1034,14 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
         touchedBucketIds.add(accessBucketId);
         touchedBucketIds.add(writeBucketId);
         const accessBucketSet = await loadBucketSet(
+          this,
           accessBucketsDir,
           currentManifest.accessBuckets[accessBucketId],
           bucketUpdates.access,
           accessBucketId,
         );
         const writeBucketSet = await loadBucketSet(
+          this,
           writeBucketsDir,
           currentManifest.writeBuckets[writeBucketId],
           bucketUpdates.write,
@@ -711,6 +1075,7 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
       const accessBucketId = getBucketId(nextLastAccessAt);
       touchedBucketIds.add(accessBucketId);
       const accessBucketSet = await loadBucketSet(
+        this,
         accessBucketsDir,
         currentManifest.accessBuckets[accessBucketId],
         bucketUpdates.access,
@@ -760,12 +1125,14 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
       touchedBucketIds.add(writeBucketId);
 
       const accessBucketSet = await loadBucketSet(
+        this,
         accessBucketsDir,
         currentManifest.accessBuckets[accessBucketId],
         bucketUpdates.access,
         accessBucketId,
       );
       const writeBucketSet = await loadBucketSet(
+        this,
         writeBucketsDir,
         currentManifest.writeBuckets[writeBucketId],
         bucketUpdates.write,
@@ -821,6 +1188,7 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   async clearNamespace(scope: AsyncStorageNamespaceScope): Promise<void> {
+    await this.flushPendingNamespaceCommit(scope);
     const entry = await this.findNamespaceEntry(scope);
     if (!entry) return;
 
@@ -836,6 +1204,8 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
       entries: registry.entries.filter((item) => item.id !== entry.id),
     });
     this.namespaceCache.delete(entry.id);
+    this.pendingNamespaceCommits.delete(entry.id);
+    this.clearRecentTouchedBucketsForNamespace(entry.id);
   }
 
   private scheduleStartupCleanupIfNeeded(): void {
@@ -882,6 +1252,7 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   private async performStartupCleanup(): Promise<void> {
+    await this.flushAllPendingNamespaceCommits();
     const registry = await this.readRegistry();
     const protectedRefsBySession = new Map<string, Set<string>>();
 
@@ -918,7 +1289,7 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
       }
 
       if (nextRemoves.length > 0) {
-        await this.commitToNamespace(entry, { removes: nextRemoves });
+        await this.commitToNamespaceInternal(entry, { removes: nextRemoves });
       }
 
       const manifest = await this.readManifest(context.dir);
@@ -970,14 +1341,18 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   private async readProtectedRefs(sessionKey: string): Promise<Set<string>> {
-    const scope: AsyncStorageNamespaceScope = {
-      sessionKey,
-      storeName: '__offline__',
-      kind: '__internal.protected',
-    };
-    const namespace = this.openNamespace<{ keys: string[] }>(scope);
-    const entry = await namespace.get('registry', { touch: 'never' });
-    return new Set(entry?.value.keys ?? []);
+    const protectedKeysSnapshot = getSessionProtectedKeysSnapshot(sessionKey);
+    if (protectedKeysSnapshot !== null) {
+      return new Set(protectedKeysSnapshot);
+    }
+
+    const namespace = this.openNamespace<unknown>(
+      getProtectedKeysStorageScope(sessionKey),
+    );
+    const entry = await namespace.get(PROTECTED_KEYS_STORAGE_ENTRY_KEY, {
+      touch: 'never',
+    });
+    return new Set(parseProtectedKeys(entry?.value)?.keys ?? []);
   }
 
   private async getRootDir(): Promise<FileSystemDirectoryHandle> {
@@ -1033,7 +1408,7 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
           namespacesDir,
           REGISTRY_FILE,
         );
-        return isNamespaceRegistryFile(registry) ? registry : { entries: [] };
+        return parseNamespaceRegistryFile(registry) ?? { entries: [] };
       })();
     }
 
@@ -1097,7 +1472,7 @@ export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
       namespaceDir,
       MANIFEST_FILE,
     );
-    return isNamespaceManifest(manifest) ? manifest : createDefaultManifest();
+    return parseNamespaceManifest(manifest) ?? createDefaultManifest();
   }
 
   private writeManifest(

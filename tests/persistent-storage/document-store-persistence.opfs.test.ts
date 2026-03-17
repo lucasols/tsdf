@@ -11,10 +11,7 @@ import {
   vi,
 } from 'vitest';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
-import type {
-  PersistedDocumentData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import type { StorageCacheEntry } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -58,10 +55,10 @@ function populateStorage(
   version: number | undefined = undefined,
 ) {
   const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
+  const entry: StorageCacheEntry<{ d: { value: TestData } }> =
     version === undefined
-      ? { data: { data: { value: data } }, timestamp: Date.now() }
-      : { data: { data: { value: data } }, timestamp: Date.now(), version };
+      ? { data: { d: { value: data } }, timestamp: Date.now() }
+      : { data: { d: { value: data } }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 
@@ -105,8 +102,9 @@ describe('opfs: document store persistence', () => {
     expect(mockAdapter.has(key)).toBe(true);
     expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
-    await env.apiStore.preloadPersistentStorage();
-    await advanceTime(2100);
+    const preloadPromise = env.apiStore.preloadPersistentStorage();
+    await advanceTime(50);
+    await preloadPromise;
     await flushAllTimers();
 
     expect(mockAdapter.readRequests).toEqual([key]);
@@ -116,8 +114,11 @@ describe('opfs: document store persistence', () => {
   test('schema validation failure triggers cleanup', async () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
     const key = 'tsdf.session1.opfs-cleanup';
-    const entry: StorageCacheEntry<PersistedDocumentData<{ badField: true }>> =
-      { data: { data: { badField: true } }, timestamp: Date.now(), version: 1 };
+    const entry: StorageCacheEntry<{ d: { badField: true } }> = {
+      data: { d: { badField: true } },
+      timestamp: Date.now(),
+      version: 1,
+    };
     mockAdapter.setValue(key, entry);
 
     const env = createDocPersistenceEnv({
@@ -133,7 +134,7 @@ describe('opfs: document store persistence', () => {
     const preloadPromise = env.apiStore.preloadPersistentStorage();
     await advanceTime(50);
     await preloadPromise;
-    await advanceTime(3000);
+    await flushAllTimers();
 
     expect(mockAdapter.readRequests).toEqual([key]);
     expect(mockAdapter.has(key)).toBe(false);

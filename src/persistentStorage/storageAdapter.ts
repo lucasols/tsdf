@@ -448,15 +448,11 @@ export const localPersistentStorage: LocalPersistentStorage = {
 export const opfsPersistentStorage: AsyncStorageAdapter =
   new OpfsAsyncStorageAdapter();
 
-export function isAsyncStorageAdapter(
-  adapter: StorageAdapter,
-): adapter is AsyncStorageAdapter {
+export function isAsyncStorageAdapter(adapter: StorageAdapter): boolean {
   return adapter !== 'local-sync';
 }
 
-export function isSyncStorageAdapter(
-  adapter: StorageAdapter,
-): adapter is 'local-sync' {
+export function isSyncStorageAdapter(adapter: StorageAdapter): boolean {
   return adapter === 'local-sync';
 }
 
