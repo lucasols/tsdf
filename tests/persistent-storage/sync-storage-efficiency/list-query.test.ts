@@ -456,6 +456,110 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
+  test('maxItems cleanup evicts standalone items before query-related shared items', async () => {
+    const storeName = 'lq-shared-item-cleanup';
+    const sessionKey = 'sess1';
+    const firstUsersQuery = {
+      tableId: 'users',
+      filters: [{ field: 'name', op: 'eq', value: 'Alice' }],
+    } satisfies ListQueryParams;
+    const secondUsersQuery = {
+      tableId: 'users',
+      filters: [{ field: 'name', op: 'eq', value: 'Bob' }],
+    } satisfies ListQueryParams;
+    const sharedItemKey = storeItemKey('users', 1);
+    const aliceOnlyItemKey = storeItemKey('users', 2);
+    const bobOnlyItemKey = storeItemKey('users', 3);
+
+    // Seed two persisted queries that both reference the same oldest item.
+    setCachedItem(storeName, sessionKey, 'users', 1, {
+      id: 1,
+      name: 'Shared oldest',
+    });
+    await advanceTime(100);
+    setCachedItem(storeName, sessionKey, 'users', 2, {
+      id: 2,
+      name: 'Alice only',
+    });
+    await advanceTime(100);
+    setCachedItem(storeName, sessionKey, 'users', 3, {
+      id: 3,
+      name: 'Bob only',
+    });
+    await advanceTime(100);
+    setCachedItem(storeName, sessionKey, 'users', 4, {
+      id: 4,
+      name: 'Standalone newest',
+    });
+    setCachedQuery(storeName, sessionKey, firstUsersQuery, [
+      sharedItemKey,
+      aliceOnlyItemKey,
+    ]);
+    setCachedQuery(storeName, sessionKey, secondUsersQuery, [
+      sharedItemKey,
+      bobOnlyItemKey,
+    ]);
+
+    createListQueryEnv({ storeName, sessionKey, maxItems: 3 });
+
+    // Let the startup-scheduled maintenance enforce maxItems against the preloaded cache.
+    const cleanupCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const cleanupOperations = cleanupCapture.finish().timelineString;
+
+    // The standalone newest item should be evicted before any item referenced
+    // by the persisted queries, so both query entries stay untouched.
+    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).sort())
+      .toMatchInlineSnapshot(`
+        ['"users||1', '"users||2', '"users||3']
+      `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry(firstUsersQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||1', '"users||2']
+
+      payload:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Alice' }
+        tableId: 'users'
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry(secondUsersQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||1', '"users||3']
+
+      payload:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Bob' }
+        tableId: 'users'
+    `);
+    expect(cleanupOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
+      .    | 🔑[0] ✅ #2 tsdf.sess1.lq-shared-item-cleanup.li."users||1 (item entry)
+      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m (root, namespace, manifest)
+      .    | 🔑[2] ✅ #4 tsdf.sess1.lq-shared-item-cleanup.li."users||2 (item entry)
+      .    | 🔑[3] ✅ #5 tsdf.sess1.lq-shared-item-cleanup.li."users||3 (item entry)
+      .    | 🔑[4] ✅ #6 tsdf.sess1.lq-shared-item-cleanup.li."users||4 (item entry)
+      .    | 🔑[5] ✅ #7 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry)
+      .    | 🔑[6] ✅ #8 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (query entry)
+      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m (root, namespace, manifest) | 0.42 kb
+      .    | 📖 ✅ #7 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.25 kb
+      .    | 📖 ✅ #8 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (query entry) | 0.25 kb
+      .    | 🗑️ ✅->❌ #6 tsdf.sess1.lq-shared-item-cleanup.li."users||4 (item entry)
+      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m (root, namespace, manifest) | 0.42 kb -> 0.32 kb
+      "
+    `);
+  });
+
   test('deleteItemState removes the persisted list item and rewrites related query and item entries', async () => {
     const storeName = 'lq-delete-flow';
     const sessionKey = 'sess1';
@@ -518,7 +622,7 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
-  test('direct getQueryState hydrates the cached list query once and leaves its items in memory for later reads', async () => {
+  test('direct getQueryState reads the cached list query multiple times with short gaps and keeps it in memory', async () => {
     const storeName = 'lq-direct-get-query-state';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
@@ -536,8 +640,28 @@ describe('sync storage efficiency: list-query', () => {
     // Drain the startup scan so this capture only measures the direct read-through path.
     await settleStartupBackgroundScan();
 
-    // Reading the query should pull both the query and its referenced item into state.
+    // Repeated direct reads with short gaps should hydrate from storage once, then reuse in-memory query and item state.
     const readCapture = startPersistentStorageOperationCapture();
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    await advanceTime(100);
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    await advanceTime(100);
     expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
       error: null
       hasMore: '❌'
@@ -552,6 +676,7 @@ describe('sync storage efficiency: list-query', () => {
         id: 1
         name: 'Cached user'
       `);
+    await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(env.store.state.queries[getCompositeKey(usersQuery)])
@@ -575,6 +700,10 @@ describe('sync storage efficiency: list-query', () => {
       0    | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.12 kb
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-direct-get-query-state.li."users||1 (item entry) | 0.18 kb
+      2s   | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.12 kb
+      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.12 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb
+      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
       "
     `);
   });

@@ -201,7 +201,7 @@ describe('sync storage efficiency: collection', () => {
     `);
   });
 
-  test('direct getItemState reads the cached collection item once and promotes it into state', async () => {
+  test('direct getItemState reads the cached collection item multiple times with short gaps and promotes it once', async () => {
     const storeName = 'col-direct-get-item-state';
     const sessionKey = 'sess1';
 
@@ -214,15 +214,20 @@ describe('sync storage efficiency: collection', () => {
     // Drain the startup scan so this capture only measures the direct read path.
     await settleStartupBackgroundScan();
 
-    // The first direct read should hydrate from storage and the second one should reuse state.
+    // Repeated direct reads with short gaps should hydrate from storage once, then reuse in-memory state.
     const readCapture = startPersistentStorageOperationCapture();
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Cached user' }`,
     );
+    await advanceTime(100);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Cached user' }`,
     );
-    await flushAllTimers();
+    await advanceTime(100);
+    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
+      `value: { id: '1', name: 'Cached user' }`,
+    );
+    await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(env.store.state[getCompositeKey('1')]?.data).toMatchInlineSnapshot(

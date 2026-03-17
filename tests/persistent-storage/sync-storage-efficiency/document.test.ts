@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
-import { flushAllTimers } from '../../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
@@ -63,7 +63,7 @@ describe('sync storage efficiency: document', () => {
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
-  test('direct store.state reads stay in memory once the document is hydrated', async () => {
+  test('direct store.state reads with short gaps stay fully in memory once the document is hydrated', async () => {
     const storeName = 'doc-direct-state-read';
     const sessionKey = 'sess1';
 
@@ -74,7 +74,7 @@ describe('sync storage efficiency: document', () => {
 
     const env = createDocumentEnv({ storeName, sessionKey });
 
-    // Hydrate once through the public hook, then measure direct synchronous reads only.
+    // Hydrate once through the public hook, then measure repeated direct reads only.
     await settleStartupBackgroundScan();
     const hook = renderHook(() =>
       env.apiStore.useDocument({ disableRefetchOnMount: true }),
@@ -83,9 +83,15 @@ describe('sync storage efficiency: document', () => {
     hook.unmount();
 
     const readCapture = startPersistentStorageOperationCapture();
+    // Repeated direct reads with small gaps should stay fully in memory.
     expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
       value: { name: 'Cached document', value: 8 }
     `);
+    await advanceTime(100);
+    expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'Cached document', value: 8 }
+    `);
+    await advanceTime(100);
     expect(env.apiStore.store.state.data).toMatchInlineSnapshot(`
       value: { name: 'Cached document', value: 8 }
     `);
