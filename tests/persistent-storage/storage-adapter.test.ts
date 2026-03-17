@@ -284,8 +284,8 @@ describe('persistent storage integration', () => {
       `);
     expect(keptListQueryEnv.apiStore.getItemState('users||1'))
       .toMatchInlineSnapshot(`
-      id: 1
-      name: 'Kept row'
-    `);
+        id: 1
+        name: 'Kept row'
+      `);
   });
 });
