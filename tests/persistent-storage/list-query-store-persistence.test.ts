@@ -19,7 +19,6 @@ import type {
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import type {
-  PersistedListQueryData,
   PersistedListQueryItemData,
   PersistentStorageSchema,
   StorageCacheEntry,
@@ -133,7 +132,17 @@ function listStoredKeys(prefix: string): string[] {
 function getStoredEntryTimestamp(key: string): number {
   const itemIndex = key.indexOf('.li.');
   const queryIndex = key.indexOf('.lq.');
-  const splitIndex = itemIndex === -1 ? queryIndex : itemIndex;
+  if (queryIndex !== -1) {
+    const raw = localStorage.getItem(key);
+    if (raw === null) {
+      throw new Error(`Missing localStorage entry for ${key}`);
+    }
+
+    const parsed = __LEGIT_CAST__<{ a: number }, unknown>(JSON.parse(raw));
+    return parsed.a;
+  }
+
+  const splitIndex = itemIndex;
   const prefix = splitIndex === -1 ? `${key}.` : key.slice(0, splitIndex + 4);
   const entry = readManagedLocalStorageNamespaceEntryByPayload(key, prefix);
   if (entry === null) {
@@ -155,11 +164,8 @@ function getStoredQueryItemKeys(
     throw new Error(`Missing localStorage entry for ${storeName}`);
   }
 
-  const parsed = __LEGIT_CAST__<
-    StorageCacheEntry<PersistedListQueryData>,
-    unknown
-  >(JSON.parse(raw));
-  return parsed.data.items;
+  const parsed = __LEGIT_CAST__<{ i: string[] }, unknown>(JSON.parse(raw));
+  return parsed.i;
 }
 
 function createEnv(options: {
@@ -1611,22 +1617,18 @@ describe('localStorage: list query store persistence', () => {
     const scope = persistentStore.scope('lq-invalid-query-payload', 'sess1');
     scope.listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
     scope.listQuery.seedQuery(usersQuery, [{ tableId: 'users', id: 1 }]);
-    const entry =
-      persistentStore.storage.readEntry<
-        StorageCacheEntry<PersistedListQueryData>
-      >(queryKey);
+    const entry = persistentStore.storage.readEntry<{
+      a: number;
+      i: string[];
+      p: unknown;
+      h?: true;
+      o?: true;
+      v?: number;
+    }>(queryKey);
     if (entry === null) {
       throw new Error(`Missing seeded entry for ${queryKey}`);
     }
-    localStorage.setItem(
-      queryKey,
-      JSON.stringify({
-        ...entry,
-        data: { ...entry.data, payload: true },
-      } satisfies StorageCacheEntry<
-        PersistedListQueryData & { payload: boolean }
-      >),
-    );
+    localStorage.setItem(queryKey, JSON.stringify({ ...entry, p: true }));
 
     const env = createEnv({
       storeName: 'lq-invalid-query-payload',
