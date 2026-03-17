@@ -527,6 +527,7 @@ export function useMultipleListQueries<
             const canUseFallbackItems =
               !partialResources ||
               queryConfig.fields === undefined ||
+              queryConfig.fields === '*' ||
               (requestedFields &&
                 fallbackQuery.items.every((itemKey) => {
                   const fallbackItemState = readFallbackItemState(itemKey);

@@ -451,10 +451,8 @@ export function useMultipleItems<
           const hasAllRequestedFallbackFields =
             !partialResources ||
             query.fields === undefined ||
-            (Array.isArray(query.fields) &&
-              query.fields.every((field) =>
-                fallbackLoadedFields.includes(field),
-              ));
+            query.fields === '*' ||
+            query.fields.every((field) => fallbackLoadedFields.includes(field));
 
           if (!hasAllRequestedFallbackFields) return result;
 

@@ -233,9 +233,8 @@ describe('sync storage efficiency: list-query', () => {
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | ❌ -> 0.12 kb
       3.62s | 📖 ❌ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry)
       .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry) | ❌ -> 0.13 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.12 kb
-      .     | 📖 ✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry) | 0.17 kb
       .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry) | 0.17 kb -> 0.26 kb
+      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.12 kb
       .     | 📖 ❌ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry)
       .     | ✍️ ❌->✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry) | ❌ -> 0.18 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.12 kb -> 0.22 kb
@@ -632,12 +631,10 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (query entry) | 0.15 kb -> 0.12 kb
       .    | 📖 ✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.23 kb
       .    | ✍️ ✅->✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.23 kb -> 0.21 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-delete-flow.li."users||1 (item entry) | 0.17 kb
-      .    | 🗑️ ✅->❌ #4 tsdf.sess1.lq-delete-flow.li."users||1 (item entry)
-      .    | 📖 ✅ #5 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb
+      .    | 🗑️ ✅->❌ #3 tsdf.sess1.lq-delete-flow.li."users||1 (item entry)
+      .    | 📖 ✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #5 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb -> 0.25 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.12 kb
+      .    | ✍️ ✅->✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.12 kb
       "
     `);
   });
@@ -1094,8 +1091,6 @@ describe('sync storage efficiency: list-query', () => {
       0    | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1 (item entry) | 0.18 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1 (item entry) | 0.18 kb
       2s   | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.12 kb
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
@@ -1302,11 +1297,7 @@ describe('sync storage efficiency: list-query', () => {
       0    | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (item entry) | 0.18 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (item entry) | 0.18 kb
       .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.13 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (item entry) | 0.20 kb
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
       .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (item entry) | 0.20 kb
       2s   | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb

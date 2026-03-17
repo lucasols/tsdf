@@ -750,7 +750,10 @@ export function setupListQueryPersistence<
     queryKey: string,
   ): ParsedPersistedListQueryData<QueryPayload> | undefined {
     if (localStorageAdapter !== null) {
-      return readHydratedLocalStorageQuery(queryKey);
+      return (
+        readRememberedPersistedQueryData(queryKey) ??
+        readHydratedLocalStorageQuery(queryKey)
+      );
     }
 
     const snapshot = querySnapshotByKey.get(queryKey);
@@ -848,7 +851,10 @@ export function setupListQueryPersistence<
       }
     | undefined {
     if (localStorageAdapter !== null) {
-      return readHydratedLocalStorageItem(itemKey);
+      return (
+        readRememberedHydratedItem(itemKey) ??
+        readHydratedLocalStorageItem(itemKey)
+      );
     }
 
     const snapshot = itemSnapshotByKey.get(itemKey);

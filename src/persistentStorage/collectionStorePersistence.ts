@@ -358,7 +358,10 @@ export function setupCollectionPersistence<
     itemKey: string,
   ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
     if (localStorageAdapter !== null) {
-      return readHydratedLocalStorageItem(itemKey);
+      return (
+        readRememberedHydratedItem(itemKey) ??
+        readHydratedLocalStorageItem(itemKey)
+      );
     }
 
     const snapshot = persistedSnapshotByKey.get(itemKey);
