@@ -8,6 +8,12 @@ import {
   rc_unknown,
   type RcType,
 } from 'runcheck';
+import {
+  type CompactListQueryLocalStorageEntry,
+  createCompactListQueryLocalStorageEntry,
+  isCompactListQueryLocalStorageKey,
+  parseCompactListQueryLocalStorageEntry,
+} from './compactListQueryLocalStorageEntry';
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
@@ -88,6 +94,26 @@ const managedLocalStorageManifestSchema = rc_object({
 const managedLocalStorageGlobalMaintenanceSchema = rc_object({
   lca: rc_number.orNull(),
 });
+
+function readCompactListQueryEntry(
+  payloadKey: string,
+  io: ManagedLocalStorageIo,
+) {
+  return parseCompactListQueryLocalStorageEntry(io.getItem(payloadKey));
+}
+
+function writeCompactListQueryOfflineProtection(
+  payloadKey: string,
+  entry: CompactListQueryLocalStorageEntry,
+  offlineProtected: boolean,
+  io: ManagedLocalStorageIo,
+): void {
+  writeMetadataJson(
+    payloadKey,
+    createCompactListQueryLocalStorageEntry({ ...entry, offlineProtected }),
+    io,
+  );
+}
 
 function readParsedMetadataJson<T>(
   key: string,
@@ -544,6 +570,17 @@ export function readManagedLocalStorageProtectedKeys(
     }
   }
 
+  const payloadPrefix = `tsdf.${sessionKey}.`;
+  for (const payloadKey of allKeys) {
+    if (!payloadKey.startsWith(payloadPrefix)) continue;
+    if (isManagedLocalStorageManifestKey(payloadKey)) continue;
+    if (!isCompactListQueryLocalStorageKey(payloadKey)) continue;
+
+    if (readCompactListQueryEntry(payloadKey, io)?.offlineProtected === true) {
+      protectedKeys.add(payloadKey);
+    }
+  }
+
   return protectedKeys;
 }
 
@@ -553,8 +590,9 @@ export function syncManagedLocalStorageSessionProtection(
   io: ManagedLocalStorageIo = directManagedLocalStorageIo,
 ): void {
   const nextProtectedKeys = new Set(protectedKeys);
+  const allKeys = io.listKeys();
 
-  for (const manifestKey of io.listKeys()) {
+  for (const manifestKey of allKeys) {
     if (
       !isManagedLocalStorageManifestKey(manifestKey) ||
       !manifestBelongsToSession(manifestKey, sessionKey)
@@ -601,6 +639,26 @@ export function syncManagedLocalStorageSessionProtection(
     if (manifestChanged) {
       writeManifest(manifestKey, { entries: nextEntries }, io);
     }
+  }
+
+  const payloadPrefix = `tsdf.${sessionKey}.`;
+  for (const payloadKey of allKeys) {
+    if (!payloadKey.startsWith(payloadPrefix)) continue;
+    if (!isCompactListQueryLocalStorageKey(payloadKey)) continue;
+
+    const entry = readCompactListQueryEntry(payloadKey, io);
+    if (entry === null) continue;
+
+    const shouldProtect =
+      !isOfflinePayloadKey(payloadKey) && nextProtectedKeys.has(payloadKey);
+    if (entry.offlineProtected === shouldProtect) continue;
+
+    writeCompactListQueryOfflineProtection(
+      payloadKey,
+      entry,
+      shouldProtect,
+      io,
+    );
   }
 
   const legacyProtectedKeysStorageKey = `tsdf.${sessionKey}._o_.p`;
@@ -985,6 +1043,13 @@ export async function runManagedLocalStorageMaintenance(
   }
 
   if (runGlobalSweep) {
+    for (const callback of maintenanceCallbacks.values()) {
+      if (invokedCallbacks.has(callback)) continue;
+
+      invokedCallbacks.add(callback);
+      await callback();
+    }
+
     writeGlobalMaintenanceState({ lastCleanupAt: Date.now() }, io);
   }
 }

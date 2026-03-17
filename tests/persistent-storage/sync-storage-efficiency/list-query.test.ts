@@ -87,16 +87,15 @@ describe('sync storage efficiency: list-query', () => {
       .    | 🔑[0] ✅ #2 tsdf.sess1.list-query-expiration.li."expired-users||1 (item entry)
       .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest)
       .    | 🔑[2] ✅ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry)
-      .    | 🔑[3] ✅ #5 tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest)
-      .    | 🔑[4] ✅ #6 tsdf.sess1.list-query-expiration.li."fresh-users||2 (item entry)
-      .    | 🔑[5] ✅ #7 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (query entry)
+      .    | 🔑[3] ✅ #5 tsdf.sess1.list-query-expiration.li."fresh-users||2 (item entry)
+      .    | 🔑[4] ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (query entry)
       .    | 📖 ✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.27 kb
       .    | 🗑️ ✅->❌ #2 tsdf.sess1.list-query-expiration.li."expired-users||1 (item entry)
-      .    | 📖 ✅ #5 tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.48 kb
+      .    | 📖 ✅ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry) | 0.15 kb
+      .    | 📖 ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (query entry) | 0.14 kb
       .    | 🗑️ ✅->❌ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry)
       .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.27 kb -> 0.14 kb
-      .    | ✍️ ✅->✅ #5 tsdf._m.r.n:sess1.list-query-expiration.lq.m (root, namespace, manifest) | 0.48 kb -> 0.24 kb
       "
     `);
   });
@@ -137,42 +136,29 @@ describe('sync storage efficiency: list-query', () => {
       "
       time  |
       1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry) | ❌ -> 0.21 kb
-      .     | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.36 kb
+      .     | 📖 ❌ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry)
+      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry) | ❌ -> 0.12 kb
       .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #4 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
-      .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-query-metadata.li."third||1 (item entry) | ❌ -> 0.17 kb
-      .     | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.36 kb -> 0.55 kb
+      .     | 📖 ❌ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
+      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry) | ❌ -> 0.17 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.12 kb
+      .     | 🔑[0] ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
+      .     | 🔑[1] ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (query entry)
+      .     | 🔑[2] ✅ #6 tsdf._m.g (global maintenance)
+      .     | 🔑[3] ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry)
+      .     | 🔑[4] ✅ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
+      .     | 🔑[5] ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
+      .     | 📖 ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry) | 0.10 kb
+      .     | 📖 ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (query entry) | 0.10 kb
+      .     | 📖 ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry) | 0.12 kb
+      .     | 🗑️ ✅->❌ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.12 kb
-      .     | 🔑[0] ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
-      .     | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest)
-      .     | 🔑[2] ✅ #6 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (query entry)
-      .     | 🔑[3] ✅ #7 tsdf._m.g (global maintenance)
-      .     | 🔑[4] ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry)
-      .     | 🔑[5] ✅ #4 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
-      .     | 🔑[6] ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.55 kb
-      .     | 🗑️ ✅->❌ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
-      .     | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-query-metadata.lq.m (root, namespace, manifest) | 0.55 kb -> 0.38 kb
       "
     `);
 
     expect(
       getParsedLocalStorageValue('tsdf._m.r.n:sess1.lq-query-metadata.lq.m'),
-    ).toMatchInlineSnapshot(`
-      e:
-        - a: 1735689600100
-          h: '❌'
-          i: []
-          k: '{tableId:"second"}'
-          p: { tableId: 'second' }
-        - a: 1735689604010
-          h: '❌'
-          i: ['"third||1']
-          k: '{tableId:"third"}'
-          p: { tableId: 'third' }
-    `);
+    ).toMatchInlineSnapshot(`null`);
     expect(
       getParsedLocalStorageValue('tsdf._m.r.n:sess1.lq-query-metadata.li.m'),
     ).toMatchInlineSnapshot(`
@@ -186,12 +172,9 @@ describe('sync storage efficiency: list-query', () => {
         'tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}',
       ),
     ).toMatchInlineSnapshot(`
-      data:
-        hasMore: '❌'
-        items: ['"third||1']
-        payload: { tableId: 'third' }
-
-      timestamp: 1735689604010
+      a: 1735689604010
+      i: ['"third||1']
+      p: { tableId: 'third' }
     `);
   });
 
@@ -228,26 +211,14 @@ describe('sync storage efficiency: list-query', () => {
       `null`,
     );
     expect(getParsedLocalStorageValue(queryManifestKey)).toMatchInlineSnapshot(
-      `
-        e:
-          - a: 1735689603910
-            h: '❌'
-            i: []
-            k: '{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}'
-            p:
-              filters:
-                - { field: 'name', op: 'eq', value: 'Missing user' }
-              tableId: 'users'
-      `,
+      `null`,
     );
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-empty-query-manifest.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-empty-query-manifest.lq.m (root, namespace, manifest)
-      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (query entry) | ❌ -> 0.30 kb
-      .     | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-empty-query-manifest.lq.m (root, namespace, manifest)
-      .     | ✍️ ❌->✅ #2 tsdf._m.r.n:sess1.lq-empty-query-manifest.lq.m (root, namespace, manifest) | ❌ -> 0.42 kb
+      .     | 📖 ❌ #2 tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (query entry)
+      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (query entry) | ❌ -> 0.22 kb
       "
     `);
   });
@@ -327,24 +298,16 @@ describe('sync storage efficiency: list-query', () => {
       `,
     );
     expect(getParsedLocalStorageValue(queryManifestKey)).toMatchInlineSnapshot(
-      `
-        e:
-          - a: 1735689605910
-            h: '❌'
-            i: []
-            k: '{tableId:"users"}'
-            p: { tableId: 'users' }
-      `,
+      `null`,
     );
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
       1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (query entry) | 0.21 kb -> 0.18 kb
-      .     | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-query-becomes-empty.lq.m (root, namespace, manifest) | 0.21 kb
-      .     | ✍️ ✅->✅ #4 tsdf.sess1.lq-query-becomes-empty.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
+      .     | 📖 ✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (query entry) | 0.12 kb
+      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.10 kb
+      .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-query-becomes-empty.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-query-becomes-empty.lq.m (root, namespace, manifest) | 0.21 kb -> 0.18 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -395,15 +358,14 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry) | ❌ -> 0.17 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb -> 0.32 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb
       .    | 🔑[0] ✅ #3 tsdf.sess1.lq-item-metadata.li."users||1 (item entry)
       .    | 🔑[1] ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest)
       .    | 🔑[2] ✅ #4 tsdf.sess1.lq-item-metadata.li."users||2 (item entry)
       .    | 🔑[3] ✅ #5 tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (query entry)
-      .    | 🔑[4] ✅ #6 tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest)
-      .    | 🔑[5] ✅ #7 tsdf._m.g (global maintenance)
-      .    | 🔑[6] ✅ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
-      .    | 📖 ✅ #6 tsdf._m.r.n:sess1.lq-item-metadata.lq.m (root, namespace, manifest) | 0.23 kb
+      .    | 🔑[4] ✅ #6 tsdf._m.g (global maintenance)
+      .    | 🔑[5] ✅ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
+      .    | 📖 ✅ #5 tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (query entry) | 0.15 kb
+      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb
       .    | 🗑️ ✅->❌ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb -> 0.22 kb
       "
@@ -464,10 +426,9 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-direct-get-query-state.lq.m (root, namespace, manifest) | 0.21 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.21 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-direct-get-query-state.li."users||1 (item entry) | 0.18 kb
+      0    | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.12 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb
+      .    | 📖 ✅ #3 tsdf.sess1.lq-direct-get-query-state.li."users||1 (item entry) | 0.18 kb
       "
     `);
   });
@@ -482,9 +443,6 @@ describe('sync storage efficiency: list-query', () => {
       listQueryScope.listQuery.queryStorageKey(usersQuery);
     const itemManifestKey = localPersistentStorage.getManifestKeyForPrefix(
       `tsdf.${sessionKey}.${storeName}.li.`,
-    );
-    const queryManifestKey = localPersistentStorage.getManifestKeyForPrefix(
-      `tsdf.${sessionKey}.${storeName}.lq.`,
     );
 
     setCachedItem(storeName, sessionKey, 'users', 1, {
@@ -511,15 +469,13 @@ describe('sync storage efficiency: list-query', () => {
       wasLoaded: '✅'
     `);
 
-    // Simulate another tab marking both manifests as offline-protected before the touches run.
+    // Simulate another tab marking the existing item manifest and query entry as offline-protected.
     const currentItemManifest = getParsedLocalStorageValue<{
       e: Array<Record<string, unknown>>;
       v: number;
     }>(itemManifestKey);
-    const currentQueryManifest = getParsedLocalStorageValue<{
-      e: Array<Record<string, unknown>>;
-      v: number;
-    }>(queryManifestKey);
+    const currentQueryEntry =
+      getParsedLocalStorageValue<Record<string, unknown>>(queryStorageKey);
 
     localStorage.setItem(
       itemManifestKey,
@@ -529,11 +485,8 @@ describe('sync storage efficiency: list-query', () => {
       }),
     );
     localStorage.setItem(
-      queryManifestKey,
-      JSON.stringify({
-        ...currentQueryManifest,
-        e: currentQueryManifest?.e.map((entry) => ({ ...entry, o: true })),
-      }),
+      queryStorageKey,
+      JSON.stringify({ ...currentQueryEntry, o: true }),
     );
 
     await flushAllTimers();
@@ -547,17 +500,6 @@ describe('sync storage efficiency: list-query', () => {
       o: '✅'
       p: 'users||1'
     `);
-    expect(
-      localPersistentStorage.readNamespaceEntryMetadataByPayload(
-        queryStorageKey,
-        `tsdf.${sessionKey}.${storeName}.lq.`,
-      )?.meta,
-    ).toMatchInlineSnapshot(`
-      h: '❌'
-      i: ['"users||1']
-      o: '✅'
-      p: { tableId: 'users' }
-    `);
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
         - a: 1735689604100
@@ -565,14 +507,11 @@ describe('sync storage efficiency: list-query', () => {
           o: '✅'
           p: 'users||1'
     `);
-    expect(getParsedLocalStorageValue(queryManifestKey)).toMatchInlineSnapshot(`
-      e:
-        - a: 1735689604100
-          h: '❌'
-          i: ['"users||1']
-          k: '{tableId:"users"}'
-          o: '✅'
-          p: { tableId: 'users' }
+    expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
+      a: 1735689604100
+      i: ['"users||1']
+      o: '✅'
+      p: { tableId: 'users' }
     `);
   });
 
@@ -651,9 +590,6 @@ describe('sync storage efficiency: list-query', () => {
     const itemManifestKey = localPersistentStorage.getManifestKeyForPrefix(
       `tsdf.${sessionKey}.${storeName}.li.`,
     );
-    const queryManifestKey = localPersistentStorage.getManifestKeyForPrefix(
-      `tsdf.${sessionKey}.${storeName}.lq.`,
-    );
 
     setCachedItem(storeName, sessionKey, 'users', 1, {
       id: 1,
@@ -684,15 +620,13 @@ describe('sync storage efficiency: list-query', () => {
     );
     await flushInvalidationPersistence(0);
 
-    // Simulate another tab marking the existing item and query as offline-protected.
+    // Simulate another tab marking the existing item manifest and query entry as offline-protected.
     const currentItemManifest = getParsedLocalStorageValue<{
       e: Array<Record<string, unknown>>;
       v: number;
     }>(itemManifestKey);
-    const currentQueryManifest = getParsedLocalStorageValue<{
-      e: Array<Record<string, unknown>>;
-      v: number;
-    }>(queryManifestKey);
+    const currentQueryEntry =
+      getParsedLocalStorageValue<Record<string, unknown>>(queryStorageKey);
 
     localStorage.setItem(
       itemManifestKey,
@@ -702,11 +636,8 @@ describe('sync storage efficiency: list-query', () => {
       }),
     );
     localStorage.setItem(
-      queryManifestKey,
-      JSON.stringify({
-        ...currentQueryManifest,
-        e: currentQueryManifest?.e.map((entry) => ({ ...entry, o: true })),
-      }),
+      queryStorageKey,
+      JSON.stringify({ ...currentQueryEntry, o: true }),
     );
 
     // The refetch rewrites both namespaces, and should keep the externally-added markers.
@@ -731,17 +662,6 @@ describe('sync storage efficiency: list-query', () => {
       o: '✅'
       p: 'users||1'
     `);
-    expect(
-      localPersistentStorage.readNamespaceEntryMetadataByPayload(
-        queryStorageKey,
-        `tsdf.${sessionKey}.${storeName}.lq.`,
-      )?.meta,
-    ).toMatchInlineSnapshot(`
-      h: '❌'
-      i: ['"users||1', '"users||2']
-      o: '✅'
-      p: { tableId: 'users' }
-    `);
     expect(getParsedLocalStorageValue(itemManifestKey)).toMatchInlineSnapshot(`
       e:
         - a: 1735689605910
@@ -752,14 +672,11 @@ describe('sync storage efficiency: list-query', () => {
           k: '"users||2'
           p: 'users||2'
     `);
-    expect(getParsedLocalStorageValue(queryManifestKey)).toMatchInlineSnapshot(`
-      e:
-        - a: 1735689605910
-          h: '❌'
-          i: ['"users||1', '"users||2']
-          k: '{tableId:"users"}'
-          o: '✅'
-          p: { tableId: 'users' }
+    expect(getParsedLocalStorageValue(queryStorageKey)).toMatchInlineSnapshot(`
+      a: 1735689605910
+      i: ['"users||1', '"users||2']
+      o: '✅'
+      p: { tableId: 'users' }
     `);
   });
 
@@ -796,16 +713,15 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.21 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.21 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-remount-flow.li."users||1 (item entry) | 0.18 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-remount-flow.li."users||1 (item entry) | 0.18 kb
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.21 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-remount-flow.lq.m (root, namespace, manifest) | 0.21 kb -> 0.21 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      0    | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
+      .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1 (item entry) | 0.18 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
+      .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1 (item entry) | 0.18 kb
+      2s   | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
+      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.12 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
+      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1005,26 +921,24 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.lq.m (root, namespace, manifest) | 0.42 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.21 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (item entry) | 0.18 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (item entry) | 0.18 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.lq.m (root, namespace, manifest) | 0.42 kb
-      .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.22 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #6 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (item entry) | 0.20 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #6 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (item entry) | 0.20 kb
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.lq.m (root, namespace, manifest) | 0.42 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.lq.m (root, namespace, manifest) | 0.42 kb -> 0.42 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb -> 0.23 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.lq.m (root, namespace, manifest) | 0.42 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.lq.m (root, namespace, manifest) | 0.42 kb -> 0.42 kb
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb -> 0.23 kb
+      0    | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
+      .    | 📖 ✅ #3 tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (item entry) | 0.18 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
+      .    | 📖 ✅ #3 tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (item entry) | 0.18 kb
+      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.13 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
+      .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (item entry) | 0.20 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
+      .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (item entry) | 0.20 kb
+      2s   | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
+      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.12 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
+      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb -> 0.23 kb
+      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.13 kb
+      .    | ✍️ ✅->✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.13 kb -> 0.13 kb
+      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
+      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb -> 0.23 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

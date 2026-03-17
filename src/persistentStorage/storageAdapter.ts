@@ -235,6 +235,7 @@ type LocalPersistentStorage = {
   remove(key: string, options?: LocalStorageMetadataOptions): void;
   removeByPrefix(prefix: string): void;
   listKeys(prefix: string): string[];
+  listRawKeys(prefix: string): string[];
   getManifestKeyForSingle(storageKey: string): string;
   getManifestKeyForPrefix(storagePrefix: string): string;
   readSingleEntryMetadataByPayload(
@@ -337,6 +338,10 @@ export const localPersistentStorage: LocalPersistentStorage = {
     const io = getManagedLocalStorageIoWithWarning();
     const managedKeys = listManagedLocalStorageKeysSync(prefix, io);
     return managedKeys ?? [];
+  },
+  listRawKeys(prefix: string): string[] {
+    const io = getManagedLocalStorageIoWithWarning();
+    return io.listKeys().filter((key) => key.startsWith(prefix));
   },
   getManifestKeyForSingle(storageKey: string): string {
     return getManagedLocalStorageManifestKeyForSingle(storageKey);

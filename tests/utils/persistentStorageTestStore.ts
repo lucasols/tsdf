@@ -2,6 +2,10 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  createCompactListQueryLocalStorageEntry,
+  parseCompactListQueryLocalStorageEntry,
+} from '../../src/persistentStorage/compactListQueryLocalStorageEntry';
+import {
   getManagedLocalStorageManifestKeyForSingle,
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
@@ -295,22 +299,30 @@ function createPersistentTestStore(
           options?: StorageSeedOptions & { hasMore?: boolean },
         ) {
           const key = listQueryStorageKey(params);
-          const entry = createCacheEntry<PersistedListQueryData>(
-            {
-              payload: params,
-              items: items.map(normalizeQueryItemRef),
-              hasMore: options?.hasMore ?? false,
-            },
-            options,
-          );
-          storage.writeValue(key, entry);
+          const persistedData = {
+            payload: params,
+            items: items.map(normalizeQueryItemRef),
+            hasMore: options?.hasMore ?? false,
+          } satisfies PersistedListQueryData;
+
           if (storage.storageKind === 'localStorage') {
-            upsertManagedLocalStorageNamespaceEntry({
-              storagePrefix: `tsdf.${sessionKey}.${storeName}.lq.`,
-              entryKey: getCompositeKey(params),
-              lastAccessAt: entry.timestamp,
-              meta: { p: params, i: entry.data.items, h: entry.data.hasMore },
-            });
+            storage.writeValue(
+              key,
+              createCompactListQueryLocalStorageEntry({
+                lastAccessAt: options?.timestamp ?? Date.now(),
+                items: persistedData.items,
+                payload: persistedData.payload,
+                hasMore: persistedData.hasMore,
+                offlineProtected: false,
+                version: options?.version,
+              }),
+            );
+          } else {
+            const entry = createCacheEntry<PersistedListQueryData>(
+              persistedData,
+              options,
+            );
+            storage.writeValue(key, entry);
           }
 
           return key;
@@ -328,10 +340,30 @@ function createPersistentTestStore(
           );
         },
         readQueryEntry(params: unknown) {
-          return readRequiredEntry<StorageCacheEntry<PersistedListQueryData>>(
-            storage,
-            listQueryStorageKey(params),
+          if (storage.storageKind !== 'localStorage') {
+            return readRequiredEntry<StorageCacheEntry<PersistedListQueryData>>(
+              storage,
+              listQueryStorageKey(params),
+            );
+          }
+
+          const storageKey = listQueryStorageKey(params);
+          const entry = parseCompactListQueryLocalStorageEntry(
+            storage.getRaw(storageKey),
           );
+          if (entry === null) {
+            throw new Error(`Missing persistent test entry for ${storageKey}`);
+          }
+
+          return {
+            data: {
+              payload: entry.payload,
+              items: entry.items,
+              hasMore: entry.hasMore,
+            },
+            timestamp: entry.lastAccessAt,
+            ...(entry.version !== undefined ? { version: entry.version } : {}),
+          };
         },
       },
     };

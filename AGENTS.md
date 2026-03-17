@@ -140,3 +140,4 @@ When fixing a bug:
 ## Bad patterns to avoid
 
 - Avoid as much as possible using `__LEGIT_CAST__`, it should be the ultimate last resort when properly typing the code is not possible.
+  - As alternative consider using `runcheck` schemas when dealing with unsafe data parsing.

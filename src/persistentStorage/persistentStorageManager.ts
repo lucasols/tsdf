@@ -103,7 +103,7 @@ async function runLocalStorageMutation<T>(
   return localPersistentStorage.runLocked(callback);
 }
 
-function recordLocalStorageTouch(key: string, timestamp: number): void {
+export function recordLocalStorageTouch(key: string, timestamp: number): void {
   localStorageTouchTimestamps.set(key, timestamp);
 }
 
@@ -116,6 +116,33 @@ function shouldThrottleLocalStorageTouch(
     previousTimestamp !== undefined &&
     timestamp - previousTimestamp < SYNC_STORAGE_TOUCH_THROTTLE_MS
   );
+}
+
+export async function touchLocalStorageKeyWithThrottle(
+  key: string,
+  touch: () => boolean | Promise<boolean>,
+): Promise<void> {
+  await localPersistentStorage.runLocked(async () => {
+    const now = Date.now();
+    if (shouldThrottleLocalStorageTouch(key, now)) return;
+
+    if (await touch()) {
+      recordLocalStorageTouch(key, now);
+    }
+  });
+}
+
+export function getLocalStorageMaxAgeMs(): number {
+  return getManagedLocalStorageRuntimeConfig().maxAgeMs;
+}
+
+export function mergeLocalStorageOfflineProtection(
+  sessionKey: string,
+  storageKey: string,
+  currentOfflineProtected: boolean,
+): boolean {
+  const protectedKeys = getSessionProtectedKeysSnapshot(sessionKey);
+  return protectedKeys?.has(storageKey) === true || currentOfflineProtected;
 }
 
 export function scheduleLocalStorageRemoval(
