@@ -29,7 +29,6 @@ export const DEFAULT_LOCAL_STORAGE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const runtimeOwnerId = `runtime-${Math.random().toString(36).slice(2)}`;
 
 let maintenanceScheduled = false;
-const maintenanceCallbacks = new Map<string, () => Promise<void>>();
 
 const managedLocalStorageCatalogSchema = rc_object({
   version: rc_literals(METADATA_VERSION),
@@ -518,7 +517,6 @@ export function clearManagedLocalStorageRoot(rootKey: string): void {
 
   localStorage.removeItem(rootKey);
   removeRootKeyFromCatalog(rootKey);
-  maintenanceCallbacks.delete(rootKey);
 }
 
 export function clearManagedLocalStorageSession(sessionKey: string): void {
@@ -543,19 +541,6 @@ export function setManagedLocalStorageRootNeedsMaintenance(
   if (needsMaintenance) {
     scheduleManagedLocalStorageMaintenance();
   }
-}
-
-export function registerManagedLocalStorageMaintenanceCallback(
-  rootKey: string,
-  callback: () => Promise<void>,
-): void {
-  maintenanceCallbacks.set(rootKey, callback);
-}
-
-export function unregisterManagedLocalStorageMaintenanceCallback(
-  rootKey: string,
-): void {
-  maintenanceCallbacks.delete(rootKey);
 }
 
 function isMaintenanceDue(root: ManagedLocalStorageRoot): boolean {
@@ -670,7 +655,7 @@ export function scheduleManagedLocalStorageMaintenance(): void {
   });
 }
 
-export async function runManagedLocalStorageMaintenance(): Promise<void> {
+export function runManagedLocalStorageMaintenance(): void {
   if (!acquireMaintenanceLease()) return;
 
   try {
@@ -686,11 +671,6 @@ export async function runManagedLocalStorageMaintenance(): Promise<void> {
         protectedKeysBySession.get(root.sessionKey) ?? new Set<string>(),
       );
 
-      const callback = maintenanceCallbacks.get(rootKey);
-      if (callback) {
-        await callback();
-      }
-
       const latestRoot = readManagedLocalStorageRoot(rootKey);
       if (!latestRoot) continue;
 
@@ -705,5 +685,4 @@ export async function runManagedLocalStorageMaintenance(): Promise<void> {
 
 export function resetManagedLocalStorageState(): void {
   maintenanceScheduled = false;
-  maintenanceCallbacks.clear();
 }

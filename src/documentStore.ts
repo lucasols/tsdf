@@ -281,6 +281,10 @@ export function createDocumentStore<
             if (sessionKey === false) return [];
             return [
               createProtectedStorageKey({
+                backend:
+                  persistentStorageConfig.adapter.kind === 'async'
+                    ? 'opfs'
+                    : 'localStorage',
                 sessionKey,
                 storeName: persistentStorageConfig.storeName,
                 kind: 'document',

@@ -339,7 +339,7 @@ describe('expiration scan', () => {
     `);
   });
 
-  test('scan runs for explicit injected async adapters', async () => {
+  test('opfs startup cleanup expires stale entries via metadata pages without payload reads', async () => {
     const oldTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const key = 'tsdf.sess1.old-entry';
     const mockAdapter = createMockOpfsStorageAdapter({
@@ -357,6 +357,9 @@ describe('expiration scan', () => {
       },
     });
 
+    // Ignore fixture seeding and observe only the startup cleanup work.
+    mockAdapter.clearInstrumentation();
+
     createDocumentStoreTestEnv(
       { name: 'ok', value: 1 },
       {
@@ -372,7 +375,99 @@ describe('expiration scan', () => {
 
     await waitForScheduledCleanup(3000);
 
-    expect(mockAdapter.has(key)).toBe(false);
+    expect({
+      expiredEntryExists: mockAdapter.has(key),
+      legacyListKeysFallbackRequests:
+        mockAdapter.legacyListKeysFallbackRequests,
+      metadataListScopes: mockAdapter.metadataListRequests.map((request) => [
+        request.scope.sessionKey,
+        request.scope.storeName,
+        request.scope.kind,
+      ]),
+      payloadGetManyRequests: mockAdapter.payloadGetManyRequests,
+      payloadGetRequests: mockAdapter.payloadGetRequests,
+    }).toMatchInlineSnapshot(`
+      expiredEntryExists: '❌'
+      legacyListKeysFallbackRequests: []
+      metadataListScopes:
+        - ['sess1', 'old-entry', 'document']
+        - ['sess1', 'adapter-test', 'document']
+      payloadGetManyRequests: []
+      payloadGetRequests: []
+    `);
+  });
+
+  test('opfs cleanup preserves protected stale entries without reading their payloads', async () => {
+    const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const protectedKey = 'tsdf.sess1.protected-entry';
+    const unprotectedKey = 'tsdf.sess1.unprotected-entry';
+    const mockAdapter = createMockOpfsStorageAdapter({
+      storeName: 'cleanup-trigger',
+      sessionKey: 'sess1',
+      initialState: {
+        rawEntries: {
+          [protectedKey]: {
+            data: { data: { value: { name: 'protected', value: 1 } } },
+            timestamp: staleTimestamp,
+            version: 1,
+          },
+          [unprotectedKey]: {
+            data: { data: { value: { name: 'stale', value: 2 } } },
+            timestamp: staleTimestamp,
+            version: 1,
+          },
+          'tsdf.sess1.__offline__.protected': {
+            data: { keys: [protectedKey] },
+            timestamp: Date.now(),
+            version: 1,
+          },
+          'tsdf.sess1.cleanup-trigger': {
+            data: { data: { value: { name: 'trigger', value: 3 } } },
+            timestamp: Date.now(),
+            version: 1,
+          },
+        },
+      },
+    });
+
+    // Ignore fixture seeding and observe only the startup cleanup work.
+    mockAdapter.clearInstrumentation();
+
+    createDocumentStoreTestEnv(
+      { name: 'trigger', value: 3 },
+      {
+        getSessionKey: () => 'sess1',
+        storageAdapter: mockAdapter.adapter,
+        persistentStorage: {
+          storeName: 'cleanup-trigger',
+          adapter: opfsPersistentStorage,
+          schema: wrappedSchema,
+        },
+      },
+    );
+
+    await waitForScheduledCleanup(3000);
+
+    expect({
+      legacyListKeysFallbackRequests:
+        mockAdapter.legacyListKeysFallbackRequests,
+      payloadReadsTouchedProtectedEntry:
+        mockAdapter.payloadGetRequests.includes(protectedKey),
+      payloadReadsTouchedUnprotectedEntry:
+        mockAdapter.payloadGetRequests.includes(unprotectedKey),
+      protectedEntryExists: mockAdapter.has(protectedKey),
+      protectedRegistryReads: mockAdapter.payloadGetRequests.filter(
+        (key) => key === 'tsdf.sess1.__offline__.protected',
+      ).length,
+      unprotectedEntryExists: mockAdapter.has(unprotectedKey),
+    }).toMatchInlineSnapshot(`
+      legacyListKeysFallbackRequests: []
+      payloadReadsTouchedProtectedEntry: '❌'
+      payloadReadsTouchedUnprotectedEntry: '❌'
+      protectedEntryExists: '✅'
+      protectedRegistryReads: 1
+      unprotectedEntryExists: '❌'
+    `);
   });
 
   test('automatic cleanup is throttled by cleanupIntervalMs until the interval elapses', async () => {

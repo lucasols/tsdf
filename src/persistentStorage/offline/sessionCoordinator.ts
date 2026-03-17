@@ -196,18 +196,36 @@ function createSessionPersistenceHandles(args: {
   const adapter = args.adapter;
 
   return {
-    sessionHandle: createPersistentStorageHandle<GlobalOfflineStatus>({
-      storeName: '__offline__.session',
-      adapter,
-      getSessionKey: () => args.sessionKey,
-      onPersistentStorageError: args.onPersistentStorageError,
-    }),
-    protectedKeysHandle: createPersistentStorageHandle<{ keys: string[] }>({
-      storeName: '__offline__.protected',
-      adapter,
-      getSessionKey: () => args.sessionKey,
-      onPersistentStorageError: args.onPersistentStorageError,
-    }),
+    sessionHandle: createPersistentStorageHandle<GlobalOfflineStatus>(
+      {
+        storeName: '__offline__.session',
+        adapter,
+        getSessionKey: () => args.sessionKey,
+        onPersistentStorageError: args.onPersistentStorageError,
+      },
+      {
+        asyncNamespace: {
+          storeName: '__offline__',
+          kind: 'document',
+          entryKey: 'session',
+        },
+      },
+    ),
+    protectedKeysHandle: createPersistentStorageHandle<{ keys: string[] }>(
+      {
+        storeName: '__offline__.protected',
+        adapter,
+        getSessionKey: () => args.sessionKey,
+        onPersistentStorageError: args.onPersistentStorageError,
+      },
+      {
+        asyncNamespace: {
+          storeName: '__offline__',
+          kind: '__internal.protected',
+          entryKey: 'registry',
+        },
+      },
+    ),
   };
 }
 

@@ -104,9 +104,7 @@ describe('opfs: document store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(true);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
-      `['tsdf.sess1.opfs-version-mismatch']`,
-    );
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
     await env.apiStore.preloadPersistentStorage();
     await advanceTime(2100);
@@ -131,9 +129,7 @@ describe('opfs: document store persistence', () => {
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
-      `['tsdf.session1.opfs-cleanup']`,
-    );
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
     await advanceTime(50);
@@ -167,9 +163,7 @@ describe('opfs: document store persistence', () => {
       refetchOnMount: '❌'
       status: 'idle'
     `);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
-      `['tsdf.session1.opfs-doc']`,
-    );
+    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
 
     renderHook(() => {
       const { data, status } = env.apiStore.useDocument({

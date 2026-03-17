@@ -1,4 +1,3 @@
-import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
@@ -20,27 +19,20 @@ import {
   type ParsedPersistedCollectionItemData,
 } from './parsePersistedData';
 import {
-  getManagedLocalStorageRootKeyForPrefix,
-  readManagedLocalStorageManifestEntriesByPrefix,
-  registerManagedLocalStorageMaintenanceCallback,
-  runManagedLocalStorageMaintenance,
-  setManagedLocalStorageRootNeedsMaintenance,
-  unregisterManagedLocalStorageMaintenanceCallback,
-} from './localStorageMetadata';
-import {
   createPersistentStorageNamespaceHandle,
   getStoragePrefixForStoreNamespace,
-  listLocalStorageKeysSync,
-  readProtectedStorageKeys,
+  listAllPersistentStorageNamespaceMetadata,
+  listLocalStorageNamespaceEntryKeys,
+  readProtectedStorageNamespaceKeys,
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import { localPersistentStorage } from './storageAdapter';
 import type {
   CollectionPersistentStorageConfig,
   PersistedCollectionItemData,
 } from './types';
+import { validateWithSchema } from './validateWithSchema';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
@@ -117,6 +109,16 @@ function defineLazyLocalStorageItem<
     persisted: PersistedCollectionItemData<unknown>,
   ) => void,
 ): void {
+  function clearItem(): undefined {
+    Object.defineProperty(state, itemKey, {
+      configurable: true,
+      enumerable: false,
+      value: undefined,
+      writable: true,
+    });
+    return undefined;
+  }
+
   Object.defineProperty(state, itemKey, {
     configurable: true,
     enumerable: false,
@@ -125,15 +127,7 @@ function defineLazyLocalStorageItem<
         PersistedCollectionItemData<unknown>
       >(storageKey, version);
 
-      if (!cacheEntry) {
-        Object.defineProperty(state, itemKey, {
-          configurable: true,
-          enumerable: false,
-          value: undefined,
-          writable: true,
-        });
-        return undefined;
-      }
+      if (!cacheEntry) return clearItem();
 
       const persisted = parsePersistedCollectionItemData(
         cacheEntry.data,
@@ -141,13 +135,7 @@ function defineLazyLocalStorageItem<
       );
       if (!persisted) {
         scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
-        Object.defineProperty(state, itemKey, {
-          configurable: true,
-          enumerable: false,
-          value: undefined,
-          writable: true,
-        });
-        return undefined;
+        return clearItem();
       }
 
       const item = toCollectionItemState(
@@ -158,13 +146,7 @@ function defineLazyLocalStorageItem<
 
       if (!item) {
         scheduleIdleCleanup(() => localStorage.removeItem(storageKey));
-        Object.defineProperty(state, itemKey, {
-          configurable: true,
-          enumerable: false,
-          value: undefined,
-          writable: true,
-        });
-        return undefined;
+        return clearItem();
       }
 
       scheduleIdleCleanup(() => refreshLocalStorageTimestamp(storageKey));
@@ -227,14 +209,13 @@ export function setupCollectionPersistence<
   );
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = config.adapter;
-  const usesManagedLocalStorage = storageAdapter === localPersistentStorage;
-  const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
 
   const namespace = createPersistentStorageNamespaceHandle<
-    PersistedCollectionItemData<ItemState | StorageState>
+    PersistedCollectionItemData<ItemState | StorageState>,
+    { payload: unknown }
   >(
-    { ...persistentConfig, entryPrefix: 'collection.item' },
+    { ...config, entryPrefix: 'collection.item' },
     { getManifestMeta: (data) => ({ payload: data.payload }) },
   );
 
@@ -247,7 +228,6 @@ export function setupCollectionPersistence<
   const persistedSnapshotByKey = new Map<string, string>();
   const hydratedPersistedKeys = new Set<string>();
   let knownPersistedKeys: Set<string> | null = null;
-  let maintenanceRootKey: string | null = null;
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -264,28 +244,6 @@ export function setupCollectionPersistence<
       sessionKey,
       config.storeName,
       'collection.item',
-    );
-  }
-
-  function syncMaintenanceRegistration(): void {
-    if (!usesManagedLocalStorage) return;
-
-    const prefix = getCollectionPrefix();
-    if (prefix === false) return;
-
-    const nextRootKey = getManagedLocalStorageRootKeyForPrefix(prefix);
-    if (maintenanceRootKey === nextRootKey) return;
-
-    if (maintenanceRootKey !== null) {
-      unregisterManagedLocalStorageMaintenanceCallback(maintenanceRootKey);
-    }
-
-    maintenanceRootKey = nextRootKey;
-    registerManagedLocalStorageMaintenanceCallback(
-      maintenanceRootKey,
-      async () => {
-        await evictStoredItems();
-      },
     );
   }
 
@@ -306,12 +264,11 @@ export function setupCollectionPersistence<
 
     const prefix = getCollectionPrefix();
     if (prefix === false) return baseState;
-    syncMaintenanceRegistration();
 
     const initialState = { ...baseState };
 
-    for (const storageKey of listLocalStorageKeysSync(prefix)) {
-      const itemKey = storageKey.slice(prefix.length);
+    for (const itemKey of listLocalStorageNamespaceEntryKeys(prefix)) {
+      const storageKey = `${prefix}${itemKey}`;
       if (itemKey in initialState) continue;
 
       defineLazyLocalStorageItem(
@@ -460,87 +417,34 @@ export function setupCollectionPersistence<
   }
 
   async function evictStoredItems(): Promise<void> {
-    syncMaintenanceRegistration();
-    const keys = await namespace.listKeys();
-    if (keys.length === 0) return;
     const sessionKey = config.getSessionKey();
     const prefix = getCollectionPrefix();
     if (sessionKey === false || prefix === false) return;
-    const protectedStorageKeys = await readProtectedStorageKeys(
+    const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
+      namespace,
+      { order: 'lru-desc' },
+    );
+    if (metadataEntries.length === 0) return;
+    const protectedItemKeys = await readProtectedStorageNamespaceKeys(
       storageAdapter,
       sessionKey,
+      {
+        localStoragePrefix: prefix,
+        asyncScope: {
+          sessionKey,
+          storeName: config.storeName,
+          kind: 'collection.item',
+        },
+      },
     );
-    const protectedItemKeys = new Set(
-      [...protectedStorageKeys]
-        .filter((key) => key.startsWith(prefix))
-        .map((key) => key.slice(prefix.length)),
-    );
-    if (
-      !hasIgnoreItemFilter &&
-      keys.filter((key) => !protectedItemKeys.has(key)).length <= maxItems
-    ) {
-      return;
-    }
+    const entries = metadataEntries.map((entry) => ({
+      itemKey: entry.key,
+      lastAccessAt: entry.lastAccessAt,
+      payload: validateWithSchema(config.payloadSchema, entry.payload),
+    }));
 
-    const managedEntriesByKey = usesManagedLocalStorage
-      ? new Map(
-          readManagedLocalStorageManifestEntriesByPrefix(prefix).map(
-            (entry) => [entry.entryKey, entry],
-          ),
-        )
-      : null;
-
-    const entries = await Promise.all(
-      keys.map(async (itemKey) => ({
-        itemKey,
-        entry: await namespace.readEntry(itemKey),
-        lastAccessAt: managedEntriesByKey?.get(itemKey)?.lastAccessAt,
-      })),
-    );
-
-    const invalidEntries = filterAndMap(entries, ({ itemKey, entry }) => {
-      if (!entry) return false;
-
-      const persisted = parsePersistedCollectionItemData(
-        entry.data,
-        config.payloadSchema,
-      );
-
-      if (!persisted) return { itemKey };
-
-      return parsePersistedStoreData(persisted.data, dataSchema)
-        ? false
-        : { itemKey };
-    });
-
-    if (invalidEntries.length > 0) {
-      await Promise.all(
-        invalidEntries.map(({ itemKey }) => namespace.remove(itemKey)),
-      );
-    }
-
-    const validEntries = filterAndMap(entries, ({ itemKey, entry }) => {
-      if (!entry) return false;
-
-      const persisted = parsePersistedCollectionItemData(
-        entry.data,
-        config.payloadSchema,
-      );
-      if (!persisted) return false;
-
-      return parsePersistedStoreData(persisted.data, dataSchema)
-        ? {
-            itemKey,
-            lastAccessAt:
-              managedEntriesByKey?.get(itemKey)?.lastAccessAt ??
-              entry.timestamp,
-            persisted,
-          }
-        : false;
-    });
-
-    const ignoredEntries = validEntries.filter(({ persisted }) =>
-      shouldIgnoreItem(persisted.payload),
+    const ignoredEntries = entries.filter(
+      ({ payload }) => payload !== null && shouldIgnoreItem(payload),
     );
 
     if (ignoredEntries.length > 0) {
@@ -552,9 +456,20 @@ export function setupCollectionPersistence<
       }
     }
 
-    const filteredEntries = validEntries.filter(
-      ({ persisted }) => !shouldIgnoreItem(persisted.payload),
+    const filteredEntries = entries.filter(
+      ({ payload }) => payload === null || !shouldIgnoreItem(payload),
     );
+
+    if (
+      !hasIgnoreItemFilter &&
+      filteredEntries.filter(({ itemKey }) => !protectedItemKeys.has(itemKey))
+        .length <= maxItems
+    ) {
+      knownPersistedKeys = new Set(
+        filteredEntries.map(({ itemKey }) => itemKey),
+      );
+      return;
+    }
 
     if (filteredEntries.length <= maxItems) {
       knownPersistedKeys = new Set(
@@ -609,8 +524,6 @@ export function setupCollectionPersistence<
     const nextPersistedKeys = new Set<string>();
     const previousPersistedKeys = await ensureKnownPersistedKeys();
     const removedKeys = new Set<string>();
-    syncMaintenanceRegistration();
-
     for (const [itemKey, item] of Object.entries(state)) {
       if (!item?.data) {
         if (
@@ -676,19 +589,6 @@ export function setupCollectionPersistence<
       knownPersistedKeys.add(itemKey);
     }
 
-    if (usesManagedLocalStorage && maintenanceRootKey !== null) {
-      const needsMaintenance =
-        hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
-      setManagedLocalStorageRootNeedsMaintenance(
-        maintenanceRootKey,
-        needsMaintenance,
-      );
-      if (needsMaintenance) {
-        await runManagedLocalStorageMaintenance();
-      }
-      return;
-    }
-
     await evictStoredItems();
   }
 
@@ -703,7 +603,6 @@ export function setupCollectionPersistence<
   function attach(
     store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
   ): void {
-    syncMaintenanceRegistration();
     storeRef = store;
     unsubscribe = store.subscribe(() => {
       schedulePersistedStateFlush();
@@ -719,10 +618,6 @@ export function setupCollectionPersistence<
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
-    if (maintenanceRootKey !== null) {
-      unregisterManagedLocalStorageMaintenanceCallback(maintenanceRootKey);
-      maintenanceRootKey = null;
-    }
     namespace.dispose();
   }
 

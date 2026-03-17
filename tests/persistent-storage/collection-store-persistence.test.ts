@@ -447,6 +447,27 @@ describe('localStorage: collection store persistence', () => {
     expect(localStorage.getItem(key)).toBeNull();
   });
 
+  test('scheduled maintenance does not clean invalid cached entries before they are read', async () => {
+    const key = setCachedCollectionItem(
+      'col-invalid-maintenance',
+      'sess1',
+      'bad',
+      { value: { id: 'bad', name: 'Old' } },
+      1,
+    );
+
+    createEnv({
+      storeName: 'col-invalid-maintenance',
+      sessionKey: 'sess1',
+      version: 2,
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(key)).not.toBeNull();
+  });
+
   test('invalid cached entries are also cleaned up after a hook read', async () => {
     const key = setCachedCollectionItem(
       'col-invalid-hook',

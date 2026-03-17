@@ -1334,6 +1334,28 @@ describe('localStorage: list query store persistence', () => {
     expect(localStorage.getItem(key)).toBeNull();
   });
 
+  test('scheduled maintenance does not clean invalid cached query entries before they are read', async () => {
+    const key = setCachedQuery(
+      'lq-invalid-maintenance',
+      'sess1',
+      { tableId: 'users' },
+      [storeItemKey('users', 1)],
+      false,
+      1,
+    );
+
+    createEnv({
+      storeName: 'lq-invalid-maintenance',
+      sessionKey: 'sess1',
+      version: 2,
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(key)).not.toBeNull();
+  });
+
   test('invalid cached query entries are also cleaned up after a hook read', async () => {
     const usersQuery = { tableId: 'users' };
     const key = setCachedQuery(

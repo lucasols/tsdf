@@ -27,24 +27,135 @@ export type SyncStorageAdapter = {
   listKeys(prefix: string): string[];
 };
 
+export type AsyncStorageNamespaceKind =
+  | 'document'
+  | 'collection.item'
+  | 'listQuery.item'
+  | 'listQuery.query'
+  | 'offline.queue'
+  | 'offline.conflict'
+  | 'offline.entity'
+  | '__internal.protected';
+
+export type AsyncStorageNamespaceScope = {
+  sessionKey: string;
+  storeName: string;
+  kind: AsyncStorageNamespaceKind;
+};
+
+export type AsyncStorageProtectedEntryRef = AsyncStorageNamespaceScope & {
+  key: string;
+};
+
+export type AsyncStorageTouchMode = 'never' | 'coarse' | 'force';
+
+export type AsyncStorageReadOptions = { touch?: AsyncStorageTouchMode };
+
+export type AsyncStorageMetadataOrder = 'key' | 'lru-asc' | 'lru-desc';
+
+export type AsyncStorageEntryMetadataBase = {
+  key: string;
+  payloadRef: string;
+  writtenAt: number;
+  lastAccessAt: number;
+  sizeBytes?: number;
+  version: number;
+};
+
+export type AsyncStorageEntryMetadata<
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = AsyncStorageEntryMetadataBase & TCustomMetadata;
+
+export type AsyncStorageNamespaceGetResult<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = { value: TValue; metadata: AsyncStorageEntryMetadata<TCustomMetadata> };
+
+export type AsyncStorageNamespaceCommitUpsert<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = { key: string; value: TValue; version: number; metadata?: TCustomMetadata };
+
+export type AsyncStorageNamespaceCommitTouch = {
+  key: string;
+  lastAccessAt?: number;
+};
+
+export type AsyncStorageNamespaceCommitArgs<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  upserts?: AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>[];
+  removes?: string[];
+  touches?: AsyncStorageNamespaceCommitTouch[];
+};
+
+export type AsyncStorageMetadataPage<
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  entries: AsyncStorageEntryMetadata<TCustomMetadata>[];
+  cursor: string | null;
+};
+
+export type AsyncStorageMaintenanceState = {
+  lastSuccessfulCleanupAt: number | null;
+  startupCleanupLease: { holderId: string; expiresAt: number } | null;
+};
+
+export type AsyncStorageNamespaceHandle<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  get(
+    key: string,
+    options?: AsyncStorageReadOptions,
+  ): Promise<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>;
+  getMany(
+    keys: string[],
+    options?: AsyncStorageReadOptions,
+  ): Promise<
+    Array<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
+  >;
+  commit(
+    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+  ): Promise<void>;
+  listMetadata(args?: {
+    cursor?: string | null;
+    limit?: number;
+    order?: AsyncStorageMetadataOrder;
+  }): Promise<AsyncStorageMetadataPage<TCustomMetadata>>;
+  clear(): Promise<void>;
+};
+
 /** Async adapter used when storage access requires asynchronous I/O. */
 export type AsyncStorageAdapter = {
   /** Adapter mode marker used by persistence internals to pick async behavior. */
   kind: 'async';
-  /** Read an entry using async storage APIs. */
-  read<T>(key: string): Promise<T | null>;
-  /** Persist an entry using async storage APIs. */
-  write<T>(key: string, value: T): Promise<void>;
-  /** Remove a single key using async storage APIs. */
-  remove(key: string): Promise<void>;
-  /** Remove all keys that start with a prefix using async storage APIs. */
-  removeByPrefix(prefix: string): Promise<void>;
-  /** Return all matching keys in async storage. */
-  listKeys(prefix: string): Promise<string[]>;
+  /** Open a logical namespace for OPFS-backed reads, writes, and metadata scans. */
+  openNamespace<
+    TValue,
+    TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+  >(
+    scope: AsyncStorageNamespaceScope,
+  ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
+  /** Read persisted cleanup state shared across tabs. */
+  readMaintenanceState(): Promise<AsyncStorageMaintenanceState>;
+  /** Try to acquire the startup cleanup lease for this adapter instance. */
+  tryAcquireStartupCleanupLease(args: {
+    holderId: string;
+    ttlMs: number;
+  }): Promise<boolean>;
+  /** Mark startup cleanup as finished and clear the lease. */
+  finishStartupCleanup(args: {
+    holderId: string;
+    finishedAt: number;
+  }): Promise<void>;
 };
 
 /** Injected persistent storage adapter. */
 export type StorageAdapter = SyncStorageAdapter | AsyncStorageAdapter;
+
+export type StorageBackend = 'localStorage' | 'opfs';
 
 // --- Schema Types ---
 
