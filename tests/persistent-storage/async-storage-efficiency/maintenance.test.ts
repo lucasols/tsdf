@@ -52,37 +52,21 @@ describe('async storage efficiency: maintenance', () => {
     });
 
     // Startup should only schedule the sweep; it should not perform storage I/O yet.
-    const startupReadCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName: 'fresh-doc', sessionKey: 'sess1' },
-    );
+    const startupReadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     createDocumentEnv({
       storeName: 'fresh-doc',
       sessionKey: 'sess1',
       storageAdapter: mockAdapter.adapter,
     });
-    const startupOperations = startupReadCapture.finish();
+    const startupOperations = startupReadCapture.finish().timelineString;
 
-    expect(startupOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads: []
-        metadataReads: []
-        payloadBatchReads: []
-        scopedPayloadReads: []
-
-      operations: []
-    `);
+    expect(startupOperations).toMatchInlineSnapshot(`"empty"`);
 
     // Once the scheduled sweep runs, snapshot the complete maintenance history.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName: 'fresh-doc', sessionKey: 'sess1' },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
       expiredEntryExists: mockAdapter.has(expiredKey),
@@ -97,41 +81,47 @@ describe('async storage efficiency: maintenance', () => {
       maintenanceState: { lastSuccessfulCleanupAt: 1735689602000, startupCleanupLease: null }
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
-        legacyFallbackReads: []
-        listKeyScans:
-          - 'sess1/expired-doc/document'
-          - 'sess1/expired-doc/document'
-          - 'sess1/fresh-doc/document'
-        metadataBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
-          - ['tsdf.sess1.expired-doc (metadata)']
-          - ['document metadata']
-        metadataReads:
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'tsdf.sess1.expired-doc (metadata)'
-          - 'document metadata'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-        scopedPayloadReads: []
-
-      operations:
-        - '📖 ❌ <internal:record>'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/expired-doc/document keys=["__tsdf_meta__:document","__tsdf_payload__:document"]'
-        - '📚 sess1/expired-doc/document hits=1/1 ["tsdf.sess1.expired-doc (metadata)"]'
-        - '🗑️ sess1/expired-doc/document ["tsdf.sess1.expired-doc (payload)","tsdf.sess1.expired-doc (metadata)"]'
-        - '🗂️ sess1/expired-doc/document keys=[]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '🗂️ sess1/fresh-doc/document keys=["__tsdf_meta__:document","__tsdf_payload__:document"]'
-        - '📚 sess1/fresh-doc/document hits=1/1 ["document metadata"]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
+      "
+      time |
+      2s   | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)
+      .    | 📂 open ✅ tsdf/sess1/expired-doc/document (scope directory)
+      .    | 🗂️ tsdf/sess1/expired-doc/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .    | 📂 open ✅ tsdf/sess1/expired-doc/document (scope directory)
+      .    | 📄 open ✅ tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.expired-doc (metadata))
+      .    | 📖 tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.expired-doc (metadata))
+      .    | 📂 open ✅ tsdf/sess1/expired-doc/document (scope directory)
+      .    | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.expired-doc (payload))
+      .    | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.expired-doc (metadata))
+      .    | 📂 open ✅ tsdf/sess1/expired-doc/document (scope directory)
+      .    | 🗂️ tsdf/sess1/expired-doc/document (scope directory) entries=[]
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ✅ tsdf/sess1/fresh-doc/document (scope directory)
+      .    | 🗂️ tsdf/sess1/fresh-doc/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .    | 📂 open ✅ tsdf/sess1/fresh-doc/document (scope directory)
+      .    | 📄 open ✅ tsdf/sess1/fresh-doc/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.fresh-doc (metadata))
+      .    | 📖 tsdf/sess1/fresh-doc/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.fresh-doc (metadata))
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      "
     `);
   });
 
@@ -169,12 +159,9 @@ describe('async storage efficiency: maintenance', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName: 'trigger', sessionKey: 'sess1' },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
       corruptedExists: mockAdapter.has(corruptedKey),
@@ -188,41 +175,47 @@ describe('async storage efficiency: maintenance', () => {
       triggerExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
-        legacyFallbackReads: []
-        listKeyScans:
-          - 'sess1/corrupted/document'
-          - 'sess1/corrupted/document'
-          - 'sess1/trigger/document'
-        metadataBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
-          - ['tsdf.sess1.corrupted (metadata)']
-          - ['document metadata']
-        metadataReads:
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'tsdf.sess1.corrupted (metadata)'
-          - 'document metadata'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-        scopedPayloadReads: []
-
-      operations:
-        - '📖 ❌ <internal:record>'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/corrupted/document keys=["__tsdf_meta__:document","__tsdf_payload__:document"]'
-        - '📚 sess1/corrupted/document hits=1/1 ["tsdf.sess1.corrupted (metadata)"]'
-        - '🗑️ sess1/corrupted/document ["tsdf.sess1.corrupted (payload)","tsdf.sess1.corrupted (metadata)"]'
-        - '🗂️ sess1/corrupted/document keys=[]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '🗂️ sess1/trigger/document keys=["__tsdf_meta__:document","__tsdf_payload__:document"]'
-        - '📚 sess1/trigger/document hits=1/1 ["document metadata"]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
+      "
+      time |
+      2s   | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)
+      .    | 📂 open ✅ tsdf/sess1/corrupted/document (scope directory)
+      .    | 🗂️ tsdf/sess1/corrupted/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .    | 📂 open ✅ tsdf/sess1/corrupted/document (scope directory)
+      .    | 📄 open ✅ tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.corrupted (metadata))
+      .    | 📖 tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.corrupted (metadata))
+      .    | 📂 open ✅ tsdf/sess1/corrupted/document (scope directory)
+      .    | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.corrupted (payload))
+      .    | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.corrupted (metadata))
+      .    | 📂 open ✅ tsdf/sess1/corrupted/document (scope directory)
+      .    | 🗂️ tsdf/sess1/corrupted/document (scope directory) entries=[]
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ✅ tsdf/sess1/trigger/document (scope directory)
+      .    | 🗂️ tsdf/sess1/trigger/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .    | 📂 open ✅ tsdf/sess1/trigger/document (scope directory)
+      .    | 📄 open ✅ tsdf/sess1/trigger/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.trigger (metadata))
+      .    | 📖 tsdf/sess1/trigger/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.trigger (metadata))
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      "
     `);
   });
 
@@ -272,12 +265,9 @@ describe('async storage efficiency: maintenance', () => {
       storageAdapter: mockAdapter.adapter,
     });
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName: 'valid-doc', sessionKey: 'sess1' },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
       invalidMetadataExists: mockAdapter.has(invalidMetadataKey),
@@ -294,51 +284,63 @@ describe('async storage efficiency: maintenance', () => {
       validEntryExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
-        legacyFallbackReads: []
-        listKeyScans:
-          - 'sess1/valid-doc/document'
-          - 'sess1/invalid-metadata/document'
-          - 'sess1/invalid-metadata/document'
-          - 'sess1/missing-payload/document'
-          - 'sess1/missing-payload/document'
-        metadataBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
-          - ['document metadata']
-          - ['tsdf.sess1.invalid-metadata (metadata)']
-          - ['tsdf.sess1.missing-payload (metadata)']
-        metadataReads:
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'document metadata'
-          - 'tsdf.sess1.invalid-metadata (metadata)'
-          - 'tsdf.sess1.missing-payload (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-        scopedPayloadReads: []
-
-      operations:
-        - '📖 ❌ <internal:record>'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/valid-doc/document keys=["__tsdf_meta__:document","__tsdf_payload__:document"]'
-        - '📚 sess1/valid-doc/document hits=1/1 ["document metadata"]'
-        - '🗂️ sess1/invalid-metadata/document keys=["__tsdf_meta__:document","__tsdf_payload__:document"]'
-        - '📚 sess1/invalid-metadata/document hits=1/1 ["tsdf.sess1.invalid-metadata (metadata)"]'
-        - '🗑️ sess1/invalid-metadata/document ["tsdf.sess1.invalid-metadata (payload)","tsdf.sess1.invalid-metadata (metadata)"]'
-        - '🗂️ sess1/invalid-metadata/document keys=[]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '🗂️ sess1/missing-payload/document keys=["__tsdf_meta__:document"]'
-        - '📚 sess1/missing-payload/document hits=1/1 ["tsdf.sess1.missing-payload (metadata)"]'
-        - '🗑️ sess1/missing-payload/document ["tsdf.sess1.missing-payload (payload)","tsdf.sess1.missing-payload (metadata)"]'
-        - '🗂️ sess1/missing-payload/document keys=[]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
+      "
+      time |
+      2s   | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)
+      .    | 📂 open ✅ tsdf/sess1/valid-doc/document (scope directory)
+      .    | 🗂️ tsdf/sess1/valid-doc/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .    | 📂 open ✅ tsdf/sess1/valid-doc/document (scope directory)
+      .    | 📄 open ✅ tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.valid-doc (metadata))
+      .    | 📖 tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.valid-doc (metadata))
+      .    | 📂 open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
+      .    | 🗂️ tsdf/sess1/invalid-metadata/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .    | 📂 open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
+      .    | 📄 open ✅ tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.invalid-metadata (metadata))
+      .    | 📖 tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.invalid-metadata (metadata))
+      .    | 📂 open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
+      .    | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.invalid-metadata (payload))
+      .    | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.invalid-metadata (metadata))
+      .    | 📂 open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
+      .    | 🗂️ tsdf/sess1/invalid-metadata/document (scope directory) entries=[]
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ✅ tsdf/sess1/missing-payload/document (scope directory)
+      .    | 🗂️ tsdf/sess1/missing-payload/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json"]
+      .    | 📂 open ✅ tsdf/sess1/missing-payload/document (scope directory)
+      .    | 📄 open ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.missing-payload (metadata))
+      .    | 📖 tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.missing-payload (metadata))
+      .    | 📂 open ✅ tsdf/sess1/missing-payload/document (scope directory)
+      .    | 🗑️ ❌ tsdf/sess1/missing-payload/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.missing-payload (payload))
+      .    | 🗑️ ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.missing-payload (metadata))
+      .    | 📂 open ✅ tsdf/sess1/missing-payload/document (scope directory)
+      .    | 🗂️ tsdf/sess1/missing-payload/document (scope directory) entries=[]
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      "
     `);
   });
 
@@ -391,12 +393,9 @@ describe('async storage efficiency: maintenance', () => {
     });
 
     // Capture the full sweep so the snapshot shows stale-entry removal.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName: 'trigger-doc', sessionKey: 'sess-trigger' },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect({
       protectedEntryExists: mockAdapter.has(protectedDocStorageKey),
@@ -411,26 +410,27 @@ describe('async storage efficiency: maintenance', () => {
       unprotectedEntryExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans:
-          - 'user@example.com/protected-doc/document'
-          - 'user@example.com/unprotected-doc/document'
-        metadataBatchReads: []
-        metadataReads: []
-        payloadBatchReads: []
-        scopedPayloadReads: []
-
-      operations:
-        - '📖 ❌ <internal:record>'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '🗂️ user@example.com/protected-doc/document keys=[]'
-        - '🗂️ user@example.com/unprotected-doc/document keys=[]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
+      "
+      time |
+      2s   | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
+      .    | 📂 open ❌ tsdf/user%40example.com/protected-doc/document (scope directory)
+      .    | 📂 open ❌ tsdf/user%40example.com/unprotected-doc/document (scope directory)
+      .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | 📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
+      .    | 📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      .    | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
+      "
     `);
   });
 });

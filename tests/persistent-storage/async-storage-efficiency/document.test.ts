@@ -87,7 +87,7 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: ['document payload']
 
       operations:
-        - '📚 sess1/doc-remount-flow/document hits=2/2 ["document payload","document metadata"]'
+        - '📚 sess1/doc-remount-flow/document hits=2/2 ["sess1/doc-remount-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-remount-flow (payload))","sess1/doc-remount-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-remount-flow (metadata))"]'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -102,7 +102,7 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: ['document payload']
 
       operations:
-        - '📚 sess1/doc-remount-flow/document hits=2/2 ["document payload","document metadata"]'
+        - '📚 sess1/doc-remount-flow/document hits=2/2 ["sess1/doc-remount-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-remount-flow (payload))","sess1/doc-remount-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-remount-flow (metadata))"]'
     `);
   });
 
@@ -277,8 +277,8 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/doc-mutation-flow/document hits=1/1 ["document metadata"]'
-        - '✍️ sess1/doc-mutation-flow/document ["document payload","document metadata"]'
+        - '📚 sess1/doc-mutation-flow/document hits=1/1 ["sess1/doc-mutation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-mutation-flow (metadata))"]'
+        - '✍️ sess1/doc-mutation-flow/document ["sess1/doc-mutation-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-mutation-flow (payload))","sess1/doc-mutation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-mutation-flow (metadata))"]'
     `);
   });
 
@@ -343,8 +343,8 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/doc-invalidation-flow/document hits=1/1 ["document metadata"]'
-        - '✍️ sess1/doc-invalidation-flow/document ["document payload","document metadata"]'
+        - '📚 sess1/doc-invalidation-flow/document hits=1/1 ["sess1/doc-invalidation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-invalidation-flow (metadata))"]'
+        - '✍️ sess1/doc-invalidation-flow/document ["sess1/doc-invalidation-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-invalidation-flow (payload))","sess1/doc-invalidation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-invalidation-flow (metadata))"]'
     `);
   });
 
@@ -439,8 +439,8 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/doc-coalesced-invalidations/document hits=1/1 ["document metadata"]'
-        - '✍️ sess1/doc-coalesced-invalidations/document ["document payload","document metadata"]'
+        - '📚 sess1/doc-coalesced-invalidations/document hits=1/1 ["sess1/doc-coalesced-invalidations/document/__tsdf_meta__:document (tsdf.sess1.doc-coalesced-invalidations (metadata))"]'
+        - '✍️ sess1/doc-coalesced-invalidations/document ["sess1/doc-coalesced-invalidations/document/__tsdf_payload__:document (tsdf.sess1.doc-coalesced-invalidations (payload))","sess1/doc-coalesced-invalidations/document/__tsdf_meta__:document (tsdf.sess1.doc-coalesced-invalidations (metadata))"]'
     `);
   });
 
@@ -629,7 +629,7 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: ['document payload']
 
       operations:
-        - '📚 sess1/doc-opfs-efficiency/document hits=2/2 ["document payload","document metadata"]'
+        - '📚 sess1/doc-opfs-efficiency/document hits=2/2 ["sess1/doc-opfs-efficiency/document/__tsdf_payload__:document (tsdf.sess1.doc-opfs-efficiency (payload))","sess1/doc-opfs-efficiency/document/__tsdf_meta__:document (tsdf.sess1.doc-opfs-efficiency (metadata))"]'
     `);
 
     expect(mockAdapter.has(documentStorageKey(storeName, sessionKey))).toBe(

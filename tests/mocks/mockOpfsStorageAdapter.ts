@@ -64,39 +64,55 @@ type InstrumentedRecord = {
 
 export type MockOpfsOperation =
   | {
+      time: number;
       type: 'get';
       exists: boolean;
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
     }
   | {
+      time: number;
       type: 'getMany';
       hitCount: number;
       records: InstrumentedRecord[];
       scope: AsyncStorageNamespaceScope;
     }
   | {
+      time: number;
       type: 'set';
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
     }
   | {
+      time: number;
       type: 'setMany';
       records: InstrumentedRecord[];
       scope: AsyncStorageNamespaceScope;
     }
   | {
+      time: number;
       type: 'remove';
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
     }
   | {
+      time: number;
       type: 'removeMany';
       records: InstrumentedRecord[];
       scope: AsyncStorageNamespaceScope;
     }
-  | { type: 'listKeys'; keys: string[]; scope: AsyncStorageNamespaceScope }
-  | { type: 'clear'; removedKeys: string[]; scope: AsyncStorageNamespaceScope };
+  | {
+      time: number;
+      type: 'listKeys';
+      keys: string[];
+      scope: AsyncStorageNamespaceScope;
+    }
+  | {
+      time: number;
+      type: 'clear';
+      removedKeys: string[];
+      scope: AsyncStorageNamespaceScope;
+    };
 
 type MockStorageEntry = { value: unknown };
 
@@ -477,6 +493,7 @@ export function createMockOpfsStorageAdapter(
   const legacyListKeysFallbackRequests: string[] = [];
   const operations: MockOpfsOperation[] = [];
   const readDelayMs = options.readDelayMs ?? 0;
+  const startedAt = Date.now();
 
   function getNamespace(
     scope: AsyncStorageNamespaceScope,
@@ -628,6 +645,7 @@ export function createMockOpfsStorageAdapter(
 
       const entry = namespace.get(key);
       operations.push({
+        time: Date.now() - startedAt,
         type: 'get',
         scope,
         record,
@@ -639,6 +657,7 @@ export function createMockOpfsStorageAdapter(
       const namespace = getNamespace(scope);
       namespace.set(key, { value });
       operations.push({
+        time: Date.now() - startedAt,
         type: 'set',
         scope,
         record: getInstrumentedRecord(scope, key),
@@ -651,6 +670,7 @@ export function createMockOpfsStorageAdapter(
         namespaceStore.delete(getNamespaceId(scope));
       }
       operations.push({
+        time: Date.now() - startedAt,
         type: 'remove',
         scope,
         record: getInstrumentedRecord(scope, key),
@@ -659,14 +679,24 @@ export function createMockOpfsStorageAdapter(
     async listKeys(scope) {
       const keys = [...getNamespace(scope).keys()].sort(compareStrings);
       listKeysRequests.push(scope);
-      operations.push({ type: 'listKeys', scope, keys: [...keys] });
+      operations.push({
+        time: Date.now() - startedAt,
+        type: 'listKeys',
+        scope,
+        keys: [...keys],
+      });
       return keys;
     },
     async clear(scope) {
       const namespace = getNamespace(scope);
       const removedKeys = [...namespace.keys()].sort(compareStrings);
       namespaceStore.delete(getNamespaceId(scope));
-      operations.push({ type: 'clear', scope, removedKeys });
+      operations.push({
+        time: Date.now() - startedAt,
+        type: 'clear',
+        scope,
+        removedKeys,
+      });
     },
     async getMany(scope, keys) {
       const namespace = getNamespace(scope);
@@ -686,6 +716,7 @@ export function createMockOpfsStorageAdapter(
 
       const values = keys.map((key) => namespace.get(key)?.value ?? null);
       operations.push({
+        time: Date.now() - startedAt,
         type: 'getMany',
         scope,
         records,
@@ -699,6 +730,7 @@ export function createMockOpfsStorageAdapter(
         namespace.set(entry.key, { value: entry.value });
       }
       operations.push({
+        time: Date.now() - startedAt,
         type: 'setMany',
         scope,
         records: entries.map((entry) =>
@@ -715,6 +747,7 @@ export function createMockOpfsStorageAdapter(
         namespaceStore.delete(getNamespaceId(scope));
       }
       operations.push({
+        time: Date.now() - startedAt,
         type: 'removeMany',
         scope,
         records: keys.map((key) => getInstrumentedRecord(scope, key)),

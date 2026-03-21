@@ -124,18 +124,42 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📖 ❌ <internal:record>'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/collection-expiration/collection.item keys=["__tsdf_meta__:\\"expired-user","__tsdf_meta__:\\"expired-user-2","__tsdf_meta__:\\"fresh-user","__tsdf_payload__:\\"expired-user","__tsdf_payload__:\\"expired-user-2","__tsdf_payload__:\\"fresh-user"]'
-        - '📚 sess1/collection-expiration/collection.item hits=3/3 ["ci.\\"expired-user (metadata)","ci.\\"expired-user-2 (metadata)","ci.\\"fresh-user (metadata)"]'
-        - '🗑️ sess1/collection-expiration/collection.item ["ci.\\"expired-user (payload)","ci.\\"expired-user (metadata)","ci.\\"expired-user-2 (payload)","ci.\\"expired-user-2 (metadata)"]'
-        - '🗂️ sess1/collection-expiration/collection.item keys=["__tsdf_meta__:\\"fresh-user","__tsdf_payload__:\\"fresh-user"]'
-        - '📖 ✅ <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/collection-expiration/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22expired-user-2.json","file:__tsdf_meta__%3A%22expired-user.json","file:__tsdf_meta__%3A%22fresh-user.json","file:__tsdf_payload__%3A%22expired-user-2.json","file:__tsdf_payload__%3A%22expired-user.json","file:__tsdf_payload__%3A%22fresh-user.json"]'
+        - '📂 open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json (tsdf.sess1.collection-expiration.ci."expired-user (metadata))'
+        - '📄 open ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))'
+        - '📄 open ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22fresh-user.json (tsdf.sess1.collection-expiration.ci."fresh-user (metadata))'
+        - '📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json (tsdf.sess1.collection-expiration.ci."expired-user (metadata))'
+        - '📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))'
+        - '📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22fresh-user.json (tsdf.sess1.collection-expiration.ci."fresh-user (metadata))'
+        - '📂 open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_payload__%3A%22expired-user.json (tsdf.sess1.collection-expiration.ci."expired-user (payload))'
+        - '🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json (tsdf.sess1.collection-expiration.ci."expired-user (metadata))'
+        - '🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_payload__%3A%22expired-user-2.json (tsdf.sess1.collection-expiration.ci."expired-user-2 (payload))'
+        - '🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))'
+        - '📂 open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/collection-expiration/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22fresh-user.json","file:__tsdf_payload__%3A%22fresh-user.json"]'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
     `);
   });
 
@@ -197,7 +221,7 @@ describe('async storage efficiency: collection', () => {
         storeName,
         sessionKey,
       ).sort(),
-    ).toMatchInlineSnapshot(`['b', 'c']`);
+    ).toMatchInlineSnapshot(`[]`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
@@ -221,16 +245,35 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/col-max-items-metadata/collection.item keys=["__tsdf_meta__:\\"a","__tsdf_meta__:\\"b","__tsdf_payload__:\\"a","__tsdf_payload__:\\"b"]'
-        - '📚 sess1/col-max-items-metadata/collection.item hits=0/1 ["ci.\\"c (metadata)"]'
-        - '✍️ sess1/col-max-items-metadata/collection.item ["ci.\\"c (payload)","ci.\\"c (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/col-max-items-metadata/collection.item keys=["__tsdf_meta__:\\"a","__tsdf_meta__:\\"b","__tsdf_meta__:\\"c","__tsdf_payload__:\\"a","__tsdf_payload__:\\"b","__tsdf_payload__:\\"c"]'
-        - '📚 sess1/col-max-items-metadata/collection.item hits=3/3 ["ci.\\"a (metadata)","ci.\\"b (metadata)","ci.\\"c (metadata)"]'
-        - '🗑️ sess1/col-max-items-metadata/collection.item ["ci.\\"a (payload)","ci.\\"a (metadata)"]'
-        - '🗂️ sess1/col-max-items-metadata/collection.item keys=["__tsdf_meta__:\\"b","__tsdf_meta__:\\"c","__tsdf_payload__:\\"b","__tsdf_payload__:\\"c"]'
+        - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-max-items-metadata/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22a.json","file:__tsdf_meta__%3A%22b.json","file:__tsdf_payload__%3A%22a.json","file:__tsdf_payload__%3A%22b.json"]'
+        - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
+        - '📄 open ❌ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-max-items-metadata.ci."c (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_payload__%3A%22c.json (tsdf.sess1.col-max-items-metadata.ci."c (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-max-items-metadata.ci."c (metadata))'
+        - '✍️ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_payload__%3A%22c.json (tsdf.sess1.col-max-items-metadata.ci."c (payload))'
+        - '✍️ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-max-items-metadata.ci."c (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-max-items-metadata/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22a.json","file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_payload__%3A%22a.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json"]'
+        - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22a.json (tsdf.sess1.col-max-items-metadata.ci."a (metadata))'
+        - '📄 open ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22b.json (tsdf.sess1.col-max-items-metadata.ci."b (metadata))'
+        - '📄 open ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-max-items-metadata.ci."c (metadata))'
+        - '📖 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22a.json (tsdf.sess1.col-max-items-metadata.ci."a (metadata))'
+        - '📖 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22b.json (tsdf.sess1.col-max-items-metadata.ci."b (metadata))'
+        - '📖 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-max-items-metadata.ci."c (metadata))'
+        - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_payload__%3A%22a.json (tsdf.sess1.col-max-items-metadata.ci."a (payload))'
+        - '🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22a.json (tsdf.sess1.col-max-items-metadata.ci."a (metadata))'
+        - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-max-items-metadata/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json"]'
     `);
   });
 
@@ -278,7 +321,7 @@ describe('async storage efficiency: collection', () => {
         storeName,
         sessionKey,
       ).sort(),
-    ).toMatchInlineSnapshot(`['c', 'd']`);
+    ).toMatchInlineSnapshot(`[]`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
@@ -305,18 +348,46 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/col-coalesced-maintenance/collection.item keys=["__tsdf_meta__:\\"a","__tsdf_meta__:\\"b","__tsdf_payload__:\\"a","__tsdf_payload__:\\"b"]'
-        - '📚 sess1/col-coalesced-maintenance/collection.item hits=0/1 ["ci.\\"c (metadata)"]'
-        - '✍️ sess1/col-coalesced-maintenance/collection.item ["ci.\\"c (payload)","ci.\\"c (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/col-coalesced-maintenance/collection.item hits=0/1 ["ci.\\"d (metadata)"]'
-        - '✍️ sess1/col-coalesced-maintenance/collection.item ["ci.\\"d (payload)","ci.\\"d (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/col-coalesced-maintenance/collection.item keys=["__tsdf_meta__:\\"a","__tsdf_meta__:\\"b","__tsdf_meta__:\\"c","__tsdf_meta__:\\"d","__tsdf_payload__:\\"a","__tsdf_payload__:\\"b","__tsdf_payload__:\\"c","__tsdf_payload__:\\"d"]'
-        - '📚 sess1/col-coalesced-maintenance/collection.item hits=4/4 ["ci.\\"a (metadata)","ci.\\"b (metadata)","ci.\\"c (metadata)","ci.\\"d (metadata)"]'
-        - '🗑️ sess1/col-coalesced-maintenance/collection.item ["ci.\\"b (payload)","ci.\\"b (metadata)","ci.\\"a (payload)","ci.\\"a (metadata)"]'
-        - '🗂️ sess1/col-coalesced-maintenance/collection.item keys=["__tsdf_meta__:\\"c","__tsdf_meta__:\\"d","__tsdf_payload__:\\"c","__tsdf_payload__:\\"d"]'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22a.json","file:__tsdf_meta__%3A%22b.json","file:__tsdf_payload__%3A%22a.json","file:__tsdf_payload__%3A%22b.json"]'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '📄 open ❌ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22c.json (tsdf.sess1.col-coalesced-maintenance.ci."c (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))'
+        - '✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22c.json (tsdf.sess1.col-coalesced-maintenance.ci."c (payload))'
+        - '✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '📄 open ❌ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))'
+        - '✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (payload))'
+        - '✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22a.json","file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_meta__%3A%22d.json","file:__tsdf_payload__%3A%22a.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json","file:__tsdf_payload__%3A%22d.json"]'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22a.json (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))'
+        - '📄 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22b.json (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata))'
+        - '📄 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))'
+        - '📄 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))'
+        - '📖 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22a.json (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))'
+        - '📖 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22b.json (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata))'
+        - '📖 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))'
+        - '📖 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22b.json (tsdf.sess1.col-coalesced-maintenance.ci."b (payload))'
+        - '🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22b.json (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata))'
+        - '🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22a.json (tsdf.sess1.col-coalesced-maintenance.ci."a (payload))'
+        - '🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22a.json (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22c.json","file:__tsdf_meta__%3A%22d.json","file:__tsdf_payload__%3A%22c.json","file:__tsdf_payload__%3A%22d.json"]'
     `);
   });
 
@@ -472,7 +543,7 @@ describe('async storage efficiency: collection', () => {
       payloadRef: '__tsdf_payload__:"1'
       sizeBytes: 55
       version: 1
-      writtenAt: 1735689604090
+      writtenAt: 1735689604140
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -489,13 +560,26 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/col-mutation-flow/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_payload__:\\"1"]'
-        - '📚 sess1/col-mutation-flow/collection.item hits=1/1 ["ci.\\"1 (metadata)"]'
-        - '✍️ sess1/col-mutation-flow/collection.item ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '🗂️ sess1/col-mutation-flow/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_payload__:\\"1"]'
-        - '📚 sess1/col-mutation-flow/collection.item hits=1/1 ["ci.\\"1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/col-mutation-flow/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-mutation-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
+        - '📂 open ✅ tsdf/sess1/col-mutation-flow/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/col-mutation-flow/collection.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (metadata))'
+        - '✍️ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (payload))'
+        - '✍️ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ✅ tsdf/sess1/col-mutation-flow/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-mutation-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
+        - '📂 open ✅ tsdf/sess1/col-mutation-flow/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-mutation-flow.ci."1 (metadata))'
     `);
   });
 
@@ -537,7 +621,7 @@ describe('async storage efficiency: collection', () => {
         storeName,
         sessionKey,
       ).sort(),
-    ).toMatchInlineSnapshot(`['2']`);
+    ).toMatchInlineSnapshot(`[]`);
     expect(deleteOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
@@ -554,11 +638,17 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗑️ sess1/col-delete-flow/collection.item ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
-        - '🗂️ sess1/col-delete-flow/collection.item keys=["__tsdf_meta__:\\"2","__tsdf_payload__:\\"2"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/col-delete-flow/collection.item keys=["__tsdf_meta__:\\"2","__tsdf_payload__:\\"2"]'
-        - '📚 sess1/col-delete-flow/collection.item hits=1/1 ["ci.\\"2 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-delete-flow.ci."1 (payload))'
+        - '🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-delete-flow.ci."1 (metadata))'
+        - '📂 open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-delete-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%222.json","file:__tsdf_payload__%3A%222.json"]'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-delete-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%222.json","file:__tsdf_payload__%3A%222.json"]'
+        - '📂 open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-delete-flow/collection.item/__tsdf_meta__%3A%222.json (tsdf.sess1.col-delete-flow.ci."2 (metadata))'
+        - '📖 tsdf/sess1/col-delete-flow/collection.item/__tsdf_meta__%3A%222.json (tsdf.sess1.col-delete-flow.ci."2 (metadata))'
     `);
   });
 
@@ -630,14 +720,27 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/col-invalidation-flow/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_payload__:\\"1"]'
-        - '📚 sess1/col-invalidation-flow/collection.item hits=1/1 ["ci.\\"1 (metadata)"]'
-        - '✍️ sess1/col-invalidation-flow/collection.item ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/col-invalidation-flow/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_payload__:\\"1"]'
-        - '📚 sess1/col-invalidation-flow/collection.item hits=1/1 ["ci.\\"1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-invalidation-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
+        - '📂 open ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))'
+        - '✍️ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (payload))'
+        - '✍️ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-invalidation-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
+        - '📂 open ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))'
     `);
   });
 
@@ -692,7 +795,7 @@ describe('async storage efficiency: collection', () => {
       payloadRef: '__tsdf_payload__:"1'
       sizeBytes: 54
       version: 1
-      writtenAt: 1735689604900
+      writtenAt: 1735689604950
     `);
   });
 
@@ -794,14 +897,27 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/col-coalesced-invalidations/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_payload__:\\"1"]'
-        - '📚 sess1/col-coalesced-invalidations/collection.item hits=1/1 ["ci.\\"1 (metadata)"]'
-        - '✍️ sess1/col-coalesced-invalidations/collection.item ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/col-coalesced-invalidations/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_payload__:\\"1"]'
-        - '📚 sess1/col-coalesced-invalidations/collection.item hits=1/1 ["ci.\\"1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))'
+        - '✍️ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload))'
+        - '✍️ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)'
+        - '🗂️ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
+        - '📂 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))'
     `);
   });
 
@@ -856,7 +972,11 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: ['ci."1 (payload)']
 
       operations:
-        - '📚 sess1/col-remount-flow/collection.item hits=2/2 ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/col-remount-flow/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-remount-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-remount-flow.ci."1 (payload))'
+        - '📄 open ✅ tsdf/sess1/col-remount-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-remount-flow.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-remount-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-remount-flow.ci."1 (payload))'
+        - '📖 tsdf/sess1/col-remount-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-remount-flow.ci."1 (metadata))'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -931,8 +1051,16 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: ['ci."1 (payload)', 'ci."2 (payload)']
 
       operations:
-        - '📚 sess1/col-multi-remount-flow/collection.item hits=2/2 ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
-        - '📚 sess1/col-multi-remount-flow/collection.item hits=2/2 ["ci.\\"2 (payload)","ci.\\"2 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/col-multi-remount-flow/collection.item (scope directory)'
+        - '📂 open ✅ tsdf/sess1/col-multi-remount-flow/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-multi-remount-flow.ci."1 (payload))'
+        - '📄 open ✅ tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-multi-remount-flow.ci."1 (metadata))'
+        - '📄 open ✅ tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_payload__%3A%222.json (tsdf.sess1.col-multi-remount-flow.ci."2 (payload))'
+        - '📄 open ✅ tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_meta__%3A%222.json (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata))'
+        - '📖 tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.col-multi-remount-flow.ci."1 (payload))'
+        - '📖 tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-multi-remount-flow.ci."1 (metadata))'
+        - '📖 tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_payload__%3A%222.json (tsdf.sess1.col-multi-remount-flow.ci."2 (payload))'
+        - '📖 tsdf/sess1/col-multi-remount-flow/collection.item/__tsdf_meta__%3A%222.json (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata))'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -1057,7 +1185,11 @@ describe('async storage efficiency: collection', () => {
         scopedPayloadReads: ['ci."1 (payload)']
 
       operations:
-        - '📚 sess1/collection-opfs-efficiency/collection.item hits=2/2 ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/collection-opfs-efficiency/collection.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/collection-opfs-efficiency/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload))'
+        - '📄 open ✅ tsdf/sess1/collection-opfs-efficiency/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata))'
+        - '📖 tsdf/sess1/collection-opfs-efficiency/collection.item/__tsdf_payload__%3A%221.json (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload))'
+        - '📖 tsdf/sess1/collection-opfs-efficiency/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata))'
     `);
 
     expect(mockAdapter.payloadGetManyRequests.flat()).toContain(hotKey);

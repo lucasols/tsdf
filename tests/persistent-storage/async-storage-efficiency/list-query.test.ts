@@ -149,23 +149,53 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📖 ❌ <internal:record>'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/list-query-expiration/listQuery.item keys=["__tsdf_meta__:\\"expired-users||1","__tsdf_meta__:\\"fresh-users||2","__tsdf_payload__:\\"expired-users||1","__tsdf_payload__:\\"fresh-users||2"]'
-        - '📚 sess1/list-query-expiration/listQuery.item hits=2/2 ["li.\\"expired-users||1 (metadata)","li.\\"fresh-users||2 (metadata)"]'
-        - '🗑️ sess1/list-query-expiration/listQuery.item ["li.\\"expired-users||1 (payload)","li.\\"expired-users||1 (metadata)"]'
-        - '🗂️ sess1/list-query-expiration/listQuery.item keys=["__tsdf_meta__:\\"fresh-users||2","__tsdf_payload__:\\"fresh-users||2"]'
-        - '📖 ✅ <internal:record>'
-        - '🗂️ sess1/list-query-expiration/listQuery.query keys=["__tsdf_meta__:{tableId:\\"expired-users\\"}","__tsdf_meta__:{tableId:\\"fresh-users\\"}","__tsdf_payload__:{tableId:\\"expired-users\\"}","__tsdf_payload__:{tableId:\\"fresh-users\\"}"]'
-        - '📚 sess1/list-query-expiration/listQuery.query hits=2/2 ["lq.{tableId:\\"expired-users\\"} (metadata)","lq.{tableId:\\"fresh-users\\"} (metadata)"]'
-        - '🗑️ sess1/list-query-expiration/listQuery.query ["lq.{tableId:\\"expired-users\\"} (payload)","lq.{tableId:\\"expired-users\\"} (metadata)"]'
-        - '🗂️ sess1/list-query-expiration/listQuery.query keys=["__tsdf_meta__:{tableId:\\"fresh-users\\"}","__tsdf_payload__:{tableId:\\"fresh-users\\"}"]'
-        - '📖 ✅ <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-expiration/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22expired-users%7C%7C1.json","file:__tsdf_meta__%3A%22fresh-users%7C%7C2.json","file:__tsdf_payload__%3A%22expired-users%7C%7C1.json","file:__tsdf_payload__%3A%22fresh-users%7C%7C2.json"]'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/list-query-expiration/listQuery.item/__tsdf_meta__%3A%22expired-users%7C%7C1.json (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))'
+        - '📄 open ✅ tsdf/sess1/list-query-expiration/listQuery.item/__tsdf_meta__%3A%22fresh-users%7C%7C2.json (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata))'
+        - '📖 tsdf/sess1/list-query-expiration/listQuery.item/__tsdf_meta__%3A%22expired-users%7C%7C1.json (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))'
+        - '📖 tsdf/sess1/list-query-expiration/listQuery.item/__tsdf_meta__%3A%22fresh-users%7C%7C2.json (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/list-query-expiration/listQuery.item/__tsdf_payload__%3A%22expired-users%7C%7C1.json (tsdf.sess1.list-query-expiration.li."expired-users||1 (payload))'
+        - '🗑️ ✅ tsdf/sess1/list-query-expiration/listQuery.item/__tsdf_meta__%3A%22expired-users%7C%7C1.json (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-expiration/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22fresh-users%7C%7C2.json","file:__tsdf_payload__%3A%22fresh-users%7C%7C2.json"]'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-expiration/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22expired-users%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22fresh-users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22expired-users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22fresh-users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/list-query-expiration/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22expired-users%22%7D.json (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/list-query-expiration/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22fresh-users%22%7D.json (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata))'
+        - '📖 tsdf/sess1/list-query-expiration/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22expired-users%22%7D.json (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))'
+        - '📖 tsdf/sess1/list-query-expiration/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22fresh-users%22%7D.json (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.query (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/list-query-expiration/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22expired-users%22%7D.json (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (payload))'
+        - '🗑️ ✅ tsdf/sess1/list-query-expiration/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22expired-users%22%7D.json (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-expiration/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22fresh-users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22fresh-users%22%7D.json"]'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
     `);
   });
 
@@ -209,7 +239,7 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.query',
       }).sort(),
-    ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
+    ).toMatchInlineSnapshot(`[]`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -246,24 +276,54 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-query-metadata/listQuery.item keys=[]'
-        - '🗂️ sess1/lq-query-metadata/listQuery.query keys=["__tsdf_meta__:{tableId:\\"first\\"}","__tsdf_meta__:{tableId:\\"second\\"}","__tsdf_payload__:{tableId:\\"first\\"}","__tsdf_payload__:{tableId:\\"second\\"}"]'
-        - '📚 sess1/lq-query-metadata/listQuery.query hits=0/1 ["lq.{tableId:\\"third\\"} (metadata)"]'
-        - '✍️ sess1/lq-query-metadata/listQuery.query ["lq.{tableId:\\"third\\"} (payload)","lq.{tableId:\\"third\\"} (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/lq-query-metadata/listQuery.item hits=0/1 ["li.\\"third||1 (metadata)"]'
-        - '✍️ sess1/lq-query-metadata/listQuery.item ["li.\\"third||1 (payload)","li.\\"third||1 (metadata)"]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-query-metadata/listQuery.query keys=["__tsdf_meta__:{tableId:\\"first\\"}","__tsdf_meta__:{tableId:\\"second\\"}","__tsdf_meta__:{tableId:\\"third\\"}","__tsdf_payload__:{tableId:\\"first\\"}","__tsdf_payload__:{tableId:\\"second\\"}","__tsdf_payload__:{tableId:\\"third\\"}"]'
-        - '📚 sess1/lq-query-metadata/listQuery.query hits=3/3 ["lq.{tableId:\\"first\\"} (metadata)","lq.{tableId:\\"second\\"} (metadata)","lq.{tableId:\\"third\\"} (metadata)"]'
-        - '🗑️ sess1/lq-query-metadata/listQuery.query ["lq.{tableId:\\"first\\"} (payload)","lq.{tableId:\\"first\\"} (metadata)"]'
-        - '🗂️ sess1/lq-query-metadata/listQuery.query keys=["__tsdf_meta__:{tableId:\\"second\\"}","__tsdf_meta__:{tableId:\\"third\\"}","__tsdf_payload__:{tableId:\\"second\\"}","__tsdf_payload__:{tableId:\\"third\\"}"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-query-metadata/listQuery.item keys=["__tsdf_meta__:\\"third||1","__tsdf_payload__:\\"third||1"]'
-        - '📚 sess1/lq-query-metadata/listQuery.item hits=1/1 ["li.\\"third||1 (metadata)"]'
+        - '📂 open ❌ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
+        - '📄 open ❌ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata))'
+        - '✍️ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (payload))'
+        - '✍️ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory)'
+        - '📁 ensure 🆕 tsdf/sess1/lq-query-metadata/listQuery.item (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/lq-query-metadata/listQuery.item/__tsdf_payload__%3A%22third%7C%7C1.json (tsdf.sess1.lq-query-metadata.li."third||1 (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-query-metadata/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-query-metadata.li."third||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-query-metadata/listQuery.item/__tsdf_payload__%3A%22third%7C%7C1.json (tsdf.sess1.lq-query-metadata.li."third||1 (payload))'
+        - '✍️ tsdf/sess1/lq-query-metadata/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-query-metadata.li."third||1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata))'
+        - '📖 tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (metadata))'
+        - '📖 tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (metadata))'
+        - '📖 tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (payload))'
+        - '🗑️ ✅ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22third%7C%7C1.json","file:__tsdf_payload__%3A%22third%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-metadata/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-query-metadata.li."third||1 (metadata))'
+        - '📖 tsdf/sess1/lq-query-metadata/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-query-metadata.li."third||1 (metadata))'
     `);
   });
 
@@ -317,7 +377,7 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.query',
       }).sort(),
-    ).toMatchInlineSnapshot(`['{tableId:"fourth"}', '{tableId:"third"}']`);
+    ).toMatchInlineSnapshot(`[]`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -362,28 +422,80 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-coalesced-query-maintenance/listQuery.item keys=[]'
-        - '🗂️ sess1/lq-coalesced-query-maintenance/listQuery.query keys=["__tsdf_meta__:{tableId:\\"first\\"}","__tsdf_meta__:{tableId:\\"second\\"}","__tsdf_payload__:{tableId:\\"first\\"}","__tsdf_payload__:{tableId:\\"second\\"}"]'
-        - '📚 sess1/lq-coalesced-query-maintenance/listQuery.query hits=0/1 ["lq.{tableId:\\"third\\"} (metadata)"]'
-        - '✍️ sess1/lq-coalesced-query-maintenance/listQuery.query ["lq.{tableId:\\"third\\"} (payload)","lq.{tableId:\\"third\\"} (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/lq-coalesced-query-maintenance/listQuery.item hits=0/1 ["li.\\"third||1 (metadata)"]'
-        - '✍️ sess1/lq-coalesced-query-maintenance/listQuery.item ["li.\\"third||1 (payload)","li.\\"third||1 (metadata)"]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/lq-coalesced-query-maintenance/listQuery.query hits=0/1 ["lq.{tableId:\\"fourth\\"} (metadata)"]'
-        - '✍️ sess1/lq-coalesced-query-maintenance/listQuery.query ["lq.{tableId:\\"fourth\\"} (payload)","lq.{tableId:\\"fourth\\"} (metadata)"]'
-        - '📚 sess1/lq-coalesced-query-maintenance/listQuery.item hits=1/2 ["li.\\"third||1 (metadata)","li.\\"fourth||2 (metadata)"]'
-        - '✍️ sess1/lq-coalesced-query-maintenance/listQuery.item ["li.\\"third||1 (payload)","li.\\"third||1 (metadata)","li.\\"fourth||2 (payload)","li.\\"fourth||2 (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-coalesced-query-maintenance/listQuery.query keys=["__tsdf_meta__:{tableId:\\"first\\"}","__tsdf_meta__:{tableId:\\"fourth\\"}","__tsdf_meta__:{tableId:\\"second\\"}","__tsdf_meta__:{tableId:\\"third\\"}","__tsdf_payload__:{tableId:\\"first\\"}","__tsdf_payload__:{tableId:\\"fourth\\"}","__tsdf_payload__:{tableId:\\"second\\"}","__tsdf_payload__:{tableId:\\"third\\"}"]'
-        - '📚 sess1/lq-coalesced-query-maintenance/listQuery.query hits=4/4 ["lq.{tableId:\\"first\\"} (metadata)","lq.{tableId:\\"fourth\\"} (metadata)","lq.{tableId:\\"second\\"} (metadata)","lq.{tableId:\\"third\\"} (metadata)"]'
-        - '🗑️ sess1/lq-coalesced-query-maintenance/listQuery.query ["lq.{tableId:\\"second\\"} (payload)","lq.{tableId:\\"second\\"} (metadata)","lq.{tableId:\\"first\\"} (payload)","lq.{tableId:\\"first\\"} (metadata)"]'
-        - '🗂️ sess1/lq-coalesced-query-maintenance/listQuery.query keys=["__tsdf_meta__:{tableId:\\"fourth\\"}","__tsdf_meta__:{tableId:\\"third\\"}","__tsdf_payload__:{tableId:\\"fourth\\"}","__tsdf_payload__:{tableId:\\"third\\"}"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-coalesced-query-maintenance/listQuery.item keys=["__tsdf_meta__:\\"fourth||2","__tsdf_meta__:\\"third||1","__tsdf_payload__:\\"fourth||2","__tsdf_payload__:\\"third||1"]'
-        - '📚 sess1/lq-coalesced-query-maintenance/listQuery.item hits=2/2 ["li.\\"fourth||2 (metadata)","li.\\"third||1 (metadata)"]'
+        - '📂 open ❌ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '📄 open ❌ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (payload))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
+        - '📁 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_payload__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_payload__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '📄 open ❌ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22fourth%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22fourth%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (payload))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
+        - '📄 open ❌ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_payload__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_payload__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_payload__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_payload__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (payload))'
+        - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (payload))'
+        - '🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (metadata))'
+        - '🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (payload))'
+        - '🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22fourth%7C%7C2.json","file:__tsdf_meta__%3A%22third%7C%7C1.json","file:__tsdf_payload__%3A%22fourth%7C%7C2.json","file:__tsdf_payload__%3A%22third%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
     `);
   });
 
@@ -428,9 +540,7 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.query',
       }),
-    ).toMatchInlineSnapshot(
-      `['{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}']`,
-    );
+    ).toMatchInlineSnapshot(`[]`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -458,17 +568,27 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-empty-query-manifest/listQuery.item keys=[]'
-        - '🗂️ sess1/lq-empty-query-manifest/listQuery.query keys=[]'
-        - '📚 sess1/lq-empty-query-manifest/listQuery.query hits=0/1 ["lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Missing user\\"}],tableId:\\"users\\"} (metadata)"]'
-        - '✍️ sess1/lq-empty-query-manifest/listQuery.query ["lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Missing user\\"}],tableId:\\"users\\"} (payload)","lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Missing user\\"}],tableId:\\"users\\"} (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-empty-query-manifest/listQuery.query keys=["__tsdf_meta__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Missing user\\"}],tableId:\\"users\\"}","__tsdf_payload__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Missing user\\"}],tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-empty-query-manifest/listQuery.query hits=1/1 ["lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Missing user\\"}],tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-empty-query-manifest/listQuery.item keys=[]'
+        - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.item (scope directory)'
+        - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
+        - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
+        - '📁 ensure 🆕 tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))'
+        - '✍️ tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (payload))'
+        - '✍️ tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.item (scope directory)'
     `);
   });
 
@@ -528,19 +648,19 @@ describe('async storage efficiency: list-query', () => {
     expect(hook.result.current.items).toMatchInlineSnapshot(`[]`);
     expect(mockAdapter.listQuery.readQueryEntry(usersQuery))
       .toMatchInlineSnapshot(`
-      data:
-        hasMore: '❌'
-        items: []
-        payload: { tableId: 'users' }
+        data:
+          hasMore: '❌'
+          items: []
+          payload: { tableId: 'users' }
 
-      timestamp: 1735689600000
-      version: 1
-    `);
+        timestamp: 1735689600000
+        version: 1
+      `);
     expect(mockAdapter.listQuery.readItemData('users', 1))
       .toMatchInlineSnapshot(`
-      id: 1
-      name: 'Cached user'
-    `);
+        id: 1
+        name: 'Cached user'
+      `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads: []
@@ -564,20 +684,47 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-query-becomes-empty/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '🗂️ sess1/lq-query-becomes-empty/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-query-becomes-empty/listQuery.query hits=1/1 ["lq.{tableId:\\"users\\"} (metadata)"]'
-        - '✍️ sess1/lq-query-becomes-empty/listQuery.query ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/lq-query-becomes-empty/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
-        - '✍️ sess1/lq-query-becomes-empty/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '🗂️ sess1/lq-query-becomes-empty/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-query-becomes-empty/listQuery.query hits=1/1 ["lq.{tableId:\\"users\\"} (metadata)"]'
-        - '🗂️ sess1/lq-query-becomes-empty/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '📚 sess1/lq-query-becomes-empty/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-becomes-empty/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-becomes-empty/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata))'
+        - '✍️ tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (payload))'
+        - '✍️ tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (payload))'
+        - '✍️ tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-becomes-empty/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-query-becomes-empty/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-becomes-empty/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-query-becomes-empty/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata))'
     `);
   });
 
@@ -629,7 +776,7 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.item',
       }).sort(),
-    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`[]`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -664,20 +811,43 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-item-metadata/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_meta__:\\"users||2","__tsdf_payload__:\\"users||1","__tsdf_payload__:\\"users||2"]'
-        - '🗂️ sess1/lq-item-metadata/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-item-metadata/listQuery.item hits=0/1 ["li.\\"users||3 (metadata)"]'
-        - '✍️ sess1/lq-item-metadata/listQuery.item ["li.\\"users||3 (payload)","li.\\"users||3 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-item-metadata/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-item-metadata/listQuery.query hits=1/1 ["lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-item-metadata/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_meta__:\\"users||2","__tsdf_meta__:\\"users||3","__tsdf_payload__:\\"users||1","__tsdf_payload__:\\"users||2","__tsdf_payload__:\\"users||3"]'
-        - '📚 sess1/lq-item-metadata/listQuery.item hits=3/3 ["li.\\"users||1 (metadata)","li.\\"users||2 (metadata)","li.\\"users||3 (metadata)"]'
-        - '🗑️ sess1/lq-item-metadata/listQuery.item ["li.\\"users||3 (payload)","li.\\"users||3 (metadata)"]'
-        - '🗂️ sess1/lq-item-metadata/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_meta__:\\"users||2","__tsdf_payload__:\\"users||1","__tsdf_payload__:\\"users||2"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C2.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
+        - '📄 open ❌ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_payload__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))'
+        - '✍️ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_payload__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (payload))'
+        - '✍️ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-item-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-item-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_meta__%3A%22users%7C%7C3.json","file:__tsdf_payload__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C3.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-metadata.li."users||1 (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-item-metadata.li."users||2 (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))'
+        - '📖 tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-metadata.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-item-metadata.li."users||2 (metadata))'
+        - '📖 tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_payload__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (payload))'
+        - '🗑️ ✅ tsdf/sess1/lq-item-metadata/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C2.json"]'
     `);
   });
 
@@ -757,35 +927,33 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.item',
       }).sort(),
-    ).toMatchInlineSnapshot(
-      `['"users||1', '"users||2', '"users||3', '"users||4']`,
-    );
+    ).toMatchInlineSnapshot(`[]`);
     expect(mockAdapter.listQuery.readQueryEntry(firstUsersQuery))
       .toMatchInlineSnapshot(`
-      data:
-        hasMore: '❌'
-        items: ['"users||1', '"users||2']
-        payload:
-          filters:
-            - { field: 'name', op: 'eq', value: 'Alice' }
-          tableId: 'users'
+        data:
+          hasMore: '❌'
+          items: ['"users||1', '"users||2']
+          payload:
+            filters:
+              - { field: 'name', op: 'eq', value: 'Alice' }
+            tableId: 'users'
 
-      timestamp: 1735689600300
-      version: 1
-    `);
+        timestamp: 1735689600300
+        version: 1
+      `);
     expect(mockAdapter.listQuery.readQueryEntry(secondUsersQuery))
       .toMatchInlineSnapshot(`
-      data:
-        hasMore: '❌'
-        items: ['"users||1', '"users||3']
-        payload:
-          filters:
-            - { field: 'name', op: 'eq', value: 'Bob' }
-          tableId: 'users'
+        data:
+          hasMore: '❌'
+          items: ['"users||1', '"users||3']
+          payload:
+            filters:
+              - { field: 'name', op: 'eq', value: 'Bob' }
+            tableId: 'users'
 
-      timestamp: 1735689600300
-      version: 1
-    `);
+        timestamp: 1735689600300
+        version: 1
+      `);
     expect(cleanupOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
@@ -814,17 +982,41 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📖 ❌ <internal:record>'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📖 ✅ <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-shared-item-cleanup/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_meta__:\\"users||2","__tsdf_meta__:\\"users||3","__tsdf_meta__:\\"users||4","__tsdf_payload__:\\"users||1","__tsdf_payload__:\\"users||2","__tsdf_payload__:\\"users||3","__tsdf_payload__:\\"users||4"]'
-        - '📚 sess1/lq-shared-item-cleanup/listQuery.item hits=4/4 ["li.\\"users||1 (metadata)","li.\\"users||2 (metadata)","li.\\"users||3 (metadata)","li.\\"users||4 (metadata)"]'
-        - '🗂️ sess1/lq-shared-item-cleanup/listQuery.query keys=["__tsdf_meta__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"}","__tsdf_meta__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Bob\\"}],tableId:\\"users\\"}","__tsdf_payload__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"}","__tsdf_payload__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Bob\\"}],tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-shared-item-cleanup/listQuery.query hits=2/2 ["lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"} (metadata)","lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Bob\\"}],tableId:\\"users\\"} (metadata)"]'
-        - '📖 ✅ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-shared-item-cleanup/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_meta__%3A%22users%7C%7C3.json","file:__tsdf_meta__%3A%22users%7C%7C4.json","file:__tsdf_payload__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C3.json","file:__tsdf_payload__%3A%22users%7C%7C4.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-shared-item-cleanup.li."users||1 (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-shared-item-cleanup.li."users||2 (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-shared-item-cleanup.li."users||3 (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C4.json (tsdf.sess1.lq-shared-item-cleanup.li."users||4 (metadata))'
+        - '📖 tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-shared-item-cleanup.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-shared-item-cleanup.li."users||2 (metadata))'
+        - '📖 tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C3.json (tsdf.sess1.lq-shared-item-cleanup.li."users||3 (metadata))'
+        - '📖 tsdf/sess1/lq-shared-item-cleanup/listQuery.item/__tsdf_meta__%3A%22users%7C%7C4.json (tsdf.sess1.lq-shared-item-cleanup.li."users||4 (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-shared-item-cleanup/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-shared-item-cleanup/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-shared-item-cleanup/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)'
     `);
   });
 
@@ -879,30 +1071,30 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.item',
       }).sort(),
-    ).toMatchInlineSnapshot(`['"users||2']`);
+    ).toMatchInlineSnapshot(`[]`);
     expect(mockAdapter.listQuery.readQueryEntry(usersQuery))
       .toMatchInlineSnapshot(`
-      data:
-        hasMore: '❌'
-        items: ['"users||2']
-        payload: { tableId: 'users' }
+        data:
+          hasMore: '❌'
+          items: ['"users||2']
+          payload: { tableId: 'users' }
 
-      timestamp: 1735689601850
-      version: 1
-    `);
+        timestamp: 1735689601850
+        version: 1
+      `);
     expect(mockAdapter.listQuery.readQueryEntry(filteredUsersQuery))
       .toMatchInlineSnapshot(`
-      data:
-        hasMore: '❌'
-        items: []
-        payload:
-          filters:
-            - { field: 'name', op: 'eq', value: 'Alice' }
-          tableId: 'users'
+        data:
+          hasMore: '❌'
+          items: []
+          payload:
+            filters:
+              - { field: 'name', op: 'eq', value: 'Alice' }
+            tableId: 'users'
 
-      timestamp: 1735689601850
-      version: 1
-    `);
+        timestamp: 1735689601850
+        version: 1
+      `);
     expect(deleteOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -934,17 +1126,45 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/lq-delete-flow/listQuery.query hits=2/2 ["lq.{tableId:\\"users\\"} (metadata)","lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"} (metadata)"]'
-        - '✍️ sess1/lq-delete-flow/listQuery.query ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)","lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"} (payload)","lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/lq-delete-flow/listQuery.item hits=1/1 ["li.\\"users||2 (metadata)"]'
-        - '🗑️ sess1/lq-delete-flow/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '✍️ sess1/lq-delete-flow/listQuery.item ["li.\\"users||2 (payload)","li.\\"users||2 (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-delete-flow/listQuery.query keys=["__tsdf_meta__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"}","__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-delete-flow/listQuery.query hits=2/2 ["lq.{filters:[{field:\\"name\\",op:\\"eq\\",value:\\"Alice\\"}],tableId:\\"users\\"} (metadata)","lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-delete-flow/listQuery.item keys=["__tsdf_meta__:\\"users||2","__tsdf_payload__:\\"users||2"]'
-        - '📚 sess1/lq-delete-flow/listQuery.item hits=1/1 ["li.\\"users||2 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
+        - '📄 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '✍️ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (payload))'
+        - '✍️ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
+        - '✍️ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (payload))'
+        - '✍️ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
+        - '📖 tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-delete-flow.li."users||1 (payload))'
+        - '🗑️ ✅ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-delete-flow.li."users||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
+        - '✍️ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (payload))'
+        - '✍️ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C2.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
+        - '📖 tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
     `);
   });
 
@@ -1076,28 +1296,28 @@ describe('async storage efficiency: list-query', () => {
 
     expect(readEntryMetadata(mockAdapter, itemStorageKey))
       .toMatchInlineSnapshot(`
-      customMetadata: { o: '✅', p: 'users||1' }
-      key: '"users||1'
-      lastAccessAt: 1735664400000
-      payloadRef: '__tsdf_payload__:"users||1'
-      sizeBytes: 50
-      version: 1
-      writtenAt: 1735664400000
-    `);
+        customMetadata: { o: '✅', p: 'users||1' }
+        key: '"users||1'
+        lastAccessAt: 1735664400000
+        payloadRef: '__tsdf_payload__:"users||1'
+        sizeBytes: 50
+        version: 1
+        writtenAt: 1735664400000
+      `);
     expect(readEntryMetadata(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
-      customMetadata:
-        i: ['"users||1']
-        o: '✅'
-        p: { tableId: 'users' }
+        customMetadata:
+          i: ['"users||1']
+          o: '✅'
+          p: { tableId: 'users' }
 
-      key: '{tableId:"users"}'
-      lastAccessAt: 1735664400000
-      payloadRef: '__tsdf_payload__:{tableId:"users"}'
-      sizeBytes: 44
-      version: 1
-      writtenAt: 1735664400000
-    `);
+        key: '{tableId:"users"}'
+        lastAccessAt: 1735664400000
+        payloadRef: '__tsdf_payload__:{tableId:"users"}'
+        sizeBytes: 44
+        version: 1
+        writtenAt: 1735664400000
+      `);
   });
 
   test('useListQuery invalidation snapshots the full query persistence timeline through the refetch save', async () => {
@@ -1155,14 +1375,14 @@ describe('async storage efficiency: list-query', () => {
     );
     expect(mockAdapter.listQuery.readQueryEntry(usersQuery))
       .toMatchInlineSnapshot(`
-      data:
-        hasMore: '❌'
-        items: ['"users||1']
-        payload: { tableId: 'users' }
+        data:
+          hasMore: '❌'
+          items: ['"users||1']
+          payload: { tableId: 'users' }
 
-      timestamp: 1735689600000
-      version: 1
-    `);
+        timestamp: 1735689600000
+        version: 1
+      `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -1192,18 +1412,35 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-query-invalidation-flow/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '🗂️ sess1/lq-query-invalidation-flow/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-query-invalidation-flow/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
-        - '✍️ sess1/lq-query-invalidation-flow/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-query-invalidation-flow/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-query-invalidation-flow/listQuery.query hits=1/1 ["lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-query-invalidation-flow/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '📚 sess1/lq-query-invalidation-flow/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (payload))'
+        - '✍️ tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-query-invalidation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"} (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-query-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata))'
     `);
   });
 
@@ -1295,9 +1532,9 @@ describe('async storage efficiency: list-query', () => {
     );
     expect(mockAdapter.listQuery.readItemData('users', 1))
       .toMatchInlineSnapshot(`
-      id: 1
-      name: 'Fresh user 2'
-    `);
+        id: 1
+        name: 'Fresh user 2'
+      `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -1327,18 +1564,35 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-coalesced-invalidations/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '🗂️ sess1/lq-coalesced-invalidations/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-coalesced-invalidations/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
-        - '✍️ sess1/lq-coalesced-invalidations/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-coalesced-invalidations/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-coalesced-invalidations/listQuery.query hits=1/1 ["lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-coalesced-invalidations/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '📚 sess1/lq-coalesced-invalidations/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (payload))'
+        - '✍️ tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-coalesced-invalidations.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-invalidations/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-coalesced-invalidations.lq.{tableId:"users"} (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-coalesced-invalidations/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata))'
     `);
   });
 
@@ -1412,27 +1666,27 @@ describe('async storage efficiency: list-query', () => {
     `);
     expect(readEntryMetadata(mockAdapter, itemStorageKey))
       .toMatchInlineSnapshot(`
-      customMetadata: { p: 'users||1' }
-      key: '"users||1'
-      lastAccessAt: 1735689600000
-      payloadRef: '__tsdf_payload__:"users||1'
-      sizeBytes: 82
-      version: 1
-      writtenAt: 1735689604950
-    `);
+        customMetadata: { p: 'users||1' }
+        key: '"users||1'
+        lastAccessAt: 1735689600000
+        payloadRef: '__tsdf_payload__:"users||1'
+        sizeBytes: 82
+        version: 1
+        writtenAt: 1735689605000
+      `);
     expect(readEntryMetadata(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
-      customMetadata:
-        i: ['"users||1', '"users||2']
-        p: { tableId: 'users' }
+        customMetadata:
+          i: ['"users||1', '"users||2']
+          p: { tableId: 'users' }
 
-      key: '{tableId:"users"}'
-      lastAccessAt: 1735689600000
-      payloadRef: '__tsdf_payload__:{tableId:"users"}'
-      sizeBytes: 57
-      version: 1
-      writtenAt: 1735689604950
-    `);
+        key: '{tableId:"users"}'
+        lastAccessAt: 1735689600000
+        payloadRef: '__tsdf_payload__:{tableId:"users"}'
+        sizeBytes: 57
+        version: 1
+        writtenAt: 1735689605000
+      `);
   });
 
   test('query hook remount reuses hydrated list-query state without touching localStorage again', async () => {
@@ -1493,8 +1747,16 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: ['lq.{tableId:"users"} (payload)', 'li."users||1 (payload)']
 
       operations:
-        - '📚 sess1/lq-remount-flow/listQuery.query hits=2/2 ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/lq-remount-flow/listQuery.item hits=2/2 ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-remount-flow/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-remount-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-remount-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-remount-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload))'
+        - '📖 tsdf/sess1/lq-remount-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-remount-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-remount-flow.li."users||1 (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-remount-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-remount-flow.li."users||1 (payload))'
+        - '📖 tsdf/sess1/lq-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-remount-flow.li."users||1 (metadata))'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -1561,9 +1823,9 @@ describe('async storage efficiency: list-query', () => {
     `);
     expect(mockAdapter.listQuery.readItemData('users', 1))
       .toMatchInlineSnapshot(`
-      id: 1
-      name: 'Fresh user'
-    `);
+        id: 1
+        name: 'Fresh user'
+      `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -1591,17 +1853,30 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-item-invalidation-flow/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '🗂️ sess1/lq-item-invalidation-flow/listQuery.query keys=[]'
-        - '📚 sess1/lq-item-invalidation-flow/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
-        - '✍️ sess1/lq-item-invalidation-flow/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-item-invalidation-flow/listQuery.query keys=[]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-item-invalidation-flow/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '📚 sess1/lq-item-invalidation-flow/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ❌ tsdf/sess1/lq-item-invalidation-flow/listQuery.query (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (payload))'
+        - '✍️ tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ❌ tsdf/sess1/lq-item-invalidation-flow/listQuery.query (scope directory)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-item-invalidation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata))'
     `);
   });
 
@@ -1658,7 +1933,11 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: ['li."users||1 (payload)']
 
       operations:
-        - '📚 sess1/lq-item-remount-flow/listQuery.item hits=2/2 ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-item-remount-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-item-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-remount-flow.li."users||1 (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-item-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-remount-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-item-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-remount-flow.li."users||1 (payload))'
+        - '📖 tsdf/sess1/lq-item-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-item-remount-flow.li."users||1 (metadata))'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -1738,8 +2017,16 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: ['li."users||1 (payload)', 'li."users||2 (payload)']
 
       operations:
-        - '📚 sess1/lq-multi-item-remount-flow/listQuery.item hits=2/2 ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '📚 sess1/lq-multi-item-remount-flow/listQuery.item hits=2/2 ["li.\\"users||2 (payload)","li.\\"users||2 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-multi-item-remount-flow/listQuery.item (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-multi-item-remount-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C2.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (metadata))'
+        - '📖 tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (payload))'
+        - '📖 tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C2.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (payload))'
+        - '📖 tsdf/sess1/lq-multi-item-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (metadata))'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -1839,10 +2126,26 @@ describe('async storage efficiency: list-query', () => {
           - 'li."projects||1 (payload)'
 
       operations:
-        - '📚 sess1/lq-multi-query-remount-flow/listQuery.query hits=2/2 ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/lq-multi-query-remount-flow/listQuery.query hits=2/2 ["lq.{tableId:\\"projects\\"} (payload)","lq.{tableId:\\"projects\\"} (metadata)"]'
-        - '📚 sess1/lq-multi-query-remount-flow/listQuery.item hits=2/2 ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '📚 sess1/lq-multi-query-remount-flow/listQuery.item hits=2/2 ["li.\\"projects||1 (payload)","li.\\"projects||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.query (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22projects%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22projects%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_payload__%3A%22projects%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload))'
+        - '📄 open ✅ tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_payload__%3A%22projects%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload))'
+        - '📖 tsdf/sess1/lq-multi-query-remount-flow/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata))'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -1912,19 +2215,19 @@ describe('async storage efficiency: list-query', () => {
 
     expect(mockAdapter.listQuery.readItemData('users', 1))
       .toMatchInlineSnapshot(`
-      id: 1
-      name: 'Edited user'
-    `);
+        id: 1
+        name: 'Edited user'
+      `);
     expect(readEntryMetadata(mockAdapter, itemStorageKey))
       .toMatchInlineSnapshot(`
-      customMetadata: { p: 'users||1' }
-      key: '"users||1'
-      lastAccessAt: 1735689600000
-      payloadRef: '__tsdf_payload__:"users||1'
-      sizeBytes: 83
-      version: 1
-      writtenAt: 1735689604140
-    `);
+        customMetadata: { p: 'users||1' }
+        key: '"users||1'
+        lastAccessAt: 1735689600000
+        payloadRef: '__tsdf_payload__:"users||1'
+        sizeBytes: 83
+        version: 1
+        writtenAt: 1735689604190
+      `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       breakdown:
         externalPayloadReads:
@@ -1954,18 +2257,35 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '🗂️ sess1/lq-mutation-flow/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '🗂️ sess1/lq-mutation-flow/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-mutation-flow/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
-        - '✍️ sess1/lq-mutation-flow/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '📖 ❌ <internal:record>'
-        - '✍️ __tsdf_async__/__tsdf_async__/__internal.protected <internal:record>'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-mutation-flow/listQuery.query keys=["__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/lq-mutation-flow/listQuery.query hits=1/1 ["lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/lq-mutation-flow/listQuery.item keys=["__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"users||1"]'
-        - '📚 sess1/lq-mutation-flow/listQuery.item hits=1/1 ["li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata))'
+        - '✍️ tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (payload))'
+        - '✍️ tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata))'
+        - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
+        - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-mutation-flow.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/lq-mutation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-mutation-flow.lq.{tableId:"users"} (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/lq-mutation-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata))'
     `);
   });
 
@@ -2044,8 +2364,16 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: ['lq.{tableId:"users"} (payload)', 'li."users||1 (payload)']
 
       operations:
-        - '📚 sess1/list-query-opfs-efficiency/listQuery.query hits=2/2 ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)"]'
-        - '📚 sess1/list-query-opfs-efficiency/listQuery.item hits=2/2 ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-efficiency/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-efficiency/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload))'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-efficiency/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload))'
+        - '📖 tsdf/sess1/list-query-opfs-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-efficiency/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-efficiency/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload))'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-efficiency/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-efficiency/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload))'
+        - '📖 tsdf/sess1/list-query-opfs-efficiency/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata))'
     `);
 
     expect(mockAdapter.payloadGetManyRequests.flat()).toContain(usersQueryKey);
@@ -2139,20 +2467,56 @@ describe('async storage efficiency: list-query', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.query hits=0/1 ["lq.{tableId:\\"tasks\\"} (metadata)"]'
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query ["lq.{tableId:\\"tasks\\"} (payload)","lq.{tableId:\\"tasks\\"} (metadata)"]'
-        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.item hits=1/2 ["li.\\"projects||1 (metadata)","li.\\"tasks||1 (metadata)"]'
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item ["li.\\"projects||1 (payload)","li.\\"projects||1 (metadata)","li.\\"tasks||1 (payload)","li.\\"tasks||1 (metadata)"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.query keys=["__tsdf_meta__:{tableId:\\"projects\\"}","__tsdf_meta__:{tableId:\\"tasks\\"}","__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"projects\\"}","__tsdf_payload__:{tableId:\\"tasks\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
-        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.query hits=3/3 ["lq.{tableId:\\"projects\\"} (metadata)","lq.{tableId:\\"tasks\\"} (metadata)","lq.{tableId:\\"users\\"} (metadata)"]'
-        - '🗑️ sess1/list-query-opfs-eviction-efficiency/listQuery.query ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)"]'
-        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.query keys=["__tsdf_meta__:{tableId:\\"projects\\"}","__tsdf_meta__:{tableId:\\"tasks\\"}","__tsdf_payload__:{tableId:\\"projects\\"}","__tsdf_payload__:{tableId:\\"tasks\\"}"]'
-        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
-        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.item keys=["__tsdf_meta__:\\"projects||1","__tsdf_meta__:\\"tasks||1","__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"projects||1","__tsdf_payload__:\\"tasks||1","__tsdf_payload__:\\"users||1"]'
-        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.item hits=3/3 ["li.\\"projects||1 (metadata)","li.\\"tasks||1 (metadata)","li.\\"users||1 (metadata)"]'
-        - '🗑️ sess1/list-query-opfs-eviction-efficiency/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
-        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.item keys=["__tsdf_meta__:\\"projects||1","__tsdf_meta__:\\"tasks||1","__tsdf_payload__:\\"projects||1","__tsdf_payload__:\\"tasks||1"]'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
+        - '📄 open ❌ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
+        - '📄 ensure 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22tasks%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata))'
+        - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22tasks%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (payload))'
+        - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))'
+        - '📄 open ❌ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_payload__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (payload))'
+        - '📄 ensure ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))'
+        - '📄 ensure 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_payload__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (payload))'
+        - '📄 ensure 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))'
+        - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_payload__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (payload))'
+        - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))'
+        - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_payload__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (payload))'
+        - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22tasks%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"projects"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata))'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"projects"} (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (payload))'
+        - '🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22tasks%22%7D.json"]'
+        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22projects%7C%7C1.json","file:__tsdf_meta__%3A%22tasks%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22projects%7C%7C1.json","file:__tsdf_payload__%3A%22tasks%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))'
+        - '📄 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."users||1 (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))'
+        - '📖 tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."users||1 (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'
+        - '🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_payload__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."users||1 (payload))'
+        - '🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22users%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."users||1 (metadata))'
+        - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'
+        - '🗂️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22projects%7C%7C1.json","file:__tsdf_meta__%3A%22tasks%7C%7C1.json","file:__tsdf_payload__%3A%22projects%7C%7C1.json","file:__tsdf_payload__%3A%22tasks%7C%7C1.json"]'
     `);
   });
 });
