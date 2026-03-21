@@ -22,7 +22,8 @@ import {
   upsertManagedLocalStorageSingleEntry,
   type ManagedLocalStorageIo,
 } from './localStorageMetadata';
-import { OpfsAsyncStorageAdapter } from './opfsAsyncStorageAdapter';
+import { createAsyncStorageAdapter } from './asyncStorageAdapter';
+import { OpfsAsyncStorageDriver } from './opfsAsyncStorageAdapter';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   AsyncStorageAdapter,
@@ -446,7 +447,7 @@ export const localPersistentStorage: LocalPersistentStorage = {
 };
 
 export const opfsPersistentStorage: AsyncStorageAdapter =
-  new OpfsAsyncStorageAdapter();
+  createAsyncStorageAdapter(new OpfsAsyncStorageDriver());
 
 export function isAsyncStorageAdapter(adapter: StorageAdapter): boolean {
   return adapter !== 'local-sync';

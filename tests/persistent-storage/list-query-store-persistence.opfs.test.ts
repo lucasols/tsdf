@@ -158,7 +158,7 @@ describe('opfs: list query store persistence', () => {
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getQueryState(usersQuery)).toBeUndefined();
     expect(env.apiStore.getItemState('users||1')).toBeUndefined();
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const renders = createLoggerStore({ arrays: 'all' });
 

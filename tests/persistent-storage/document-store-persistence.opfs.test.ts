@@ -100,14 +100,14 @@ describe('opfs: document store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(true);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
     await advanceTime(50);
     await preloadPromise;
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -129,14 +129,14 @@ describe('opfs: document store persistence', () => {
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
     await advanceTime(50);
     await preloadPromise;
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
@@ -163,7 +163,7 @@ describe('opfs: document store persistence', () => {
       refetchOnMount: '❌'
       status: 'idle'
     `);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     renderHook(() => {
       const { data, status } = env.apiStore.useDocument({
@@ -175,7 +175,7 @@ describe('opfs: document store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key]);
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "

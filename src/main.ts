@@ -60,6 +60,7 @@ export type {
 // Persistent Storage types
 export type {
   AsyncStorageAdapter,
+  AsyncStorageDriver,
   PersistentStorageSchema,
   PersistentStorageDataSchema,
   ConvertedPersistentStorageDataSchema,
@@ -108,3 +109,5 @@ export {
   localPersistentStorage,
   opfsPersistentStorage,
 } from './persistentStorage/storageAdapter';
+
+export { createAsyncStorageAdapter } from './persistentStorage/asyncStorageAdapter';

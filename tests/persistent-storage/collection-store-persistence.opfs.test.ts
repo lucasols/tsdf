@@ -115,7 +115,7 @@ describe('opfs: collection store persistence', () => {
 
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getItemState('1')).toBeUndefined();
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const renders = createLoggerStore();
 
@@ -129,10 +129,10 @@ describe('opfs: collection store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toContain(
+    expect(mockAdapter.payloadGetRequests).toContain(
       'tsdf.sess1.col-opfs-hook.ci."1',
     );
-    expect(mockAdapter.readRequests).not.toContain(
+    expect(mockAdapter.payloadGetRequests).not.toContain(
       'tsdf.sess1.col-opfs-hook.ci."2',
     );
 

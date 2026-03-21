@@ -1,1536 +1,246 @@
-import { murmur3 } from '@ls-stack/utils/hash';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type {
-  AsyncStorageAdapter,
-  AsyncStorageEntryMetadata,
-  AsyncStorageEntryMetadataBase,
-  AsyncStorageMaintenanceState,
-  AsyncStorageMetadataOrder,
-  AsyncStorageMetadataPage,
-  AsyncStorageNamespaceCommitArgs,
-  AsyncStorageNamespaceCommitUpsert,
-  AsyncStorageNamespaceGetResult,
-  AsyncStorageNamespaceHandle,
-  AsyncStorageNamespaceKind,
+  AsyncStorageDriver,
+  AsyncStorageDriverSetEntry,
   AsyncStorageNamespaceScope,
-  AsyncStorageProtectedEntryRef,
-  AsyncStorageReadOptions,
 } from './types';
-import {
-  getProtectedKeysStorageScope,
-  parseProtectedKeys,
-  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
-} from './offline/protectedKeysPersistence';
-import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 
-const OPFS_CACHE_DIR = 'tsdf-cache-v2';
-const ROOT_DIR = 'root';
-const NAMESPACES_DIR = 'namespaces';
-const REGISTRY_FILE = 'index.json';
-const MAINTENANCE_FILE = 'maintenance.json';
-const MANIFEST_FILE = 'manifest.json';
-const LOOKUP_DIR = 'lookup';
-const RECENCY_DIR = 'recency';
-const ACCESS_BUCKETS_DIR = 'access';
-const WRITE_BUCKETS_DIR = 'write';
-const PAYLOADS_DIR = 'payloads';
-const LOOKUP_SHARD_COUNT = 32;
-const DEFAULT_METADATA_PAGE_LIMIT = 100;
-const ASYNC_COMMIT_DEBOUNCE_MS = 40;
+const OPFS_CACHE_DIR = 'tsdf';
+const JSON_FILE_EXTENSION = '.json';
 
-export const OPFS_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
-export const OPFS_STARTUP_CLEANUP_COOLDOWN_MS = 12 * 60 * 60 * 1000;
-export const OPFS_STARTUP_CLEANUP_LEASE_TTL_MS = 60 * 1000;
-export const OPFS_RECENCY_BUCKET_MS = 6 * 60 * 60 * 1000;
+function encodePathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
 
-function getRecord(value: unknown): Record<string, unknown> | null {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
+function decodePathSegment(value: string): string {
+  return decodeURIComponent(value);
+}
+
+async function getNavigatorStorageDirectory(): Promise<FileSystemDirectoryHandle> {
+  const storage = __LEGIT_CAST__<
+    | { getDirectory?: (() => Promise<FileSystemDirectoryHandle>) | undefined }
+    | undefined,
+    unknown
+  >(globalThis.navigator.storage);
+  if (storage?.getDirectory === undefined) {
+    throw new Error('[TSDF] OPFS is unavailable in this environment.');
   }
 
-  const record: Record<string, unknown> = {};
-  for (const [key, entryValue] of Object.entries(value)) {
-    record[key] = entryValue;
-  }
-
-  return record;
+  return storage.getDirectory();
 }
 
-function parseStringRecord(value: unknown): Record<string, string> | null {
-  const record = getRecord(value);
-  if (!record) return null;
-
-  const parsed: Record<string, string> = {};
-  for (const [key, entryValue] of Object.entries(record)) {
-    if (typeof entryValue !== 'string') return null;
-    parsed[key] = entryValue;
-  }
-
-  return parsed;
-}
-
-function parseNamespaceKind(value: unknown): AsyncStorageNamespaceKind | null {
-  switch (value) {
-    case 'document':
-    case 'collection.item':
-    case 'listQuery.item':
-    case 'listQuery.query':
-    case 'offline.queue':
-    case 'offline.conflict':
-    case 'offline.entity':
-    case '__internal.protected': {
-      return value;
-    }
-    default: {
-      return null;
-    }
-  }
-}
-
-function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
-  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
-}
-
-function toNamespaceDirName(scope: AsyncStorageNamespaceScope): string {
-  return `ns-${murmur3(getNamespaceId(scope), 'uint32').toString(16)}`;
-}
-
-type NamespaceManifest = {
-  sequence: number;
-  lookup: Record<string, string>;
-  accessBuckets: Record<string, string>;
-  writeBuckets: Record<string, string>;
-};
-
-function createDefaultManifest(): NamespaceManifest {
-  return { sequence: 0, lookup: {}, accessBuckets: {}, writeBuckets: {} };
-}
-
-function createDefaultMaintenanceState(): AsyncStorageMaintenanceState {
-  return { lastSuccessfulCleanupAt: null, startupCleanupLease: null };
-}
-
-function parseMaintenanceState(
-  value: unknown,
-): AsyncStorageMaintenanceState | null {
-  const record = getRecord(value);
-  if (!record) return null;
-
-  const lastSuccessfulCleanupAt = record.lastSuccessfulCleanupAt;
-  if (
-    lastSuccessfulCleanupAt !== null &&
-    typeof lastSuccessfulCleanupAt !== 'number'
-  ) {
-    return null;
-  }
-
-  const lease = record.startupCleanupLease;
-  if (lease === null) {
-    return { lastSuccessfulCleanupAt, startupCleanupLease: null };
-  }
-
-  const leaseRecord = getRecord(lease);
-  if (
-    leaseRecord === null ||
-    typeof leaseRecord.holderId !== 'string' ||
-    typeof leaseRecord.expiresAt !== 'number'
-  ) {
-    return null;
-  }
-
-  return {
-    lastSuccessfulCleanupAt,
-    startupCleanupLease: {
-      holderId: leaseRecord.holderId,
-      expiresAt: leaseRecord.expiresAt,
-    },
-  };
-}
-
-function parseNamespaceManifest(value: unknown): NamespaceManifest | null {
-  const record = getRecord(value);
-  if (!record || typeof record.sequence !== 'number') return null;
-
-  const lookup = parseStringRecord(record.lookup);
-  const accessBuckets = parseStringRecord(record.accessBuckets);
-  const writeBuckets = parseStringRecord(record.writeBuckets);
-  if (!lookup || !accessBuckets || !writeBuckets) return null;
-
-  return { sequence: record.sequence, lookup, accessBuckets, writeBuckets };
-}
-
-type NamespaceRegistryEntry = AsyncStorageNamespaceScope & {
-  id: string;
-  dirName: string;
-  updatedAt: number;
-};
-
-function parseNamespaceRegistryEntry(
-  value: unknown,
-): NamespaceRegistryEntry | null {
-  const record = getRecord(value);
-  if (!record) return null;
-
-  const kind = parseNamespaceKind(record.kind);
-  if (
-    typeof record.id !== 'string' ||
-    typeof record.dirName !== 'string' ||
-    typeof record.sessionKey !== 'string' ||
-    typeof record.storeName !== 'string' ||
-    kind === null ||
-    typeof record.updatedAt !== 'number'
-  ) {
-    return null;
-  }
-
-  return {
-    id: record.id,
-    dirName: record.dirName,
-    sessionKey: record.sessionKey,
-    storeName: record.storeName,
-    kind,
-    updatedAt: record.updatedAt,
-  };
-}
-
-type NamespaceRegistryFile = { entries: NamespaceRegistryEntry[] };
-
-function parseNamespaceRegistryFile(
-  value: unknown,
-): NamespaceRegistryFile | null {
-  const record = getRecord(value);
-  if (!record || !Array.isArray(record.entries)) {
-    return null;
-  }
-
-  const entries: NamespaceRegistryEntry[] = [];
-  for (const entry of record.entries) {
-    const parsedEntry = parseNamespaceRegistryEntry(entry);
-    if (!parsedEntry) return null;
-    entries.push(parsedEntry);
-  }
-
-  return { entries };
-}
-
-type LookupShardFile = { entries: Record<string, unknown> };
-
-function parseLookupShardFile(value: unknown): LookupShardFile | null {
-  const record = getRecord(value);
-  const entries = record ? getRecord(record.entries) : null;
-  if (!entries) return null;
-
-  return { entries };
-}
-
-type BucketFile = { keys: string[] };
-
-function parseBucketFile(value: unknown): BucketFile | null {
-  const record = getRecord(value);
-  if (
-    record &&
-    Array.isArray(record.keys) &&
-    record.keys.every((key) => typeof key === 'string')
-  ) {
-    return { keys: [...record.keys] };
-  }
-
-  return null;
-}
-
-function parseMetadataBase(
-  value: unknown,
-): AsyncStorageEntryMetadataBase | null {
-  const record = getRecord(value);
-  if (!record) return null;
-
-  if (
-    typeof record.key !== 'string' ||
-    typeof record.payloadRef !== 'string' ||
-    typeof record.writtenAt !== 'number' ||
-    typeof record.lastAccessAt !== 'number' ||
-    typeof record.version !== 'number' ||
-    (record.sizeBytes !== undefined && typeof record.sizeBytes !== 'number')
-  ) {
-    return null;
-  }
-
-  return {
-    key: record.key,
-    payloadRef: record.payloadRef,
-    writtenAt: record.writtenAt,
-    lastAccessAt: record.lastAccessAt,
-    version: record.version,
-    ...(record.sizeBytes !== undefined ? { sizeBytes: record.sizeBytes } : {}),
-  };
-}
-
-function getLookupShardId(key: string): string {
-  return String(murmur3(key, 'uint32') % LOOKUP_SHARD_COUNT);
-}
-
-function getBucketId(timestamp: number): string {
-  return String(Math.floor(timestamp / OPFS_RECENCY_BUCKET_MS));
-}
-
-function uniq(values: string[]): string[] {
-  return [...new Set(values)];
-}
-
-function encodeCursor(value: Record<string, unknown>): string {
-  return JSON.stringify(value);
-}
-
-function decodeCursor(
-  cursor: string | null | undefined,
-): Record<string, unknown> | null {
-  if (!cursor) return null;
-
+async function getDirectoryHandleIfExists(
+  parent: FileSystemDirectoryHandle,
+  name: string,
+): Promise<FileSystemDirectoryHandle | null> {
   try {
-    const parsed: unknown = JSON.parse(cursor);
-    return getRecord(parsed);
+    return await parent.getDirectoryHandle(name);
   } catch {
     return null;
   }
 }
 
-function compareMetadataByOrder(
-  left: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  right: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  order: AsyncStorageMetadataOrder,
-): number {
-  if (order === 'key') {
-    return left.key.localeCompare(right.key);
+async function getFileHandleIfExists(
+  parent: FileSystemDirectoryHandle,
+  name: string,
+): Promise<FileSystemFileHandle | null> {
+  try {
+    return await parent.getFileHandle(name);
+  } catch {
+    return null;
   }
-
-  if (left.lastAccessAt !== right.lastAccessAt) {
-    return order === 'lru-asc'
-      ? left.lastAccessAt - right.lastAccessAt
-      : right.lastAccessAt - left.lastAccessAt;
-  }
-
-  return left.key.localeCompare(right.key);
 }
 
-async function iterateDirEntries(
-  dir: FileSystemDirectoryHandle,
-): Promise<string[]> {
-  const names: string[] = [];
+export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
+  private rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
 
-  for await (const [name] of dir.entries()) {
-    names.push(name);
+  async get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown> {
+    const [value] = await this.getMany(scope, [key]);
+    return value ?? null;
   }
 
-  return names;
-}
-
-class OpfsNamespaceHandle<
-  TValue,
-  TCustomMetadata extends Record<string, unknown> = Record<string, never>,
-> implements AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
-  constructor(
-    private readonly adapter: OpfsAsyncStorageAdapter,
-    private readonly scope: AsyncStorageNamespaceScope,
-  ) {}
-
-  async get(
+  async set(
+    scope: AsyncStorageNamespaceScope,
     key: string,
-    options: AsyncStorageReadOptions = {},
-  ): Promise<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null> {
-    const results = await this.getMany([key], options);
-    return results[0] ?? null;
+    value: unknown,
+  ): Promise<void> {
+    await this.setMany(scope, [{ key, value }]);
+  }
+
+  async remove(scope: AsyncStorageNamespaceScope, key: string): Promise<void> {
+    await this.removeMany(scope, [key]);
   }
 
   async getMany(
+    scope: AsyncStorageNamespaceScope,
     keys: string[],
-    options: AsyncStorageReadOptions = {},
-  ): Promise<
-    Array<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
-  > {
+  ): Promise<unknown[]> {
     if (keys.length === 0) return [];
 
-    try {
-      const context = await this.adapter.loadNamespaceContext(this.scope);
-      const removals: string[] = [];
-      const touches: string[] = [];
-      const now = Date.now();
-      const uniqueKeys = uniq(keys);
-      const metadataByKey = await this.adapter.readMetadataByKeys(
-        context,
-        uniqueKeys,
-      );
-      const resultsByKey = new Map<
-        string,
-        AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null
-      >();
-
-      for (const key of uniqueKeys) {
-        const metadata = metadataByKey.get(key);
-        if (!metadata) {
-          resultsByKey.set(key, null);
-          continue;
-        }
-
-        const payload = await this.adapter.readPayload<TValue>(
-          context,
-          metadata.payloadRef,
-        );
-
-        if (payload === null) {
-          removals.push(key);
-          resultsByKey.set(key, null);
-          continue;
-        }
-
-        const touchMode = options.touch ?? 'coarse';
-        const shouldTouch = this.adapter.shouldEnqueueTouch(
-          this.scope,
-          key,
-          metadata.lastAccessAt,
-          touchMode,
-          now,
-        );
-
-        if (shouldTouch) {
-          touches.push(key);
-        }
-
-        resultsByKey.set(key, {
-          value: payload,
-          metadata: __LEGIT_CAST__<
-            AsyncStorageEntryMetadata<TCustomMetadata>,
-            AsyncStorageEntryMetadata<Record<string, unknown>>
-          >(metadata),
-        });
-      }
-
-      if (removals.length > 0) {
-        await this.commit({
-          removes: removals,
-          touches: touches.map((key) => ({ key, lastAccessAt: now })),
-        });
-      } else if (touches.length > 0) {
-        void this.commit({
-          touches: touches.map((key) => ({ key, lastAccessAt: now })),
-        });
-      }
-
-      return keys.map((key) => resultsByKey.get(key) ?? null);
-    } catch {
+    const scopeDir = await this.getScopeDir(scope, { create: false });
+    if (scopeDir === null) {
       return keys.map(() => null);
     }
+
+    return Promise.all(
+      keys.map(async (key) => {
+        const fileHandle = await getFileHandleIfExists(
+          scopeDir,
+          this.getFileNameForKey(key),
+        );
+        if (fileHandle === null) return null;
+
+        try {
+          const file = await fileHandle.getFile();
+          const parsed: unknown = JSON.parse(await file.text());
+          return parsed;
+        } catch {
+          return null;
+        }
+      }),
+    );
   }
 
-  commit(
-    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
-  ): Promise<void> {
-    return this.adapter
-      .queueCommitToNamespace(this.scope, args)
-      .catch(() => {});
-  }
-
-  async listMetadata(
-    args: {
-      cursor?: string | null;
-      limit?: number;
-      order?: AsyncStorageMetadataOrder;
-    } = {},
-  ): Promise<AsyncStorageMetadataPage<TCustomMetadata>> {
-    try {
-      const context = await this.adapter.loadNamespaceContext(this.scope);
-      const order = args.order ?? 'key';
-      const limit = Math.max(1, args.limit ?? DEFAULT_METADATA_PAGE_LIMIT);
-      const cursorData = decodeCursor(args.cursor);
-      const offset =
-        cursorData && typeof cursorData.offset === 'number'
-          ? cursorData.offset
-          : 0;
-      const cursorOrder =
-        cursorData && typeof cursorData.order === 'string'
-          ? cursorData.order
-          : order;
-
-      const allMetadata = await this.adapter.listAllMetadata(context);
-      const sorted = allMetadata.sort((left, right) =>
-        compareMetadataByOrder(left, right, order),
-      );
-
-      const nextEntries = sorted.slice(offset, offset + limit);
-      const nextCursor =
-        offset + nextEntries.length >= sorted.length
-          ? null
-          : encodeCursor({ offset: offset + nextEntries.length, order });
-
-      return {
-        entries: __LEGIT_CAST__<
-          AsyncStorageEntryMetadata<TCustomMetadata>[],
-          AsyncStorageEntryMetadata<Record<string, unknown>>[]
-        >(nextEntries),
-        cursor:
-          cursorOrder === order
-            ? nextCursor
-            : encodeCursor({ offset: 0, order }),
-      };
-    } catch {
-      return { entries: [], cursor: null };
-    }
-  }
-
-  clear(): Promise<void> {
-    return this.adapter.clearNamespace(this.scope).catch(() => {});
-  }
-}
-
-type CachedNamespace = {
-  entry: NamespaceRegistryEntry;
-  dir: Promise<FileSystemDirectoryHandle>;
-};
-
-type PendingNamespaceCommit = {
-  scope: AsyncStorageNamespaceScope;
-  cancelFlush: (() => void) | null;
-  flushPromise: Promise<void> | null;
-  removes: Set<string>;
-  touches: Map<string, number>;
-  upserts: Map<
-    string,
-    AsyncStorageNamespaceCommitUpsert<unknown, Record<string, unknown>>
-  >;
-  waiters: Array<{ reject: (error: unknown) => void; resolve: () => void }>;
-};
-
-export class OpfsAsyncStorageAdapter implements AsyncStorageAdapter {
-  readonly kind = 'async' as const;
-
-  private rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
-  private registryPromise: Promise<NamespaceRegistryFile> | null = null;
-  private namespaceCache = new Map<string, CachedNamespace>();
-  private pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
-  private recentTouchedBuckets = new Map<string, string>();
-  private startupCleanupScheduled = false;
-
-  openNamespace<
-    TValue,
-    TCustomMetadata extends Record<string, unknown> = Record<string, never>,
-  >(
+  async setMany(
     scope: AsyncStorageNamespaceScope,
-  ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
-    this.scheduleStartupCleanupIfNeeded();
-    return new OpfsNamespaceHandle<TValue, TCustomMetadata>(this, scope);
-  }
+    entries: AsyncStorageDriverSetEntry[],
+  ): Promise<void> {
+    if (entries.length === 0) return;
 
-  async readMaintenanceState(): Promise<AsyncStorageMaintenanceState> {
-    const root = await this.getRootDir();
-    const maintenance = await this.readJsonFile<AsyncStorageMaintenanceState>(
-      root,
-      MAINTENANCE_FILE,
-    );
-    return (
-      parseMaintenanceState(maintenance) ?? createDefaultMaintenanceState()
-    );
-  }
-
-  async tryAcquireStartupCleanupLease(args: {
-    holderId: string;
-    ttlMs: number;
-  }): Promise<boolean> {
-    const state = await this.readMaintenanceState();
-    const now = Date.now();
-    const currentLease = state.startupCleanupLease;
-
-    if (
-      currentLease &&
-      currentLease.holderId !== args.holderId &&
-      currentLease.expiresAt > now
-    ) {
-      return false;
+    const scopeDir = await this.getScopeDir(scope, { create: true });
+    if (scopeDir === null) {
+      throw new Error('[TSDF] Failed to open OPFS scope directory.');
     }
 
-    await this.writeMaintenanceState({
-      ...state,
-      startupCleanupLease: {
-        holderId: args.holderId,
-        expiresAt: now + args.ttlMs,
-      },
-    });
+    await Promise.all(
+      entries.map(async (entry) => {
+        const fileHandle = await scopeDir.getFileHandle(
+          this.getFileNameForKey(entry.key),
+          { create: true },
+        );
+        const writable = await fileHandle.createWritable();
 
-    return true;
+        try {
+          await writable.write(JSON.stringify(entry.value));
+        } finally {
+          await writable.close();
+        }
+      }),
+    );
   }
 
-  async finishStartupCleanup(args: {
-    holderId: string;
-    finishedAt: number;
-  }): Promise<void> {
-    const state = await this.readMaintenanceState();
-    const currentLease = state.startupCleanupLease;
+  async removeMany(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+  ): Promise<void> {
+    if (keys.length === 0) return;
 
-    if (currentLease && currentLease.holderId !== args.holderId) {
-      return;
-    }
+    const scopeDir = await this.getScopeDir(scope, { create: false });
+    if (scopeDir === null) return;
 
-    await this.writeMaintenanceState({
-      lastSuccessfulCleanupAt: args.finishedAt,
-      startupCleanupLease: null,
-    });
+    await Promise.all(
+      keys.map(async (key) => {
+        try {
+          await scopeDir.removeEntry(this.getFileNameForKey(key));
+        } catch {
+          // Ignore missing records.
+        }
+      }),
+    );
   }
 
-  async clearSession(sessionKey: string): Promise<void> {
-    await this.flushAllPendingNamespaceCommits();
-    const registry = await this.readRegistry();
-    const remaining: NamespaceRegistryEntry[] = [];
+  async listKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
+    const scopeDir = await this.getScopeDir(scope, { create: false });
+    if (scopeDir === null) return [];
 
-    for (const entry of registry.entries) {
-      if (entry.sessionKey !== sessionKey) {
-        remaining.push(entry);
+    const keys: string[] = [];
+    for await (const entry of scopeDir.values()) {
+      if (entry.kind !== 'file' || !entry.name.endsWith(JSON_FILE_EXTENSION)) {
         continue;
       }
 
-      const namespacesDir = await this.getNamespacesDir();
-      try {
-        await namespacesDir.removeEntry(entry.dirName, { recursive: true });
-      } catch {
-        // Ignore missing directories.
-      }
-      this.namespaceCache.delete(entry.id);
-      this.pendingNamespaceCommits.delete(entry.id);
-      this.clearRecentTouchedBucketsForNamespace(entry.id);
+      keys.push(
+        decodePathSegment(entry.name.slice(0, -JSON_FILE_EXTENSION.length)),
+      );
     }
 
-    await this.writeRegistry({ entries: remaining });
+    return keys.sort();
+  }
+
+  async clear(scope: AsyncStorageNamespaceScope): Promise<void> {
+    const root = await this.getRootDir();
+    const sessionDir = await getDirectoryHandleIfExists(
+      root,
+      encodePathSegment(scope.sessionKey),
+    );
+    if (sessionDir === null) return;
+
+    const storeDir = await getDirectoryHandleIfExists(
+      sessionDir,
+      encodePathSegment(scope.storeName),
+    );
+    if (storeDir === null) return;
+
+    try {
+      await storeDir.removeEntry(encodePathSegment(scope.kind), {
+        recursive: true,
+      });
+    } catch {
+      // Ignore missing scopes.
+    }
   }
 
   resetForTests(): void {
     this.rootDirPromise = null;
-    this.registryPromise = null;
-    this.namespaceCache.clear();
-    this.pendingNamespaceCommits.clear();
-    this.recentTouchedBuckets.clear();
-    this.startupCleanupScheduled = false;
   }
 
-  private getOrCreatePendingNamespaceCommit(
-    scope: AsyncStorageNamespaceScope,
-  ): PendingNamespaceCommit {
-    const namespaceKey = getNamespaceId(scope);
-    const existing = this.pendingNamespaceCommits.get(namespaceKey);
-    if (existing) return existing;
-
-    const created: PendingNamespaceCommit = {
-      scope,
-      cancelFlush: null,
-      flushPromise: null,
-      removes: new Set(),
-      touches: new Map(),
-      upserts: new Map(),
-      waiters: [],
-    };
-    this.pendingNamespaceCommits.set(namespaceKey, created);
-    return created;
-  }
-
-  private schedulePendingNamespaceFlush(pending: PendingNamespaceCommit): void {
-    if (pending.cancelFlush !== null || pending.flushPromise !== null) return;
-
-    const timeoutId = setTimeout(() => {
-      pending.cancelFlush = null;
-      void this.flushPendingNamespaceCommit(pending.scope);
-    }, ASYNC_COMMIT_DEBOUNCE_MS);
-
-    pending.cancelFlush = () => clearTimeout(timeoutId);
-  }
-
-  private async flushAllPendingNamespaceCommits(): Promise<void> {
-    const tasks: Promise<void>[] = [];
-    for (const pending of this.pendingNamespaceCommits.values()) {
-      tasks.push(this.flushPendingNamespaceCommit(pending.scope));
-    }
-
-    await Promise.all(tasks);
-  }
-
-  private async flushPendingNamespaceCommit(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<void> {
-    const namespaceKey = getNamespaceId(scope);
-    const pending = this.pendingNamespaceCommits.get(namespaceKey);
-    if (!pending) return;
-    if (pending.flushPromise) {
-      await pending.flushPromise;
-      return;
-    }
-
-    pending.cancelFlush?.();
-    pending.cancelFlush = null;
-
-    const upserts = [...pending.upserts.values()];
-    const removes = [...pending.removes];
-    const touches = [...pending.touches.entries()].map(
-      ([key, lastAccessAt]) => ({ key, lastAccessAt }),
-    );
-    const waiters = [...pending.waiters];
-    pending.upserts = new Map();
-    pending.removes = new Set();
-    pending.touches = new Map();
-    pending.waiters = [];
-
-    if (upserts.length === 0 && removes.length === 0 && touches.length === 0) {
-      this.pendingNamespaceCommits.delete(namespaceKey);
-      for (const waiter of waiters) {
-        waiter.resolve();
-      }
-      return;
-    }
-
-    pending.flushPromise = this.commitToNamespaceInternal(scope, {
-      upserts,
-      removes,
-      touches,
-    })
-      .then(() => {
-        const now = Date.now();
-        const currentBucket = getBucketId(now);
-        for (const touch of touches) {
-          const touchBucket = getBucketId(touch.lastAccessAt);
-          this.recentTouchedBuckets.set(
-            `${namespaceKey}::${touch.key}`,
-            touchBucket,
-          );
-        }
-        for (const upsert of upserts) {
-          this.recentTouchedBuckets.set(
-            `${namespaceKey}::${upsert.key}`,
-            currentBucket,
-          );
-        }
-        this.pruneRecentTouchedBuckets(currentBucket);
-        for (const waiter of waiters) {
-          waiter.resolve();
-        }
-      })
-      .catch((error) => {
-        for (const waiter of waiters) {
-          waiter.reject(error);
-        }
-        throw error;
-      })
-      .finally(() => {
-        pending.flushPromise = null;
-        if (pending.waiters.length === 0) {
-          this.pendingNamespaceCommits.delete(namespaceKey);
-          return;
-        }
-        this.schedulePendingNamespaceFlush(pending);
-      });
-
-    await pending.flushPromise;
-  }
-
-  shouldEnqueueTouch(
-    scope: AsyncStorageNamespaceScope,
-    key: string,
-    lastAccessAt: number,
-    touchMode: AsyncStorageReadOptions['touch'],
-    now: number,
-  ): boolean {
-    if (touchMode === 'never') return false;
-
-    const currentBucket = getBucketId(now);
-    if (touchMode !== 'force' && getBucketId(lastAccessAt) === currentBucket) {
-      return false;
-    }
-
-    const namespaceKey = getNamespaceId(scope);
-    const touchGuardKey = `${namespaceKey}::${key}`;
-    if (this.recentTouchedBuckets.get(touchGuardKey) === currentBucket) {
-      return false;
-    }
-
-    const pending = this.pendingNamespaceCommits.get(namespaceKey);
-    const pendingTouch = pending?.touches.get(key);
-    return (
-      pendingTouch === undefined || getBucketId(pendingTouch) !== currentBucket
-    );
-  }
-
-  private pruneRecentTouchedBuckets(currentBucket: string): void {
-    for (const [key, bucket] of this.recentTouchedBuckets) {
-      if (bucket !== currentBucket) {
-        this.recentTouchedBuckets.delete(key);
-      }
-    }
-  }
-
-  private clearRecentTouchedBucketsForNamespace(namespaceKey: string): void {
-    const keyPrefix = `${namespaceKey}::`;
-    for (const key of this.recentTouchedBuckets.keys()) {
-      if (key.startsWith(keyPrefix)) {
-        this.recentTouchedBuckets.delete(key);
-      }
-    }
-  }
-
-  async loadNamespaceContext(
-    scope: AsyncStorageNamespaceScope,
-    options: { skipPendingFlush?: boolean } = {},
-  ): Promise<{
-    entry: NamespaceRegistryEntry;
-    dir: FileSystemDirectoryHandle;
-    manifest: NamespaceManifest;
-  }> {
-    if (!options.skipPendingFlush) {
-      await this.flushPendingNamespaceCommit(scope);
-    }
-
-    const entry = await this.ensureNamespaceEntry(scope);
-    const dir = await this.getNamespaceDir(entry);
-    const manifest = await this.readManifest(dir);
-    return { entry, dir, manifest };
-  }
-
-  async listAllMetadata(
-    context: Awaited<
-      ReturnType<OpfsAsyncStorageAdapter['loadNamespaceContext']>
-    >,
-  ): Promise<AsyncStorageEntryMetadata<Record<string, unknown>>[]> {
-    const shardFiles = Object.values(context.manifest.lookup);
-    const lookupDir = await context.dir.getDirectoryHandle(LOOKUP_DIR, {
-      create: true,
-    });
-    const entries: AsyncStorageEntryMetadata<Record<string, unknown>>[] = [];
-
-    for (const fileName of shardFiles) {
-      const shard = await this.readJsonFile<LookupShardFile>(
-        lookupDir,
-        fileName,
-      );
-      const parsedShard = parseLookupShardFile(shard);
-      if (!parsedShard) continue;
-
-      for (const entry of Object.values(parsedShard.entries)) {
-        const parsedEntry = parseMetadataBase(entry);
-        if (parsedEntry) {
-          entries.push(parsedEntry);
-        }
-      }
-    }
-
-    return entries;
-  }
-
-  async readMetadataByKeys(
-    context: Awaited<
-      ReturnType<OpfsAsyncStorageAdapter['loadNamespaceContext']>
-    >,
-    keys: string[],
-  ): Promise<Map<string, AsyncStorageEntryMetadata<Record<string, unknown>>>> {
-    const lookupDir = await context.dir.getDirectoryHandle(LOOKUP_DIR, {
-      create: true,
-    });
-    const shardIds = uniq(keys.map((key) => getLookupShardId(key)));
-    const shardEntries = new Map<
-      string,
-      Record<string, AsyncStorageEntryMetadata<Record<string, unknown>>>
-    >();
-
-    for (const shardId of shardIds) {
-      const fileName = context.manifest.lookup[shardId];
-      if (!fileName) continue;
-
-      const shard = await this.readJsonFile<LookupShardFile>(
-        lookupDir,
-        fileName,
-      );
-      const parsedShard = parseLookupShardFile(shard);
-      if (!parsedShard) continue;
-
-      const validEntries = Object.fromEntries(
-        Object.entries(parsedShard.entries).flatMap(
-          ([entryKey, entryValue]) => {
-            const parsedEntry = parseMetadataBase(entryValue);
-            return parsedEntry ? [[entryKey, parsedEntry]] : [];
-          },
-        ),
-      );
-      shardEntries.set(shardId, validEntries);
-    }
-
-    const result = new Map<
-      string,
-      AsyncStorageEntryMetadata<Record<string, unknown>>
-    >();
-
-    for (const key of keys) {
-      const shardEntriesForKey = shardEntries.get(getLookupShardId(key));
-      const metadata = shardEntriesForKey?.[key];
-      if (metadata) {
-        result.set(key, metadata);
-      }
-    }
-
-    return result;
-  }
-
-  async readPayload<TValue>(
-    context: Awaited<
-      ReturnType<OpfsAsyncStorageAdapter['loadNamespaceContext']>
-    >,
-    payloadRef: string,
-  ): Promise<TValue | null> {
-    const payloadsDir = await context.dir.getDirectoryHandle(PAYLOADS_DIR, {
-      create: true,
-    });
-    return this.readJsonFile<TValue>(payloadsDir, `${payloadRef}.json`);
-  }
-
-  async queueCommitToNamespace<
-    TValue,
-    TCustomMetadata extends Record<string, unknown>,
-  >(
-    scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
-  ): Promise<void> {
-    const pending = this.getOrCreatePendingNamespaceCommit(scope);
-    const now = Date.now();
-
-    for (const touch of args.touches ?? []) {
-      pending.touches.set(touch.key, touch.lastAccessAt ?? now);
-    }
-
-    for (const remove of args.removes ?? []) {
-      pending.upserts.delete(remove);
-      pending.touches.delete(remove);
-      pending.removes.add(remove);
-    }
-
-    for (const upsert of args.upserts ?? []) {
-      pending.removes.delete(upsert.key);
-      pending.upserts.set(
-        upsert.key,
-        __LEGIT_CAST__<
-          AsyncStorageNamespaceCommitUpsert<unknown, Record<string, unknown>>,
-          AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>
-        >(upsert),
-      );
-    }
-
-    this.schedulePendingNamespaceFlush(pending);
-
-    return new Promise<void>((resolve, reject) => {
-      pending.waiters.push({ resolve, reject });
-    });
-  }
-
-  async commitToNamespaceInternal<
-    TValue,
-    TCustomMetadata extends Record<string, unknown>,
-  >(
-    scope: AsyncStorageNamespaceScope,
-    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
-  ): Promise<void> {
-    const upserts = args.upserts ?? [];
-    const removes = uniq(args.removes ?? []);
-    const touchesByKey = new Map(
-      (args.touches ?? []).map((touch) => [touch.key, touch.lastAccessAt]),
-    );
-    const keys = uniq([
-      ...upserts.map((upsert) => upsert.key),
-      ...removes,
-      ...touchesByKey.keys(),
-    ]);
-    if (keys.length === 0) return;
-
-    const context = await this.loadNamespaceContext(scope, {
-      skipPendingFlush: true,
-    });
-    const now = Date.now();
-    const lookupDir = await context.dir.getDirectoryHandle(LOOKUP_DIR, {
-      create: true,
-    });
-    const payloadsDir = await context.dir.getDirectoryHandle(PAYLOADS_DIR, {
-      create: true,
-    });
-    const [accessBucketsDir, writeBucketsDir] = await Promise.all([
-      this.getBucketDir(context.dir, ACCESS_BUCKETS_DIR),
-      this.getBucketDir(context.dir, WRITE_BUCKETS_DIR),
-    ]);
-    const existingMetadata = await this.readMetadataByKeys(context, keys);
-    const changedShardIds = new Set(keys.map((key) => getLookupShardId(key)));
-    const shardEntries = new Map<
-      string,
-      Record<string, AsyncStorageEntryMetadata<Record<string, unknown>>>
-    >();
-    const bucketUpdates = {
-      access: new Map<string, Set<string>>(),
-      write: new Map<string, Set<string>>(),
-    };
-    const currentManifest: NamespaceManifest = {
-      sequence: context.manifest.sequence,
-      lookup: { ...context.manifest.lookup },
-      accessBuckets: { ...context.manifest.accessBuckets },
-      writeBuckets: { ...context.manifest.writeBuckets },
-    };
-
-    for (const shardId of changedShardIds) {
-      const fileName = currentManifest.lookup[shardId];
-      if (!fileName) {
-        shardEntries.set(shardId, {});
-        continue;
-      }
-
-      const shard = await this.readJsonFile<LookupShardFile>(
-        lookupDir,
-        fileName,
-      );
-      const parsedShard = parseLookupShardFile(shard);
-      if (!parsedShard) {
-        shardEntries.set(shardId, {});
-        continue;
-      }
-
-      shardEntries.set(
-        shardId,
-        Object.fromEntries(
-          Object.entries(parsedShard.entries).flatMap(
-            ([entryKey, entryValue]) => {
-              const parsedEntry = parseMetadataBase(entryValue);
-              return parsedEntry ? [[entryKey, parsedEntry]] : [];
-            },
-          ),
-        ),
-      );
-    }
-
-    const touchedBucketIds = new Set<string>();
-
-    async function loadBucketSet(
-      adapter: OpfsAsyncStorageAdapter,
-      dir: FileSystemDirectoryHandle,
-      fileName: string | undefined,
-      cache: Map<string, Set<string>>,
-      bucketId: string,
-      fallback = new Set<string>(),
-    ): Promise<Set<string>> {
-      if (cache.has(bucketId)) {
-        return cache.get(bucketId) ?? fallback;
-      }
-
-      if (!fileName) {
-        cache.set(bucketId, new Set(fallback));
-        return cache.get(bucketId) ?? fallback;
-      }
-
-      const bucket = await adapter.readJsonFile<BucketFile>(dir, fileName);
-      const set = new Set(parseBucketFile(bucket)?.keys ?? []);
-      cache.set(bucketId, set);
-      return set;
-    }
-
-    for (const key of keys) {
-      const existing = existingMetadata.get(key);
-      if (existing) {
-        const accessBucketId = getBucketId(existing.lastAccessAt);
-        const writeBucketId = getBucketId(existing.writtenAt);
-        touchedBucketIds.add(accessBucketId);
-        touchedBucketIds.add(writeBucketId);
-        const accessBucketSet = await loadBucketSet(
-          this,
-          accessBucketsDir,
-          currentManifest.accessBuckets[accessBucketId],
-          bucketUpdates.access,
-          accessBucketId,
-        );
-        const writeBucketSet = await loadBucketSet(
-          this,
-          writeBucketsDir,
-          currentManifest.writeBuckets[writeBucketId],
-          bucketUpdates.write,
-          writeBucketId,
-        );
-        accessBucketSet.delete(key);
-        writeBucketSet.delete(key);
-      }
-    }
-
-    for (const removedKey of removes) {
-      const shardId = getLookupShardId(removedKey);
-      const entries = shardEntries.get(shardId);
-      if (entries) {
-        delete entries[removedKey];
-      }
-    }
-
-    for (const [key, lastAccessAt] of touchesByKey) {
-      const metadata = existingMetadata.get(key);
-      if (!metadata || removes.includes(key)) continue;
-
-      const nextLastAccessAt = lastAccessAt ?? now;
-      const nextMetadata = { ...metadata, lastAccessAt: nextLastAccessAt };
-      const shardId = getLookupShardId(key);
-      const entries = shardEntries.get(shardId);
-      if (entries) {
-        entries[key] = nextMetadata;
-      }
-
-      const accessBucketId = getBucketId(nextLastAccessAt);
-      touchedBucketIds.add(accessBucketId);
-      const accessBucketSet = await loadBucketSet(
-        this,
-        accessBucketsDir,
-        currentManifest.accessBuckets[accessBucketId],
-        bucketUpdates.access,
-        accessBucketId,
-      );
-      accessBucketSet.add(key);
-    }
-
-    for (const upsert of upserts) {
-      const payloadRef = `payload-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 10)}`;
-      const payloadRaw = JSON.stringify(upsert.value);
-      await this.writeTextFile(payloadsDir, `${payloadRef}.json`, payloadRaw);
-
-      const existing = existingMetadata.get(upsert.key);
-      if (existing && existing.payloadRef !== payloadRef) {
-        try {
-          await payloadsDir.removeEntry(`${existing.payloadRef}.json`);
-        } catch {
-          // Ignore missing payloads.
-        }
-      }
-
-      const metadata: AsyncStorageEntryMetadata<Record<string, unknown>> = {
-        key: upsert.key,
-        payloadRef,
-        writtenAt: now,
-        lastAccessAt:
-          touchesByKey.get(upsert.key) ?? existing?.lastAccessAt ?? now,
-        sizeBytes: payloadRaw.length,
-        version: upsert.version,
-        ...(upsert.metadata ?? {}),
-      };
-
-      const shardId = getLookupShardId(upsert.key);
-      const entries = shardEntries.get(shardId);
-      if (entries) {
-        entries[upsert.key] = metadata;
-      } else {
-        shardEntries.set(shardId, { [upsert.key]: metadata });
-      }
-
-      const accessBucketId = getBucketId(metadata.lastAccessAt);
-      const writeBucketId = getBucketId(metadata.writtenAt);
-      touchedBucketIds.add(accessBucketId);
-      touchedBucketIds.add(writeBucketId);
-
-      const accessBucketSet = await loadBucketSet(
-        this,
-        accessBucketsDir,
-        currentManifest.accessBuckets[accessBucketId],
-        bucketUpdates.access,
-        accessBucketId,
-      );
-      const writeBucketSet = await loadBucketSet(
-        this,
-        writeBucketsDir,
-        currentManifest.writeBuckets[writeBucketId],
-        bucketUpdates.write,
-        writeBucketId,
-      );
-      accessBucketSet.add(upsert.key);
-      writeBucketSet.add(upsert.key);
-    }
-
-    currentManifest.sequence += 1;
-
-    for (const [shardId, entries] of shardEntries) {
-      if (Object.keys(entries).length === 0) {
-        delete currentManifest.lookup[shardId];
-        continue;
-      }
-
-      const fileName = `lookup-${shardId}-${currentManifest.sequence}.json`;
-      await this.writeJsonFile(lookupDir, fileName, { entries });
-      currentManifest.lookup[shardId] = fileName;
-    }
-
-    for (const bucketId of touchedBucketIds) {
-      const accessSet = bucketUpdates.access.get(bucketId);
-      if (accessSet) {
-        if (accessSet.size === 0) {
-          delete currentManifest.accessBuckets[bucketId];
-        } else {
-          const fileName = `access-${bucketId}-${currentManifest.sequence}.json`;
-          await this.writeJsonFile(accessBucketsDir, fileName, {
-            keys: [...accessSet].sort(),
-          });
-          currentManifest.accessBuckets[bucketId] = fileName;
-        }
-      }
-
-      const writeSet = bucketUpdates.write.get(bucketId);
-      if (writeSet) {
-        if (writeSet.size === 0) {
-          delete currentManifest.writeBuckets[bucketId];
-        } else {
-          const fileName = `write-${bucketId}-${currentManifest.sequence}.json`;
-          await this.writeJsonFile(writeBucketsDir, fileName, {
-            keys: [...writeSet].sort(),
-          });
-          currentManifest.writeBuckets[bucketId] = fileName;
-        }
-      }
-    }
-
-    await this.writeManifest(context.dir, currentManifest);
-    await this.touchNamespaceEntry(context.entry);
-  }
-
-  async clearNamespace(scope: AsyncStorageNamespaceScope): Promise<void> {
-    await this.flushPendingNamespaceCommit(scope);
-    const entry = await this.findNamespaceEntry(scope);
-    if (!entry) return;
-
-    const namespacesDir = await this.getNamespacesDir();
-    try {
-      await namespacesDir.removeEntry(entry.dirName, { recursive: true });
-    } catch {
-      // Ignore missing directories.
-    }
-
-    const registry = await this.readRegistry();
-    await this.writeRegistry({
-      entries: registry.entries.filter((item) => item.id !== entry.id),
-    });
-    this.namespaceCache.delete(entry.id);
-    this.pendingNamespaceCommits.delete(entry.id);
-    this.clearRecentTouchedBucketsForNamespace(entry.id);
-  }
-
-  private scheduleStartupCleanupIfNeeded(): void {
-    if (this.startupCleanupScheduled) return;
-    this.startupCleanupScheduled = true;
-
-    scheduleIdleCleanup(() => {
-      void this.runStartupCleanupIfDue().catch(() => {
-        // Ignore startup cleanup failures; regular reads/writes still self-heal.
-      });
-    });
-  }
-
-  private async runStartupCleanupIfDue(): Promise<void> {
-    const maintenance = await this.readMaintenanceState();
-    const now = Date.now();
-    if (
-      maintenance.lastSuccessfulCleanupAt !== null &&
-      now - maintenance.lastSuccessfulCleanupAt <
-        OPFS_STARTUP_CLEANUP_COOLDOWN_MS
-    ) {
-      return;
-    }
-
-    if (document.hidden) {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 150);
-      });
-    }
-
-    const holderId = `startup-cleanup-${Math.random().toString(36).slice(2, 10)}`;
-    const acquired = await this.tryAcquireStartupCleanupLease({
-      holderId,
-      ttlMs: OPFS_STARTUP_CLEANUP_LEASE_TTL_MS,
-    });
-    if (!acquired) return;
-
-    try {
-      await this.performStartupCleanup();
-      await this.finishStartupCleanup({ holderId, finishedAt: Date.now() });
-    } catch {
-      // Leave the lease to expire naturally if cleanup crashes.
-    }
-  }
-
-  private async performStartupCleanup(): Promise<void> {
-    await this.flushAllPendingNamespaceCommits();
-    const registry = await this.readRegistry();
-    const protectedRefsBySession = new Map<string, Set<string>>();
-
-    for (const entry of registry.entries) {
-      const context = await this.loadNamespaceContext(entry);
-      const cached = protectedRefsBySession.get(entry.sessionKey);
-      const protectedRefs =
-        cached ?? (await this.readProtectedRefs(entry.sessionKey));
-      if (!cached) protectedRefsBySession.set(entry.sessionKey, protectedRefs);
-      const metadataEntries = await this.listAllMetadata(context);
-      const referencedPayloads = new Set<string>();
-      const [lookupDir, accessDir, writeDir, payloadsDir] = await Promise.all([
-        context.dir.getDirectoryHandle(LOOKUP_DIR, { create: true }),
-        this.getBucketDir(context.dir, ACCESS_BUCKETS_DIR),
-        this.getBucketDir(context.dir, WRITE_BUCKETS_DIR),
-        context.dir.getDirectoryHandle(PAYLOADS_DIR, { create: true }),
-      ]);
-      const nextRemoves: string[] = [];
-
-      for (const metadata of metadataEntries) {
-        const protectedKey = serializeProtectedRef({
-          ...entry,
-          key: metadata.key,
-        });
-        const isProtected = protectedRefs.has(protectedKey);
-        const isExpired =
-          nowMinusLatest(metadata, Date.now()) > OPFS_MAX_AGE_MS;
-        if (isExpired && !isProtected) {
-          nextRemoves.push(metadata.key);
-          continue;
-        }
-
-        referencedPayloads.add(metadata.payloadRef);
-      }
-
-      if (nextRemoves.length > 0) {
-        await this.commitToNamespaceInternal(entry, { removes: nextRemoves });
-      }
-
-      const manifest = await this.readManifest(context.dir);
-      const lookupCurrent = new Set(Object.values(manifest.lookup));
-      const accessCurrent = new Set(Object.values(manifest.accessBuckets));
-      const writeCurrent = new Set(Object.values(manifest.writeBuckets));
-
-      for (const fileName of await iterateDirEntries(lookupDir)) {
-        if (!lookupCurrent.has(fileName)) {
-          try {
-            await lookupDir.removeEntry(fileName);
-          } catch {
-            // Ignore.
-          }
-        }
-      }
-
-      for (const fileName of await iterateDirEntries(accessDir)) {
-        if (!accessCurrent.has(fileName)) {
-          try {
-            await accessDir.removeEntry(fileName);
-          } catch {
-            // Ignore.
-          }
-        }
-      }
-
-      for (const fileName of await iterateDirEntries(writeDir)) {
-        if (!writeCurrent.has(fileName)) {
-          try {
-            await writeDir.removeEntry(fileName);
-          } catch {
-            // Ignore.
-          }
-        }
-      }
-
-      for (const fileName of await iterateDirEntries(payloadsDir)) {
-        if (!fileName.endsWith('.json')) continue;
-        const payloadRef = fileName.slice(0, -'.json'.length);
-        if (referencedPayloads.has(payloadRef)) continue;
-        try {
-          await payloadsDir.removeEntry(fileName);
-        } catch {
-          // Ignore.
-        }
-      }
-    }
-  }
-
-  private async readProtectedRefs(sessionKey: string): Promise<Set<string>> {
-    const protectedKeysSnapshot = getSessionProtectedKeysSnapshot(sessionKey);
-    if (protectedKeysSnapshot !== null) {
-      return new Set(protectedKeysSnapshot);
-    }
-
-    const namespace = this.openNamespace<unknown>(
-      getProtectedKeysStorageScope(sessionKey),
-    );
-    const entry = await namespace.get(PROTECTED_KEYS_STORAGE_ENTRY_KEY, {
-      touch: 'never',
-    });
-    return new Set(parseProtectedKeys(entry?.value)?.keys ?? []);
+  private getFileNameForKey(key: string): string {
+    return `${encodePathSegment(key)}${JSON_FILE_EXTENSION}`;
   }
 
   private async getRootDir(): Promise<FileSystemDirectoryHandle> {
-    if (!this.rootDirPromise) {
+    if (this.rootDirPromise === null) {
       this.rootDirPromise = (async () => {
-        const root = await navigator.storage.getDirectory();
-        const cacheDir = await root.getDirectoryHandle(OPFS_CACHE_DIR, {
+        const navigatorRoot = await getNavigatorStorageDirectory();
+        return navigatorRoot.getDirectoryHandle(OPFS_CACHE_DIR, {
           create: true,
         });
-        return cacheDir.getDirectoryHandle(ROOT_DIR, { create: true });
       })();
     }
 
     return this.rootDirPromise;
   }
 
-  private async getNamespacesDir(): Promise<FileSystemDirectoryHandle> {
+  private async getScopeDir(
+    scope: AsyncStorageNamespaceScope,
+    options: { create: boolean },
+  ): Promise<FileSystemDirectoryHandle | null> {
     const root = await this.getRootDir();
-    return root.getDirectoryHandle(NAMESPACES_DIR, { create: true });
-  }
-
-  private async getNamespaceDir(
-    entry: NamespaceRegistryEntry,
-  ): Promise<FileSystemDirectoryHandle> {
-    const cached = this.namespaceCache.get(entry.id);
-    if (cached) {
-      return cached.dir;
-    }
-
-    const namespacesDir = await this.getNamespacesDir();
-    const dir = namespacesDir.getDirectoryHandle(entry.dirName, {
-      create: true,
-    });
-    this.namespaceCache.set(entry.id, { entry, dir });
-    return dir;
-  }
-
-  private async getBucketDir(
-    namespaceDir: FileSystemDirectoryHandle,
-    bucketKind: typeof ACCESS_BUCKETS_DIR | typeof WRITE_BUCKETS_DIR,
-  ): Promise<FileSystemDirectoryHandle> {
-    const recencyDir = await namespaceDir.getDirectoryHandle(RECENCY_DIR, {
-      create: true,
-    });
-    return recencyDir.getDirectoryHandle(bucketKind, { create: true });
-  }
-
-  private async readRegistry(): Promise<NamespaceRegistryFile> {
-    if (!this.registryPromise) {
-      this.registryPromise = (async () => {
-        const namespacesDir = await this.getNamespacesDir();
-        const registry = await this.readJsonFile<NamespaceRegistryFile>(
-          namespacesDir,
-          REGISTRY_FILE,
+    const sessionDir = options.create
+      ? await root.getDirectoryHandle(encodePathSegment(scope.sessionKey), {
+          create: true,
+        })
+      : await getDirectoryHandleIfExists(
+          root,
+          encodePathSegment(scope.sessionKey),
         );
-        return parseNamespaceRegistryFile(registry) ?? { entries: [] };
-      })();
-    }
+    if (sessionDir === null) return null;
 
-    return this.registryPromise;
+    const storeDir = options.create
+      ? await sessionDir.getDirectoryHandle(
+          encodePathSegment(scope.storeName),
+          { create: true },
+        )
+      : await getDirectoryHandleIfExists(
+          sessionDir,
+          encodePathSegment(scope.storeName),
+        );
+    if (storeDir === null) return null;
+
+    return options.create
+      ? storeDir.getDirectoryHandle(encodePathSegment(scope.kind), {
+          create: true,
+        })
+      : getDirectoryHandleIfExists(storeDir, encodePathSegment(scope.kind));
   }
-
-  private async writeRegistry(registry: NamespaceRegistryFile): Promise<void> {
-    const namespacesDir = await this.getNamespacesDir();
-    await this.writeJsonFile(namespacesDir, REGISTRY_FILE, registry);
-    this.registryPromise = Promise.resolve(registry);
-  }
-
-  private async ensureNamespaceEntry(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<NamespaceRegistryEntry> {
-    const existing = await this.findNamespaceEntry(scope);
-    if (existing) return existing;
-
-    const registry = await this.readRegistry();
-    const nextEntry: NamespaceRegistryEntry = {
-      ...scope,
-      id: getNamespaceId(scope),
-      dirName: toNamespaceDirName(scope),
-      updatedAt: Date.now(),
-    };
-
-    await this.writeRegistry({ entries: [...registry.entries, nextEntry] });
-
-    const dir = await this.getNamespaceDir(nextEntry);
-    await dir.getDirectoryHandle(LOOKUP_DIR, { create: true });
-    await dir.getDirectoryHandle(PAYLOADS_DIR, { create: true });
-    await this.getBucketDir(dir, ACCESS_BUCKETS_DIR);
-    await this.getBucketDir(dir, WRITE_BUCKETS_DIR);
-    await this.writeManifest(dir, createDefaultManifest());
-
-    return nextEntry;
-  }
-
-  private async findNamespaceEntry(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<NamespaceRegistryEntry | null> {
-    const registry = await this.readRegistry();
-    const id = getNamespaceId(scope);
-    return registry.entries.find((entry) => entry.id === id) ?? null;
-  }
-
-  private async touchNamespaceEntry(
-    entry: NamespaceRegistryEntry,
-  ): Promise<void> {
-    const registry = await this.readRegistry();
-    const nextEntries = registry.entries.map((current) =>
-      current.id === entry.id ? { ...current, updatedAt: Date.now() } : current,
-    );
-    await this.writeRegistry({ entries: nextEntries });
-  }
-
-  private async readManifest(
-    namespaceDir: FileSystemDirectoryHandle,
-  ): Promise<NamespaceManifest> {
-    const manifest = await this.readJsonFile<NamespaceManifest>(
-      namespaceDir,
-      MANIFEST_FILE,
-    );
-    return parseNamespaceManifest(manifest) ?? createDefaultManifest();
-  }
-
-  private writeManifest(
-    namespaceDir: FileSystemDirectoryHandle,
-    manifest: NamespaceManifest,
-  ): Promise<void> {
-    return this.writeJsonFile(namespaceDir, MANIFEST_FILE, manifest);
-  }
-
-  private async writeMaintenanceState(
-    state: AsyncStorageMaintenanceState,
-  ): Promise<void> {
-    const root = await this.getRootDir();
-    await this.writeJsonFile(root, MAINTENANCE_FILE, state);
-  }
-
-  private async readJsonFile<T>(
-    dir: FileSystemDirectoryHandle,
-    fileName: string,
-  ): Promise<T | null> {
-    try {
-      const fileHandle = await dir.getFileHandle(fileName);
-      const file = await fileHandle.getFile();
-      return __LEGIT_CAST__<T, unknown>(JSON.parse(await file.text()));
-    } catch {
-      return null;
-    }
-  }
-
-  private async writeJsonFile(
-    dir: FileSystemDirectoryHandle,
-    fileName: string,
-    value: unknown,
-  ): Promise<void> {
-    await this.writeTextFile(dir, fileName, JSON.stringify(value));
-  }
-
-  private async writeTextFile(
-    dir: FileSystemDirectoryHandle,
-    fileName: string,
-    raw: string,
-  ): Promise<void> {
-    const fileHandle = await dir.getFileHandle(fileName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(raw);
-    await writable.close();
-  }
-}
-
-function nowMinusLatest(
-  metadata: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  now: number,
-): number {
-  return now - Math.max(metadata.lastAccessAt, metadata.writtenAt);
-}
-
-export function serializeProtectedRef(
-  ref: AsyncStorageProtectedEntryRef,
-): string {
-  return JSON.stringify([ref.sessionKey, ref.storeName, ref.kind, ref.key]);
 }

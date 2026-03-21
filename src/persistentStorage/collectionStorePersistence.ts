@@ -581,7 +581,7 @@ export function setupCollectionPersistence<
     const invalidEntries = filterAndMap(metadataEntries, (entry) => {
       const payload = validateWithSchema(
         config.payloadSchema,
-        readManifestPayloadMeta(entry),
+        readManifestPayloadMeta(entry.customMetadata),
       );
 
       return payload === null ? { itemKey: entry.key } : false;
@@ -596,7 +596,7 @@ export function setupCollectionPersistence<
     const validEntries = filterAndMap(metadataEntries, (entry) => {
       const payload = validateWithSchema(
         config.payloadSchema,
-        readManifestPayloadMeta(entry),
+        readManifestPayloadMeta(entry.customMetadata),
       );
       if (payload === null) return false;
 

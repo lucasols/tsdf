@@ -46,7 +46,7 @@ export type AsyncStorageEntryMetadataBase = {
 
 export type AsyncStorageEntryMetadata<
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
-> = AsyncStorageEntryMetadataBase & TCustomMetadata;
+> = AsyncStorageEntryMetadataBase & { customMetadata: TCustomMetadata };
 
 export type AsyncStorageNamespaceGetResult<
   TValue,
@@ -72,16 +72,43 @@ export type AsyncStorageNamespaceCommitArgs<
   touches?: AsyncStorageNamespaceCommitTouch[];
 };
 
-export type AsyncStorageMetadataPage<
-  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
-> = {
-  entries: AsyncStorageEntryMetadata<TCustomMetadata>[];
-  cursor: string | null;
-};
-
 export type AsyncStorageMaintenanceState = {
   lastSuccessfulCleanupAt: number | null;
   startupCleanupLease: { holderId: string; expiresAt: number } | null;
+};
+
+export type AsyncStorageDriverSetEntry = { key: string; value: unknown };
+
+/** Low-level async backend contract implemented by custom storage drivers. */
+export type AsyncStorageDriver = {
+  /** Read a single raw record from a logical namespace. */
+  get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown>;
+  /** Write a single raw record to a logical namespace. */
+  set(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+    value: unknown,
+  ): Promise<void>;
+  /** Remove a single raw record from a logical namespace. */
+  remove(scope: AsyncStorageNamespaceScope, key: string): Promise<void>;
+  /** List raw record keys within a logical namespace. */
+  listKeys(scope: AsyncStorageNamespaceScope): Promise<string[]>;
+  /** Remove every record from a logical namespace. */
+  clear(scope: AsyncStorageNamespaceScope): Promise<void>;
+  /** Optional bulk read fast path for backends that support it cheaply. */
+  getMany?(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+  ): Promise<unknown[]>;
+  /** Optional bulk write fast path for backends that support it cheaply. */
+  setMany?(
+    scope: AsyncStorageNamespaceScope,
+    entries: AsyncStorageDriverSetEntry[],
+  ): Promise<void>;
+  /** Optional bulk remove fast path for backends that support it cheaply. */
+  removeMany?(scope: AsyncStorageNamespaceScope, keys: string[]): Promise<void>;
+  /** Test-only reset hook used by TSDF internals. */
+  resetForTests?(): void;
 };
 
 export type AsyncStorageNamespaceHandle<
@@ -98,40 +125,31 @@ export type AsyncStorageNamespaceHandle<
   ): Promise<
     Array<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
   >;
+  listKeys(): Promise<string[]>;
   commit(
     args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<void>;
   listMetadata(args?: {
-    cursor?: string | null;
-    limit?: number;
     order?: AsyncStorageMetadataOrder;
-  }): Promise<AsyncStorageMetadataPage<TCustomMetadata>>;
+  }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]>;
   clear(): Promise<void>;
 };
 
-/** Async adapter used when storage access requires asynchronous I/O. */
+/** Managed async adapter consumed by TSDF persistence internals. */
 export type AsyncStorageAdapter = {
   /** Adapter mode marker used by persistence internals to pick async behavior. */
   kind: 'async';
-  /** Open a logical namespace for OPFS-backed reads, writes, and metadata scans. */
+  /** Open a logical namespace with managed batching and touch guarantees. */
   openNamespace<
     TValue,
     TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
   >(
     scope: AsyncStorageNamespaceScope,
   ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
-  /** Read persisted cleanup state shared across tabs. */
-  readMaintenanceState(): Promise<AsyncStorageMaintenanceState>;
-  /** Try to acquire the startup cleanup lease for this adapter instance. */
-  tryAcquireStartupCleanupLease(args: {
-    holderId: string;
-    ttlMs: number;
-  }): Promise<boolean>;
-  /** Mark startup cleanup as finished and clear the lease. */
-  finishStartupCleanup(args: {
-    holderId: string;
-    finishedAt: number;
-  }): Promise<void>;
+  /** Remove all namespaces for a session key. */
+  clearSession(sessionKey: string): Promise<void>;
+  /** Test-only reset hook used by TSDF internals. */
+  resetForTests?(): void;
 };
 
 /** Injected persistent storage adapter. */

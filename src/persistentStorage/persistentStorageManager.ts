@@ -6,10 +6,7 @@ import {
   resetManagedLocalStorageState,
   setManagedLocalStorageEntryOfflineProtected,
 } from './localStorageMetadata';
-import {
-  OpfsAsyncStorageAdapter,
-  serializeProtectedRef,
-} from './opfsAsyncStorageAdapter';
+import { serializeProtectedRef } from './asyncStorageAdapter';
 import {
   getProtectedKeysStorageScope,
   parseProtectedKeys,
@@ -35,7 +32,6 @@ import type {
 } from './types';
 
 const DEBOUNCE_MS = 1000;
-const ASYNC_STORAGE_METADATA_PAGE_LIMIT = 100;
 export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
 
 const cacheEntrySchema = rc_object({
@@ -488,7 +484,8 @@ export function createPersistentStorageHandle<T>(
 
 export type PersistentStorageNamespaceMetadata<
   TMetadata extends Record<string, unknown>,
-> = TMetadata & {
+> = {
+  customMetadata: TMetadata;
   key: string;
   lastAccessAt: number;
   writtenAt: number;
@@ -515,13 +512,8 @@ export type PersistentStorageNamespaceHandle<
   remove(entryKey: string): Promise<void>;
   listKeys(): Promise<string[]>;
   listMetadata(args?: {
-    cursor?: string | null;
-    limit?: number;
     order?: AsyncStorageMetadataOrder;
-  }): Promise<{
-    entries: PersistentStorageNamespaceMetadata<TMetadata>[];
-    cursor: string | null;
-  }>;
+  }): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]>;
   clear(): Promise<void>;
   dispose(): void;
 };
@@ -531,24 +523,9 @@ export async function listAllPersistentStorageNamespaceMetadata<
   TMetadata extends Record<string, unknown> = Record<string, never>,
 >(
   namespace: PersistentStorageNamespaceHandle<T, TMetadata>,
-  args: { order?: AsyncStorageMetadataOrder; limit?: number } = {},
+  args: { order?: AsyncStorageMetadataOrder } = {},
 ): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]> {
-  const entries: PersistentStorageNamespaceMetadata<TMetadata>[] = [];
-  const limit = Math.max(1, args.limit ?? ASYNC_STORAGE_METADATA_PAGE_LIMIT);
-  let cursor: string | null = null;
-
-  do {
-    const page = await namespace.listMetadata({
-      cursor,
-      limit,
-      order: args.order,
-    });
-
-    entries.push(...page.entries);
-    cursor = page.cursor;
-  } while (cursor !== null);
-
-  return entries;
+  return namespace.listMetadata(args);
 }
 
 export function createPersistentStorageNamespaceHandle<
@@ -834,38 +811,22 @@ export function createPersistentStorageNamespaceHandle<
   }
 
   async function listMetadata(
-    args: {
-      cursor?: string | null;
-      limit?: number;
-      order?: AsyncStorageMetadataOrder;
-    } = {},
-  ): Promise<{
-    entries: PersistentStorageNamespaceMetadata<TMetadata>[];
-    cursor: string | null;
-  }> {
+    args: { order?: AsyncStorageMetadataOrder } = {},
+  ): Promise<PersistentStorageNamespaceMetadata<TMetadata>[]> {
     try {
       if (asyncAdapter !== null) {
         const namespace = getAsyncNamespace();
-        if (!namespace) {
-          return { entries: [], cursor: null };
-        }
+        if (!namespace) return [];
 
         return namespace.listMetadata(args);
       }
 
       const prefix = getPrefix();
-      if (prefix === false) {
-        return { entries: [], cursor: null };
-      }
+      if (prefix === false) return [];
 
       const order = args.order ?? 'key';
-      const limit = Math.max(1, args.limit ?? 100);
-      const offset =
-        args.cursor === null || args.cursor === undefined
-          ? 0
-          : Number(args.cursor) || 0;
 
-      const sortedEntries = localPersistentStorage
+      return localPersistentStorage
         .listManifestEntries(prefix)
         .sort((left, right) => {
           if (order === 'key') {
@@ -878,47 +839,31 @@ export function createPersistentStorageNamespaceHandle<
           }
 
           return left.entryKey.localeCompare(right.entryKey);
-        });
-
-      const pageEntries = sortedEntries
-        .slice(offset, offset + limit)
+        })
         .map((entry) => ({
-          ...(entry.meta
+          customMetadata: entry.meta
             ? __LEGIT_CAST__<TMetadata, unknown>(entry.meta)
-            : __LEGIT_CAST__<TMetadata, Record<string, never>>({})),
+            : __LEGIT_CAST__<TMetadata, Record<string, never>>({}),
           key: entry.entryKey,
           lastAccessAt: entry.lastAccessAt,
           writtenAt: entry.lastAccessAt,
           version: asyncVersion,
         }));
-
-      return {
-        entries: pageEntries,
-        cursor:
-          offset + pageEntries.length >= sortedEntries.length
-            ? null
-            : String(offset + pageEntries.length),
-      };
     } catch (error) {
       onPersistentStorageError?.(error);
-      return { entries: [], cursor: null };
+      return [];
     }
   }
 
   async function listKeys(): Promise<string[]> {
-    const entries: PersistentStorageNamespaceMetadata<TMetadata>[] = [];
-    let cursor: string | null = null;
+    if (asyncAdapter !== null) {
+      const namespace = getAsyncNamespace();
+      if (!namespace) return [];
 
-    do {
-      const page = await listMetadata({
-        cursor,
-        limit: ASYNC_STORAGE_METADATA_PAGE_LIMIT,
-        order: 'key',
-      });
-      entries.push(...page.entries);
-      cursor = page.cursor;
-    } while (cursor !== null);
+      return namespace.listKeys();
+    }
 
+    const entries = await listMetadata({ order: 'key' });
     return entries.map((entry) => entry.key);
   }
 
@@ -1098,9 +1043,7 @@ export async function clearSessionStorage(
     return;
   }
 
-  if (adapter instanceof OpfsAsyncStorageAdapter) {
-    await adapter.clearSession(sessionKey);
-  }
+  await adapter.clearSession(sessionKey);
 }
 
 /** Clears all persistent storage entries for a given session key across built-in adapters. */
@@ -1140,9 +1083,7 @@ export function resetExpirationScanTracking(): void {
   scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
   localStorageTouchTimestamps = new Map<string, number>();
   resetManagedLocalStorageState();
-  if (opfsPersistentStorage instanceof OpfsAsyncStorageAdapter) {
-    opfsPersistentStorage.resetForTests();
-  }
+  opfsPersistentStorage.resetForTests?.();
 }
 
 export async function readProtectedStorageKeys(

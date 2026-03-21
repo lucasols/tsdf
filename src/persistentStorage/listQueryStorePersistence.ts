@@ -1207,9 +1207,9 @@ export function setupListQueryPersistence<
     const invalidEntries = filterAndMap(metadataEntries, (entry) => {
       const payload = validateWithSchema(
         config.queryPayloadSchema,
-        readManifestPayloadMeta(entry),
+        readManifestPayloadMeta(entry.customMetadata),
       );
-      const items = entry.i;
+      const items = entry.customMetadata.i;
 
       return payload === null || !Array.isArray(items)
         ? { queryKey: entry.key }
@@ -1225,16 +1225,16 @@ export function setupListQueryPersistence<
     const validEntries = filterAndMap(metadataEntries, (entry) => {
       const payload = validateWithSchema(
         config.queryPayloadSchema,
-        readManifestPayloadMeta(entry),
+        readManifestPayloadMeta(entry.customMetadata),
       );
-      const items = entry.i;
+      const items = entry.customMetadata.i;
       if (payload === null || !Array.isArray(items)) return false;
 
       return {
         queryKey: entry.key,
         payload,
         items,
-        hasMore: entry.h === true,
+        hasMore: entry.customMetadata.h === true,
         lastAccessAt: entry.lastAccessAt,
       };
     });
@@ -1475,7 +1475,7 @@ export function setupListQueryPersistence<
     const invalidItemEntries = filterAndMap(itemMetadataEntries, (entry) => {
       const payload = validateWithSchema(
         config.itemPayloadSchema,
-        readManifestPayloadMeta(entry),
+        readManifestPayloadMeta(entry.customMetadata),
       );
       return payload === null ? { itemKey: entry.key } : false;
     });
@@ -1489,7 +1489,7 @@ export function setupListQueryPersistence<
     const validItemEntries = filterAndMap(itemMetadataEntries, (entry) => {
       const payload = validateWithSchema(
         config.itemPayloadSchema,
-        readManifestPayloadMeta(entry),
+        readManifestPayloadMeta(entry.customMetadata),
       );
       if (payload === null) return false;
 

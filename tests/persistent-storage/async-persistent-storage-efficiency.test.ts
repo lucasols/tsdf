@@ -188,7 +188,9 @@ describe('async persistent storage efficiency', () => {
 
     await advanceTime(39);
     expect(
-      mockAdapter.operations.filter((operation) => operation.type === 'commit'),
+      mockAdapter.operations.filter(
+        (operation) => operation.type === 'setMany',
+      ),
     ).toMatchInlineSnapshot(`[]`);
 
     const readPromise = namespace.get('document', { touch: 'never' });
@@ -199,13 +201,20 @@ describe('async persistent storage efficiency', () => {
       value: 'second'
     `);
     expect(
-      mockAdapter.operations.filter((operation) => operation.type === 'commit'),
+      mockAdapter.operations
+        .filter((operation) => operation.type === 'setMany')
+        .map((operation) => ({
+          scope: operation.scope,
+          records: operation.records.map((record) => ({
+            key: record.key,
+            kind: record.recordKind,
+          })),
+        })),
     ).toMatchInlineSnapshot(`
-      - removes: []
+      - records:
+          - { key: '__tsdf_payload__:document', kind: 'payload' }
+          - { key: '__tsdf_meta__:document', kind: 'metadata' }
         scope: { kind: 'document', sessionKey: 'sess1', storeName: 'coalesced-opfs' }
-        touches: []
-        type: 'commit'
-        upserts: ['document']
     `);
   });
 
@@ -240,20 +249,18 @@ describe('async persistent storage efficiency', () => {
     `);
     expect(
       mockAdapter.operations
-        .filter((operation) => operation.type === 'commit')
+        .filter((operation) => operation.type === 'setMany')
         .map((operation) => ({
-          type: operation.type,
           scope: operation.scope,
-          upserts: operation.upserts,
-          removes: operation.removes,
-          touches: operation.touches.map((touch) => touch.key),
+          records: operation.records.map((record) => ({
+            key: record.key,
+            kind: record.recordKind,
+          })),
         })),
     ).toMatchInlineSnapshot(`
-      - removes: []
+      - records:
+          - { key: '__tsdf_meta__:document', kind: 'metadata' }
         scope: { kind: 'document', sessionKey: 'sess1', storeName: 'touch-guard-opfs' }
-        touches: ['document']
-        type: 'commit'
-        upserts: []
     `);
   });
 
@@ -288,11 +295,16 @@ describe('async persistent storage efficiency', () => {
       breakdown:
         externalPayloadReads: []
         legacyFallbackReads: []
-        metadataReads: []
-        payloadBatchReads: []
+        listKeyScans: []
+        metadataBatchReads:
+          - ['document metadata']
+        metadataReads: ['document metadata']
+        payloadBatchReads:
+          - ['document payload']
         scopedPayloadReads: ['document payload']
 
-      operations: ['📖 ✅ document payload | touch=never']
+      operations:
+        - '📚 sess1/doc-opfs-efficiency/document hits=2/2 ["document payload","document metadata"]'
     `);
 
     expect(mockAdapter.has(documentStorageKey(storeName, sessionKey))).toBe(
@@ -344,15 +356,20 @@ describe('async persistent storage efficiency', () => {
       breakdown:
         externalPayloadReads: []
         legacyFallbackReads: []
-        metadataReads: []
-        payloadBatchReads: []
+        listKeyScans: []
+        metadataBatchReads:
+          - ['ci."1 (metadata)']
+        metadataReads: ['ci."1 (metadata)']
+        payloadBatchReads:
+          - ['ci."1 (payload)']
         scopedPayloadReads: ['ci."1 (payload)']
 
-      operations: ['📖 ✅ ci."1 (payload) | touch=never']
+      operations:
+        - '📚 sess1/collection-opfs-efficiency/collection.item hits=2/2 ["ci.\\"1 (payload)","ci.\\"1 (metadata)"]'
     `);
 
-    expect(mockAdapter.payloadGetRequests).toContain(hotKey);
-    expect(mockAdapter.payloadGetRequests).not.toContain(coldKey);
+    expect(mockAdapter.payloadGetManyRequests.flat()).toContain(hotKey);
+    expect(mockAdapter.payloadGetManyRequests.flat()).not.toContain(coldKey);
   });
 
   test('collection maxItems eviction uses metadata scans without reading stored item payloads', async () => {
@@ -385,16 +402,31 @@ describe('async persistent storage efficiency', () => {
       breakdown:
         externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
         legacyFallbackReads: []
+        listKeyScans:
+          - 'sess1/collection-opfs-eviction-efficiency/collection.item'
+          - 'sess1/collection-opfs-eviction-efficiency/collection.item'
+        metadataBatchReads:
+          - ['ci."3 (metadata)']
+          - ['tsdf.sess1._o_.p (protected registry metadata)']
+          - ['ci."1 (metadata)', 'ci."2 (metadata)', 'ci."3 (metadata)']
         metadataReads:
-          - 'sess1/collection-opfs-eviction-efficiency/collection.item (metadata order=lru-desc cursor=null limit=100)'
-        payloadBatchReads: []
+          - 'ci."3 (metadata)'
+          - 'tsdf.sess1._o_.p (protected registry metadata)'
+          - 'ci."1 (metadata)'
+          - 'ci."2 (metadata)'
+          - 'ci."3 (metadata)'
+        payloadBatchReads:
+          - ['tsdf.sess1._o_.p (protected registry payload)']
         scopedPayloadReads: []
 
       operations:
-        - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item upserts=["collection.item.\\"3 (payload)"] removes=[] touches=[]'
-        - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
-        - '📇 sess1/collection-opfs-eviction-efficiency/collection.item (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
-        - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item upserts=[] removes=["collection.item.\\"2 (payload)"] touches=[]'
+        - '📚 sess1/collection-opfs-eviction-efficiency/collection.item hits=0/1 ["ci.\\"3 (metadata)"]'
+        - '✍️ sess1/collection-opfs-eviction-efficiency/collection.item ["ci.\\"3 (payload)","ci.\\"3 (metadata)"]'
+        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
+        - '🗂️ sess1/collection-opfs-eviction-efficiency/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_meta__:\\"2","__tsdf_meta__:\\"3","__tsdf_payload__:\\"1","__tsdf_payload__:\\"2","__tsdf_payload__:\\"3"]'
+        - '📚 sess1/collection-opfs-eviction-efficiency/collection.item hits=3/3 ["ci.\\"1 (metadata)","ci.\\"2 (metadata)","ci.\\"3 (metadata)"]'
+        - '🗑️ sess1/collection-opfs-eviction-efficiency/collection.item ["ci.\\"2 (payload)","ci.\\"2 (metadata)"]'
+        - '🗂️ sess1/collection-opfs-eviction-efficiency/collection.item keys=["__tsdf_meta__:\\"1","__tsdf_meta__:\\"3","__tsdf_payload__:\\"1","__tsdf_payload__:\\"3"]'
     `);
   });
 
@@ -425,14 +457,13 @@ describe('async persistent storage efficiency', () => {
     await flushAllTimers();
 
     expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
-    expect(mockAdapter.metadataListRequests).toMatchInlineSnapshot(`
-      - cursor: null
-        limit: 100
-        order: 'lru-desc'
-        scope:
-          kind: 'collection.item'
-          sessionKey: 'sess1'
-          storeName: 'collection-opfs-protected-snapshot'
+    expect(mockAdapter.listKeysRequests).toMatchInlineSnapshot(`
+      - kind: 'collection.item'
+        sessionKey: 'sess1'
+        storeName: 'collection-opfs-protected-snapshot'
+      - kind: 'collection.item'
+        sessionKey: 'sess1'
+        storeName: 'collection-opfs-protected-snapshot'
     `);
   });
 
@@ -500,19 +531,29 @@ describe('async persistent storage efficiency', () => {
       breakdown:
         externalPayloadReads: []
         legacyFallbackReads: []
-        metadataReads: []
-        payloadBatchReads: []
+        listKeyScans: []
+        metadataBatchReads:
+          - ['lq.{tableId:"users"} (metadata)']
+          - ['li."users||1 (metadata)']
+        metadataReads: ['lq.{tableId:"users"} (metadata)', 'li."users||1 (metadata)']
+        payloadBatchReads:
+          - ['lq.{tableId:"users"} (payload)']
+          - ['li."users||1 (payload)']
         scopedPayloadReads: ['lq.{tableId:"users"} (payload)', 'li."users||1 (payload)']
 
       operations:
-        - '📖 ✅ lq.{tableId:"users"} (payload) | touch=never'
-        - '📖 ✅ li."users||1 (payload) | touch=never'
+        - '📚 sess1/list-query-opfs-efficiency/listQuery.query hits=2/2 ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)"]'
+        - '📚 sess1/list-query-opfs-efficiency/listQuery.item hits=2/2 ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
     `);
 
-    expect(mockAdapter.payloadGetRequests).toContain(usersQueryKey);
-    expect(mockAdapter.payloadGetRequests).toContain(usersItemKey);
-    expect(mockAdapter.payloadGetRequests).not.toContain(projectsQueryKey);
-    expect(mockAdapter.payloadGetRequests).not.toContain(projectsItemKey);
+    expect(mockAdapter.payloadGetManyRequests.flat()).toContain(usersQueryKey);
+    expect(mockAdapter.payloadGetManyRequests.flat()).toContain(usersItemKey);
+    expect(mockAdapter.payloadGetManyRequests.flat()).not.toContain(
+      projectsQueryKey,
+    );
+    expect(mockAdapter.payloadGetManyRequests.flat()).not.toContain(
+      projectsItemKey,
+    );
   });
 
   test('list query eviction uses metadata scans without reading stored query or item payloads', async () => {
@@ -562,21 +603,54 @@ describe('async persistent storage efficiency', () => {
           - 'tsdf.sess1._o_.p (protected registry payload)'
           - 'tsdf.sess1._o_.p (protected registry payload)'
         legacyFallbackReads: []
+        listKeyScans:
+          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.query'
+          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.query'
+          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.item'
+          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.item'
+        metadataBatchReads:
+          - ['lq.{tableId:"tasks"} (metadata)']
+          - ['li."projects||1 (metadata)', 'li."tasks||1 (metadata)']
+          - ['tsdf.sess1._o_.p (protected registry metadata)']
+          - - 'lq.{tableId:"projects"} (metadata)'
+            - 'lq.{tableId:"tasks"} (metadata)'
+            - 'lq.{tableId:"users"} (metadata)'
+          - ['tsdf.sess1._o_.p (protected registry metadata)']
+          - - 'li."projects||1 (metadata)'
+            - 'li."tasks||1 (metadata)'
+            - 'li."users||1 (metadata)'
         metadataReads:
-          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.query (metadata order=lru-desc cursor=null limit=100)'
-          - 'sess1/list-query-opfs-eviction-efficiency/listQuery.item (metadata order=lru-desc cursor=null limit=100)'
-        payloadBatchReads: []
+          - 'lq.{tableId:"tasks"} (metadata)'
+          - 'li."projects||1 (metadata)'
+          - 'li."tasks||1 (metadata)'
+          - 'tsdf.sess1._o_.p (protected registry metadata)'
+          - 'lq.{tableId:"projects"} (metadata)'
+          - 'lq.{tableId:"tasks"} (metadata)'
+          - 'lq.{tableId:"users"} (metadata)'
+          - 'tsdf.sess1._o_.p (protected registry metadata)'
+          - 'li."projects||1 (metadata)'
+          - 'li."tasks||1 (metadata)'
+          - 'li."users||1 (metadata)'
+        payloadBatchReads:
+          - ['tsdf.sess1._o_.p (protected registry payload)']
+          - ['tsdf.sess1._o_.p (protected registry payload)']
         scopedPayloadReads: []
 
       operations:
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=["listQuery.query.{tableId:\\"tasks\\"} (payload)"] removes=[] touches=[]'
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=["listQuery.item.\\"projects||1 (payload)","listQuery.item.\\"tasks||1 (payload)"] removes=[] touches=[]'
-        - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
-        - '📇 sess1/list-query-opfs-eviction-efficiency/listQuery.query (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query upserts=[] removes=["listQuery.query.{tableId:\\"users\\"} (payload)"] touches=[]'
-        - '📖 ❌ tsdf.sess1._o_.p (protected registry payload) | touch=never'
-        - '📇 sess1/list-query-opfs-eviction-efficiency/listQuery.item (metadata order=lru-desc cursor=null limit=100 resultCount=3 nextCursor=null)'
-        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item upserts=[] removes=["listQuery.item.\\"users||1 (payload)"] touches=[]'
+        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.query hits=0/1 ["lq.{tableId:\\"tasks\\"} (metadata)"]'
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.query ["lq.{tableId:\\"tasks\\"} (payload)","lq.{tableId:\\"tasks\\"} (metadata)"]'
+        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.item hits=1/2 ["li.\\"projects||1 (metadata)","li.\\"tasks||1 (metadata)"]'
+        - '✍️ sess1/list-query-opfs-eviction-efficiency/listQuery.item ["li.\\"projects||1 (payload)","li.\\"projects||1 (metadata)","li.\\"tasks||1 (payload)","li.\\"tasks||1 (metadata)"]'
+        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
+        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.query keys=["__tsdf_meta__:{tableId:\\"projects\\"}","__tsdf_meta__:{tableId:\\"tasks\\"}","__tsdf_meta__:{tableId:\\"users\\"}","__tsdf_payload__:{tableId:\\"projects\\"}","__tsdf_payload__:{tableId:\\"tasks\\"}","__tsdf_payload__:{tableId:\\"users\\"}"]'
+        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.query hits=3/3 ["lq.{tableId:\\"projects\\"} (metadata)","lq.{tableId:\\"tasks\\"} (metadata)","lq.{tableId:\\"users\\"} (metadata)"]'
+        - '🗑️ sess1/list-query-opfs-eviction-efficiency/listQuery.query ["lq.{tableId:\\"users\\"} (payload)","lq.{tableId:\\"users\\"} (metadata)"]'
+        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.query keys=["__tsdf_meta__:{tableId:\\"projects\\"}","__tsdf_meta__:{tableId:\\"tasks\\"}","__tsdf_payload__:{tableId:\\"projects\\"}","__tsdf_payload__:{tableId:\\"tasks\\"}"]'
+        - '📚 sess1/_o_.p/document hits=0/2 ["tsdf.sess1._o_.p (protected registry payload)","tsdf.sess1._o_.p (protected registry metadata)"]'
+        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.item keys=["__tsdf_meta__:\\"projects||1","__tsdf_meta__:\\"tasks||1","__tsdf_meta__:\\"users||1","__tsdf_payload__:\\"projects||1","__tsdf_payload__:\\"tasks||1","__tsdf_payload__:\\"users||1"]'
+        - '📚 sess1/list-query-opfs-eviction-efficiency/listQuery.item hits=3/3 ["li.\\"projects||1 (metadata)","li.\\"tasks||1 (metadata)","li.\\"users||1 (metadata)"]'
+        - '🗑️ sess1/list-query-opfs-eviction-efficiency/listQuery.item ["li.\\"users||1 (payload)","li.\\"users||1 (metadata)"]'
+        - '🗂️ sess1/list-query-opfs-eviction-efficiency/listQuery.item keys=["__tsdf_meta__:\\"projects||1","__tsdf_meta__:\\"tasks||1","__tsdf_payload__:\\"projects||1","__tsdf_payload__:\\"tasks||1"]'
     `);
   });
 });
