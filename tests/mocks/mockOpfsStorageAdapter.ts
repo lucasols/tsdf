@@ -15,6 +15,12 @@ import type {
 
 const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
 const METADATA_RECORD_PREFIX = '__tsdf_meta__:';
+const INTERNAL_REGISTRY_KEY = 'registry';
+const INTERNAL_ASYNC_SCOPE: AsyncStorageNamespaceScope = {
+  sessionKey: '__tsdf_async__',
+  storeName: '__tsdf_async__',
+  kind: '__internal.protected',
+};
 
 type MockOpfsStorageAdapterOptions = {
   readDelayMs?: number;
@@ -240,6 +246,23 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
   return null;
 }
 
+type LogicalRecordLocation = {
+  metadataRecordKey: string;
+  payloadRecordKey: string;
+  scope: AsyncStorageNamespaceScope;
+};
+
+function getLogicalRecordLocation(key: string): LogicalRecordLocation | null {
+  const parsed = parseFlatStorageKey(key);
+  if (parsed === null) return null;
+
+  return {
+    scope: parsed.scope,
+    payloadRecordKey: getPayloadRecordKey(parsed.key),
+    metadataRecordKey: getMetadataRecordKey(parsed.key),
+  };
+}
+
 function buildCustomMetadata(
   scope: AsyncStorageNamespaceScope,
   data: unknown,
@@ -376,8 +399,22 @@ export function createMockOpfsStorageAdapter(
     getRaw: (key: string) => string | null;
     has: (key: string) => boolean;
     readEntry: <T>(key: string) => StorageCacheEntry<T> | null;
+    readMetadata: (
+      key: string,
+    ) => {
+      customMetadata: Record<string, unknown>;
+      key: string;
+      lastAccessAt: number;
+      sizeBytes?: number;
+      version: number;
+      writtenAt: number;
+    } | null;
     writeRaw: (key: string, raw: string) => void;
     writeValue: <T>(key: string, value: T) => void;
+    writePayload: (key: string, value: unknown) => void;
+    writeMetadata: (key: string, value: unknown) => void;
+    removePayload: (key: string) => void;
+    removeMetadata: (key: string) => void;
   };
   scope?: never;
   payloadGetRequests: string[];
@@ -390,8 +427,33 @@ export function createMockOpfsStorageAdapter(
   clearInstrumentation: () => void;
   getRaw: (key: string) => string | null;
   has: (key: string) => boolean;
+  registerNamespace: (scope: AsyncStorageNamespaceScope) => void;
   setRaw: (key: string, raw: string) => void;
   setValue: <T>(key: string, value: T) => void;
+  setPayload: (key: string, value: unknown) => void;
+  setMetadata: (key: string, value: unknown) => void;
+  readMetadata: (
+    key: string,
+  ) => {
+    customMetadata: Record<string, unknown>;
+    key: string;
+    lastAccessAt: number;
+    sizeBytes?: number;
+    version: number;
+    writtenAt: number;
+  } | null;
+  removePayload: (key: string) => void;
+  removeMetadata: (key: string) => void;
+  rawNamespace: {
+    get: (scope: AsyncStorageNamespaceScope, key: string) => unknown;
+    listKeys: (scope: AsyncStorageNamespaceScope) => string[];
+    remove: (scope: AsyncStorageNamespaceScope, key: string) => void;
+    set: (
+      scope: AsyncStorageNamespaceScope,
+      key: string,
+      value: unknown,
+    ) => void;
+  };
   document: { storageKey: () => string; readData: <T>() => T | null };
   collection: {
     itemStorageKey: (payload: string) => string;
@@ -426,6 +488,98 @@ export function createMockOpfsStorageAdapter(
       namespaceStore.set(namespaceId, namespace);
     }
     return namespace;
+  }
+
+  function setNamespaceValue(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+    value: unknown,
+  ): void {
+    getNamespace(scope).set(key, { value });
+  }
+
+  function getNamespaceValue(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+  ): unknown {
+    return getNamespace(scope).get(key)?.value ?? null;
+  }
+
+  function removeNamespaceValue(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+  ): void {
+    const namespace = getNamespace(scope);
+    namespace.delete(key);
+    if (namespace.size === 0) {
+      namespaceStore.delete(getNamespaceId(scope));
+    }
+  }
+
+  function readRegisteredNamespaces(): AsyncStorageNamespaceScope[] {
+    const record = getNamespaceValue(
+      INTERNAL_ASYNC_SCOPE,
+      INTERNAL_REGISTRY_KEY,
+    );
+    const parsed = getRecord(record);
+    if (parsed === null || !Array.isArray(parsed.namespaces)) {
+      return [];
+    }
+
+    const namespaces: AsyncStorageNamespaceScope[] = [];
+    for (const entry of parsed.namespaces) {
+      const namespace = getRecord(entry);
+      if (
+        namespace === null ||
+        typeof namespace.sessionKey !== 'string' ||
+        typeof namespace.storeName !== 'string' ||
+        typeof namespace.kind !== 'string'
+      ) {
+        continue;
+      }
+
+      namespaces.push({
+        sessionKey: namespace.sessionKey,
+        storeName: namespace.storeName,
+        kind: __LEGIT_CAST__<AsyncStorageNamespaceScope['kind'], string>(
+          namespace.kind,
+        ),
+      });
+    }
+
+    return namespaces;
+  }
+
+  function writeRegisteredNamespaces(
+    namespaces: AsyncStorageNamespaceScope[],
+  ): void {
+    setNamespaceValue(INTERNAL_ASYNC_SCOPE, INTERNAL_REGISTRY_KEY, {
+      namespaces,
+    });
+  }
+
+  function ensureNamespaceRegistered(scope: AsyncStorageNamespaceScope): void {
+    if (
+      scope.sessionKey === INTERNAL_ASYNC_SCOPE.sessionKey &&
+      scope.storeName === INTERNAL_ASYNC_SCOPE.storeName &&
+      scope.kind === INTERNAL_ASYNC_SCOPE.kind
+    ) {
+      return;
+    }
+
+    const existing = readRegisteredNamespaces();
+    if (
+      existing.some(
+        (entry) =>
+          entry.sessionKey === scope.sessionKey &&
+          entry.storeName === scope.storeName &&
+          entry.kind === scope.kind,
+      )
+    ) {
+      return;
+    }
+
+    writeRegisteredNamespaces([...existing, scope]);
   }
 
   async function waitForReadDelay(): Promise<void> {
@@ -618,6 +772,43 @@ export function createMockOpfsStorageAdapter(
     writeLogicalStorageEntry(key, value);
   }
 
+  function setPayloadValue(key: string, value: unknown): void {
+    const location = getLogicalRecordLocation(key);
+    if (location === null) return;
+
+    setNamespaceValue(location.scope, location.payloadRecordKey, value);
+  }
+
+  function setMetadataValue(key: string, value: unknown): void {
+    const location = getLogicalRecordLocation(key);
+    if (location === null) return;
+
+    setNamespaceValue(location.scope, location.metadataRecordKey, value);
+  }
+
+  function removePayloadValue(key: string): void {
+    const location = getLogicalRecordLocation(key);
+    if (location === null) return;
+
+    removeNamespaceValue(location.scope, location.payloadRecordKey);
+  }
+
+  function removeMetadataValue(key: string): void {
+    const location = getLogicalRecordLocation(key);
+    if (location === null) return;
+
+    removeNamespaceValue(location.scope, location.metadataRecordKey);
+  }
+
+  function readLogicalMetadata(key: string) {
+    const location = getLogicalRecordLocation(key);
+    if (location === null) return null;
+
+    return parseManagedMetadataRecord(
+      getNamespaceValue(location.scope, location.metadataRecordKey),
+    );
+  }
+
   function setRaw(key: string, raw: string): void {
     const parsed = parseJson<unknown>(raw);
     if (parsed !== null) {
@@ -721,8 +912,13 @@ export function createMockOpfsStorageAdapter(
       getRaw,
       has: hasLogicalStorageEntry,
       readEntry: readLogicalStorageEntry,
+      readMetadata: readLogicalMetadata,
       writeRaw: setRaw,
       writeValue: setValue,
+      writePayload: setPayloadValue,
+      writeMetadata: setMetadataValue,
+      removePayload: removePayloadValue,
+      removeMetadata: removeMetadataValue,
     },
     payloadGetRequests,
     payloadGetManyRequests,
@@ -751,8 +947,22 @@ export function createMockOpfsStorageAdapter(
     },
     getRaw,
     has: hasLogicalStorageEntry,
+    registerNamespace: ensureNamespaceRegistered,
     setRaw,
     setValue,
+    setPayload: setPayloadValue,
+    setMetadata: setMetadataValue,
+    readMetadata: readLogicalMetadata,
+    removePayload: removePayloadValue,
+    removeMetadata: removeMetadataValue,
+    rawNamespace: {
+      get: getNamespaceValue,
+      listKeys(scope) {
+        return [...getNamespace(scope).keys()].sort(compareStrings);
+      },
+      remove: removeNamespaceValue,
+      set: setNamespaceValue,
+    },
     document: {
       storageKey() {
         const storeName = options.storeName ?? 'store';
