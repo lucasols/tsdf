@@ -78,26 +78,26 @@ describe('async storage efficiency: collection', () => {
       2.002s | 🗂️ tsdf (root directory) entries=["dir:sess1"]
       .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:collection-expiration"]
       .      | 🗂️ tsdf/sess1/collection-expiration
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22expired-user-2.json","file:collection.item~__tsdf_meta__%3A%22expired-user.json","file:collection.item~__tsdf_meta__%3A%22fresh-user.json","file:collection.item~__tsdf_payload__%3A%22expired-user-2.json","file:collection.item~__tsdf_payload__%3A%22expired-user.json","file:collection.item~__tsdf_payload__%3A%22fresh-user.json"]
+             |    └ (store directory) entries=["file:ci.%22expired-user-2.m.json","file:ci.%22expired-user-2.p.json","file:ci.%22expired-user.m.json","file:ci.%22expired-user.p.json","file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
       .      | 🗂️ tsdf/sess1/collection-expiration
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22expired-user-2.json","file:collection.item~__tsdf_meta__%3A%22expired-user.json","file:collection.item~__tsdf_meta__%3A%22fresh-user.json","file:collection.item~__tsdf_payload__%3A%22expired-user-2.json","file:collection.item~__tsdf_payload__%3A%22expired-user.json","file:collection.item~__tsdf_payload__%3A%22fresh-user.json"]
+             |    └ (store directory) entries=["file:ci.%22expired-user-2.m.json","file:ci.%22expired-user-2.p.json","file:ci.%22expired-user.m.json","file:ci.%22expired-user.p.json","file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
       2.003s | 🗂️ tsdf/sess1 (session directory) entries=["dir:collection-expiration"]
-      2.006s | 📖 tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user-2.json
+      2.006s | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
-      2.007s | 📖 tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user.json
+      2.008s | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
-      2.008s | 📖 tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22fresh-user.json
-             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
-      2.009s | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_payload__%3A%22expired-user.json
+      2.009s | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.p.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (payload))
-      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user.json
+      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
-      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_payload__%3A%22expired-user-2.json
+      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.p.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user-2.json
+      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
       .      | 🗂️ tsdf/sess1/collection-expiration
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22fresh-user.json","file:collection.item~__tsdf_payload__%3A%22fresh-user.json"]
+             |    └ (store directory) entries=["file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
+      2.01s  | 📖 tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
 
       verbose
       time   |
@@ -105,39 +105,39 @@ describe('async storage efficiency: collection', () => {
       .      | 🗂️ tsdf (root directory) entries=["dir:sess1"]
       .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:collection-expiration"]
       .      | 🗂️ tsdf/sess1/collection-expiration
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22expired-user-2.json","file:collection.item~__tsdf_meta__%3A%22expired-user.json","file:collection.item~__tsdf_meta__%3A%22fresh-user.json","file:collection.item~__tsdf_payload__%3A%22expired-user-2.json","file:collection.item~__tsdf_payload__%3A%22expired-user.json","file:collection.item~__tsdf_payload__%3A%22fresh-user.json"]
+             |    └ (store directory) entries=["file:ci.%22expired-user-2.m.json","file:ci.%22expired-user-2.p.json","file:ci.%22expired-user.m.json","file:ci.%22expired-user.p.json","file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
       .      | 🗂️ tsdf/sess1/collection-expiration
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22expired-user-2.json","file:collection.item~__tsdf_meta__%3A%22expired-user.json","file:collection.item~__tsdf_meta__%3A%22fresh-user.json","file:collection.item~__tsdf_payload__%3A%22expired-user-2.json","file:collection.item~__tsdf_payload__%3A%22expired-user.json","file:collection.item~__tsdf_payload__%3A%22fresh-user.json"]
+             |    └ (store directory) entries=["file:ci.%22expired-user-2.m.json","file:ci.%22expired-user-2.p.json","file:ci.%22expired-user.m.json","file:ci.%22expired-user.p.json","file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
       2.003s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
-      .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user-2.json
+      .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
       .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:collection-expiration"]
-      2.004s | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
-      2.005s | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22fresh-user.json
-             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata))
-      2.006s | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_payload__%3A%22expired-user-2.json
+      2.004s | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.p.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (payload))
-      .      | 📖 tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user-2.json
+      2.005s | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
+      2.006s | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.p.json
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (payload))
+      .      | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
-      2.007s | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_payload__%3A%22expired-user.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (payload))
-      .      | 📖 tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
-      2.008s | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_payload__%3A%22fresh-user.json
+      2.007s | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata))
+      2.008s | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22fresh-user.p.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (payload))
-      .      | 📖 tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22fresh-user.json
-             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
-      2.009s | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_payload__%3A%22expired-user.json
+      .      | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
+      2.009s | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.p.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (payload))
-      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user.json
+      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
-      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_payload__%3A%22expired-user-2.json
+      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.p.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item~__tsdf_meta__%3A%22expired-user-2.json
+      .      | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
       .      | 🗂️ tsdf/sess1/collection-expiration
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22fresh-user.json","file:collection.item~__tsdf_payload__%3A%22fresh-user.json"]
+             |    └ (store directory) entries=["file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
+      2.01s  | 📖 tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
       "
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, freshItemKey))
@@ -203,69 +203,69 @@ describe('async storage efficiency: collection', () => {
       simplified
       time   |
       4.102s | 🗂️ tsdf/sess1/col-max-items-metadata
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json"]
-      4.147s | ✍️ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_payload__%3A%22c.json
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json"]
+      4.147s | ✍️ tsdf/sess1/col-max-items-metadata/ci.%22c.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (payload)) | 0.00 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22c.json
+      .      | ✍️ tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.00 kb -> 0.24 kb
       6.14s  | 🗂️ tsdf/sess1/col-max-items-metadata
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22c.json"]
-      6.143s | 📖 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22a.json
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json"]
+      6.143s | 📖 tsdf/sess1/col-max-items-metadata/ci.%22a.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22b.json
+      .      | 📖 tsdf/sess1/col-max-items-metadata/ci.%22b.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."b (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22c.json
+      .      | 📖 tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.24 kb
       6.18s  | 🗂️ tsdf/sess1 (session directory) entries=["dir:col-max-items-metadata"]
-      6.181s | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_payload__%3A%22a.json
+      6.181s | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22a.json
+      .      | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata))
       .      | 🗂️ tsdf/sess1/col-max-items-metadata
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22c.json"]
+             |    └ (store directory) entries=["file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json"]
 
       verbose
       time   |
       4.101s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       4.102s | 📂 dir-open ✅ tsdf/sess1/col-max-items-metadata (store directory)
       .      | 🗂️ tsdf/sess1/col-max-items-metadata
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json"]
-      4.103s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22a.json
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json"]
+      4.103s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata))
-      4.104s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22b.json
-             |    └ (tsdf.sess1.col-max-items-metadata.ci."b (metadata))
-      4.105s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_payload__%3A%22a.json
+      4.104s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (payload))
-      4.106s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_payload__%3A%22b.json
+      4.105s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/ci.%22b.m.json
+             |    └ (tsdf.sess1.col-max-items-metadata.ci."b (metadata))
+      4.106s | 📄 file-open ✅ tsdf/sess1/col-max-items-metadata/ci.%22b.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."b (payload))
-      4.141s | 📄 file-open ❌ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22c.json
+      4.141s | 📄 file-open ❌ tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata))
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.142s | 📁 dir-open-or-create ✅ tsdf/sess1/col-max-items-metadata (store directory)
-      4.143s | 📄 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_payload__%3A%22c.json
+      4.143s | 📄 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.%22c.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22c.json
+      .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata))
-      4.147s | ✍️ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_payload__%3A%22c.json
+      4.147s | ✍️ tsdf/sess1/col-max-items-metadata/ci.%22c.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (payload)) | 0.00 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22c.json
+      .      | ✍️ tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.00 kb -> 0.24 kb
       6.14s  | 🗂️ tsdf/sess1/col-max-items-metadata
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22c.json"]
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json"]
       6.141s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
-      6.143s | 📖 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22a.json
+      6.143s | 📖 tsdf/sess1/col-max-items-metadata/ci.%22a.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22b.json
+      .      | 📖 tsdf/sess1/col-max-items-metadata/ci.%22b.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."b (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22c.json
+      .      | 📖 tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.24 kb
       6.18s  | 🗂️ tsdf/sess1 (session directory) entries=["dir:col-max-items-metadata"]
-      6.181s | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_payload__%3A%22a.json
+      6.181s | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item~__tsdf_meta__%3A%22a.json
+      .      | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.m.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata))
       .      | 🗂️ tsdf/sess1/col-max-items-metadata
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22c.json"]
+             |    └ (store directory) entries=["file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json"]
       "
     `);
   });
@@ -312,97 +312,97 @@ describe('async storage efficiency: collection', () => {
       simplified
       time   |
       4.102s | 🗂️ tsdf/sess1/col-coalesced-maintenance
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json"]
-      4.147s | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22c.json
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json"]
+      4.147s | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22c.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (payload)) | 0.00 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22c.json
+      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.00 kb -> 0.24 kb
-      5.247s | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22d.json
+      5.247s | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22d.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (payload)) | 0.00 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22d.json
+      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.00 kb -> 0.24 kb
       6.14s  | 🗂️ tsdf/sess1/col-coalesced-maintenance
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_meta__%3A%22d.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22d.json"]
-      6.143s | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22a.json
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json","file:ci.%22d.m.json","file:ci.%22d.p.json"]
+      6.143s | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22a.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22b.json
+      .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22b.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22c.json
+      .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22d.json
+      .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.24 kb
       6.18s  | 🗂️ tsdf/sess1 (session directory) entries=["dir:col-coalesced-maintenance"]
-      6.181s | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22b.json
+      6.181s | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22b.json
+      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata))
-      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22a.json
+      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22a.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22a.json
+      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22a.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))
       .      | 🗂️ tsdf/sess1/col-coalesced-maintenance
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_meta__%3A%22d.json","file:collection.item~__tsdf_payload__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22d.json"]
+             |    └ (store directory) entries=["file:ci.%22c.m.json","file:ci.%22c.p.json","file:ci.%22d.m.json","file:ci.%22d.p.json"]
 
       verbose
       time   |
       4.101s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       4.102s | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
       .      | 🗂️ tsdf/sess1/col-coalesced-maintenance
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json"]
-      4.103s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22a.json
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json"]
+      4.103s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22a.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))
-      4.104s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22b.json
-             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata))
-      4.105s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22a.json
+      4.104s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22a.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (payload))
-      4.106s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22b.json
+      4.105s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.m.json
+             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata))
+      4.106s | 📄 file-open ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (payload))
-      4.141s | 📄 file-open ❌ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22c.json
+      4.141s | 📄 file-open ❌ tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.142s | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
-      4.143s | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22c.json
+      4.143s | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/ci.%22c.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22c.json
+      .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))
-      4.147s | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22c.json
+      4.147s | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22c.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (payload)) | 0.00 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22c.json
+      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.00 kb -> 0.24 kb
-      5.241s | 📄 file-open ❌ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22d.json
+      5.241s | 📄 file-open ❌ tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       5.242s | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
-      5.243s | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22d.json
+      5.243s | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/ci.%22d.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22d.json
+      .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))
-      5.247s | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22d.json
+      5.247s | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22d.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (payload)) | 0.00 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22d.json
+      .      | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.00 kb -> 0.24 kb
       6.14s  | 🗂️ tsdf/sess1/col-coalesced-maintenance
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22a.json","file:collection.item~__tsdf_meta__%3A%22b.json","file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_meta__%3A%22d.json","file:collection.item~__tsdf_payload__%3A%22a.json","file:collection.item~__tsdf_payload__%3A%22b.json","file:collection.item~__tsdf_payload__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22d.json"]
+             |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json","file:ci.%22d.m.json","file:ci.%22d.p.json"]
       6.141s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
-      6.143s | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22a.json
+      6.143s | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22a.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22b.json
+      .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22b.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22c.json
+      .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22d.json
+      .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.24 kb
       6.18s  | 🗂️ tsdf/sess1 (session directory) entries=["dir:col-coalesced-maintenance"]
-      6.181s | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22b.json
+      6.181s | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22b.json
+      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata))
-      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_payload__%3A%22a.json
+      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22a.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item~__tsdf_meta__%3A%22a.json
+      .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22a.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))
       .      | 🗂️ tsdf/sess1/col-coalesced-maintenance
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%22c.json","file:collection.item~__tsdf_meta__%3A%22d.json","file:collection.item~__tsdf_payload__%3A%22c.json","file:collection.item~__tsdf_payload__%3A%22d.json"]
+             |    └ (store directory) entries=["file:ci.%22c.m.json","file:ci.%22c.p.json","file:ci.%22d.m.json","file:ci.%22d.p.json"]
       "
     `);
   });
@@ -555,37 +555,37 @@ describe('async storage efficiency: collection', () => {
       simplified
       time   |
       4.05s  | 🗂️ tsdf/sess1/col-mutation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
-      4.143s | 📖 tsdf/sess1/col-mutation-flow/collection.item~__tsdf_meta__%3A%221.json
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
+      4.143s | 📖 tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb
-      4.147s | ✍️ tsdf/sess1/col-mutation-flow/collection.item~__tsdf_payload__%3A%221.json
+      4.147s | ✍️ tsdf/sess1/col-mutation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/col-mutation-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | ✍️ tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
       6.14s  | 🗂️ tsdf/sess1/col-mutation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
-      6.193s | 📖 tsdf/sess1/col-mutation-flow/collection.item~__tsdf_meta__%3A%221.json
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
+      6.193s | 📖 tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb
 
       verbose
       time   |
       4.05s  | 🗂️ tsdf/sess1/col-mutation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       4.141s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.142s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-flow (store directory)
-      4.143s | 📖 tsdf/sess1/col-mutation-flow/collection.item~__tsdf_meta__%3A%221.json
+      4.143s | 📖 tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-mutation-flow/collection.item~__tsdf_payload__%3A%221.json
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-mutation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-mutation-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata))
-      4.147s | ✍️ tsdf/sess1/col-mutation-flow/collection.item~__tsdf_payload__%3A%221.json
+      4.147s | ✍️ tsdf/sess1/col-mutation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/col-mutation-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | ✍️ tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
       6.14s  | 🗂️ tsdf/sess1/col-mutation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
-      6.193s | 📖 tsdf/sess1/col-mutation-flow/collection.item~__tsdf_meta__%3A%221.json
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
+      6.193s | 📖 tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb
       "
     `);
@@ -625,29 +625,29 @@ describe('async storage efficiency: collection', () => {
       simplified
       time   |
       4.08s  | 🗂️ tsdf/sess1 (session directory) entries=["dir:col-delete-flow"]
-      4.081s | 🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item~__tsdf_payload__%3A%221.json
+      4.081s | 🗑️ ✅ tsdf/sess1/col-delete-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 🗑️ ✅ tsdf/sess1/col-delete-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (metadata))
       .      | 🗂️ tsdf/sess1/col-delete-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%222.json","file:collection.item~__tsdf_payload__%3A%222.json"]
+             |    └ (store directory) entries=["file:ci.%222.m.json","file:ci.%222.p.json"]
       6.08s  | 🗂️ tsdf/sess1/col-delete-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%222.json","file:collection.item~__tsdf_payload__%3A%222.json"]
-      6.083s | 📖 tsdf/sess1/col-delete-flow/collection.item~__tsdf_meta__%3A%222.json
+             |    └ (store directory) entries=["file:ci.%222.m.json","file:ci.%222.p.json"]
+      6.083s | 📖 tsdf/sess1/col-delete-flow/ci.%222.m.json
              |    └ (tsdf.sess1.col-delete-flow.ci."2 (metadata)) | 0.24 kb
 
       verbose
       time   |
       4.08s  | 🗂️ tsdf/sess1 (session directory) entries=["dir:col-delete-flow"]
-      4.081s | 🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item~__tsdf_payload__%3A%221.json
+      4.081s | 🗑️ ✅ tsdf/sess1/col-delete-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 🗑️ ✅ tsdf/sess1/col-delete-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (metadata))
       .      | 🗂️ tsdf/sess1/col-delete-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%222.json","file:collection.item~__tsdf_payload__%3A%222.json"]
+             |    └ (store directory) entries=["file:ci.%222.m.json","file:ci.%222.p.json"]
       6.08s  | 🗂️ tsdf/sess1/col-delete-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%222.json","file:collection.item~__tsdf_payload__%3A%222.json"]
-      6.083s | 📖 tsdf/sess1/col-delete-flow/collection.item~__tsdf_meta__%3A%222.json
+             |    └ (store directory) entries=["file:ci.%222.m.json","file:ci.%222.p.json"]
+      6.083s | 📖 tsdf/sess1/col-delete-flow/ci.%222.m.json
              |    └ (tsdf.sess1.col-delete-flow.ci."2 (metadata)) | 0.24 kb
       "
     `);
@@ -704,38 +704,38 @@ describe('async storage efficiency: collection', () => {
       simplified
       time   |
       4.86s  | 🗂️ tsdf/sess1/col-invalidation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
-      4.953s | 📖 tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_meta__%3A%221.json
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
+      4.953s | 📖 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb
-      4.957s | ✍️ tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_payload__%3A%221.json
+      4.957s | ✍️ tsdf/sess1/col-invalidation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | ✍️ tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
       6.95s  | 🗂️ tsdf/sess1/col-invalidation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
-      7.003s | 📖 tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_meta__%3A%221.json
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
+      7.003s | 📖 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb
 
       verbose
       time   |
       4.86s  | 🗂️ tsdf/sess1/col-invalidation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       4.951s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.952s | 📁 dir-open-or-create ✅ tsdf/sess1/col-invalidation-flow (store directory)
-      4.953s | 📖 tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_meta__%3A%221.json
+      4.953s | 📖 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_payload__%3A%221.json
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-invalidation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))
-      4.957s | ✍️ tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_payload__%3A%221.json
+      4.957s | ✍️ tsdf/sess1/col-invalidation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | ✍️ tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
       6.95s  | 🗂️ tsdf/sess1/col-invalidation-flow
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       6.951s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
-      7.003s | 📖 tsdf/sess1/col-invalidation-flow/collection.item~__tsdf_meta__%3A%221.json
+      7.003s | 📖 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb
       "
     `);
@@ -881,38 +881,38 @@ describe('async storage efficiency: collection', () => {
       simplified
       time   |
       5.76s  | 🗂️ tsdf/sess1/col-coalesced-invalidations
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
-      5.853s | 📖 tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_meta__%3A%221.json
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
+      5.853s | 📖 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb
-      5.857s | ✍️ tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_payload__%3A%221.json
+      5.857s | ✍️ tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload)) | 0.11 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_meta__%3A%221.json
+      .      | ✍️ tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
       7.85s  | 🗂️ tsdf/sess1/col-coalesced-invalidations
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
-      7.903s | 📖 tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_meta__%3A%221.json
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
+      7.903s | 📖 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb
 
       verbose
       time   |
       5.76s  | 🗂️ tsdf/sess1/col-coalesced-invalidations
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       5.851s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       5.852s | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations (store directory)
-      5.853s | 📖 tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_meta__%3A%221.json
+      5.853s | 📖 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_payload__%3A%221.json
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))
-      5.857s | ✍️ tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_payload__%3A%221.json
+      5.857s | ✍️ tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload)) | 0.11 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_meta__%3A%221.json
+      .      | ✍️ tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
       7.85s  | 🗂️ tsdf/sess1/col-coalesced-invalidations
-             |    └ (store directory) entries=["file:collection.item~__tsdf_meta__%3A%221.json","file:collection.item~__tsdf_payload__%3A%221.json"]
+             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       7.851s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
-      7.903s | 📖 tsdf/sess1/col-coalesced-invalidations/collection.item~__tsdf_meta__%3A%221.json
+      7.903s | 📖 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb
       "
     `);
@@ -955,22 +955,22 @@ describe('async storage efficiency: collection', () => {
       "
       simplified
       time   |
-      3.056s | 📖 tsdf/sess1/col-remount-flow/collection.item~__tsdf_payload__%3A%221.json
+      3.056s | 📖 tsdf/sess1/col-remount-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload)) | 0.11 kb
-      .      | 📖 tsdf/sess1/col-remount-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📖 tsdf/sess1/col-remount-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata)) | 0.24 kb
 
       verbose
       time   |
       3.001s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3.002s | 📂 dir-open ✅ tsdf/sess1/col-remount-flow (store directory)
-      3.003s | 📄 file-open ✅ tsdf/sess1/col-remount-flow/collection.item~__tsdf_payload__%3A%221.json
+      3.003s | 📄 file-open ✅ tsdf/sess1/col-remount-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload))
-      .      | 📄 file-open ✅ tsdf/sess1/col-remount-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📄 file-open ✅ tsdf/sess1/col-remount-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata))
-      3.056s | 📖 tsdf/sess1/col-remount-flow/collection.item~__tsdf_payload__%3A%221.json
+      3.056s | 📖 tsdf/sess1/col-remount-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload)) | 0.11 kb
-      .      | 📖 tsdf/sess1/col-remount-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📖 tsdf/sess1/col-remount-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata)) | 0.24 kb
       "
     `);
@@ -1019,34 +1019,34 @@ describe('async storage efficiency: collection', () => {
       "
       simplified
       time   |
-      3.056s | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_payload__%3A%221.json
+      3.056s | 📖 tsdf/sess1/col-multi-remount-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (payload)) | 0.11 kb
-      .      | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📖 tsdf/sess1/col-multi-remount-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_payload__%3A%222.json
+      .      | 📖 tsdf/sess1/col-multi-remount-flow/ci.%222.p.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (payload)) | 0.11 kb
-      .      | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_meta__%3A%222.json
+      .      | 📖 tsdf/sess1/col-multi-remount-flow/ci.%222.m.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata)) | 0.24 kb
 
       verbose
       time   |
       3.001s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3.002s | 📂 dir-open ✅ tsdf/sess1/col-multi-remount-flow (store directory)
-      3.003s | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_payload__%3A%221.json
+      3.003s | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (payload))
-      .      | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_payload__%3A%222.json
+      .      | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.%222.p.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (payload))
-      .      | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_meta__%3A%222.json
+      .      | 📄 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.%222.m.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata))
-      3.056s | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_payload__%3A%221.json
+      3.056s | 📖 tsdf/sess1/col-multi-remount-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (payload)) | 0.11 kb
-      .      | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📖 tsdf/sess1/col-multi-remount-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_payload__%3A%222.json
+      .      | 📖 tsdf/sess1/col-multi-remount-flow/ci.%222.p.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (payload)) | 0.11 kb
-      .      | 📖 tsdf/sess1/col-multi-remount-flow/collection.item~__tsdf_meta__%3A%222.json
+      .      | 📖 tsdf/sess1/col-multi-remount-flow/ci.%222.m.json
              |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata)) | 0.24 kb
       "
     `);
@@ -1132,22 +1132,22 @@ describe('async storage efficiency: collection', () => {
       "
       simplified
       time   |
-      3.056s | 📖 tsdf/sess1/collection-opfs-efficiency/collection.item~__tsdf_payload__%3A%221.json
+      3.056s | 📖 tsdf/sess1/collection-opfs-efficiency/ci.%221.p.json
              |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload)) | 0.09 kb
-      .      | 📖 tsdf/sess1/collection-opfs-efficiency/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📖 tsdf/sess1/collection-opfs-efficiency/ci.%221.m.json
              |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata)) | 0.24 kb
 
       verbose
       time   |
       3.001s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3.002s | 📂 dir-open ✅ tsdf/sess1/collection-opfs-efficiency (store directory)
-      3.003s | 📄 file-open ✅ tsdf/sess1/collection-opfs-efficiency/collection.item~__tsdf_payload__%3A%221.json
+      3.003s | 📄 file-open ✅ tsdf/sess1/collection-opfs-efficiency/ci.%221.p.json
              |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload))
-      .      | 📄 file-open ✅ tsdf/sess1/collection-opfs-efficiency/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📄 file-open ✅ tsdf/sess1/collection-opfs-efficiency/ci.%221.m.json
              |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata))
-      3.056s | 📖 tsdf/sess1/collection-opfs-efficiency/collection.item~__tsdf_payload__%3A%221.json
+      3.056s | 📖 tsdf/sess1/collection-opfs-efficiency/ci.%221.p.json
              |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload)) | 0.09 kb
-      .      | 📖 tsdf/sess1/collection-opfs-efficiency/collection.item~__tsdf_meta__%3A%221.json
+      .      | 📖 tsdf/sess1/collection-opfs-efficiency/ci.%221.m.json
              |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata)) | 0.24 kb
       "
     `);

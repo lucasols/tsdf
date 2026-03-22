@@ -438,7 +438,7 @@ function getOpfsPersistentStorageOperationTimelineString(args: {
   ].join('\n');
 }
 
-const OPFS_TIMELINE_WRAP_AT = 100;
+const OPFS_TIMELINE_WRAP_AT = 80;
 const OPFS_TIMELINE_DETAIL_PREFIX = '   └ ';
 
 function formatWrappedOpfsOperationLabel(
