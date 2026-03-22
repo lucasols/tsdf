@@ -76,10 +76,10 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
       .      | 📖 tsdf/sess1/fresh-doc/d.e.m.json (tsdf.sess1.fresh-doc (metadata)) | 0.23 kb
       2.011s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.p.json (tsdf.sess1.expired-doc (payload))
-      2.012s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
-      2.013s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
-      2.015s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:fresh-doc"]
-      2.016s | end
+      .      | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
+      2.012s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
+      2.014s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:fresh-doc"]
+      2.015s | end
 
       verbose
       time   |
@@ -99,11 +99,11 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
       .      | 📖 tsdf/sess1/fresh-doc/d.e.m.json (tsdf.sess1.fresh-doc (metadata)) | 0.23 kb
       2.011s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.p.json (tsdf.sess1.expired-doc (payload))
-      2.012s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
-      2.013s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
-      2.014s | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
-      2.015s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:fresh-doc"]
-      2.016s | end
+      .      | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
+      2.012s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
+      2.013s | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
+      2.014s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:fresh-doc"]
+      2.015s | end
       "
     `);
     expect(
@@ -155,10 +155,10 @@ describe('async storage efficiency: maintenance', () => {
       2.009s | 📖 tsdf/sess1/corrupted/d.e.m.json (tsdf.sess1.corrupted (metadata)) | 0.02 kb
       .      | 📖 tsdf/sess1/trigger/d.e.m.json (tsdf.sess1.trigger (metadata)) | 0.23 kb
       2.011s | 🗑️ ✅ tsdf/sess1/corrupted/d.e.p.json (tsdf.sess1.corrupted (payload))
-      2.012s | 🗑️ ✅ tsdf/sess1/corrupted/d.e.m.json (tsdf.sess1.corrupted (metadata))
-      2.013s | 🗂️ list-dir tsdf/sess1/corrupted (store directory) entries=[]
-      2.015s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:trigger"]
-      2.016s | end
+      .      | 🗑️ ✅ tsdf/sess1/corrupted/d.e.m.json (tsdf.sess1.corrupted (metadata))
+      2.012s | 🗂️ list-dir tsdf/sess1/corrupted (store directory) entries=[]
+      2.014s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:trigger"]
+      2.015s | end
 
       verbose
       time   |
@@ -176,11 +176,11 @@ describe('async storage efficiency: maintenance', () => {
       2.009s | 📖 tsdf/sess1/corrupted/d.e.m.json (tsdf.sess1.corrupted (metadata)) | 0.02 kb
       .      | 📖 tsdf/sess1/trigger/d.e.m.json (tsdf.sess1.trigger (metadata)) | 0.23 kb
       2.011s | 🗑️ ✅ tsdf/sess1/corrupted/d.e.p.json (tsdf.sess1.corrupted (payload))
-      2.012s | 🗑️ ✅ tsdf/sess1/corrupted/d.e.m.json (tsdf.sess1.corrupted (metadata))
-      2.013s | 🗂️ list-dir tsdf/sess1/corrupted (store directory) entries=[]
-      2.014s | 🧹 del-dir ✅ tsdf/sess1/corrupted (store directory)
-      2.015s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:trigger"]
-      2.016s | end
+      .      | 🗑️ ✅ tsdf/sess1/corrupted/d.e.m.json (tsdf.sess1.corrupted (metadata))
+      2.012s | 🗂️ list-dir tsdf/sess1/corrupted (store directory) entries=[]
+      2.013s | 🧹 del-dir ✅ tsdf/sess1/corrupted (store directory)
+      2.014s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:trigger"]
+      2.015s | end
       "
     `);
   });
@@ -242,14 +242,14 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.sess2.expired-doc (metadata)) | 0.23 kb
       .      | 📖 tsdf/sess2/fresh-doc/d.e.m.json (tsdf.sess2.fresh-doc (metadata)) | 0.23 kb
       2.013s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.p.json (tsdf.sess1.expired-doc (payload))
+      .      | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.p.json (tsdf.sess2.expired-doc (payload))
-      2.014s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.m.json (tsdf.sess2.expired-doc (metadata))
-      2.015s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
+      2.014s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2/expired-doc (store directory) entries=[]
-      2.017s | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
+      2.016s | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2 (session directory) entries=["dir:fresh-doc"]
-      2.018s | end
+      2.017s | end
 
       verbose
       time   |
@@ -277,17 +277,17 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.sess2.expired-doc (metadata)) | 0.23 kb
       .      | 📖 tsdf/sess2/fresh-doc/d.e.m.json (tsdf.sess2.fresh-doc (metadata)) | 0.23 kb
       2.013s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.p.json (tsdf.sess1.expired-doc (payload))
+      .      | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.p.json (tsdf.sess2.expired-doc (payload))
-      2.014s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.m.json (tsdf.sess2.expired-doc (metadata))
-      2.015s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
+      2.014s | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2/expired-doc (store directory) entries=[]
-      2.016s | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
+      2.015s | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
       .      | 🧹 del-dir ✅ tsdf/sess2/expired-doc (store directory)
-      2.017s | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
+      2.016s | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2 (session directory) entries=["dir:fresh-doc"]
-      2.018s | 🧹 del-dir ✅ tsdf/sess1 (session directory)
-      2.019s | end
+      2.017s | 🧹 del-dir ✅ tsdf/sess1 (session directory)
+      2.018s | end
       "
     `);
   });
@@ -348,15 +348,15 @@ describe('async storage efficiency: maintenance', () => {
       .      | 📖 tsdf/sess1/valid-doc/d.e.m.json (tsdf.sess1.valid-doc (metadata)) | 0.23 kb
       2.012s | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.p.json
              |    └ (tsdf.sess1.invalid-metadata (payload))
-      2.013s | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.m.json
+      .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.m.json
              |    └ (tsdf.sess1.invalid-metadata (metadata))
       .      | 🗑️ ✅ tsdf/sess1/missing-payload/d.e.m.json
              |    └ (tsdf.sess1.missing-payload (metadata))
-      2.014s | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
+      2.013s | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess1/missing-payload (store directory) entries=[]
-      2.017s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
-      2.018s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
-      2.019s | end
+      2.015s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
+      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
+      2.016s | end
 
       verbose
       time   |
@@ -383,18 +383,18 @@ describe('async storage efficiency: maintenance', () => {
       .      | 📖 tsdf/sess1/valid-doc/d.e.m.json (tsdf.sess1.valid-doc (metadata)) | 0.23 kb
       2.012s | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.p.json
              |    └ (tsdf.sess1.invalid-metadata (payload))
-      .      | 🧹 del-dir ❌ tsdf/sess1/missing-payload/d.e.p.json (scope directory)
-      2.013s | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.m.json
+      .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.m.json
              |    └ (tsdf.sess1.invalid-metadata (metadata))
+      .      | 🧹 del-dir ❌ tsdf/sess1/missing-payload/d.e.p.json (scope directory)
       .      | 🗑️ ✅ tsdf/sess1/missing-payload/d.e.m.json
              |    └ (tsdf.sess1.missing-payload (metadata))
-      2.014s | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
+      2.013s | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess1/missing-payload (store directory) entries=[]
-      2.015s | 🧹 del-dir ✅ tsdf/sess1/invalid-metadata (store directory)
-      2.016s | 🧹 del-dir ✅ tsdf/sess1/missing-payload (store directory)
-      2.017s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
-      2.018s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
-      2.019s | end
+      2.014s | 🧹 del-dir ✅ tsdf/sess1/invalid-metadata (store directory)
+      .      | 🧹 del-dir ✅ tsdf/sess1/missing-payload (store directory)
+      2.015s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
+      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
+      2.016s | end
       "
     `);
   });
@@ -459,13 +459,13 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.user@example.com.unprotected-doc (metadata)) | 0.23 kb
       2.01s  | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.p.json
              |    └ (tsdf.user@example.com.unprotected-doc (payload))
-      2.011s | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
+      .      | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
              |    └ (tsdf.user@example.com.unprotected-doc (metadata))
-      2.012s | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
+      2.011s | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
              |    └ (store directory) entries=[]
-      2.014s | 🗂️ list-dir tsdf/user%40example.com
+      2.013s | 🗂️ list-dir tsdf/user%40example.com
              |    └ (session directory) entries=["dir:protected-doc"]
-      2.015s | end
+      2.014s | end
 
       verbose
       time   |
@@ -487,14 +487,14 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.user@example.com.unprotected-doc (metadata)) | 0.23 kb
       2.01s  | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.p.json
              |    └ (tsdf.user@example.com.unprotected-doc (payload))
-      2.011s | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
+      .      | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
              |    └ (tsdf.user@example.com.unprotected-doc (metadata))
-      2.012s | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
+      2.011s | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
              |    └ (store directory) entries=[]
-      2.013s | 🧹 del-dir ✅ tsdf/user%40example.com/unprotected-doc (store directory)
-      2.014s | 🗂️ list-dir tsdf/user%40example.com
+      2.012s | 🧹 del-dir ✅ tsdf/user%40example.com/unprotected-doc (store directory)
+      2.013s | 🗂️ list-dir tsdf/user%40example.com
              |    └ (session directory) entries=["dir:protected-doc"]
-      2.015s | end
+      2.014s | end
       "
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, protectedDocStorageKey))

@@ -45,8 +45,6 @@ type MockBrowserOpfsDeleteDirOperation = MockBrowserOpfsBaseOperation & {
   type: 'deleteDir';
 };
 
-type ReadyAtRef = { value: number };
-
 type MockFileNode = {
   kind: 'file';
   name: string;
@@ -63,6 +61,12 @@ type MockDirectoryNode = {
 
 function createDirectoryNode(name: string): MockDirectoryNode {
   return { kind: 'directory', name, directories: new Map(), files: new Map() };
+}
+
+type ReadyAtRef = { value: number };
+
+function cloneReadyAtRef(readyAtRef: ReadyAtRef): ReadyAtRef {
+  return { value: readyAtRef.value };
 }
 
 function compareStrings(left: string, right: string): number {
@@ -399,7 +403,7 @@ export class MockBrowserOpfsEnvironment {
     > {
       const { completionTime, startedTime } = await waitLatency({
         delayMs: MOCK_OPFS_LATENCY_MS.listDir,
-        readyAtRef,
+        readyAtRef: cloneReadyAtRef(readyAtRef),
       });
       const entries = getDirectoryEntries();
 
@@ -423,7 +427,7 @@ export class MockBrowserOpfsEnvironment {
       async isSameEntry(other: FileSystemHandle): Promise<boolean> {
         await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.sameEntry,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const otherPath = handlePaths.get(other);
         return (
@@ -438,7 +442,7 @@ export class MockBrowserOpfsEnvironment {
       ): Promise<FileSystemDirectoryHandle> {
         const { completionTime, startedTime } = await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.directoryHandle,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const create = options?.create === true;
         const existing = node.directories.get(name);
@@ -484,7 +488,7 @@ export class MockBrowserOpfsEnvironment {
       ): Promise<FileSystemFileHandle> {
         const { completionTime, startedTime } = await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.fileHandle,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const create = options?.create === true;
         const existing = node.files.get(name);
@@ -534,7 +538,7 @@ export class MockBrowserOpfsEnvironment {
       ): Promise<void> {
         const { completionTime, startedTime } = await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.removeEntry,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const filePath = joinPath(pathSegments, name);
         if (node.files.has(name)) {
@@ -601,7 +605,7 @@ export class MockBrowserOpfsEnvironment {
       ): Promise<string[] | null> {
         await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.resolve,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const descendantPath = handlePaths.get(possibleDescendant);
         if (descendantPath === undefined) return null;
@@ -647,7 +651,7 @@ export class MockBrowserOpfsEnvironment {
       async isSameEntry(other: FileSystemHandle): Promise<boolean> {
         await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.sameEntry,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const otherPath = handlePaths.get(other);
         return (
@@ -659,7 +663,7 @@ export class MockBrowserOpfsEnvironment {
       async getFile(): Promise<File> {
         const { completionTime } = await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.getFile,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const path = joinPath(pathSegments, node.name);
         const currentNode = getCurrentFileNode();
@@ -716,7 +720,7 @@ export class MockBrowserOpfsEnvironment {
       async createWritable(): Promise<FileSystemWritableFileStream> {
         const { completionTime } = await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.createWritable,
-          readyAtRef,
+          readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const currentNode = getCurrentFileNode();
         const path = joinPath(pathSegments, node.name);

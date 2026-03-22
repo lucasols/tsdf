@@ -79,10 +79,10 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       time |
       4ms  | 🗂️ list-dir tsdf/sess1/docs
            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      8ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      12ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
-      14ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
-      15ms | end
+      7ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
+      11ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      13ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      14ms | end
 
       verbose
       time |
@@ -91,12 +91,12 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | 🗂️ list-dir tsdf/sess1/docs
            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      5ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
-      6ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata))
-      8ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      12ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
-      14ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
-      15ms | end
+      .    | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      5ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata))
+      7ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
+      11ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      13ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      14ms | end
       "
     `);
   });
