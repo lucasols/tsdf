@@ -23,7 +23,8 @@ import {
   type ListQueryParams,
   type Row,
 } from '../mocks/listQueryStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -67,7 +68,7 @@ function createConvertedSchemaConfig(
 }
 
 function readStoredQuery(
-  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter> & {
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore> & {
     listQuery: {
       readQueryEntry: (
         params: ListQueryParams,
@@ -82,7 +83,6 @@ function readStoredQuery(
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
-  storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
   schemaConfig?: ListQueryPersistentStorageConfig<
     Row,
     ListQueryParams,
@@ -97,7 +97,6 @@ function createEnv(options: {
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       ...schemaConfig,
       storeName: options.storeName,
@@ -112,17 +111,21 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 describe('opfs: converted list query store persistence', () => {
   test('explicit query preload hydrates converted item data before mount', async () => {
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    createOpfsPersistentStorageTestStore({
       readDelayMs: 100,
       storeName: 'lq-opfs-converted',
       sessionKey: 'sess1',
@@ -142,7 +145,6 @@ describe('opfs: converted list query store persistence', () => {
     const env = createEnv({
       storeName: 'lq-opfs-converted',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
@@ -177,7 +179,7 @@ describe('opfs: converted list query store persistence', () => {
 
   test('invalid converted cached items are removed during query preload', async () => {
     const usersQuery = { tableId: 'users' };
-    const invalidStorageAdapter = createMockOpfsStorageAdapter({
+    const invalidStorageAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName: 'lq-opfs-invalid-storage',
       sessionKey: 'sess1',
@@ -190,7 +192,7 @@ describe('opfs: converted list query store persistence', () => {
         },
       },
     });
-    const throwingAdapter = createMockOpfsStorageAdapter({
+    const throwingAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName: 'lq-opfs-throwing',
       sessionKey: 'sess1',
@@ -209,12 +211,10 @@ describe('opfs: converted list query store persistence', () => {
     const invalidStorageEnv = createEnv({
       storeName: 'lq-opfs-invalid-storage',
       sessionKey: 'sess1',
-      storageAdapter: invalidStorageAdapter.adapter,
     });
     const throwingEnv = createEnv({
       storeName: 'lq-opfs-throwing',
       sessionKey: 'sess1',
-      storageAdapter: throwingAdapter.adapter,
       schemaConfig: {
         ...createConvertedSchemaConfig({
           convertFromStorage() {
@@ -249,7 +249,7 @@ describe('opfs: converted list query store persistence', () => {
 
   test('invalid final data after conversion is removed during query preload', async () => {
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName: 'lq-opfs-invalid-final',
       sessionKey: 'sess1',
@@ -269,7 +269,6 @@ describe('opfs: converted list query store persistence', () => {
     const env = createEnv({
       storeName: 'lq-opfs-invalid-final',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       schemaConfig: {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidRow,
@@ -290,7 +289,7 @@ describe('opfs: converted list query store persistence', () => {
 
   test('write conversion errors are reported without overwriting item entries', async () => {
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 100,
       storeName: 'lq-opfs-save-error',
       sessionKey: 'sess1',
@@ -309,7 +308,6 @@ describe('opfs: converted list query store persistence', () => {
     const env = createEnv({
       storeName: 'lq-opfs-save-error',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       serverData: { users: [{ id: 1, name: 'Fresh' }] },
       onPersistentStorageError,
       schemaConfig: {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { AsyncStorageNamespaceScope } from '../../../src/persistentStorage/types';
-import { createMockOpfsStorageAdapter } from '../../mocks/mockOpfsStorageAdapter';
+import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   createDocumentEnv,
@@ -25,7 +25,7 @@ describe('async storage efficiency: maintenance', () => {
     const oneWeekAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const expiredKey = documentStorageKey('expired-doc', 'sess1');
     const freshKey = documentStorageKey('fresh-doc', 'sess1');
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName: 'fresh-doc',
       sessionKey: 'sess1',
     });
@@ -54,11 +54,7 @@ describe('async storage efficiency: maintenance', () => {
     // Startup should only schedule the sweep; it should not perform storage I/O yet.
     const startupReadCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
-    createDocumentEnv({
-      storeName: 'fresh-doc',
-      sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
-    });
+    createDocumentEnv({ storeName: 'fresh-doc', sessionKey: 'sess1' });
     const startupOperations = startupReadCapture.finish().timelineString;
 
     expect(startupOperations).toMatchInlineSnapshot(`"empty"`);
@@ -93,7 +89,6 @@ describe('async storage efficiency: maintenance', () => {
       .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
       .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
       .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
-      .    | 📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)
       .    | 📂 open ✅ tsdf/sess1/expired-doc/document (scope directory)
       .    | 🗂️ tsdf/sess1/expired-doc/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .    | 📂 open ✅ tsdf/sess1/expired-doc/document (scope directory)
@@ -128,7 +123,7 @@ describe('async storage efficiency: maintenance', () => {
   test('malformed persisted records are tolerated and handled predictably', async () => {
     const corruptedKey = documentStorageKey('corrupted', 'sess1');
     const triggerKey = documentStorageKey('trigger', 'sess1');
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName: 'trigger',
       sessionKey: 'sess1',
     });
@@ -153,11 +148,7 @@ describe('async storage efficiency: maintenance', () => {
       kind: 'document',
     });
 
-    createDocumentEnv({
-      storeName: 'trigger',
-      sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
-    });
+    createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
@@ -187,7 +178,6 @@ describe('async storage efficiency: maintenance', () => {
       .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
       .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
       .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
-      .    | 📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)
       .    | 📂 open ✅ tsdf/sess1/corrupted/document (scope directory)
       .    | 🗂️ tsdf/sess1/corrupted/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .    | 📂 open ✅ tsdf/sess1/corrupted/document (scope directory)
@@ -223,7 +213,7 @@ describe('async storage efficiency: maintenance', () => {
     const validKey = documentStorageKey('valid-doc', 'sess1');
     const invalidMetadataKey = documentStorageKey('invalid-metadata', 'sess1');
     const missingPayloadKey = documentStorageKey('missing-payload', 'sess1');
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName: 'valid-doc',
       sessionKey: 'sess1',
     });
@@ -259,11 +249,7 @@ describe('async storage efficiency: maintenance', () => {
       kind: 'document',
     });
 
-    createDocumentEnv({
-      storeName: 'valid-doc',
-      sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
-    });
+    createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
@@ -296,7 +282,6 @@ describe('async storage efficiency: maintenance', () => {
       .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
       .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
       .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
-      .    | 📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)
       .    | 📂 open ✅ tsdf/sess1/valid-doc/document (scope directory)
       .    | 🗂️ tsdf/sess1/valid-doc/document (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .    | 📂 open ✅ tsdf/sess1/valid-doc/document (scope directory)
@@ -324,7 +309,6 @@ describe('async storage efficiency: maintenance', () => {
       .    | 📄 open ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.missing-payload (metadata))
       .    | 📖 tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.missing-payload (metadata))
       .    | 📂 open ✅ tsdf/sess1/missing-payload/document (scope directory)
-      .    | 🗑️ ❌ tsdf/sess1/missing-payload/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.missing-payload (payload))
       .    | 🗑️ ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.missing-payload (metadata))
       .    | 📂 open ✅ tsdf/sess1/missing-payload/document (scope directory)
       .    | 🗂️ tsdf/sess1/missing-payload/document (scope directory) entries=[]
@@ -355,7 +339,7 @@ describe('async storage efficiency: maintenance', () => {
       'unprotected-doc',
       dottedSessionKey,
     );
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName: 'trigger-doc',
       sessionKey: 'sess-trigger',
     });
@@ -386,11 +370,7 @@ describe('async storage efficiency: maintenance', () => {
     setProtectedKeysSnapshot(dottedSessionKey, [protectedDocStorageKey]);
 
     // A fresh entry in another session triggers the scheduled global cleanup pass.
-    createDocumentEnv({
-      storeName: 'trigger-doc',
-      sessionKey: 'sess-trigger',
-      storageAdapter: mockAdapter.adapter,
-    });
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey: 'sess-trigger' });
 
     // Capture the full sweep so the snapshot shows stale-entry removal.
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
@@ -422,8 +402,6 @@ describe('async storage efficiency: maintenance', () => {
       .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
       .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
       .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)
-      .    | 📂 open ❌ tsdf/user%40example.com/protected-doc/document (scope directory)
-      .    | 📂 open ❌ tsdf/user%40example.com/unprotected-doc/document (scope directory)
       .    | 📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
       .    | 📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)
       .    | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json (global maintenance)

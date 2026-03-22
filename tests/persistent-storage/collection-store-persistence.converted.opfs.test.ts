@@ -14,7 +14,8 @@ import {
 import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -59,7 +60,6 @@ function createConvertedSchemaConfig(
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
-  storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
   schemaConfig?: CollectionPersistentStorageConfig<
     ItemState,
     string,
@@ -72,7 +72,6 @@ function createEnv(options: {
 
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     getSessionKey: () => options.sessionKey ?? 'session1',
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       ...schemaConfig,
       storeName: options.storeName,
@@ -87,16 +86,20 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 describe('opfs: converted collection store persistence', () => {
   test('explicit preload hydrates converted cached items before mount', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({
+    createOpfsPersistentStorageTestStore({
       readDelayMs: 100,
       storeName: 'col-opfs-converted',
       sessionKey: 'sess1',
@@ -109,7 +112,6 @@ describe('opfs: converted collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-converted',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
@@ -142,13 +144,13 @@ describe('opfs: converted collection store persistence', () => {
   });
 
   test('invalid converted cached data is removed during preload', async () => {
-    const invalidStorageAdapter = createMockOpfsStorageAdapter({
+    const invalidStorageAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName: 'col-opfs-invalid-storage',
       sessionKey: 'sess1',
       initialState: { collection: [{ payload: '1', data: { wrong: true } }] },
     });
-    const throwingAdapter = createMockOpfsStorageAdapter({
+    const throwingAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName: 'col-opfs-throwing',
       sessionKey: 'sess1',
@@ -160,12 +162,10 @@ describe('opfs: converted collection store persistence', () => {
     const invalidStorageEnv = createEnv({
       storeName: 'col-opfs-invalid-storage',
       sessionKey: 'sess1',
-      storageAdapter: invalidStorageAdapter.adapter,
     });
     const throwingEnv = createEnv({
       storeName: 'col-opfs-throwing',
       sessionKey: 'sess1',
-      storageAdapter: throwingAdapter.adapter,
       schemaConfig: {
         ...createConvertedSchemaConfig({
           // The storage payload is valid, so this isolates convertFromStorage cleanup.
@@ -199,7 +199,7 @@ describe('opfs: converted collection store persistence', () => {
   });
 
   test('invalid final data after conversion is removed during preload', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName: 'col-opfs-invalid-final',
       sessionKey: 'sess1',
@@ -211,7 +211,6 @@ describe('opfs: converted collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-invalid-final',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       schemaConfig: {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidItemState,
@@ -231,7 +230,7 @@ describe('opfs: converted collection store persistence', () => {
   });
 
   test('write conversion errors are reported and keep the previous cached item', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 100,
       storeName: 'col-opfs-save-error',
       sessionKey: 'sess1',
@@ -243,7 +242,6 @@ describe('opfs: converted collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-save-error',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       serverData: { '1': { id: '1', name: 'Fresh' } },
       onPersistentStorageError,
       schemaConfig: {

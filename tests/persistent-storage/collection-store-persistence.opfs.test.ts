@@ -17,7 +17,8 @@ import type {
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -42,7 +43,7 @@ type ItemState = { id: string; name: string };
 type PersistedItemState = { value: ItemState };
 
 function setCachedCollectionItem(
-  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
   storeName: string,
   sessionKey: string,
   payload: string,
@@ -63,13 +64,11 @@ function setCachedCollectionItem(
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
-  storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
   ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Record<string, ItemState>;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     getSessionKey: () => options.sessionKey ?? 'session1',
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
       adapter: opfsPersistentStorage,
@@ -86,16 +85,22 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 describe('opfs: collection store persistence', () => {
   test('first hook read hydrates only the requested cached item and refetches', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
     setCachedCollectionItem(mockAdapter, 'col-opfs-hook', 'sess1', '1', {
       value: { id: '1', name: 'Cached' },
     });
@@ -106,7 +111,6 @@ describe('opfs: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-hook',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
@@ -152,7 +156,9 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('explicit preload hydrates cached data before mount', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
     setCachedCollectionItem(mockAdapter, 'col-opfs-preload', 'sess1', '1', {
       value: { id: '1', name: 'Cached' },
     });
@@ -160,7 +166,6 @@ describe('opfs: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-preload',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       serverData: { '1': { id: '1', name: 'Fresh' } },
     });
 
@@ -192,7 +197,9 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('invalid cached items are removed during targeted preload', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 50,
+    });
     const key = itemStorageKey('col-opfs-invalid', 'sess1', 'bad');
     const entry: StorageCacheEntry<PersistedCollectionItemData<{ bad: true }>> =
       {
@@ -205,7 +212,6 @@ describe('opfs: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-invalid',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
@@ -219,7 +225,9 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('invalid cached payloads are removed during targeted preload', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 50,
+    });
     const key = itemStorageKey('col-opfs-invalid-payload', 'sess1', 'bad');
     const entry: StorageCacheEntry<
       PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
@@ -233,7 +241,6 @@ describe('opfs: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-invalid-payload',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
@@ -247,7 +254,9 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('ignored cached items are skipped during preload and removed from opfs', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 50,
+    });
     const key = setCachedCollectionItem(
       mockAdapter,
       'col-opfs-ignore',
@@ -259,7 +268,6 @@ describe('opfs: collection store persistence', () => {
     const env = createEnv({
       storeName: 'col-opfs-ignore',
       sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
       ignoreItems: ['secret'],
     });
 
@@ -276,16 +284,14 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('stale async preload does not overwrite live state', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
     setCachedCollectionItem(mockAdapter, 'col-opfs-race', 'sess1', '1', {
       value: { id: '1', name: 'Stale' },
     });
 
-    const env = createEnv({
-      storeName: 'col-opfs-race',
-      sessionKey: 'sess1',
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createEnv({ storeName: 'col-opfs-race', sessionKey: 'sess1' });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('1');
 
@@ -307,17 +313,15 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('deleteItemState removes deleted items from persisted storage', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
     const storeName = 'col-opfs-delete-persisted-item';
     const sessionKey = 'sess1';
     const deletedItemStorageKey = itemStorageKey(storeName, sessionKey, '1');
     const keptItemStorageKey = itemStorageKey(storeName, sessionKey, '2');
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createEnv({ storeName, sessionKey });
 
     env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
     env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });

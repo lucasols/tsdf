@@ -1,7 +1,8 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-import { createMockOpfsStorageAdapter } from '../../mocks/mockOpfsStorageAdapter';
+import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
@@ -23,7 +24,10 @@ describe('async storage efficiency: document', () => {
   test('document hook remount stays fully in memory after the cached document is loaded at startup', async () => {
     const storeName = 'doc-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     setCachedDocumentData(mockAdapter, storeName, sessionKey, {
       name: 'Cached document',
@@ -35,11 +39,7 @@ describe('async storage efficiency: document', () => {
       mockAdapter,
       { storeName, sessionKey },
     );
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
     const startupOperations = startupCapture.finish();
 
     expect(startupOperations).toMatchInlineSnapshot(`
@@ -87,7 +87,11 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: ['document payload']
 
       operations:
-        - '📚 sess1/doc-remount-flow/document hits=2/2 ["sess1/doc-remount-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-remount-flow (payload))","sess1/doc-remount-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-remount-flow (metadata))"]'
+        - '📂 open ✅ tsdf/sess1/doc-remount-flow/document (scope directory)'
+        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
+        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
+        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
+        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -102,14 +106,18 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: ['document payload']
 
       operations:
-        - '📚 sess1/doc-remount-flow/document hits=2/2 ["sess1/doc-remount-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-remount-flow (payload))","sess1/doc-remount-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-remount-flow (metadata))"]'
+        - '📂 open ✅ tsdf/sess1/doc-remount-flow/document (scope directory)'
+        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
+        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
+        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
+        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
     `);
   });
 
   test('direct store.state reads with short gaps stay fully in memory once the document is hydrated', async () => {
     const storeName = 'doc-direct-state-read';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -120,11 +128,7 @@ describe('async storage efficiency: document', () => {
       value: 8,
     });
 
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
 
     // Hydrate once through the public hook, then measure repeated direct reads only.
     await settleStartupBackgroundScan(mockAdapter);
@@ -172,7 +176,7 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
     const storageKey = documentStorageKey(storeName, sessionKey);
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -184,11 +188,7 @@ describe('async storage efficiency: document', () => {
       version: 1,
     });
 
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
 
     // Preload the cached document so the async adapter schedules a timestamp touch.
     await settleStartupBackgroundScan(mockAdapter);
@@ -209,7 +209,7 @@ describe('async storage efficiency: document', () => {
       payloadRef: '__tsdf_payload__:document'
       sizeBytes: 52
       version: 1
-      writtenAt: 1735689604090
+      writtenAt: 1735689604140
     `);
   });
 
@@ -217,7 +217,7 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-mutation-flow';
     const sessionKey = 'sess1';
     const storageKey = documentStorageKey(storeName, sessionKey);
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -228,11 +228,7 @@ describe('async storage efficiency: document', () => {
       value: 8,
     });
 
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
 
     // Hydrate the cached document through a normal mounted hook first.
     await settleStartupBackgroundScan(mockAdapter);
@@ -263,7 +259,7 @@ describe('async storage efficiency: document', () => {
       payloadRef: '__tsdf_payload__:document'
       sizeBytes: 53
       version: 1
-      writtenAt: 1735689605130
+      writtenAt: 1735689605230
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       breakdown:
@@ -277,15 +273,21 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/doc-mutation-flow/document hits=1/1 ["sess1/doc-mutation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-mutation-flow (metadata))"]'
-        - '✍️ sess1/doc-mutation-flow/document ["sess1/doc-mutation-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-mutation-flow (payload))","sess1/doc-mutation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-mutation-flow (metadata))"]'
+        - '📂 open ✅ tsdf/sess1/doc-mutation-flow/document (scope directory)'
+        - '📄 open ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
+        - '📖 tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/doc-mutation-flow/document (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-mutation-flow (payload))'
+        - '📄 ensure ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
+        - '✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-mutation-flow (payload))'
+        - '✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
     `);
   });
 
   test('useDocument invalidation snapshots the full persistence timeline through the refetch save', async () => {
     const storeName = 'doc-invalidation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -300,7 +302,6 @@ describe('async storage efficiency: document', () => {
       storeName,
       sessionKey,
       serverData: { name: 'Fresh document', value: 42 },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
@@ -343,15 +344,21 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/doc-invalidation-flow/document hits=1/1 ["sess1/doc-invalidation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-invalidation-flow (metadata))"]'
-        - '✍️ sess1/doc-invalidation-flow/document ["sess1/doc-invalidation-flow/document/__tsdf_payload__:document (tsdf.sess1.doc-invalidation-flow (payload))","sess1/doc-invalidation-flow/document/__tsdf_meta__:document (tsdf.sess1.doc-invalidation-flow (metadata))"]'
+        - '📂 open ✅ tsdf/sess1/doc-invalidation-flow/document (scope directory)'
+        - '📄 open ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
+        - '📖 tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/doc-invalidation-flow/document (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (payload))'
+        - '📄 ensure ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
+        - '✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (payload))'
+        - '✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
     `);
   });
 
   test('repeated invalidations within the debounce window coalesce document persistence writes', async () => {
     const storeName = 'doc-coalesced-invalidations';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -366,7 +373,6 @@ describe('async storage efficiency: document', () => {
       storeName,
       sessionKey,
       serverData: { name: 'Fresh document 1', value: 41 },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first so only the invalidation writes are counted below.
@@ -439,8 +445,14 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: []
 
       operations:
-        - '📚 sess1/doc-coalesced-invalidations/document hits=1/1 ["sess1/doc-coalesced-invalidations/document/__tsdf_meta__:document (tsdf.sess1.doc-coalesced-invalidations (metadata))"]'
-        - '✍️ sess1/doc-coalesced-invalidations/document ["sess1/doc-coalesced-invalidations/document/__tsdf_payload__:document (tsdf.sess1.doc-coalesced-invalidations (payload))","sess1/doc-coalesced-invalidations/document/__tsdf_meta__:document (tsdf.sess1.doc-coalesced-invalidations (metadata))"]'
+        - '📂 open ✅ tsdf/sess1/doc-coalesced-invalidations/document (scope directory)'
+        - '📄 open ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
+        - '📖 tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
+        - '📁 ensure ✅ tsdf/sess1/doc-coalesced-invalidations/document (scope directory)'
+        - '📄 ensure ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (payload))'
+        - '📄 ensure ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
+        - '✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (payload))'
+        - '✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
     `);
   });
 
@@ -448,7 +460,7 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-offline-marker-flow';
     const sessionKey = 'sess1';
     const storageKey = documentStorageKey(storeName, sessionKey);
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -463,7 +475,6 @@ describe('async storage efficiency: document', () => {
       storeName,
       sessionKey,
       serverData: { name: 'Fresh document', value: 42 },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
@@ -497,16 +508,16 @@ describe('async storage efficiency: document', () => {
       payloadRef: '__tsdf_payload__:document'
       sizeBytes: 52
       version: 1
-      writtenAt: 1735689605940
+      writtenAt: 1735689606040
     `);
   });
 
   test('namespace commits coalesce and pending writes flush before reads', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName: 'coalesced-opfs',
       sessionKey: 'sess1',
     });
-    const namespace = mockAdapter.adapter.openNamespace<
+    const namespace = opfsPersistentStorage.openNamespace<
       { value: string },
       Record<string, never>
     >({ sessionKey: 'sess1', storeName: 'coalesced-opfs', kind: 'document' });
@@ -521,7 +532,7 @@ describe('async storage efficiency: document', () => {
     await advanceTime(39);
     expect(
       mockAdapter.operations.filter(
-        (operation) => operation.type === 'setMany',
+        (operation) => operation.type === 'writeFile',
       ),
     ).toMatchInlineSnapshot(`[]`);
 
@@ -530,29 +541,39 @@ describe('async storage efficiency: document', () => {
 
     expect(entry?.value).toMatchInlineSnapshot(`value: 'second'`);
     expect(
-      mockAdapter.operations
-        .filter((operation) => operation.type === 'setMany')
-        .map((operation) => ({
-          scope: operation.scope,
-          records: operation.records.map((record) => ({
-            key: record.key,
-            kind: record.recordKind,
-          })),
-        })),
+      mockAdapter.operations.flatMap((operation) =>
+        operation.type === 'writeFile'
+          ? [
+              {
+                scope: operation.scope,
+                key: operation.record.key,
+                kind: operation.record.recordKind,
+              },
+            ]
+          : [],
+      ),
     ).toMatchInlineSnapshot(`
-      - records:
-          - { key: '__tsdf_payload__:document', kind: 'payload' }
-          - { key: '__tsdf_meta__:document', kind: 'metadata' }
+      - key: '__tsdf_payload__:document'
+        kind: 'payload'
         scope: { kind: 'document', sessionKey: 'sess1', storeName: 'coalesced-opfs' }
+      - key: '__tsdf_meta__:document'
+        kind: 'metadata'
+        scope: { kind: 'document', sessionKey: 'sess1', storeName: 'coalesced-opfs' }
+      - key: 'registry'
+        kind: 'internal'
+        scope:
+          kind: '__internal.protected'
+          sessionKey: '__tsdf_async__'
+          storeName: '__tsdf_async__'
     `);
   });
 
   test('live async reads suppress redundant touch commits in the same recency bucket', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName: 'touch-guard-opfs',
       sessionKey: 'sess1',
     });
-    const namespace = mockAdapter.adapter.openNamespace<
+    const namespace = opfsPersistentStorage.openNamespace<
       { value: string },
       Record<string, never>
     >({ sessionKey: 'sess1', storeName: 'touch-guard-opfs', kind: 'document' });
@@ -573,18 +594,20 @@ describe('async storage efficiency: document', () => {
     expect(firstRead?.value).toMatchInlineSnapshot(`value: 'cached'`);
     expect(secondRead?.value).toMatchInlineSnapshot(`value: 'cached'`);
     expect(
-      mockAdapter.operations
-        .filter((operation) => operation.type === 'setMany')
-        .map((operation) => ({
-          scope: operation.scope,
-          records: operation.records.map((record) => ({
-            key: record.key,
-            kind: record.recordKind,
-          })),
-        })),
+      mockAdapter.operations.flatMap((operation) =>
+        operation.type === 'writeFile'
+          ? [
+              {
+                scope: operation.scope,
+                key: operation.record.key,
+                kind: operation.record.recordKind,
+              },
+            ]
+          : [],
+      ),
     ).toMatchInlineSnapshot(`
-      - records:
-          - { key: '__tsdf_meta__:document', kind: 'metadata' }
+      - key: '__tsdf_meta__:document'
+        kind: 'metadata'
         scope: { kind: 'document', sessionKey: 'sess1', storeName: 'touch-guard-opfs' }
     `);
   });
@@ -592,7 +615,7 @@ describe('async storage efficiency: document', () => {
   test('document preload performs one targeted payload read without metadata scans', async () => {
     const storeName = 'doc-opfs-efficiency';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName,
       sessionKey,
@@ -600,11 +623,7 @@ describe('async storage efficiency: document', () => {
         document: { data: { value: { name: 'cached', value: 1 } } },
       },
     });
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
     const readCapture = startOpfsPersistentStorageOperationCapture(
@@ -629,7 +648,11 @@ describe('async storage efficiency: document', () => {
         scopedPayloadReads: ['document payload']
 
       operations:
-        - '📚 sess1/doc-opfs-efficiency/document hits=2/2 ["sess1/doc-opfs-efficiency/document/__tsdf_payload__:document (tsdf.sess1.doc-opfs-efficiency (payload))","sess1/doc-opfs-efficiency/document/__tsdf_meta__:document (tsdf.sess1.doc-opfs-efficiency (metadata))"]'
+        - '📂 open ✅ tsdf/sess1/doc-opfs-efficiency/document (scope directory)'
+        - '📄 open ✅ tsdf/sess1/doc-opfs-efficiency/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (payload))'
+        - '📄 open ✅ tsdf/sess1/doc-opfs-efficiency/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (metadata))'
+        - '📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (payload))'
+        - '📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (metadata))'
     `);
 
     expect(mockAdapter.has(documentStorageKey(storeName, sessionKey))).toBe(

@@ -23,9 +23,10 @@ import {
   type Row,
   type Tables,
 } from '../../mocks/listQueryStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../../mocks/mockOpfsStorageAdapter';
+import { resetMockBrowserOpfsForTests } from '../../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
+import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
   startOpfsPersistentStorageOperationCapture,
   type PersistentStorageOperationSummary,
@@ -57,11 +58,14 @@ export function setupAsyncStorageEfficiencyTestSuite(): void {
 
   beforeEach(() => {
     vi.setSystemTime(TEST_INITIAL_TIME);
+    resetMockBrowserOpfsForTests();
+    opfsPersistentStorage.resetForTests?.();
   });
 
   afterEach(() => {
     vi.runOnlyPendingTimers();
     localStorage.clear();
+    resetMockBrowserOpfsForTests();
     opfsPersistentStorage.resetForTests?.();
     clearSessionProtectedKeysSnapshot('sess1');
     clearSessionProtectedKeysSnapshot('session1');
@@ -75,7 +79,9 @@ export async function waitForScheduledCleanup(delayMs = 3000): Promise<void> {
   await flushAllTimers();
 }
 
-export type MockOpfsAdapter = ReturnType<typeof createMockOpfsStorageAdapter>;
+export type MockOpfsAdapter = ReturnType<
+  typeof createOpfsPersistentStorageTestStore
+>;
 
 export async function settleStartupBackgroundScan(
   mockAdapter: MockOpfsAdapter,
@@ -125,14 +131,12 @@ export type DocumentState = { name: string; value: number };
 export function createDocumentEnv(options: {
   serverData?: DocumentState;
   sessionKey?: string;
-  storageAdapter: MockOpfsAdapter['adapter'];
   storeName: string;
 }) {
   return createDocumentStoreTestEnv(
     options.serverData ?? { name: 'test', value: 42 },
     {
       getSessionKey: () => options.sessionKey ?? 'session1',
-      storageAdapter: options.storageAdapter,
       persistentStorage: {
         storeName: options.storeName,
         adapter: opfsPersistentStorage,
@@ -177,12 +181,10 @@ export function createCollectionEnv(options: {
   maxItems?: number;
   serverData?: Record<string, CollectionItemState>;
   sessionKey?: string;
-  storageAdapter: MockOpfsAdapter['adapter'];
   storeName: string;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
     getSessionKey: () => options.sessionKey ?? 'session1',
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
       adapter: opfsPersistentStorage,
@@ -261,7 +263,6 @@ export function createListQueryEnv(options: {
   offsetPagination?: OffsetPaginationConfig;
   serverData?: Tables<Row>;
   sessionKey?: string;
-  storageAdapter: MockOpfsAdapter['adapter'];
   storeName: string;
 }) {
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
@@ -269,7 +270,6 @@ export function createListQueryEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
       adapter: opfsPersistentStorage,

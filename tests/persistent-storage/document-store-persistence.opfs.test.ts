@@ -13,7 +13,8 @@ import {
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type { StorageCacheEntry } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -30,14 +31,12 @@ function createDocPersistenceEnv(options: {
   version?: number;
   getSessionKey?: () => string | false;
   serverData?: TestData;
-  storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
 }) {
   const getSessionKey =
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
 
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
     getSessionKey,
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
       adapter: opfsPersistentStorage,
@@ -48,7 +47,7 @@ function createDocPersistenceEnv(options: {
 }
 
 function populateStorage(
-  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
   storeName: string,
   sessionKey: string,
   data: TestData,
@@ -71,16 +70,20 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 describe('opfs: document store persistence', () => {
   test('version mismatch cleans up stored entry', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter();
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const key = populateStorage(
       mockAdapter,
       'opfs-version-mismatch',
@@ -93,7 +96,6 @@ describe('opfs: document store persistence', () => {
       storeName: 'opfs-version-mismatch',
       sessionKey: 'sess1',
       version: 2,
-      storageAdapter: mockAdapter.adapter,
     });
 
     await advanceTime(2100);
@@ -112,7 +114,9 @@ describe('opfs: document store persistence', () => {
   });
 
   test('schema validation failure triggers cleanup', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 50,
+    });
     const key = 'tsdf.session1.opfs-cleanup';
     const entry: StorageCacheEntry<{ d: { badField: true } }> = {
       data: { d: { badField: true } },
@@ -121,10 +125,7 @@ describe('opfs: document store persistence', () => {
     };
     mockAdapter.setValue(key, entry);
 
-    const env = createDocPersistenceEnv({
-      storeName: 'opfs-cleanup',
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocPersistenceEnv({ storeName: 'opfs-cleanup' });
 
     await advanceTime(2100);
     await flushAllTimers();
@@ -141,16 +142,15 @@ describe('opfs: document store persistence', () => {
   });
 
   test('loads cached data on first read and refetches on mount', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
     const key = populateStorage(mockAdapter, 'opfs-doc', 'session1', {
       name: 'cached',
       value: 42,
     });
 
-    const env = createDocPersistenceEnv({
-      storeName: 'opfs-doc',
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocPersistenceEnv({ storeName: 'opfs-doc' });
 
     await advanceTime(2100);
     await flushAllTimers();
@@ -188,7 +188,9 @@ describe('opfs: document store persistence', () => {
   });
 
   test('explicit preload hydrates cached data before mount', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
     populateStorage(mockAdapter, 'opfs-preload', 'session1', {
       name: 'cached',
       value: 7,
@@ -196,7 +198,6 @@ describe('opfs: document store persistence', () => {
 
     const env = createDocPersistenceEnv({
       storeName: 'opfs-preload',
-      storageAdapter: mockAdapter.adapter,
       serverData: { name: 'fresh', value: 8 },
     });
 
@@ -226,16 +227,15 @@ describe('opfs: document store persistence', () => {
   });
 
   test('reset prevents stale OPFS hydration from modifying store', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
     populateStorage(mockAdapter, 'test-dispose', 'session1', {
       name: 'stale',
       value: 999,
     });
 
-    const env = createDocPersistenceEnv({
-      storeName: 'test-dispose',
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocPersistenceEnv({ storeName: 'test-dispose' });
 
     env.apiStore.reset();
 

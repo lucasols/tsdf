@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../../mocks/mockOpfsStorageAdapter';
+import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
@@ -34,7 +34,10 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const expiredQueryParams: ListQueryParams = { tableId: 'expired-users' };
     const freshQueryParams: ListQueryParams = { tableId: 'fresh-users' };
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     // Seed one stale query+item pair and one fresh pair to verify cleanup across both namespaces.
     const expiredItemKey = setCachedItem(
@@ -85,11 +88,7 @@ describe('async storage efficiency: list-query', () => {
       mockAdapter,
       { storeName, sessionKey },
     );
-    createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    createListQueryEnv({ storeName, sessionKey });
     const startupOperationBreakdown = startupOperationCapture.finish();
 
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`
@@ -126,7 +125,7 @@ describe('async storage efficiency: list-query', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/list-query-expiration/listQuery.item'
@@ -134,18 +133,15 @@ describe('async storage efficiency: list-query', () => {
           - 'sess1/list-query-expiration/listQuery.query'
           - 'sess1/list-query-expiration/listQuery.query'
         metadataBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."expired-users||1 (metadata)', 'li."fresh-users||2 (metadata)']
           - - 'lq.{tableId:"expired-users"} (metadata)'
             - 'lq.{tableId:"fresh-users"} (metadata)'
         metadataReads:
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."expired-users||1 (metadata)'
           - 'li."fresh-users||2 (metadata)'
           - 'lq.{tableId:"expired-users"} (metadata)'
           - 'lq.{tableId:"fresh-users"} (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -159,7 +155,6 @@ describe('async storage efficiency: list-query', () => {
         - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/list-query-expiration/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22expired-users%7C%7C1.json","file:__tsdf_meta__%3A%22fresh-users%7C%7C2.json","file:__tsdf_payload__%3A%22expired-users%7C%7C1.json","file:__tsdf_payload__%3A%22fresh-users%7C%7C2.json"]'
         - '📂 open ✅ tsdf/sess1/list-query-expiration/listQuery.item (scope directory)'
@@ -205,7 +200,10 @@ describe('async storage efficiency: list-query', () => {
     const thirdQuery = { tableId: 'third' };
     const storeName = 'lq-query-metadata';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     setCachedQuery(mockAdapter, storeName, sessionKey, firstQuery, []);
     await advanceTime(100);
@@ -216,7 +214,6 @@ describe('async storage efficiency: list-query', () => {
       sessionKey,
       maxQueries: 2,
       serverData: { third: [{ id: 1, name: 'Third' }] },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Drain the startup-scheduled cleanup before capturing the query fetch/eviction flow.
@@ -239,40 +236,27 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.query',
       }).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
-          - 'sess1/lq-query-metadata/listQuery.item'
           - 'sess1/lq-query-metadata/listQuery.query'
           - 'sess1/lq-query-metadata/listQuery.query'
           - 'sess1/lq-query-metadata/listQuery.query'
           - 'sess1/lq-query-metadata/listQuery.item'
         metadataBatchReads:
-          - ['lq.{tableId:"third"} (metadata)']
-          - ['li."third||1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - - 'lq.{tableId:"first"} (metadata)'
             - 'lq.{tableId:"second"} (metadata)'
             - 'lq.{tableId:"third"} (metadata)'
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."third||1 (metadata)']
         metadataReads:
-          - 'lq.{tableId:"third"} (metadata)'
-          - 'li."third||1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{tableId:"first"} (metadata)'
           - 'lq.{tableId:"second"} (metadata)'
           - 'lq.{tableId:"third"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."third||1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -303,7 +287,6 @@ describe('async storage efficiency: list-query', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
@@ -318,7 +301,6 @@ describe('async storage efficiency: list-query', () => {
         - '🗑️ ✅ tsdf/sess1/lq-query-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (metadata))'
         - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-query-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22third%7C%7C1.json","file:__tsdf_payload__%3A%22third%7C%7C1.json"]'
         - '📂 open ✅ tsdf/sess1/lq-query-metadata/listQuery.item (scope directory)'
@@ -334,7 +316,10 @@ describe('async storage efficiency: list-query', () => {
     const fourthQuery = { tableId: 'fourth' };
     const storeName = 'lq-coalesced-query-maintenance';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     setCachedQuery(mockAdapter, storeName, sessionKey, firstQuery, []);
     await advanceTime(100);
@@ -348,7 +333,6 @@ describe('async storage efficiency: list-query', () => {
         third: [{ id: 1, name: 'Third' }],
         fourth: [{ id: 2, name: 'Fourth' }],
       },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Drain the startup maintenance so the capture only covers coalesced query eviction.
@@ -377,48 +361,32 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.query',
       }).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(`['{tableId:"fourth"}', '{tableId:"third"}']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
-          - 'sess1/lq-coalesced-query-maintenance/listQuery.item'
           - 'sess1/lq-coalesced-query-maintenance/listQuery.query'
           - 'sess1/lq-coalesced-query-maintenance/listQuery.query'
           - 'sess1/lq-coalesced-query-maintenance/listQuery.query'
           - 'sess1/lq-coalesced-query-maintenance/listQuery.item'
         metadataBatchReads:
-          - ['lq.{tableId:"third"} (metadata)']
           - ['li."third||1 (metadata)']
-          - ['lq.{tableId:"fourth"} (metadata)']
-          - ['li."third||1 (metadata)', 'li."fourth||2 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - - 'lq.{tableId:"first"} (metadata)'
             - 'lq.{tableId:"fourth"} (metadata)'
             - 'lq.{tableId:"second"} (metadata)'
             - 'lq.{tableId:"third"} (metadata)'
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."fourth||2 (metadata)', 'li."third||1 (metadata)']
         metadataReads:
-          - 'lq.{tableId:"third"} (metadata)'
           - 'li."third||1 (metadata)'
-          - 'lq.{tableId:"fourth"} (metadata)'
-          - 'li."third||1 (metadata)'
-          - 'li."fourth||2 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{tableId:"first"} (metadata)'
           - 'lq.{tableId:"fourth"} (metadata)'
           - 'lq.{tableId:"second"} (metadata)'
           - 'lq.{tableId:"third"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."fourth||2 (metadata)'
           - 'li."third||1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -469,7 +437,6 @@ describe('async storage efficiency: list-query', () => {
         - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22third%7C%7C1.json (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))'
         - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_payload__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (payload))'
         - '✍️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item/__tsdf_meta__%3A%22fourth%7C%7C2.json (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22first%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22second%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
@@ -488,7 +455,6 @@ describe('async storage efficiency: list-query', () => {
         - '🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22first%22%7D.json (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (metadata))'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22third%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22fourth%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22third%22%7D.json"]'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22fourth%7C%7C2.json","file:__tsdf_meta__%3A%22third%7C%7C1.json","file:__tsdf_payload__%3A%22fourth%7C%7C2.json","file:__tsdf_payload__%3A%22third%7C%7C1.json"]'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-query-maintenance/listQuery.item (scope directory)'
@@ -506,13 +472,15 @@ describe('async storage efficiency: list-query', () => {
       tableId: 'users',
       filters: [{ field: 'name', op: 'eq', value: 'Missing user' }],
     } satisfies ListQueryParams;
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     const env = createListQueryEnv({
       storeName,
       sessionKey,
       serverData: { users: [{ id: 1, name: 'Existing user' }] },
-      storageAdapter: mockAdapter.adapter,
     });
 
     await settleStartupBackgroundScan(mockAdapter);
@@ -540,37 +508,22 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.query',
       }),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(
+      `['{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}']`,
+    );
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
-        listKeyScans:
-          - 'sess1/lq-empty-query-manifest/listQuery.item'
-          - 'sess1/lq-empty-query-manifest/listQuery.query'
-          - 'sess1/lq-empty-query-manifest/listQuery.query'
-          - 'sess1/lq-empty-query-manifest/listQuery.item'
+        listKeyScans: ['sess1/lq-empty-query-manifest/listQuery.query']
         metadataBatchReads:
           - - 'lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata)'
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
-          - - 'lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata)'
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
         metadataReads:
           - 'lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
-        - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.item (scope directory)'
-        - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
-        - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
         - '📁 ensure 🆕 tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
         - '📄 ensure 🆕 tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (payload))'
         - '📄 ensure 🆕 tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))'
@@ -581,13 +534,11 @@ describe('async storage efficiency: list-query', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-empty-query-manifest/listQuery.query (scope directory)'
         - '📄 open ✅ tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))'
         - '📖 tsdf/sess1/lq-empty-query-manifest/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ❌ tsdf/sess1/lq-empty-query-manifest/listQuery.item (scope directory)'
     `);
   });
@@ -596,7 +547,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-query-becomes-empty';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -615,7 +566,6 @@ describe('async storage efficiency: list-query', () => {
       storeName,
       sessionKey,
       serverData: { users: [{ id: 1, name: 'Cached user' }] },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
@@ -731,7 +681,10 @@ describe('async storage efficiency: list-query', () => {
   test('when maxItems limit is reached a full store cleanup occurs', async () => {
     const storeName = 'lq-item-metadata';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     setCachedItem(mockAdapter, storeName, sessionKey, 'users', 1, {
       id: 1,
@@ -747,12 +700,7 @@ describe('async storage efficiency: list-query', () => {
       storeItemKey('users', 2),
     ]);
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      maxItems: 2,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey, maxItems: 2 });
 
     // Drain the startup cleanup before capturing the maxItems flush.
     await settleStartupBackgroundScan(mockAdapter);
@@ -776,12 +724,10 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.item',
       }).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/lq-item-metadata/listQuery.item'
@@ -790,24 +736,16 @@ describe('async storage efficiency: list-query', () => {
           - 'sess1/lq-item-metadata/listQuery.item'
           - 'sess1/lq-item-metadata/listQuery.item'
         metadataBatchReads:
-          - ['li."users||3 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['lq.{tableId:"users"} (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - - 'li."users||1 (metadata)'
             - 'li."users||2 (metadata)'
             - 'li."users||3 (metadata)'
         metadataReads:
-          - 'li."users||3 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."users||1 (metadata)'
           - 'li."users||2 (metadata)'
           - 'li."users||3 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -827,13 +765,11 @@ describe('async storage efficiency: list-query', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.query (scope directory)'
         - '📄 open ✅ tsdf/sess1/lq-item-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (metadata))'
         - '📖 tsdf/sess1/lq-item-metadata/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_meta__%3A%22users%7C%7C3.json","file:__tsdf_payload__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C3.json"]'
         - '📂 open ✅ tsdf/sess1/lq-item-metadata/listQuery.item (scope directory)'
@@ -865,7 +801,10 @@ describe('async storage efficiency: list-query', () => {
     const sharedItemKey = storeItemKey('users', 1);
     const aliceOnlyItemKey = storeItemKey('users', 2);
     const bobOnlyItemKey = storeItemKey('users', 3);
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     // Seed two persisted queries that both reference the same oldest item.
     setCachedItem(mockAdapter, storeName, sessionKey, 'users', 1, {
@@ -906,12 +845,7 @@ describe('async storage efficiency: list-query', () => {
       kind: 'listQuery.query',
     });
 
-    createListQueryEnv({
-      storeName,
-      sessionKey,
-      maxItems: 3,
-      storageAdapter: mockAdapter.adapter,
-    });
+    createListQueryEnv({ storeName, sessionKey, maxItems: 3 });
 
     // Let the startup-scheduled maintenance enforce maxItems against the preloaded cache.
     const cleanupCapture = startOpfsPersistentStorageOperationCapture(
@@ -927,7 +861,9 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.item',
       }).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(
+      `['"users||1', '"users||2', '"users||3', '"users||4']`,
+    );
     expect(mockAdapter.listQuery.readQueryEntry(firstUsersQuery))
       .toMatchInlineSnapshot(`
         data:
@@ -956,13 +892,12 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(cleanupOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/lq-shared-item-cleanup/listQuery.item'
           - 'sess1/lq-shared-item-cleanup/listQuery.query'
         metadataBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - - 'li."users||1 (metadata)'
             - 'li."users||2 (metadata)'
             - 'li."users||3 (metadata)'
@@ -970,15 +905,13 @@ describe('async storage efficiency: list-query', () => {
           - - 'lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)'
             - 'lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata)'
         metadataReads:
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."users||1 (metadata)'
           - 'li."users||2 (metadata)'
           - 'li."users||3 (metadata)'
           - 'li."users||4 (metadata)'
           - 'lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)'
           - 'lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -992,7 +925,6 @@ describe('async storage efficiency: list-query', () => {
         - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-shared-item-cleanup/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_meta__%3A%22users%7C%7C3.json","file:__tsdf_meta__%3A%22users%7C%7C4.json","file:__tsdf_payload__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C3.json","file:__tsdf_payload__%3A%22users%7C%7C4.json"]'
         - '📂 open ✅ tsdf/sess1/lq-shared-item-cleanup/listQuery.item (scope directory)'
@@ -1034,7 +966,10 @@ describe('async storage efficiency: list-query', () => {
       'users',
       1,
     );
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     const env = createListQueryEnv({
       storeName,
@@ -1045,7 +980,6 @@ describe('async storage efficiency: list-query', () => {
           { id: 2, name: 'Bob' },
         ],
       },
-      storageAdapter: mockAdapter.adapter,
     });
 
     env.scheduleFetch('highPriority', usersQuery);
@@ -1071,7 +1005,7 @@ describe('async storage efficiency: list-query', () => {
         storeName,
         kind: 'listQuery.item',
       }).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(`['"users||2']`);
     expect(mockAdapter.listQuery.readQueryEntry(usersQuery))
       .toMatchInlineSnapshot(`
         data:
@@ -1097,32 +1031,24 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(deleteOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans: ['sess1/lq-delete-flow/listQuery.query', 'sess1/lq-delete-flow/listQuery.item']
         metadataBatchReads:
           - - 'lq.{tableId:"users"} (metadata)'
             - 'lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)'
           - ['li."users||2 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - - 'lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)'
             - 'lq.{tableId:"users"} (metadata)'
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."users||2 (metadata)']
         metadataReads:
           - 'lq.{tableId:"users"} (metadata)'
           - 'lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)'
           - 'li."users||2 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)'
           - 'lq.{tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."users||2 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -1151,7 +1077,6 @@ describe('async storage efficiency: list-query', () => {
         - '📄 ensure ✅ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
         - '✍️ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_payload__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (payload))'
         - '✍️ tsdf/sess1/lq-delete-flow/listQuery.item/__tsdf_meta__%3A%22users%7C%7C2.json (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query (scope directory)'
@@ -1159,7 +1084,6 @@ describe('async storage efficiency: list-query', () => {
         - '📄 open ✅ tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
         - '📖 tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))'
         - '📖 tsdf/sess1/lq-delete-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C2.json","file:__tsdf_payload__%3A%22users%7C%7C2.json"]'
         - '📂 open ✅ tsdf/sess1/lq-delete-flow/listQuery.item (scope directory)'
@@ -1172,7 +1096,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-direct-get-query-state';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1186,11 +1110,7 @@ describe('async storage efficiency: list-query', () => {
       storeItemKey('users', 1),
     ]);
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so this capture only measures the direct read-through path.
     await settleStartupBackgroundScan(mockAdapter);
@@ -1257,7 +1177,7 @@ describe('async storage efficiency: list-query', () => {
       sessionKey,
       usersQuery,
     );
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1274,11 +1194,7 @@ describe('async storage efficiency: list-query', () => {
       version: 1,
     });
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the later touches only come from the direct read path.
     await settleStartupBackgroundScan(mockAdapter);
@@ -1324,7 +1240,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-query-invalidation-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1342,7 +1258,6 @@ describe('async storage efficiency: list-query', () => {
       storeName,
       sessionKey,
       serverData: { users: [{ id: 1, name: 'Fresh user' }] },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
@@ -1385,9 +1300,7 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/lq-query-invalidation-flow/listQuery.item'
@@ -1396,19 +1309,13 @@ describe('async storage efficiency: list-query', () => {
           - 'sess1/lq-query-invalidation-flow/listQuery.item'
         metadataBatchReads:
           - ['li."users||1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['lq.{tableId:"users"} (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."users||1 (metadata)']
         metadataReads:
           - 'li."users||1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."users||1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -1429,13 +1336,11 @@ describe('async storage efficiency: list-query', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.query (scope directory)'
         - '📄 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"} (metadata))'
         - '📖 tsdf/sess1/lq-query-invalidation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"} (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
         - '📂 open ✅ tsdf/sess1/lq-query-invalidation-flow/listQuery.item (scope directory)'
@@ -1448,7 +1353,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-coalesced-invalidations';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1466,7 +1371,6 @@ describe('async storage efficiency: list-query', () => {
       storeName,
       sessionKey,
       serverData: { users: [{ id: 1, name: 'Fresh user 1' }] },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first so only the invalidation writes are counted below.
@@ -1537,9 +1441,7 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/lq-coalesced-invalidations/listQuery.item'
@@ -1548,19 +1450,13 @@ describe('async storage efficiency: list-query', () => {
           - 'sess1/lq-coalesced-invalidations/listQuery.item'
         metadataBatchReads:
           - ['li."users||1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['lq.{tableId:"users"} (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."users||1 (metadata)']
         metadataReads:
           - 'li."users||1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."users||1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -1581,13 +1477,11 @@ describe('async storage efficiency: list-query', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.query (scope directory)'
         - '📄 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-coalesced-invalidations.lq.{tableId:"users"} (metadata))'
         - '📖 tsdf/sess1/lq-coalesced-invalidations/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-coalesced-invalidations.lq.{tableId:"users"} (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
         - '📂 open ✅ tsdf/sess1/lq-coalesced-invalidations/listQuery.item (scope directory)'
@@ -1611,7 +1505,7 @@ describe('async storage efficiency: list-query', () => {
       sessionKey,
       usersQuery,
     );
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1634,7 +1528,6 @@ describe('async storage efficiency: list-query', () => {
           { id: 2, name: 'Second user' },
         ],
       },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
@@ -1693,7 +1586,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-remount-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1707,11 +1600,7 @@ describe('async storage efficiency: list-query', () => {
       storeItemKey('users', 1),
     ]);
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted query flow.
     await settleStartupBackgroundScan(mockAdapter);
@@ -1777,7 +1666,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-item-invalidation-flow';
     const sessionKey = 'sess1';
     const itemPayload = rawItemPayload('users', 1);
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1792,7 +1681,6 @@ describe('async storage efficiency: list-query', () => {
       storeName,
       sessionKey,
       serverData: { users: [{ id: 1, name: 'Fresh user' }] },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
@@ -1828,28 +1716,16 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/lq-item-invalidation-flow/listQuery.item'
-          - 'sess1/lq-item-invalidation-flow/listQuery.query'
-          - 'sess1/lq-item-invalidation-flow/listQuery.query'
           - 'sess1/lq-item-invalidation-flow/listQuery.item'
         metadataBatchReads:
           - ['li."users||1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."users||1 (metadata)']
-        metadataReads:
-          - 'li."users||1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'li."users||1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        metadataReads: ['li."users||1 (metadata)', 'li."users||1 (metadata)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -1869,9 +1745,7 @@ describe('async storage efficiency: list-query', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ❌ tsdf/sess1/lq-item-invalidation-flow/listQuery.query (scope directory)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
         - '📂 open ✅ tsdf/sess1/lq-item-invalidation-flow/listQuery.item (scope directory)'
@@ -1883,7 +1757,7 @@ describe('async storage efficiency: list-query', () => {
   test('item hook remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
     const storeName = 'lq-item-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1894,11 +1768,7 @@ describe('async storage efficiency: list-query', () => {
       name: 'Cached user',
     });
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted item flow.
     await settleStartupBackgroundScan(mockAdapter);
@@ -1957,7 +1827,7 @@ describe('async storage efficiency: list-query', () => {
   test('useMultipleItems remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
     const storeName = 'lq-multi-item-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1972,11 +1842,7 @@ describe('async storage efficiency: list-query', () => {
       name: 'Cached user 2',
     });
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted item flow.
     await settleStartupBackgroundScan(mockAdapter);
@@ -2048,7 +1914,7 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -2069,11 +1935,7 @@ describe('async storage efficiency: list-query', () => {
       storeItemKey('projects', 1),
     ]);
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the mounted query flow.
     await settleStartupBackgroundScan(mockAdapter);
@@ -2172,7 +2034,7 @@ describe('async storage efficiency: list-query', () => {
       'users',
       1,
     );
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -2186,11 +2048,7 @@ describe('async storage efficiency: list-query', () => {
       storeItemKey('users', 1),
     ]);
 
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     // Hydrate the cached query through a normal mounted component first.
     await settleStartupBackgroundScan(mockAdapter);
@@ -2230,9 +2088,7 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/lq-mutation-flow/listQuery.item'
@@ -2241,19 +2097,13 @@ describe('async storage efficiency: list-query', () => {
           - 'sess1/lq-mutation-flow/listQuery.item'
         metadataBatchReads:
           - ['li."users||1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['lq.{tableId:"users"} (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['li."users||1 (metadata)']
         metadataReads:
           - 'li."users||1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."users||1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -2274,13 +2124,11 @@ describe('async storage efficiency: list-query', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.query (scope directory)'
         - '📄 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-mutation-flow.lq.{tableId:"users"} (metadata))'
         - '📖 tsdf/sess1/lq-mutation-flow/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.lq-mutation-flow.lq.{tableId:"users"} (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
         - '📂 open ✅ tsdf/sess1/lq-mutation-flow/listQuery.item (scope directory)'
@@ -2316,7 +2164,7 @@ describe('async storage efficiency: list-query', () => {
       sessionKey,
       projectsQuery,
     );
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName,
       sessionKey,
@@ -2333,11 +2181,7 @@ describe('async storage efficiency: list-query', () => {
         },
       },
     });
-    const env = createListQueryEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createListQueryEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
     const readCapture = startOpfsPersistentStorageOperationCapture(
@@ -2392,11 +2236,13 @@ describe('async storage efficiency: list-query', () => {
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };
     const tasksQuery = { tableId: 'tasks' };
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
     const env = createListQueryEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       maxItems: 2,
       maxQueries: 2,
       serverData: {
@@ -2429,9 +2275,7 @@ describe('async storage efficiency: list-query', () => {
 
     expect(readCapture.finish()).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads:
-          - 'tsdf.sess1._o_.p (protected registry payload)'
-          - 'tsdf.sess1._o_.p (protected registry payload)'
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/list-query-opfs-eviction-efficiency/listQuery.query'
@@ -2439,31 +2283,22 @@ describe('async storage efficiency: list-query', () => {
           - 'sess1/list-query-opfs-eviction-efficiency/listQuery.item'
           - 'sess1/list-query-opfs-eviction-efficiency/listQuery.item'
         metadataBatchReads:
-          - ['lq.{tableId:"tasks"} (metadata)']
-          - ['li."projects||1 (metadata)', 'li."tasks||1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
+          - ['li."projects||1 (metadata)']
           - - 'lq.{tableId:"projects"} (metadata)'
             - 'lq.{tableId:"tasks"} (metadata)'
             - 'lq.{tableId:"users"} (metadata)'
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - - 'li."projects||1 (metadata)'
             - 'li."tasks||1 (metadata)'
             - 'li."users||1 (metadata)'
         metadataReads:
-          - 'lq.{tableId:"tasks"} (metadata)'
           - 'li."projects||1 (metadata)'
-          - 'li."tasks||1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'lq.{tableId:"projects"} (metadata)'
           - 'lq.{tableId:"tasks"} (metadata)'
           - 'lq.{tableId:"users"} (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'li."projects||1 (metadata)'
           - 'li."tasks||1 (metadata)'
           - 'li."users||1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -2487,7 +2322,6 @@ describe('async storage efficiency: list-query', () => {
         - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22projects%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))'
         - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_payload__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (payload))'
         - '✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item/__tsdf_meta__%3A%22tasks%7C%7C1.json (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22tasks%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22users%22%7D.json"]'
         - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
@@ -2502,7 +2336,6 @@ describe('async storage efficiency: list-query', () => {
         - '🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query/__tsdf_meta__%3A%7BtableId%3A%22users%22%7D.json (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (metadata))'
         - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory)'
         - '🗂️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.query (scope directory) entries=["file:__tsdf_meta__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_meta__%3A%7BtableId%3A%22tasks%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22projects%22%7D.json","file:__tsdf_payload__%3A%7BtableId%3A%22tasks%22%7D.json"]'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'
         - '🗂️ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory) entries=["file:__tsdf_meta__%3A%22projects%7C%7C1.json","file:__tsdf_meta__%3A%22tasks%7C%7C1.json","file:__tsdf_meta__%3A%22users%7C%7C1.json","file:__tsdf_payload__%3A%22projects%7C%7C1.json","file:__tsdf_payload__%3A%22tasks%7C%7C1.json","file:__tsdf_payload__%3A%22users%7C%7C1.json"]'
         - '📂 open ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/listQuery.item (scope directory)'

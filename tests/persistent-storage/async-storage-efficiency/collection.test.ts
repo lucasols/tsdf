@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-import { createMockOpfsStorageAdapter } from '../../mocks/mockOpfsStorageAdapter';
+import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
@@ -28,7 +28,10 @@ describe('async storage efficiency: collection', () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'collection-expiration';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     // Seed one expired item and one fresh item so cleanup has a meaningful choice.
     const expiredItemKey = setCachedCollectionItem(
@@ -65,11 +68,7 @@ describe('async storage efficiency: collection', () => {
       mockAdapter,
       { storeName, sessionKey },
     );
-    createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    createCollectionEnv({ storeName, sessionKey });
     const startupOperationBreakdown = startupOperationCapture.finish();
 
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`
@@ -104,23 +103,20 @@ describe('async storage efficiency: collection', () => {
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/collection-expiration/collection.item'
           - 'sess1/collection-expiration/collection.item'
         metadataBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - - 'ci."expired-user (metadata)'
             - 'ci."expired-user-2 (metadata)'
             - 'ci."fresh-user (metadata)'
         metadataReads:
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
           - 'ci."expired-user (metadata)'
           - 'ci."expired-user-2 (metadata)'
           - 'ci."fresh-user (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -134,7 +130,6 @@ describe('async storage efficiency: collection', () => {
         - '📂 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)'
         - '🗂️ tsdf/sess1/collection-expiration/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22expired-user-2.json","file:__tsdf_meta__%3A%22expired-user.json","file:__tsdf_meta__%3A%22fresh-user.json","file:__tsdf_payload__%3A%22expired-user-2.json","file:__tsdf_payload__%3A%22expired-user.json","file:__tsdf_payload__%3A%22fresh-user.json"]'
         - '📂 open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)'
@@ -166,7 +161,10 @@ describe('async storage efficiency: collection', () => {
   test('maxItems cleanup snapshots the full manifest history', async () => {
     const storeName = 'col-max-items-metadata';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     setCachedCollectionItem(mockAdapter, storeName, sessionKey, 'a', {
       value: { id: 'a', name: 'Oldest cached' },
@@ -181,12 +179,7 @@ describe('async storage efficiency: collection', () => {
       mockAdapter,
       { storeName, sessionKey },
     );
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      maxItems: 2,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
     const startupOperationBreakdown = startupOperationCapture.finish();
 
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`
@@ -221,27 +214,19 @@ describe('async storage efficiency: collection', () => {
         storeName,
         sessionKey,
       ).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(`['b', 'c']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/col-max-items-metadata/collection.item'
           - 'sess1/col-max-items-metadata/collection.item'
           - 'sess1/col-max-items-metadata/collection.item'
         metadataBatchReads:
-          - ['ci."c (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['ci."a (metadata)', 'ci."b (metadata)', 'ci."c (metadata)']
-        metadataReads:
-          - 'ci."c (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'ci."a (metadata)'
-          - 'ci."b (metadata)'
-          - 'ci."c (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        metadataReads: ['ci."a (metadata)', 'ci."b (metadata)', 'ci."c (metadata)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -259,7 +244,6 @@ describe('async storage efficiency: collection', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
         - '🗂️ tsdf/sess1/col-max-items-metadata/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22a.json","file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_payload__%3A%22a.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json"]'
         - '📂 open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)'
@@ -280,7 +264,10 @@ describe('async storage efficiency: collection', () => {
   test('multiple overflowing collection updates before idle maintenance trigger a single cleanup pass', async () => {
     const storeName = 'col-coalesced-maintenance';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
 
     setCachedCollectionItem(mockAdapter, storeName, sessionKey, 'a', {
       value: { id: 'a', name: 'Oldest cached' },
@@ -290,12 +277,7 @@ describe('async storage efficiency: collection', () => {
       value: { id: 'b', name: 'Newer cached' },
     });
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      maxItems: 2,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
 
     // Drain the startup maintenance so the capture only covers the coalesced overflow path.
     await settleStartupBackgroundScan(mockAdapter);
@@ -321,30 +303,19 @@ describe('async storage efficiency: collection', () => {
         storeName,
         sessionKey,
       ).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/col-coalesced-maintenance/collection.item'
           - 'sess1/col-coalesced-maintenance/collection.item'
           - 'sess1/col-coalesced-maintenance/collection.item'
         metadataBatchReads:
-          - ['ci."c (metadata)']
-          - ['ci."d (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['ci."a (metadata)', 'ci."b (metadata)', 'ci."c (metadata)', 'ci."d (metadata)']
-        metadataReads:
-          - 'ci."c (metadata)'
-          - 'ci."d (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'ci."a (metadata)'
-          - 'ci."b (metadata)'
-          - 'ci."c (metadata)'
-          - 'ci."d (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        metadataReads: ['ci."a (metadata)', 'ci."b (metadata)', 'ci."c (metadata)', 'ci."d (metadata)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -369,7 +340,6 @@ describe('async storage efficiency: collection', () => {
         - '📄 ensure 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))'
         - '✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (payload))'
         - '✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
         - '🗂️ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%22a.json","file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_meta__%3A%22d.json","file:__tsdf_payload__%3A%22a.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json","file:__tsdf_payload__%3A%22d.json"]'
         - '📂 open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)'
@@ -394,7 +364,7 @@ describe('async storage efficiency: collection', () => {
   test('direct getItemState reads the cached collection item multiple times with short gaps and promotes it once', async () => {
     const storeName = 'col-direct-get-item-state';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -404,11 +374,7 @@ describe('async storage efficiency: collection', () => {
       value: { id: '1', name: 'Cached user' },
     });
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     // Drain the startup scan so this capture only measures the direct read path.
     await settleStartupBackgroundScan(mockAdapter);
@@ -451,7 +417,7 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-direct-touch-offline-marker';
     const sessionKey = 'sess1';
     const storageKey = collectionStorageKey(storeName, sessionKey, '1');
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -463,11 +429,7 @@ describe('async storage efficiency: collection', () => {
       version: 1,
     });
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the later touch only comes from the direct read path.
     await settleStartupBackgroundScan(mockAdapter);
@@ -497,7 +459,7 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-mutation-flow';
     const sessionKey = 'sess1';
     const storageKey = collectionStorageKey(storeName, sessionKey, '1');
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -507,11 +469,7 @@ describe('async storage efficiency: collection', () => {
       value: { id: '1', name: 'Cached user' },
     });
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     // Hydrate the cached item through a normal mounted hook first.
     await settleStartupBackgroundScan(mockAdapter);
@@ -586,18 +544,17 @@ describe('async storage efficiency: collection', () => {
   test('deleteItemState removes the persisted collection entry through the namespace manifest only', async () => {
     const storeName = 'col-delete-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      storeName,
+      sessionKey,
+    });
     const deletedItemStorageKey = collectionStorageKey(
       storeName,
       sessionKey,
       '1',
     );
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     env.apiStore.addItemToState('1', { value: { id: '1', name: 'Alice' } });
     env.apiStore.addItemToState('2', { value: { id: '2', name: 'Bob' } });
@@ -621,20 +578,18 @@ describe('async storage efficiency: collection', () => {
         storeName,
         sessionKey,
       ).sort(),
-    ).toMatchInlineSnapshot(`[]`);
+    ).toMatchInlineSnapshot(`['2']`);
     expect(deleteOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/col-delete-flow/collection.item'
           - 'sess1/col-delete-flow/collection.item'
         metadataBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['ci."2 (metadata)']
-        metadataReads: ['tsdf.sess1._o_.p (protected registry metadata)', 'ci."2 (metadata)']
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        metadataReads: ['ci."2 (metadata)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -643,7 +598,6 @@ describe('async storage efficiency: collection', () => {
         - '🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item/__tsdf_meta__%3A%221.json (tsdf.sess1.col-delete-flow.ci."1 (metadata))'
         - '📂 open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)'
         - '🗂️ tsdf/sess1/col-delete-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%222.json","file:__tsdf_payload__%3A%222.json"]'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)'
         - '🗂️ tsdf/sess1/col-delete-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%222.json","file:__tsdf_payload__%3A%222.json"]'
         - '📂 open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)'
@@ -655,7 +609,7 @@ describe('async storage efficiency: collection', () => {
   test('useItem invalidation snapshots the full persistence timeline through the refetch save', async () => {
     const storeName = 'col-invalidation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -669,7 +623,6 @@ describe('async storage efficiency: collection', () => {
       storeName,
       sessionKey,
       serverData: { '1': { id: '1', name: 'Fresh user' } },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
@@ -702,21 +655,16 @@ describe('async storage efficiency: collection', () => {
     );
     expect(invalidationOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/col-invalidation-flow/collection.item'
           - 'sess1/col-invalidation-flow/collection.item'
         metadataBatchReads:
           - ['ci."1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['ci."1 (metadata)']
-        metadataReads:
-          - 'ci."1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'ci."1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        metadataReads: ['ci."1 (metadata)', 'ci."1 (metadata)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -735,7 +683,6 @@ describe('async storage efficiency: collection', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)'
         - '🗂️ tsdf/sess1/col-invalidation-flow/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
         - '📂 open ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)'
@@ -748,7 +695,7 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-offline-marker-flow';
     const sessionKey = 'sess1';
     const storageKey = collectionStorageKey(storeName, sessionKey, '1');
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -762,7 +709,6 @@ describe('async storage efficiency: collection', () => {
       storeName,
       sessionKey,
       serverData: { '1': { id: '1', name: 'Fresh user' } },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
@@ -802,7 +748,7 @@ describe('async storage efficiency: collection', () => {
   test('repeated invalidations within the debounce window coalesce collection persistence writes', async () => {
     const storeName = 'col-coalesced-invalidations';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -816,7 +762,6 @@ describe('async storage efficiency: collection', () => {
       storeName,
       sessionKey,
       serverData: { '1': { id: '1', name: 'Fresh user 1' } },
-      storageAdapter: mockAdapter.adapter,
     });
 
     // Hydrate cached data first so only the invalidation writes are counted below.
@@ -879,21 +824,16 @@ describe('async storage efficiency: collection', () => {
     );
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       breakdown:
-        externalPayloadReads: ['tsdf.sess1._o_.p (protected registry payload)']
+        externalPayloadReads: []
         legacyFallbackReads: []
         listKeyScans:
           - 'sess1/col-coalesced-invalidations/collection.item'
           - 'sess1/col-coalesced-invalidations/collection.item'
         metadataBatchReads:
           - ['ci."1 (metadata)']
-          - ['tsdf.sess1._o_.p (protected registry metadata)']
           - ['ci."1 (metadata)']
-        metadataReads:
-          - 'ci."1 (metadata)'
-          - 'tsdf.sess1._o_.p (protected registry metadata)'
-          - 'ci."1 (metadata)'
-        payloadBatchReads:
-          - ['tsdf.sess1._o_.p (protected registry payload)']
+        metadataReads: ['ci."1 (metadata)', 'ci."1 (metadata)']
+        payloadBatchReads: []
         scopedPayloadReads: []
 
       operations:
@@ -912,7 +852,6 @@ describe('async storage efficiency: collection', () => {
         - '📁 ensure ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)'
         - '📄 ensure 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
         - '✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json (internal registry)'
-        - '📂 open ❌ tsdf/sess1/_o_.p/document (scope directory)'
         - '📂 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)'
         - '🗂️ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]'
         - '📂 open ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)'
@@ -924,7 +863,7 @@ describe('async storage efficiency: collection', () => {
   test('hook remount reuses hydrated collection state without touching localStorage again', async () => {
     const storeName = 'col-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -934,11 +873,7 @@ describe('async storage efficiency: collection', () => {
       value: { id: '1', name: 'Cached user' },
     });
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the UI mount path only.
     await settleStartupBackgroundScan(mockAdapter);
@@ -996,7 +931,7 @@ describe('async storage efficiency: collection', () => {
   test('useMultipleItems remount reuses hydrated collection items without touching localStorage again', async () => {
     const storeName = 'col-multi-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1009,11 +944,7 @@ describe('async storage efficiency: collection', () => {
       value: { id: '2', name: 'Cached user 2' },
     });
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     // Drain the startup scan so the capture focuses on the hook mount path only.
     await settleStartupBackgroundScan(mockAdapter);
@@ -1080,7 +1011,7 @@ describe('async storage efficiency: collection', () => {
   test('getItemState stays in memory after a hook has already hydrated the collection item', async () => {
     const storeName = 'col-get-item-state-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
@@ -1090,11 +1021,7 @@ describe('async storage efficiency: collection', () => {
       value: { id: '1', name: 'Cached user' },
     });
 
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     // Hydrate the item through a realistic UI mount first.
     await settleStartupBackgroundScan(mockAdapter);
@@ -1139,7 +1066,7 @@ describe('async storage efficiency: collection', () => {
     const coldPayload = '2';
     const hotKey = collectionStorageKey(storeName, sessionKey, hotPayload);
     const coldKey = collectionStorageKey(storeName, sessionKey, coldPayload);
-    const mockAdapter = createMockOpfsStorageAdapter({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
       storeName,
       sessionKey,
@@ -1156,11 +1083,7 @@ describe('async storage efficiency: collection', () => {
         ],
       },
     });
-    const env = createCollectionEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createCollectionEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
     const readCapture = startOpfsPersistentStorageOperationCapture(
@@ -1199,13 +1122,11 @@ describe('async storage efficiency: collection', () => {
   test('protected snapshot reuse avoids rereading the async protected registry during eviction', async () => {
     const storeName = 'collection-opfs-protected-snapshot';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
-    const env = createCollectionEnv({
+    const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
-      maxItems: 2,
     });
+    const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
 
     await settleStartupBackgroundScan(mockAdapter);
     setProtectedKeysSnapshot(sessionKey, [

@@ -1,7 +1,10 @@
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import {
+  createOpfsPersistentStorageTestStore,
+  type MockOpfsOperation,
+} from './opfsPersistentStorageTestStore';
 
 const LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX = 'li';
 const LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX = 'lq';
@@ -133,6 +136,7 @@ function formatByteSize(byteSize: number): string {
 const secondsFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
 });
+const LEADING_SLASHES_REGEX = /^\/+/;
 
 function formatTimeMs(ms: number): string {
   if (ms === 0) return '0';
@@ -392,6 +396,12 @@ function formatOpfsPath(scope: {
   return `${scope.sessionKey}/${scope.storeName}/${scope.kind}`;
 }
 
+function stripOpfsRootPrefix(path: string): string {
+  return path.startsWith('tsdf/')
+    ? path
+    : path.replace(LEADING_SLASHES_REGEX, '');
+}
+
 function describeOpfsInternalRecord(key: string): string {
   switch (key) {
     case 'maintenance':
@@ -441,85 +451,75 @@ function createEmptyPersistentStorageReadBreakdown(): PersistentStorageReadBreak
   };
 }
 
+function formatRecordLabel(record: {
+  key: string;
+  logicalKey: string | null;
+  recordKind: 'payload' | 'metadata' | 'internal';
+}): string {
+  if (record.recordKind === 'payload' && record.logicalKey !== null) {
+    return formatGlobalPayloadKey(record.logicalKey);
+  }
+
+  if (record.recordKind === 'metadata' && record.logicalKey !== null) {
+    return formatGlobalMetadataKey(record.logicalKey);
+  }
+
+  return describeOpfsInternalRecord(record.key);
+}
+
+function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
+  switch (operation.type) {
+    case 'openDir':
+      return `📂 open ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+        operation.path,
+      )} (scope directory)`;
+    case 'ensureDir':
+      return `📁 ensure ${operation.created ? '🆕' : '✅'} ${stripOpfsRootPrefix(
+        operation.path,
+      )} (scope directory)`;
+    case 'openFile':
+      return `📄 open ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+        operation.path,
+      )} (${formatRecordLabel(operation.record)})`;
+    case 'ensureFile':
+      return `📄 ensure ${
+        operation.created ? '🆕' : '✅'
+      } ${stripOpfsRootPrefix(operation.path)} (${formatRecordLabel(
+        operation.record,
+      )})`;
+    case 'readFile':
+      return `📖 ${stripOpfsRootPrefix(operation.path)} (${formatRecordLabel(
+        operation.record,
+      )})`;
+    case 'writeFile':
+      return `✍️ ${stripOpfsRootPrefix(operation.path)} (${formatRecordLabel(
+        operation.record,
+      )})`;
+    case 'deleteFile':
+      return `🗑️ ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+        operation.path,
+      )} (${formatRecordLabel(operation.record)})`;
+    case 'listDir':
+      return `🗂️ ${stripOpfsRootPrefix(operation.path)} (scope directory) entries=${JSON.stringify(
+        operation.entries,
+      )}`;
+    case 'deleteDir':
+      return `🧹 ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+        operation.path,
+      )} (scope directory)`;
+  }
+}
+
 export type OpfsPersistentStorageOperationCaptureResult = {
   operations: string[];
   timelineString: string;
 };
 
 function buildOpfsOperationCaptureResult(
-  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
 ): OpfsPersistentStorageOperationCaptureResult {
-  function formatRecord(record: {
-    key: string;
-    logicalKey: string | null;
-    recordKind: 'payload' | 'metadata' | 'internal';
-  }): string {
-    if (record.recordKind === 'payload' && record.logicalKey !== null) {
-      return formatGlobalPayloadKey(record.logicalKey);
-    }
-
-    if (record.recordKind === 'metadata' && record.logicalKey !== null) {
-      return formatGlobalMetadataKey(record.logicalKey);
-    }
-
-    return describeOpfsInternalRecord(record.key);
-  }
-
-  function formatScopedRecord(
-    scope: { sessionKey: string; storeName: string; kind: string },
-    record: {
-      key: string;
-      logicalKey: string | null;
-      recordKind: 'payload' | 'metadata' | 'internal';
-    },
-  ): string {
-    return `${formatOpfsPath(scope)}/${record.key} (${formatRecord(record)})`;
-  }
-
-  function formatOperationLabel(
-    operation: (typeof mockAdapter.operations)[number],
-  ): string {
-    switch (operation.type) {
-      case 'get':
-        return `📖 ${operation.exists ? '✅' : '❌'} ${formatScopedRecord(
-          operation.scope,
-          operation.record,
-        )}`;
-      case 'getMany':
-        return `📚 ${formatOpfsPath(operation.scope)} hits=${operation.hitCount}/${operation.records.length} ${JSON.stringify(
-          operation.records.map((record) =>
-            formatScopedRecord(operation.scope, record),
-          ),
-        )}`;
-      case 'set':
-        return `✍️ ${formatScopedRecord(operation.scope, operation.record)}`;
-      case 'setMany':
-        return `✍️ ${formatOpfsPath(operation.scope)} ${JSON.stringify(
-          operation.records.map((record) =>
-            formatScopedRecord(operation.scope, record),
-          ),
-        )}`;
-      case 'remove':
-        return `🗑️ ${formatScopedRecord(operation.scope, operation.record)}`;
-      case 'removeMany':
-        return `🗑️ ${formatOpfsPath(operation.scope)} ${JSON.stringify(
-          operation.records.map((record) =>
-            formatScopedRecord(operation.scope, record),
-          ),
-        )}`;
-      case 'listKeys':
-        return `🗂️ ${formatOpfsPath(operation.scope)} keys=${JSON.stringify(
-          operation.keys,
-        )}`;
-      case 'clear':
-        return `🧹 ${formatOpfsPath(operation.scope)} removes=${JSON.stringify(
-          operation.removedKeys,
-        )}`;
-    }
-  }
-
   const operations = [
-    ...mockAdapter.operations.map(formatOperationLabel),
+    ...mockAdapter.operations.map(formatOpfsOperationLabel),
     ...mockAdapter.legacyListKeysFallbackRequests.map(
       (prefix) => `🗂️ legacyListKeys ${prefix}`,
     ),
@@ -527,7 +527,7 @@ function buildOpfsOperationCaptureResult(
   const timelineString = getOpfsPersistentStorageOperationTimelineString([
     ...mockAdapter.operations.map((operation) => ({
       time: operation.time,
-      label: formatOperationLabel(operation),
+      label: formatOpfsOperationLabel(operation),
     })),
     ...mockAdapter.legacyListKeysFallbackRequests.map((prefix) => ({
       time: 0,
@@ -541,7 +541,7 @@ function buildOpfsOperationCaptureResult(
 type OpfsCaptureArgs = { storeName: string; sessionKey: string };
 
 function buildScopedOpfsReadBreakdown(
-  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
   args: OpfsCaptureArgs,
 ): PersistentStorageReadBreakdown {
   const scopedPrefix = `tsdf.${args.sessionKey}.${args.storeName}.`;
@@ -589,34 +589,37 @@ function buildScopedOpfsReadBreakdown(
   }
 
   const payloadReads = mockAdapter.payloadGetRequests.map(formatPayloadKey);
-  const metadataReads = mockAdapter.operations.flatMap((operation) => {
-    switch (operation.type) {
-      case 'get':
-        return operation.record.recordKind === 'metadata' &&
-          operation.record.logicalKey !== null
-          ? [formatMetadataLogicalKey(operation.record.logicalKey)]
-          : [];
-      case 'getMany':
-        return operation.records.flatMap((record) =>
-          record.recordKind === 'metadata' && record.logicalKey !== null
-            ? [formatMetadataLogicalKey(record.logicalKey)]
-            : [],
-        );
-      default:
-        return [];
-    }
-  });
-  const metadataBatchReads = mockAdapter.operations.flatMap((operation) =>
-    operation.type === 'getMany'
-      ? [
-          operation.records.flatMap((record) =>
-            record.recordKind === 'metadata' && record.logicalKey !== null
-              ? [formatMetadataLogicalKey(record.logicalKey)]
-              : [],
-          ),
-        ].filter((records) => records.length > 0)
+  const metadataReads = mockAdapter.operations.flatMap((operation) =>
+    operation.type === 'readFile' &&
+    operation.record.recordKind === 'metadata' &&
+    operation.record.logicalKey !== null
+      ? [formatMetadataLogicalKey(operation.record.logicalKey)]
       : [],
   );
+  const metadataBatchReads: string[][] = [];
+  let currentMetadataBatch: string[] = [];
+
+  for (const operation of mockAdapter.operations) {
+    if (
+      operation.type === 'readFile' &&
+      operation.record.recordKind === 'metadata' &&
+      operation.record.logicalKey !== null
+    ) {
+      currentMetadataBatch.push(
+        formatMetadataLogicalKey(operation.record.logicalKey),
+      );
+      continue;
+    }
+
+    if (currentMetadataBatch.length > 0) {
+      metadataBatchReads.push(currentMetadataBatch);
+      currentMetadataBatch = [];
+    }
+  }
+
+  if (currentMetadataBatch.length > 0) {
+    metadataBatchReads.push(currentMetadataBatch);
+  }
 
   return {
     metadataReads,
@@ -630,8 +633,8 @@ function buildScopedOpfsReadBreakdown(
       keys.map((key) => formatPayloadKey(key).value),
     ),
     metadataBatchReads,
-    listKeyScans: mockAdapter.listKeysRequests.map(
-      (scope) => `${scope.sessionKey}/${scope.storeName}/${scope.kind}`,
+    listKeyScans: mockAdapter.listKeysRequests.map((scope) =>
+      formatOpfsPath(scope),
     ),
     legacyFallbackReads: [...mockAdapter.legacyListKeysFallbackRequests],
   };
@@ -643,7 +646,7 @@ export type PersistentStorageOperationSummary =
   };
 
 export function startOpfsPersistentStorageOperationCapture(
-  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
   args?: OpfsCaptureArgs,
 ): { finish: () => PersistentStorageOperationSummary } {
   mockAdapter.clearInstrumentation();
