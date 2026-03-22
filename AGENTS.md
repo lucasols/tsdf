@@ -91,6 +91,13 @@ Do not manually wire up fetch functions, error normalizers, or event handlers �
 - Add comments to explain the purpose of different phases of the test, especially when using `expect` statements, to make it easier for future readers to understand the intent of the test
 - After updating snapshots automatically via `vitest --update-snapshots` or `vitest -u`, check the diff to ensure that the updates are expected and not regressions.
 
+### Test isolation from production code
+
+- **Never modify production code to fix or work around test issues.** If a test is failing, the fix must be at the test level — adjust mocks, test setup, assertions, or test utilities.
+- Tests should use mocks and test utilities to simulate the conditions they need. Do not add hooks, flags, or conditional logic in production code solely to make tests easier to write.
+- The only acceptable exception is tree-shakable compile-time guards like `import.meta.TEST` that are fully eliminated from production builds and have zero runtime impact on prod.
+- If production code genuinely has a bug, fix the bug properly — but the test that exposed it should still not require production code to be shaped around test concerns.
+
 ## General Guidelines
 
 - Prefer simple, direct solutions — don't over-engineer or add unnecessary layers of abstraction
