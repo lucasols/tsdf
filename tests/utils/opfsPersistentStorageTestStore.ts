@@ -691,6 +691,30 @@ function parseFileContext(
   return { path, scope, record: getInstrumentedRecord(scope, key) };
 }
 
+function isAppStoreFilePath(path: string): boolean {
+  const pathSegments = path.split('/');
+  if (pathSegments.length < 5 || pathSegments[0] !== OPFS_ROOT_DIR) {
+    return false;
+  }
+
+  const encodedSessionKey = pathSegments[1];
+  const encodedStoreName = pathSegments[2];
+  if (encodedSessionKey === undefined || encodedStoreName === undefined) {
+    return false;
+  }
+
+  const sessionKey = decodePathSegment(encodedSessionKey);
+  const storeName = decodePathSegment(encodedStoreName);
+  if (
+    sessionKey === INTERNAL_ASYNC_SCOPE.sessionKey &&
+    storeName === INTERNAL_ASYNC_SCOPE.storeName
+  ) {
+    return false;
+  }
+
+  return storeName !== '_o_.p';
+}
+
 export type MockOpfsOperation =
   | {
       created: boolean;
@@ -900,9 +924,9 @@ export type OpfsPersistentStorageTestStoreScope = {
 
 export type OpfsPersistentStorageTestStoreOptions = {
   readDelayMs?: number;
-  storeName?: string;
-  sessionKey?: string;
   initialState?: {
+    storeName: string;
+    sessionKey: string;
     document?: { data: unknown; timestamp?: number; version?: number };
     collection?: Array<{
       payload: string;
@@ -951,7 +975,10 @@ export function createOpfsPersistentStorageTestStore(
   listKeysRequests: AsyncStorageNamespaceScope[];
   legacyListKeysFallbackRequests: string[];
   operations: MockOpfsOperation[];
-  scopeReadRequests: () => string[];
+  scopeReadRequests: (args?: {
+    storeName: string;
+    sessionKey: string;
+  }) => string[];
   clearReadRequests: () => void;
   clearInstrumentation: () => void;
   getRaw: (key: string) => string | null;
@@ -979,45 +1006,12 @@ export function createOpfsPersistentStorageTestStore(
       value: unknown,
     ) => void;
   };
-  document: { storageKey: () => string; readData: <T>() => T | null };
-  collection: {
-    itemStorageKey: (payload: string) => string;
-    readItemData: <T>(payload: string) => T | null;
-  };
-  listQuery: {
-    itemKey: (tableId: string, id: number | string) => string;
-    itemStorageKey: (tableId: string, id: number | string) => string;
-    queryStorageKey: (params: unknown) => string;
-    readItemData: <T>(tableId: string, id: number | string) => T | null;
-    readQueryEntry: (
-      params: unknown,
-    ) => StorageCacheEntry<PersistedListQueryData>;
-    seedItem: (tableId: string, id: number | string, data: unknown) => void;
-  };
 } {
   const mockBrowserOpfs = createMockBrowserOpfs();
   const readDelayMs = options.readDelayMs ?? 0;
-  const scopePrefix =
-    options.storeName !== undefined && options.sessionKey !== undefined
-      ? `tsdf.${options.sessionKey}.${options.storeName}.`
-      : null;
 
-  if (options.storeName !== undefined && options.sessionKey !== undefined) {
-    for (const kind of [
-      'document',
-      'collection.item',
-      'listQuery.item',
-      'listQuery.query',
-    ] as const) {
-      mockBrowserOpfs.setReadDelay(
-        scopeDirPath({
-          sessionKey: options.sessionKey,
-          storeName: options.storeName,
-          kind,
-        }),
-        readDelayMs,
-      );
-    }
+  if (readDelayMs > 0) {
+    mockBrowserOpfs.setDynamicReadDelay(isAppStoreFilePath, readDelayMs);
   }
 
   function setRaw(key: string, raw: string): void {
@@ -1328,50 +1322,41 @@ export function createOpfsPersistentStorageTestStore(
   }
 
   function seedInitialState(): void {
-    const storeName = options.storeName;
-    const sessionKey = options.sessionKey;
-    if (storeName === undefined || sessionKey === undefined) {
-      for (const [key, value] of Object.entries(
-        options.initialState?.rawEntries ?? {},
-      )) {
-        if (typeof value === 'string') {
-          setRaw(key, value);
-        } else {
-          setValue(key, value);
-        }
+    const initialState = options.initialState;
+    if (initialState !== undefined) {
+      const scope = createScope(
+        initialState.storeName,
+        initialState.sessionKey,
+      );
+      const documentState = initialState.document;
+      if (documentState !== undefined) {
+        scope.document.seed(documentState.data, {
+          timestamp: documentState.timestamp,
+          version: documentState.version,
+        });
       }
-      return;
-    }
 
-    const scope = createScope(storeName, sessionKey);
-    const documentState = options.initialState?.document;
-    if (documentState !== undefined) {
-      scope.document.seed(documentState.data, {
-        timestamp: documentState.timestamp,
-        version: documentState.version,
-      });
-    }
+      for (const item of initialState.collection ?? []) {
+        scope.collection.seedItem(item.payload, item.data, {
+          timestamp: item.timestamp,
+          version: item.version,
+        });
+      }
 
-    for (const item of options.initialState?.collection ?? []) {
-      scope.collection.seedItem(item.payload, item.data, {
-        timestamp: item.timestamp,
-        version: item.version,
-      });
-    }
+      for (const item of initialState.listQuery?.items ?? []) {
+        scope.listQuery.seedItem(item.tableId, item.id, item.data, {
+          timestamp: item.timestamp,
+          version: item.version,
+        });
+      }
 
-    for (const item of options.initialState?.listQuery?.items ?? []) {
-      scope.listQuery.seedItem(item.tableId, item.id, item.data, {
-        timestamp: item.timestamp,
-        version: item.version,
-      });
-    }
-
-    for (const query of options.initialState?.listQuery?.queries ?? []) {
-      scope.listQuery.seedQuery(query.params, query.items, {
-        hasMore: query.hasMore,
-        timestamp: query.timestamp,
-        version: query.version,
-      });
+      for (const query of initialState.listQuery?.queries ?? []) {
+        scope.listQuery.seedQuery(query.params, query.items, {
+          hasMore: query.hasMore,
+          timestamp: query.timestamp,
+          version: query.version,
+        });
+      }
     }
 
     for (const [key, value] of Object.entries(
@@ -1389,10 +1374,6 @@ export function createOpfsPersistentStorageTestStore(
 
   let instrumentationStartIndex = mockBrowserOpfs.operations.length;
   let readStartIndex = mockBrowserOpfs.operations.length;
-  const defaultScope = createScope(
-    options.storeName ?? 'store',
-    options.sessionKey ?? 'session',
-  );
 
   function getCurrentOperations(): MockOpfsOperation[] {
     return mockBrowserOpfs.operations
@@ -1445,11 +1426,13 @@ export function createOpfsPersistentStorageTestStore(
     get operations() {
       return getCurrentOperations();
     },
-    scopeReadRequests() {
+    scopeReadRequests(args?: { storeName: string; sessionKey: string }) {
       const payloadGetRequests = getPayloadReadRequests(
         getCurrentReadOperations(),
       );
-      if (scopePrefix === null) return payloadGetRequests;
+      if (args === undefined) return payloadGetRequests;
+
+      const scopePrefix = `tsdf.${args.sessionKey}.${args.storeName}.`;
 
       return payloadGetRequests.map((key) =>
         key.startsWith(scopePrefix) ? key.slice(scopePrefix.length) : key,
@@ -1497,8 +1480,5 @@ export function createOpfsPersistentStorageTestStore(
         );
       },
     },
-    document: defaultScope.document,
-    collection: defaultScope.collection,
-    listQuery: defaultScope.listQuery,
   };
 }

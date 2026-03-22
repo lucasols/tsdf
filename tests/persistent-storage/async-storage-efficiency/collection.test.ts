@@ -26,10 +26,7 @@ describe('async storage efficiency: collection', () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'collection-expiration';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed one expired item and one fresh item so cleanup has a meaningful choice.
@@ -199,28 +196,25 @@ describe('async storage efficiency: collection', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, freshItemKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { p: 'fresh-user' }
-        key: '"fresh-user'
-        lastAccessAt: 1735689600000
-        sizeBytes: 72
-        version: 1
-        writtenAt: 1735689600000
+        metadata:
+          customMetadata: { p: 'fresh-user' }
+          key: '"fresh-user'
+          lastAccessAt: 1735689600000
+          sizeBytes: 72
+          version: 1
+          writtenAt: 1735689600000
 
-      payload:
-        d:
-          value: { id: 'fresh-user', name: 'Fresh User' }
-        p: 'fresh-user'
-    `);
+        payload:
+          d:
+            value: { id: 'fresh-user', name: 'Fresh User' }
+          p: 'fresh-user'
+      `);
   });
 
   test('maxItems cleanup snapshots the full manifest history', async () => {
     const storeName = 'col-max-items-metadata';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     collectionScope.collection.seedItem('a', {
@@ -361,10 +355,7 @@ describe('async storage efficiency: collection', () => {
   test('multiple overflowing collection updates before idle maintenance trigger a single cleanup pass', async () => {
     const storeName = 'col-coalesced-maintenance';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     collectionScope.collection.seedItem('a', {
@@ -536,8 +527,6 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-direct-get-item-state';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -578,8 +567,6 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-direct-touch-offline-marker';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -617,27 +604,25 @@ describe('async storage efficiency: collection', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { o: '✅', p: '1' }
-        key: '"1'
-        lastAccessAt: 1735664400000
-        sizeBytes: 55
-        version: 1
-        writtenAt: 1735664400000
+        metadata:
+          customMetadata: { o: '✅', p: '1' }
+          key: '"1'
+          lastAccessAt: 1735664400000
+          sizeBytes: 55
+          version: 1
+          writtenAt: 1735664400000
 
-      payload:
-        d:
-          value: { id: '1', name: 'Cached user' }
-        p: '1'
-    `);
+        payload:
+          d:
+            value: { id: '1', name: 'Cached user' }
+          p: '1'
+      `);
   });
 
   test('updating a hydrated collection item writes the mutation without rereading cached entries', async () => {
     const storeName = 'col-mutation-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -756,10 +741,7 @@ describe('async storage efficiency: collection', () => {
   test('deleteItemState removes the persisted collection entry through the namespace manifest only', async () => {
     const storeName = 'col-delete-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
     const deletedItemStorageKey =
       collectionScope.collection.itemStorageKey('1');
@@ -836,8 +818,6 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-invalidation-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -958,8 +938,6 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-offline-marker-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -1009,27 +987,25 @@ describe('async storage efficiency: collection', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { p: '1' }
-        key: '"1'
-        lastAccessAt: 1735689600000
-        sizeBytes: 54
-        version: 1
-        writtenAt: 1735689604950
+        metadata:
+          customMetadata: { p: '1' }
+          key: '"1'
+          lastAccessAt: 1735689600000
+          sizeBytes: 54
+          version: 1
+          writtenAt: 1735689604950
 
-      payload:
-        d:
-          value: { id: '1', name: 'Fresh user' }
-        p: '1'
-    `);
+        payload:
+          d:
+            value: { id: '1', name: 'Fresh user' }
+          p: '1'
+      `);
   });
 
   test('repeated invalidations within the debounce window coalesce collection persistence writes', async () => {
     const storeName = 'col-coalesced-invalidations';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -1171,8 +1147,6 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-remount-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -1233,8 +1207,6 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-multi-remount-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -1315,8 +1287,6 @@ describe('async storage efficiency: collection', () => {
     const storeName = 'col-get-item-state-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -1358,9 +1328,9 @@ describe('async storage efficiency: collection', () => {
     const coldPayload = '2';
     const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
-      storeName,
-      sessionKey,
       initialState: {
+        storeName,
+        sessionKey,
         collection: [
           {
             payload: hotPayload,
@@ -1420,10 +1390,7 @@ describe('async storage efficiency: collection', () => {
   test('protected snapshot reuse avoids rereading the async protected registry during eviction', async () => {
     const storeName = 'collection-opfs-protected-snapshot';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
     const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
 

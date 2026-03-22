@@ -142,6 +142,10 @@ export class MockBrowserOpfsEnvironment {
   private readonly root = createDirectoryNode('');
   private readonly startedAt = Date.now();
   private readonly readDelays = new Map<string, number>();
+  private readonly dynamicReadDelays: Array<{
+    delayMs: number;
+    matches: (path: string) => boolean;
+  }> = [];
 
   async getRootDirectoryHandle(): Promise<FileSystemDirectoryHandle> {
     const rootReadyAtRef: ReadyAtRef = { value: 0 };
@@ -174,6 +178,15 @@ export class MockBrowserOpfsEnvironment {
     }
 
     this.readDelays.set(normalizedPrefix, delayMs);
+  }
+
+  setDynamicReadDelay(
+    matches: (path: string) => boolean,
+    delayMs: number,
+  ): void {
+    if (delayMs <= 0) return;
+
+    this.dynamicReadDelays.push({ matches, delayMs });
   }
 
   ensureDir(path: string): void {
@@ -267,6 +280,12 @@ export class MockBrowserOpfsEnvironment {
           bestMatchLength = pathPrefix.length;
           bestDelayMs = delayMs;
         }
+      }
+    }
+
+    for (const rule of this.dynamicReadDelays) {
+      if (rule.matches(path)) {
+        bestDelayMs = Math.max(bestDelayMs, rule.delayMs);
       }
     }
 

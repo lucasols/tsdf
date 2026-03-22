@@ -24,10 +24,7 @@ const INTERNAL_ASYNC_SCOPE: AsyncStorageNamespaceScope = {
 describe('async storage efficiency: maintenance', () => {
   test('startup cleanup removes expired entries and snapshots the full metadata scan history', async () => {
     const oneWeekAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'fresh-doc',
-      sessionKey: 'sess1',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const expiredDoc = mockAdapter.scope('expired-doc', 'sess1');
     const freshDoc = mockAdapter.scope('fresh-doc', 'sess1');
     const expiredKey = expiredDoc.document.storageKey();
@@ -199,10 +196,7 @@ describe('async storage efficiency: maintenance', () => {
   });
 
   test('malformed persisted records are tolerated and handled predictably', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'trigger',
-      sessionKey: 'sess1',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const corruptedDoc = mockAdapter.scope('corrupted', 'sess1');
     const triggerDoc = mockAdapter.scope('trigger', 'sess1');
     const corruptedKey = corruptedDoc.document.storageKey();
@@ -359,10 +353,7 @@ describe('async storage efficiency: maintenance', () => {
   });
 
   test('cleanup removes invalid or orphaned async-managed records while preserving valid entries', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'valid-doc',
-      sessionKey: 'sess1',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const validDoc = mockAdapter.scope('valid-doc', 'sess1');
     const invalidMetadataDoc = mockAdapter.scope('invalid-metadata', 'sess1');
     const missingPayloadDoc = mockAdapter.scope('missing-payload', 'sess1');
@@ -586,10 +577,7 @@ describe('async storage efficiency: maintenance', () => {
   test('protected dotted-session cleanup keeps the protected entry and snapshots the full metadata scan history', async () => {
     const staleDurationMs = 15 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'trigger-doc',
-      sessionKey: 'sess-trigger',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const protectedDoc = mockAdapter.scope('protected-doc', dottedSessionKey);
     const unprotectedDoc = mockAdapter.scope(
       'unprotected-doc',

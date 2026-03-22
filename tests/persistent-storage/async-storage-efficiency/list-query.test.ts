@@ -30,10 +30,7 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const expiredQueryParams: ListQueryParams = { tableId: 'expired-users' };
     const freshQueryParams: ListQueryParams = { tableId: 'fresh-users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed one stale query+item pair and one fresh pair to verify cleanup across both namespaces.
@@ -251,10 +248,7 @@ describe('async storage efficiency: list-query', () => {
     const thirdQuery = { tableId: 'third' };
     const storeName = 'lq-query-metadata';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const thirdItemKey = listQueryScope.listQuery.itemStorageKey('third', 1);
     const thirdQueryKey = listQueryScope.listQuery.queryStorageKey(thirdQuery);
@@ -444,34 +438,34 @@ describe('async storage efficiency: list-query', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, thirdItemKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { p: 'third||1' }
-        key: '"third||1'
-        lastAccessAt: 1735689604950
-        sizeBytes: 44
-        version: 1
-        writtenAt: 1735689604950
+        metadata:
+          customMetadata: { p: 'third||1' }
+          key: '"third||1'
+          lastAccessAt: 1735689604950
+          sizeBytes: 44
+          version: 1
+          writtenAt: 1735689604950
 
-      payload:
-        d: { id: 1, name: 'Third' }
-        p: 'third||1'
-    `);
+        payload:
+          d: { id: 1, name: 'Third' }
+          p: 'third||1'
+      `);
     expect(getParsedOpfsEntryFiles(mockAdapter, thirdQueryKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata:
+        metadata:
+          customMetadata:
+            i: ['"third||1']
+            p: { tableId: 'third' }
+          key: '{tableId:"third"}'
+          lastAccessAt: 1735689604950
+          sizeBytes: 44
+          version: 1
+          writtenAt: 1735689604950
+
+        payload:
           i: ['"third||1']
           p: { tableId: 'third' }
-        key: '{tableId:"third"}'
-        lastAccessAt: 1735689604950
-        sizeBytes: 44
-        version: 1
-        writtenAt: 1735689604950
-
-      payload:
-        i: ['"third||1']
-        p: { tableId: 'third' }
-    `);
+      `);
   });
 
   test('multiple overflowing query writes before idle maintenance trigger a single cleanup pass', async () => {
@@ -481,10 +475,7 @@ describe('async storage efficiency: list-query', () => {
     const fourthQuery = { tableId: 'fourth' };
     const storeName = 'lq-coalesced-query-maintenance';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedQuery(firstQuery, []);
@@ -766,10 +757,7 @@ describe('async storage efficiency: list-query', () => {
       tableId: 'users',
       filters: [{ field: 'name', op: 'eq', value: 'Missing user' }],
     } satisfies ListQueryParams;
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const queryStorageKey =
       listQueryScope.listQuery.queryStorageKey(usersQuery);
@@ -866,26 +854,26 @@ describe('async storage efficiency: list-query', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata:
+        metadata:
+          customMetadata:
+            i: []
+            p:
+              filters:
+                - { field: 'name', op: 'eq', value: 'Missing user' }
+              tableId: 'users'
+          key: '{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}'
+          lastAccessAt: 1735689604850
+          sizeBytes: 94
+          version: 1
+          writtenAt: 1735689604850
+
+        payload:
           i: []
           p:
             filters:
               - { field: 'name', op: 'eq', value: 'Missing user' }
             tableId: 'users'
-        key: '{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}'
-        lastAccessAt: 1735689604850
-        sizeBytes: 94
-        version: 1
-        writtenAt: 1735689604850
-
-      payload:
-        i: []
-        p:
-          filters:
-            - { field: 'name', op: 'eq', value: 'Missing user' }
-          tableId: 'users'
-    `);
+      `);
   });
 
   test('query that becomes empty after invalidation do not clean up orphaned items from persistence', async () => {
@@ -893,8 +881,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -1095,44 +1081,41 @@ describe('async storage efficiency: list-query', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, itemStorageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { p: 'users||1' }
-        key: '"users||1'
-        lastAccessAt: 1735689600000
-        sizeBytes: 83
-        version: 1
-        writtenAt: 1735689605000
+        metadata:
+          customMetadata: { p: 'users||1' }
+          key: '"users||1'
+          lastAccessAt: 1735689600000
+          sizeBytes: 83
+          version: 1
+          writtenAt: 1735689605000
 
-      payload:
-        d: { id: 1, name: 'Cached user' }
-        lf: ['age', 'email', 'id', 'name']
-        p: 'users||1'
-    `);
+        payload:
+          d: { id: 1, name: 'Cached user' }
+          lf: ['age', 'email', 'id', 'name']
+          p: 'users||1'
+      `);
     expect(getParsedOpfsEntryFiles(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata:
+        metadata:
+          customMetadata:
+            i: []
+            p: { tableId: 'users' }
+          key: '{tableId:"users"}'
+          lastAccessAt: 1735689600000
+          sizeBytes: 32
+          version: 1
+          writtenAt: 1735689605000
+
+        payload:
           i: []
           p: { tableId: 'users' }
-        key: '{tableId:"users"}'
-        lastAccessAt: 1735689600000
-        sizeBytes: 32
-        version: 1
-        writtenAt: 1735689605000
-
-      payload:
-        i: []
-        p: { tableId: 'users' }
-    `);
+      `);
   });
 
   test('when maxItems limit is reached a full store cleanup occurs', async () => {
     const storeName = 'lq-item-metadata';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedItem('users', 1, {
@@ -1309,10 +1292,7 @@ describe('async storage efficiency: list-query', () => {
     const sharedItemKey = storeItemKey('users', 1);
     const aliceOnlyItemKey = storeItemKey('users', 2);
     const bobOnlyItemKey = storeItemKey('users', 3);
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed two persisted queries that both reference the same oldest item.
@@ -1507,10 +1487,7 @@ describe('async storage efficiency: list-query', () => {
       tableId: 'users',
       filters: [{ field: 'name', op: 'eq', value: 'Alice' }],
     } satisfies ListQueryParams;
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const deletedItemStorageKey = listQueryScope.listQuery.itemStorageKey(
       'users',
@@ -1706,8 +1683,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -1764,8 +1739,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -1811,18 +1784,18 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(getParsedOpfsEntryFiles(mockAdapter, itemStorageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { o: '✅', p: 'users||1' }
-        key: '"users||1'
-        lastAccessAt: 1735664400000
-        sizeBytes: 50
-        version: 1
-        writtenAt: 1735664400000
+        metadata:
+          customMetadata: { o: '✅', p: 'users||1' }
+          key: '"users||1'
+          lastAccessAt: 1735664400000
+          sizeBytes: 50
+          version: 1
+          writtenAt: 1735664400000
 
-      payload:
-        d: { id: 1, name: 'Cached user' }
-        p: 'users||1'
-    `);
+        payload:
+          d: { id: 1, name: 'Cached user' }
+          p: 'users||1'
+      `);
     expect(readEntryMetadata(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
         customMetadata:
@@ -1839,21 +1812,21 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(getParsedOpfsEntryFiles(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata:
-          i: ['"users||1']
-          o: '✅'
-          p: { tableId: 'users' }
-        key: '{tableId:"users"}'
-        lastAccessAt: 1735664400000
-        sizeBytes: 44
-        version: 1
-        writtenAt: 1735664400000
+        metadata:
+          customMetadata:
+            i: ['"users||1']
+            o: '✅'
+            p: { tableId: 'users' }
+          key: '{tableId:"users"}'
+          lastAccessAt: 1735664400000
+          sizeBytes: 44
+          version: 1
+          writtenAt: 1735664400000
 
-      payload:
-        i: ['"users||1']
-        p: { tableId: 'users' }
-    `);
+        payload:
+          i: ['"users||1']
+          p: { tableId: 'users' }
+      `);
   });
 
   test('useListQuery invalidation snapshots the full query persistence timeline through the refetch save', async () => {
@@ -1861,8 +1834,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2021,8 +1992,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2200,8 +2169,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2265,19 +2232,19 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(getParsedOpfsEntryFiles(mockAdapter, itemStorageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { p: 'users||1' }
-        key: '"users||1'
-        lastAccessAt: 1735689600000
-        sizeBytes: 82
-        version: 1
-        writtenAt: 1735689605000
+        metadata:
+          customMetadata: { p: 'users||1' }
+          key: '"users||1'
+          lastAccessAt: 1735689600000
+          sizeBytes: 82
+          version: 1
+          writtenAt: 1735689605000
 
-      payload:
-        d: { id: 1, name: 'Fresh user' }
-        lf: ['age', 'email', 'id', 'name']
-        p: 'users||1'
-    `);
+        payload:
+          d: { id: 1, name: 'Fresh user' }
+          lf: ['age', 'email', 'id', 'name']
+          p: 'users||1'
+      `);
     expect(readEntryMetadata(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
         customMetadata:
@@ -2293,20 +2260,20 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(getParsedOpfsEntryFiles(mockAdapter, queryStorageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata:
+        metadata:
+          customMetadata:
+            i: ['"users||1', '"users||2']
+            p: { tableId: 'users' }
+          key: '{tableId:"users"}'
+          lastAccessAt: 1735689600000
+          sizeBytes: 57
+          version: 1
+          writtenAt: 1735689605000
+
+        payload:
           i: ['"users||1', '"users||2']
           p: { tableId: 'users' }
-        key: '{tableId:"users"}'
-        lastAccessAt: 1735689600000
-        sizeBytes: 57
-        version: 1
-        writtenAt: 1735689605000
-
-      payload:
-        i: ['"users||1', '"users||2']
-        p: { tableId: 'users' }
-    `);
+      `);
   });
 
   test('query hook remount reuses hydrated list-query state without touching localStorage again', async () => {
@@ -2314,8 +2281,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2394,8 +2359,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const itemPayload = rawItemPayload('users', 1);
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2528,8 +2491,6 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-item-remount-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2592,8 +2553,6 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-multi-item-remount-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2681,8 +2640,6 @@ describe('async storage efficiency: list-query', () => {
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2803,8 +2760,6 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
@@ -2960,9 +2915,9 @@ describe('async storage efficiency: list-query', () => {
     const projectsQuery = { tableId: 'projects' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
-      storeName,
-      sessionKey,
       initialState: {
+        storeName,
+        sessionKey,
         listQuery: {
           items: [
             { tableId: 'users', id: 1, data: { id: 1, name: 'User 1' } },
@@ -3052,10 +3007,7 @@ describe('async storage efficiency: list-query', () => {
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };
     const tasksQuery = { tableId: 'tasks' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const env = createListQueryEnv({
       storeName,
       sessionKey,

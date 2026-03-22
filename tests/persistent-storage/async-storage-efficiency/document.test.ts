@@ -24,10 +24,7 @@ describe('async storage efficiency: document', () => {
   test('document hook remount stays fully in memory after the cached document is loaded at startup', async () => {
     const storeName = 'doc-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -117,8 +114,6 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-direct-state-read';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const documentScope = mockAdapter.scope(storeName, sessionKey);
@@ -163,8 +158,6 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const documentScope = mockAdapter.scope(storeName, sessionKey);
@@ -199,26 +192,24 @@ describe('async storage efficiency: document', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { o: '✅' }
-        key: 'document'
-        lastAccessAt: 1735664400000
-        sizeBytes: 52
-        version: 1
-        writtenAt: 1735689604140
+        metadata:
+          customMetadata: { o: '✅' }
+          key: 'document'
+          lastAccessAt: 1735664400000
+          sizeBytes: 52
+          version: 1
+          writtenAt: 1735689604140
 
-      payload:
-        d:
-          value: { name: 'Cached document', value: 8 }
-    `);
+        payload:
+          d:
+            value: { name: 'Cached document', value: 8 }
+      `);
   });
 
   test('updating a hydrated document writes the mutation without rereading cached entries', async () => {
     const storeName = 'doc-mutation-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const documentScope = mockAdapter.scope(storeName, sessionKey);
@@ -300,8 +291,6 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-invalidation-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const documentScope = mockAdapter.scope(storeName, sessionKey);
@@ -383,8 +372,6 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-coalesced-invalidations';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const documentScope = mockAdapter.scope(storeName, sessionKey);
@@ -487,8 +474,6 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-offline-marker-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName,
-      sessionKey,
       readDelayMs: 50,
     });
     const documentScope = mockAdapter.scope(storeName, sessionKey);
@@ -538,25 +523,22 @@ describe('async storage efficiency: document', () => {
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
       .toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: { o: '✅' }
-        key: 'document'
-        lastAccessAt: 1735689600000
-        sizeBytes: 52
-        version: 1
-        writtenAt: 1735689606040
+        metadata:
+          customMetadata: { o: '✅' }
+          key: 'document'
+          lastAccessAt: 1735689600000
+          sizeBytes: 52
+          version: 1
+          writtenAt: 1735689606040
 
-      payload:
-        d:
-          value: { name: 'Fresh document', value: 42 }
-    `);
+        payload:
+          d:
+            value: { name: 'Fresh document', value: 42 }
+      `);
   });
 
   test('namespace commits coalesce and pending writes flush before reads', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'coalesced-opfs',
-      sessionKey: 'sess1',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const namespace = opfsPersistentStorage.openNamespace<
       { value: string },
       Record<string, never>
@@ -609,10 +591,7 @@ describe('async storage efficiency: document', () => {
   });
 
   test('live async reads suppress redundant touch commits in the same recency bucket', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'touch-guard-opfs',
-      sessionKey: 'sess1',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const namespace = opfsPersistentStorage.openNamespace<
       { value: string },
       Record<string, never>
@@ -657,12 +636,13 @@ describe('async storage efficiency: document', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
-      storeName,
-      sessionKey,
       initialState: {
+        storeName,
+        sessionKey,
         document: { data: { value: { name: 'cached', value: 1 } } },
       },
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
     const env = createDocumentEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
@@ -700,7 +680,6 @@ describe('async storage efficiency: document', () => {
       "
     `);
 
-    const documentScope = mockAdapter.scope(storeName, sessionKey);
     expect(mockAdapter.has(documentScope.document.storageKey())).toBe(true);
   });
 });

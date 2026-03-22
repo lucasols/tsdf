@@ -33,10 +33,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       return await promise;
     }
 
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'docs',
-      sessionKey: 'sess1',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope('docs', 'sess1');
     documentScope.document.seed({
       value: { name: 'Cached document', value: 1 },
@@ -122,10 +119,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
   });
 
   test('OPFS inspection helpers read logical entry files and raw namespace records', () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      storeName: 'docs',
-      sessionKey: 'sess1',
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope('docs', 'sess1');
 
     documentScope.document.seed({

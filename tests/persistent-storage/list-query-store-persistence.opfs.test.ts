@@ -28,7 +28,10 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
+import {
+  createOpfsPersistentStorageTestStore,
+  type OpfsPersistentStorageTestStoreOptions,
+} from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 
@@ -110,6 +113,34 @@ function createPersistedListQueryState(
   };
 }
 
+function createListQueryOpfsTestStore(options: {
+  readDelayMs?: number;
+  storeName: string;
+  sessionKey: string;
+  initialState?: NonNullable<
+    OpfsPersistentStorageTestStoreOptions['initialState']
+  >['listQuery'];
+}) {
+  const mockAdapter = createOpfsPersistentStorageTestStore({
+    readDelayMs: options.readDelayMs,
+    ...(options.initialState !== undefined
+      ? {
+          initialState: {
+            storeName: options.storeName,
+            sessionKey: options.sessionKey,
+            listQuery: options.initialState,
+          },
+        }
+      : {}),
+  });
+  const listQueryScope = mockAdapter.scope(
+    options.storeName,
+    options.sessionKey,
+  ).listQuery;
+
+  return { mockAdapter, listQueryScope };
+}
+
 beforeAll(() => {
   vi.useFakeTimers();
 });
@@ -132,20 +163,16 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-hook';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { mockAdapter } = createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [
-            { tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } },
-            { tableId: 'projects', id: 1, data: { id: 1, name: 'Cold' } },
-          ],
-          queries: [
-            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
-          ],
-        },
+        items: [
+          { tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } },
+          { tableId: 'projects', id: 1, data: { id: 1, name: 'Cold' } },
+        ],
+        queries: [{ params: usersQuery, items: [{ tableId: 'users', id: 1 }] }],
       },
     });
     const env = createEnv({
@@ -174,7 +201,8 @@ describe('opfs: list query store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.scopeReadRequests().slice(0, 2)).toMatchInlineSnapshot(`
+    expect(mockAdapter.scopeReadRequests({ storeName, sessionKey }).slice(0, 2))
+      .toMatchInlineSnapshot(`
       ['lq.{tableId:"users"}', 'li."users||1']
     `);
 
@@ -192,17 +220,13 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-preload-query';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    createOpfsPersistentStorageTestStore({
+    createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } }],
-          queries: [
-            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
-          ],
-        },
+        items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } }],
+        queries: [{ params: usersQuery, items: [{ tableId: 'users', id: 1 }] }],
       },
     });
 
@@ -244,26 +268,24 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-ignore';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 50,
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [
-            { tableId: 'users', id: 1, data: { id: 1, name: 'Kept' } },
-            { tableId: 'users', id: 2, data: { id: 2, name: 'Ignored' } },
-          ],
-          queries: [
-            {
-              params: usersQuery,
-              items: [
-                { tableId: 'users', id: 1 },
-                { tableId: 'users', id: 2 },
-              ],
-            },
-          ],
-        },
+        items: [
+          { tableId: 'users', id: 1, data: { id: 1, name: 'Kept' } },
+          { tableId: 'users', id: 2, data: { id: 2, name: 'Ignored' } },
+        ],
+        queries: [
+          {
+            params: usersQuery,
+            items: [
+              { tableId: 'users', id: 1 },
+              { tableId: 'users', id: 2 },
+            ],
+          },
+        ],
       },
     });
 
@@ -284,16 +306,16 @@ describe('opfs: list query store persistence', () => {
         ['"users||1']
       `);
     expect(env.apiStore.getItemState('users||2')).toBeUndefined();
-    expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 2)),
-    ).toBe(false);
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 2))).toBe(
+      false,
+    );
   });
 
   test('round-trip persistence preserves partial-resource metadata for cached list queries', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-partial-roundtrip';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
@@ -344,7 +366,7 @@ describe('opfs: list query store persistence', () => {
     expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
     expect(
       readerEnv.store.state.itemLoadedFields[
-        mockAdapter.listQuery.itemKey('users', 1)
+        listQueryScope.itemKey('users', 1)
       ],
     ).toMatchInlineSnapshot(`
       ['id', 'name']
@@ -354,7 +376,7 @@ describe('opfs: list query store persistence', () => {
   test('hydrated partial-resource items keep loading until missing fields are fetched', async () => {
     const storeName = 'lq-opfs-item-partial-missing-fields';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
@@ -423,7 +445,7 @@ describe('opfs: list query store persistence', () => {
     `);
     expect(
       readerEnv.store.state.itemLoadedFields[
-        mockAdapter.listQuery.itemKey('users', 1)
+        listQueryScope.itemKey('users', 1)
       ],
     ).toMatchInlineSnapshot(`
       ['age', 'email', 'id', 'name']
@@ -434,7 +456,7 @@ describe('opfs: list query store persistence', () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-partial-missing-fields';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
@@ -510,7 +532,7 @@ describe('opfs: list query store persistence', () => {
     `);
     expect(
       readerEnv.store.state.itemLoadedFields[
-        mockAdapter.listQuery.itemKey('users', 1)
+        listQueryScope.itemKey('users', 1)
       ],
     ).toMatchInlineSnapshot(`
       ['age', 'email', 'id', 'name']
@@ -603,7 +625,7 @@ describe('opfs: list query store persistence', () => {
     const productsQuery = { tableId: 'products' };
     const storeName = 'lq-opfs-hook-loadsize-smaller';
     const sessionKey = 'sess1';
-    createOpfsPersistentStorageTestStore({
+    createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
@@ -614,7 +636,7 @@ describe('opfs: list query store persistence', () => {
           name: `Cached Product ${index + 1}`,
         })),
         10,
-      ),
+      ).listQuery,
     });
 
     const readerEnv = createEnv({
@@ -678,15 +700,12 @@ describe('opfs: list query store persistence', () => {
     }));
     const storeName = 'lq-opfs-hook-loadsize-larger';
     const sessionKey = 'sess1';
-    createOpfsPersistentStorageTestStore({
+    createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
-      initialState: createPersistedListQueryState(
-        'products',
-        cachedProducts,
-        5,
-      ),
+      initialState: createPersistedListQueryState('products', cachedProducts, 5)
+        .listQuery,
     });
 
     const readerEnv = createEnv({
@@ -810,15 +829,12 @@ describe('opfs: list query store persistence', () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-delete-persisted-item';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
     });
-    const deletedItemStorageKey = mockAdapter.listQuery.itemStorageKey(
-      'users',
-      1,
-    );
+    const deletedItemStorageKey = listQueryScope.itemStorageKey('users', 1);
 
     const env = createEnv({
       storeName,
@@ -837,11 +853,11 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(true);
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery)).toMatchObject({
+    expect(listQueryScope.readQueryEntry(usersQuery)).toMatchObject({
       data: {
         items: [
-          mockAdapter.listQuery.itemKey('users', 1),
-          mockAdapter.listQuery.itemKey('users', 2),
+          listQueryScope.itemKey('users', 1),
+          listQueryScope.itemKey('users', 2),
         ],
       },
     });
@@ -851,25 +867,23 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery)).toMatchObject({
-      data: { items: [mockAdapter.listQuery.itemKey('users', 2)] },
+    expect(listQueryScope.readQueryEntry(usersQuery)).toMatchObject({
+      data: { items: [listQueryScope.itemKey('users', 2)] },
     });
   });
 
   test('explicit item preload hydrates only the targeted item', async () => {
     const storeName = 'lq-opfs-preload-item';
     const sessionKey = 'sess1';
-    createOpfsPersistentStorageTestStore({
+    createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [
-            { tableId: 'users', id: 1, data: { id: 1, name: 'Alice' } },
-            { tableId: 'users', id: 2, data: { id: 2, name: 'Bob' } },
-          ],
-        },
+        items: [
+          { tableId: 'users', id: 1, data: { id: 1, name: 'Alice' } },
+          { tableId: 'users', id: 2, data: { id: 2, name: 'Bob' } },
+        ],
       },
     });
 
@@ -894,12 +908,12 @@ describe('opfs: list query store persistence', () => {
   test('invalid cached items are removed during targeted preload', async () => {
     const storeName = 'lq-opfs-invalid';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 50,
       storeName,
       sessionKey,
     });
-    const key = mockAdapter.listQuery.itemStorageKey('users', 1);
+    const key = listQueryScope.itemStorageKey('users', 1);
     const entry: StorageCacheEntry<PersistedListQueryItemData<{ bad: true }>> =
       {
         data: { data: { bad: true }, payload: 'users||1' },
@@ -923,12 +937,12 @@ describe('opfs: list query store persistence', () => {
   test('invalid cached item payloads are removed during targeted preload', async () => {
     const storeName = 'lq-opfs-invalid-item-payload';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 50,
       storeName,
       sessionKey,
     });
-    const key = mockAdapter.listQuery.itemStorageKey('users', 1);
+    const key = listQueryScope.itemStorageKey('users', 1);
     const entry: StorageCacheEntry<
       PersistedListQueryItemData<Row> & { payload: boolean }
     > = {
@@ -954,25 +968,25 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-invalid-query';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       readDelayMs: 50,
       storeName,
       sessionKey,
     });
-    const key = mockAdapter.listQuery.queryStorageKey(usersQuery);
+    const key = listQueryScope.queryStorageKey(usersQuery);
     const entry: StorageCacheEntry<
       PersistedListQueryData & { payload: boolean }
     > = {
       data: {
         payload: true,
-        items: [mockAdapter.listQuery.itemKey('users', 1)],
+        items: [listQueryScope.itemKey('users', 1)],
         hasMore: false,
       },
       timestamp: Date.now(),
       version: 1,
     };
     mockAdapter.storage.writeValue(key, entry);
-    mockAdapter.listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Alice' });
 
     const env = createEnv({ storeName, sessionKey });
 
@@ -990,14 +1004,12 @@ describe('opfs: list query store persistence', () => {
   test('reset cancels stale async hydrations', async () => {
     const storeName = 'lq-opfs-reset';
     const sessionKey = 'sess1';
-    createOpfsPersistentStorageTestStore({
+    createListQueryOpfsTestStore({
       readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Stale' } }],
-        },
+        items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Stale' } }],
       },
     });
 
@@ -1017,7 +1029,7 @@ describe('opfs: list query store persistence', () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-max-query-size';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
@@ -1039,19 +1051,19 @@ describe('opfs: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery).data.items)
+    expect(listQueryScope.readQueryEntry(usersQuery).data.items)
       .toMatchInlineSnapshot(`
         ['"users||1', '"users||2']
       `);
-    expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 1)),
-    ).toBe(true);
-    expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 2)),
-    ).toBe(true);
-    expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 3)),
-    ).toBe(false);
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 1))).toBe(
+      true,
+    );
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 2))).toBe(
+      true,
+    );
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 3))).toBe(
+      false,
+    );
 
     const readerEnv = createEnv({
       storeName,

@@ -80,6 +80,14 @@ function createEnv(options: {
   });
 }
 
+function collectionScope(
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
+  storeName: string,
+  sessionKey: string,
+) {
+  return mockAdapter.scope(storeName, sessionKey).collection;
+}
+
 beforeAll(() => {
   vi.useFakeTimers();
 });
@@ -101,9 +109,9 @@ describe('opfs: converted collection store persistence', () => {
   test('explicit preload hydrates converted cached items before mount', async () => {
     createOpfsPersistentStorageTestStore({
       readDelayMs: 100,
-      storeName: 'col-opfs-converted',
-      sessionKey: 'sess1',
       initialState: {
+        storeName: 'col-opfs-converted',
+        sessionKey: 'sess1',
         collection: [{ payload: '1', data: { itemId: '1', label: 'Cached' } }],
       },
     });
@@ -146,15 +154,17 @@ describe('opfs: converted collection store persistence', () => {
   test('invalid converted cached data is removed during preload', async () => {
     const invalidStorageAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
-      storeName: 'col-opfs-invalid-storage',
-      sessionKey: 'sess1',
-      initialState: { collection: [{ payload: '1', data: { wrong: true } }] },
+      initialState: {
+        storeName: 'col-opfs-invalid-storage',
+        sessionKey: 'sess1',
+        collection: [{ payload: '1', data: { wrong: true } }],
+      },
     });
     const throwingAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
-      storeName: 'col-opfs-throwing',
-      sessionKey: 'sess1',
       initialState: {
+        storeName: 'col-opfs-throwing',
+        sessionKey: 'sess1',
         collection: [{ payload: '1', data: { itemId: '1', label: 'Cached' } }],
       },
     });
@@ -190,23 +200,38 @@ describe('opfs: converted collection store persistence', () => {
 
     expect(
       invalidStorageAdapter.has(
-        invalidStorageAdapter.collection.itemStorageKey('1'),
+        collectionScope(
+          invalidStorageAdapter,
+          'col-opfs-invalid-storage',
+          'sess1',
+        ).itemStorageKey('1'),
       ),
     ).toBe(false);
     expect(
-      throwingAdapter.has(throwingAdapter.collection.itemStorageKey('1')),
+      throwingAdapter.has(
+        collectionScope(
+          throwingAdapter,
+          'col-opfs-throwing',
+          'sess1',
+        ).itemStorageKey('1'),
+      ),
     ).toBe(false);
   });
 
   test('invalid final data after conversion is removed during preload', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 50,
-      storeName: 'col-opfs-invalid-final',
-      sessionKey: 'sess1',
       initialState: {
+        storeName: 'col-opfs-invalid-final',
+        sessionKey: 'sess1',
         collection: [{ payload: '1', data: { itemId: '1', label: 'Cached' } }],
       },
     });
+    const persistedCollection = collectionScope(
+      mockAdapter,
+      'col-opfs-invalid-final',
+      'sess1',
+    );
 
     const env = createEnv({
       storeName: 'col-opfs-invalid-final',
@@ -224,7 +249,7 @@ describe('opfs: converted collection store persistence', () => {
     await preloadPromise;
     await advanceTime(2100);
 
-    expect(mockAdapter.has(mockAdapter.collection.itemStorageKey('1'))).toBe(
+    expect(mockAdapter.has(persistedCollection.itemStorageKey('1'))).toBe(
       false,
     );
   });
@@ -232,12 +257,17 @@ describe('opfs: converted collection store persistence', () => {
   test('write conversion errors are reported and keep the previous cached item', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 100,
-      storeName: 'col-opfs-save-error',
-      sessionKey: 'sess1',
       initialState: {
+        storeName: 'col-opfs-save-error',
+        sessionKey: 'sess1',
         collection: [{ payload: '1', data: { itemId: '1', label: 'Cached' } }],
       },
     });
+    const persistedCollection = collectionScope(
+      mockAdapter,
+      'col-opfs-save-error',
+      'sess1',
+    );
     const onPersistentStorageError = vi.fn();
     const env = createEnv({
       storeName: 'col-opfs-save-error',
@@ -262,7 +292,7 @@ describe('opfs: converted collection store persistence', () => {
     await flushAllTimers();
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(mockAdapter.collection.readItemData<StoredItemState>('1'))
+    expect(persistedCollection.readItemData<StoredItemState>('1'))
       .toMatchInlineSnapshot(`
         itemId: '1'
         label: 'Cached'
