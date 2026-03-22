@@ -6,6 +6,7 @@ import {
 } from './opfsFileNaming';
 import type {
   AsyncStorageAdapter,
+  AsyncStorageDiscoveredScope,
   AsyncStorageDriver,
   AsyncStorageDriverSetEntry,
   AsyncStorageEntryMetadata,
@@ -550,13 +551,27 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   >(
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
-    args: { order?: AsyncStorageMetadataOrder },
+    args: { order?: AsyncStorageMetadataOrder } = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
-    const order = args.order ?? 'key';
-    const keys = await driver.listKeys(scope);
-    const metadataKeys = keys.filter((key) =>
+    const metadataKeys = (await driver.listKeys(scope)).filter((key) =>
       key.startsWith(METADATA_RECORD_PREFIX),
     );
+    return this.#listManagedMetadataByMetadataKeysUsingDriver(
+      driver,
+      scope,
+      metadataKeys,
+      args.order ?? 'key',
+    );
+  }
+
+  async #listManagedMetadataByMetadataKeysUsingDriver<
+    TCustomMetadata extends Record<string, unknown>,
+  >(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    metadataKeys: string[],
+    order: AsyncStorageMetadataOrder = 'key',
+  ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
     const metadataValues = await this.#driverGetManyFrom(
       driver,
       scope,
@@ -908,10 +923,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   async #performStartupCleanupWithDriver(
     driver: AsyncStorageDriver,
   ): Promise<void> {
-    const scopes = await this.#listDiscoveredScopes(undefined, driver);
+    const discoveredScopes = await this.#listDiscoveredCleanupScopes(driver);
     const protectedRefsBySession = new Map<string, Set<string>>();
+    const now = Date.now();
 
-    for (const scope of scopes) {
+    for (const { scope, metadataRecordKeys } of discoveredScopes) {
       const cachedProtectedRefs = protectedRefsBySession.get(scope.sessionKey);
       const protectedRefs =
         cachedProtectedRefs ??
@@ -922,17 +938,24 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       }
 
       const keysToRemove: string[] = [];
-      for (const entry of await this.#listManagedMetadataUsingDriver(
-        driver,
-        scope,
-        { order: 'key' },
-      )) {
+      const metadataEntries =
+        metadataRecordKeys === null
+          ? await this.#listManagedMetadataUsingDriver(driver, scope, {
+              order: 'key',
+            })
+          : await this.#listManagedMetadataByMetadataKeysUsingDriver(
+              driver,
+              scope,
+              metadataRecordKeys,
+              'key',
+            );
+      for (const entry of metadataEntries) {
         const isProtected = protectedRefs.has(
           serializeProtectedRef({ ...scope, key: entry.key }),
         );
         if (
           !isProtected &&
-          Date.now() - Math.max(entry.lastAccessAt, entry.writtenAt) >
+          now - Math.max(entry.lastAccessAt, entry.writtenAt) >
             ASYNC_STORAGE_MAX_AGE_MS
         ) {
           keysToRemove.push(entry.key);
@@ -943,6 +966,21 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         await this.#removeManagedKeysUsingDriver(driver, scope, keysToRemove);
       }
     }
+  }
+
+  async #listDiscoveredCleanupScopes(
+    driver: AsyncStorageDriver,
+  ): Promise<AsyncStorageDiscoveredScope[]> {
+    const discoveredScopes = await driver.listScopesWithMetadataKeys?.();
+    if (discoveredScopes !== undefined) {
+      return discoveredScopes.filter(
+        ({ scope }) => scope.kind !== '__internal.protected',
+      );
+    }
+
+    return (await this.#listDiscoveredScopes(undefined, driver)).map(
+      (scope) => ({ metadataRecordKeys: null, scope }),
+    );
   }
 
   async #readProtectedRefs(

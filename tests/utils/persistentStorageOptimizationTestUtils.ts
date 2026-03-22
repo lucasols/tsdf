@@ -593,7 +593,7 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
       );
     case 'listDir':
       return formatWrappedOpfsOperationLabel(
-        '🗂️',
+        '🗂️ list-dir',
         operation.path,
         `(${describeOpfsDirectoryPath(operation.path)}) entries=${JSON.stringify(
           operation.entries,
@@ -601,7 +601,7 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
       );
     case 'deleteDir':
       return formatWrappedOpfsOperationLabel(
-        `🧹 ${operation.exists ? '✅' : '❌'}`,
+        `🧹 del-dir ${operation.exists ? '✅' : '❌'}`,
         operation.path,
         `(${describeOpfsDirectoryPath(operation.path)})`,
       );

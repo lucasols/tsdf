@@ -96,6 +96,12 @@ export type AsyncStorageMaintenanceState = {
 
 export type AsyncStorageDriverSetEntry = { key: string; value: unknown };
 
+export type AsyncStorageDiscoveredScope = {
+  /** Known metadata record keys for this scope. `null` if keys were not enumerated during discovery. */
+  metadataRecordKeys: string[] | null;
+  scope: AsyncStorageNamespaceScope;
+};
+
 /** Low-level async backend contract implemented by custom storage drivers. */
 export type AsyncStorageDriver = {
   /** Read a single raw record from a logical namespace. */
@@ -114,6 +120,10 @@ export type AsyncStorageDriver = {
   clear(scope: AsyncStorageNamespaceScope): Promise<void>;
   /** Optional namespace discovery fast path used by OPFS cleanup/session clearing. */
   listScopes?(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]>;
+  /** Optional cleanup fast path that returns discovered scopes together with metadata record keys. */
+  listScopesWithMetadataKeys?(
+    sessionKey?: string,
+  ): Promise<AsyncStorageDiscoveredScope[]>;
   /** Optional bulk read fast path for backends that support it cheaply. */
   getMany?(
     scope: AsyncStorageNamespaceScope,

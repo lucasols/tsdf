@@ -5,10 +5,12 @@ import {
   decodePathSegment,
   encodePathSegment,
   joinPath,
+  METADATA_RECORD_PREFIX,
   OPFS_ROOT_DIR,
   parseFileName,
 } from './opfsFileNaming';
 import type {
+  AsyncStorageDiscoveredScope,
   AsyncStorageDriver,
   AsyncStorageDriverSetEntry,
   AsyncStorageNamespaceScope,
@@ -143,6 +145,15 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     return this.#listScopesWithContext(sessionKey, this.#mainCacheContext);
   }
 
+  async listScopesWithMetadataKeys(
+    sessionKey?: string,
+  ): Promise<AsyncStorageDiscoveredScope[]> {
+    return this.#listDiscoveredScopesWithContext(
+      sessionKey,
+      this.#mainCacheContext,
+    );
+  }
+
   async withIsolatedCleanupDriver<T>(
     callback: (driver: AsyncStorageDriver) => Promise<T>,
   ): Promise<T> {
@@ -174,6 +185,8 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       clear: (scope) => this.#clearWithContext(scope, cacheContext),
       listScopes: (currentSessionKey) =>
         this.#listScopesWithContext(currentSessionKey, cacheContext),
+      listScopesWithMetadataKeys: (currentSessionKey) =>
+        this.#listDiscoveredScopesWithContext(currentSessionKey, cacheContext),
       getMany: (scope, keys) =>
         this.#getManyWithContext(scope, keys, cacheContext),
       setMany: (scope, entries) =>
@@ -324,20 +337,10 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     sessionKey: string | undefined,
     cacheContext: OpfsCacheContext,
   ): Promise<AsyncStorageNamespaceScope[]> {
-    const root = await this.#getRootDir();
-    const sessionEntries =
-      sessionKey === undefined
-        ? await this.#listDirectoryEntries(root, OPFS_ROOT_DIR, cacheContext)
-        : [
-            {
-              handle: await this.#getSessionDir(sessionKey, {
-                create: false,
-                cacheContext,
-              }),
-              name: encodePathSegment(sessionKey),
-              path: this.#getSessionDirPath(sessionKey),
-            },
-          ];
+    const sessionEntries = await this.#getSessionEntries(
+      sessionKey,
+      cacheContext,
+    );
     const discoveredScopes = new Map<string, AsyncStorageNamespaceScope>();
 
     for (const sessionEntry of sessionEntries) {
@@ -354,9 +357,8 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         const decodedStoreName = decodePathSegment(storeEntry.name);
         const seenKinds = new Set<AsyncStorageNamespaceScope['kind']>();
 
-        for await (const entry of storeEntry.handle.values()) {
-          if (entry.kind !== 'file') continue;
-          const parsed = parseFileName(entry.name);
+        for await (const fileName of storeEntry.handle.keys()) {
+          const parsed = parseFileName(fileName);
           if (parsed === null || seenKinds.has(parsed.kind)) continue;
 
           seenKinds.add(parsed.kind);
@@ -374,6 +376,96 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     }
 
     return [...discoveredScopes.values()];
+  }
+
+  async #listDiscoveredScopesWithContext(
+    sessionKey: string | undefined,
+    cacheContext: OpfsCacheContext,
+  ): Promise<AsyncStorageDiscoveredScope[]> {
+    const sessionEntries = await this.#getSessionEntries(
+      sessionKey,
+      cacheContext,
+    );
+    type DiscoveredEntry = {
+      metadataRecordKeys: string[];
+      scope: AsyncStorageNamespaceScope;
+    };
+    const discoveredScopes = new Map<string, DiscoveredEntry>();
+
+    for (const sessionEntry of sessionEntries) {
+      if (sessionEntry.handle === null) continue;
+
+      const decodedSessionKey = decodePathSegment(sessionEntry.name);
+      const storeEntries = await this.#listDirectoryEntries(
+        sessionEntry.handle,
+        sessionEntry.path,
+        cacheContext,
+      );
+
+      for (const storeEntry of storeEntries) {
+        const decodedStoreName = decodePathSegment(storeEntry.name);
+        for await (const fileName of storeEntry.handle.keys()) {
+          const parsed = parseFileName(fileName);
+          if (parsed === null) continue;
+
+          const scope = {
+            sessionKey: decodedSessionKey,
+            storeName: decodedStoreName,
+            kind: parsed.kind,
+          } satisfies AsyncStorageNamespaceScope;
+          const scopeId = JSON.stringify([
+            scope.sessionKey,
+            scope.storeName,
+            scope.kind,
+          ]);
+          const existing = discoveredScopes.get(scopeId);
+          const metadataRecordKey = parsed.key.startsWith(
+            METADATA_RECORD_PREFIX,
+          )
+            ? parsed.key
+            : null;
+          if (existing !== undefined) {
+            if (metadataRecordKey !== null) {
+              existing.metadataRecordKeys.push(metadataRecordKey);
+            }
+            continue;
+          }
+
+          discoveredScopes.set(scopeId, {
+            metadataRecordKeys:
+              metadataRecordKey === null ? [] : [metadataRecordKey],
+            scope,
+          });
+        }
+      }
+    }
+
+    return [...discoveredScopes.values()];
+  }
+
+  async #getSessionEntries(
+    sessionKey: string | undefined,
+    cacheContext: OpfsCacheContext,
+  ): Promise<
+    Array<{
+      handle: FileSystemDirectoryHandle | null;
+      name: string;
+      path: string;
+    }>
+  > {
+    const root = await this.#getRootDir();
+    return sessionKey === undefined
+      ? await this.#listDirectoryEntries(root, OPFS_ROOT_DIR, cacheContext)
+      : [
+          {
+            handle: await this.#getSessionDir(sessionKey, {
+              create: false,
+              cacheContext,
+            }),
+            name: encodePathSegment(sessionKey),
+            path: this.#getSessionDirPath(sessionKey),
+          },
+        ];
   }
 
   async #getRootDir(): Promise<FileSystemDirectoryHandle> {
