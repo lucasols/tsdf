@@ -18,8 +18,8 @@ importers:
         specifier: ^0.12.1
         version: 0.12.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/utils':
-        specifier: ^3.73.1
-        version: 3.73.1
+        specifier: ^3.74.0
+        version: 3.74.0
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -488,6 +488,10 @@ packages:
 
   '@ls-stack/utils@3.73.1':
     resolution: {integrity: sha512-DxtUXHMWXbzbk7iVSNkPaOJ53NTFT3X5zZ3AgXijj0FWl9a11+avC9SlZ7O14rnujeZOsCSExeFYa+jVWQN4PQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@ls-stack/utils@3.74.0':
+    resolution: {integrity: sha512-tQNopFyPN1CLrES26jIQl3fUBNVyk/1F2Muisy6XrirwYmB84v1oiJ4KggcxaQOQx7R2XU3uczFCzf4C+0mIiQ==}
     engines: {node: '>=20.0.0'}
 
   '@napi-rs/wasm-runtime@1.1.1':
@@ -2700,12 +2704,12 @@ snapshots:
     dependencies:
       '@eslint/js': 9.39.4
       '@ls-stack/extended-lint': 0.89.0(eslint@9.39.4)(typescript@5.9.3)
-      '@typescript-eslint/eslint-plugin': 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)
+      '@typescript-eslint/eslint-plugin': 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.2)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)
       '@typescript-eslint/parser': 8.57.0(eslint@9.39.4)(typescript@5.9.3)
       '@typescript-eslint/utils': 8.57.0(eslint@9.39.4)(typescript@5.9.3)
       eslint: 9.39.4
       eslint-plugin-unicorn: 63.0.0(eslint@9.39.4)
-      eslint-plugin-vitest: 0.5.4(@typescript-eslint/eslint-plugin@8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)(vitest@4.1.0)
+      eslint-plugin-vitest: 0.5.4(@typescript-eslint/eslint-plugin@8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.2)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)(vitest@4.1.0)
       typescript-eslint: 8.57.0(eslint@9.39.4)(typescript@5.9.3)
     transitivePeerDependencies:
       - jiti
@@ -2747,6 +2751,12 @@ snapshots:
       - react-dom
 
   '@ls-stack/utils@3.73.1':
+    dependencies:
+      '@leeoniya/ufuzzy': 1.0.19
+      evtmitter: 1.0.2
+      t-result: 0.6.1
+
+  '@ls-stack/utils@3.74.0':
     dependencies:
       '@leeoniya/ufuzzy': 1.0.19
       evtmitter: 1.0.2
@@ -3024,7 +3034,7 @@ snapshots:
     dependencies:
       '@types/node': 25.0.3
 
-  '@typescript-eslint/eslint-plugin@8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)':
+  '@typescript-eslint/eslint-plugin@8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.2)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
       '@typescript-eslint/parser': 8.57.0(eslint@9.39.4)(typescript@5.9.3)
@@ -3560,12 +3570,12 @@ snapshots:
       semver: 7.7.4
       strip-indent: 4.1.1
 
-  eslint-plugin-vitest@0.5.4(@typescript-eslint/eslint-plugin@8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)(vitest@4.1.0):
+  eslint-plugin-vitest@0.5.4(@typescript-eslint/eslint-plugin@8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.2)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)(vitest@4.1.0):
     dependencies:
       '@typescript-eslint/utils': 7.18.0(eslint@9.39.4)(typescript@5.9.3)
       eslint: 9.39.4
     optionalDependencies:
-      '@typescript-eslint/eslint-plugin': 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)
+      '@typescript-eslint/eslint-plugin': 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.2)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)
       vitest: 4.1.0(@types/node@25.0.3)(@vitest/ui@4.1.0)(happy-dom@20.8.4)(vite@8.0.0(@types/node@25.0.3)(esbuild@0.27.2))
     transitivePeerDependencies:
       - supports-color
@@ -4320,7 +4330,7 @@ snapshots:
 
   typescript-eslint@8.57.0(eslint@9.39.4)(typescript@5.9.3):
     dependencies:
-      '@typescript-eslint/eslint-plugin': 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)
+      '@typescript-eslint/eslint-plugin': 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.2)(typescript@5.9.3))(eslint@9.39.4)(typescript@5.9.3)
       '@typescript-eslint/parser': 8.57.0(eslint@9.39.4)(typescript@5.9.3)
       '@typescript-eslint/typescript-estree': 8.57.0(typescript@5.9.3)
       '@typescript-eslint/utils': 8.57.0(eslint@9.39.4)(typescript@5.9.3)
