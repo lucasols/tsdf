@@ -607,6 +607,21 @@ type MockOpfsBaseOperation = {
   time: number;
 };
 
+type UntrackedMockOpfsFileOperation = MockOpfsBaseOperation & {
+  fileName: string;
+  scope: null;
+} & (
+    | { created: boolean; exists: boolean; type: 'ensureFile' | 'openFile' }
+    | { type: 'readFile'; valueByteSize: number }
+    | {
+        type: 'writeFile';
+        valueChanged: boolean;
+        valueByteSizeAfter: number;
+        valueByteSizeBefore: number;
+      }
+    | { exists: boolean; type: 'deleteFile' }
+  );
+
 export type MockOpfsOperation =
   | (MockOpfsBaseOperation & {
       created: boolean;
@@ -639,12 +654,14 @@ export type MockOpfsOperation =
       scope: AsyncStorageNamespaceScope;
       type: 'deleteFile';
     })
+  | UntrackedMockOpfsFileOperation
   | (MockOpfsBaseOperation & {
       entries: string[];
       scope: AsyncStorageNamespaceScope | null;
       type: 'listDir';
     })
   | (MockOpfsBaseOperation & {
+      deleted: boolean;
       exists: boolean;
       scope: AsyncStorageNamespaceScope | null;
       type: 'deleteDir';
@@ -671,8 +688,17 @@ function enrichRawOperation(
     case 'writeFile':
     case 'deleteFile': {
       const fileContext = parseFileContext(operation.path);
-      if (fileContext === null) return null;
-      return { ...operation, ...fileContext };
+      if (fileContext !== null) {
+        return { ...operation, ...fileContext };
+      }
+
+      const pathSegments = operation.path.split('/');
+      const fileName = pathSegments.pop();
+      if (fileName === undefined || pathSegments[0] !== OPFS_ROOT_DIR) {
+        return null;
+      }
+
+      return { ...operation, fileName, scope: null };
     }
     case 'listDir': {
       const dirContext = parseTrackedDirPath(operation.path);
@@ -691,6 +717,7 @@ function getPayloadReadGroups(
   for (const operation of operations) {
     if (
       operation.type === 'readFile' &&
+      'record' in operation &&
       operation.record.recordKind === 'payload'
     ) {
       if (operation.record.logicalKey !== null) {
@@ -717,6 +744,7 @@ function getPayloadReadRequests(
 ): string[] {
   return operations.flatMap((operation) =>
     operation.type === 'readFile' &&
+    'record' in operation &&
     operation.record.recordKind === 'payload' &&
     operation.record.logicalKey !== null
       ? [operation.record.logicalKey]

@@ -548,6 +548,19 @@ function formatRecordLabel(record: {
   return describeOpfsInternalRecord(record.key);
 }
 
+function formatOpfsFileDescription(operation: MockOpfsOperation): string {
+  if ('record' in operation) {
+    return formatRecordLabel(operation.record);
+  }
+
+  const pathSegments = operation.path.split('/');
+  if (pathSegments[0] !== 'tsdf') return 'untracked file';
+  if (pathSegments.length === 2) return 'untracked root file';
+  if (pathSegments.length === 3) return 'untracked session file';
+  if (pathSegments.length === 4) return 'untracked store file';
+  return 'untracked file';
+}
+
 function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
   switch (operation.type) {
     case 'openDir':
@@ -566,19 +579,19 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
       return formatWrappedOpfsOperationLabel(
         `📄 file-open ${operation.exists ? '✅' : '❌'}`,
         operation.path,
-        `(${formatRecordLabel(operation.record)})`,
+        `(${formatOpfsFileDescription(operation)})`,
       );
     case 'ensureFile':
       return formatWrappedOpfsOperationLabel(
         `📄 file-open-or-create ${operation.created ? '🆕' : '✅'}`,
         operation.path,
-        `(${formatRecordLabel(operation.record)})`,
+        `(${formatOpfsFileDescription(operation)})`,
       );
     case 'readFile':
       return formatWrappedOpfsOperationLabel(
         '📖',
         operation.path,
-        `(${formatRecordLabel(operation.record)}) | ${formatByteSize(
+        `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
           operation.valueByteSize,
         )}`,
       );
@@ -586,7 +599,7 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
       return formatWrappedOpfsOperationLabel(
         '✍️',
         operation.path,
-        `(${formatRecordLabel(operation.record)}) | ${formatByteSize(
+        `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
           operation.valueByteSizeBefore,
         )} -> ${formatByteSize(operation.valueByteSizeAfter)}${
           operation.valueChanged ? '' : ' ⚠️ UNCHANGED'
@@ -596,7 +609,7 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
       return formatWrappedOpfsOperationLabel(
         `🗑️ ${operation.exists ? '✅' : '❌'}`,
         operation.path,
-        `(${formatRecordLabel(operation.record)})`,
+        `(${formatOpfsFileDescription(operation)})`,
       );
     case 'listDir':
       return formatWrappedOpfsOperationLabel(
@@ -608,7 +621,7 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
       );
     case 'deleteDir':
       return formatWrappedOpfsOperationLabel(
-        `🧹 del-dir ${operation.exists ? '✅' : '❌'}`,
+        `🧹 del-dir ${operation.deleted ? '✅' : '❌'}`,
         operation.path,
         `(${describeOpfsDirectoryPath(operation.path)})`,
       );
@@ -722,6 +735,7 @@ function buildScopedOpfsReadBreakdown(
   const payloadReads = mockAdapter.payloadGetRequests.map(formatPayloadKey);
   const metadataReads = mockAdapter.operations.flatMap((operation) =>
     operation.type === 'readFile' &&
+    'record' in operation &&
     operation.record.recordKind === 'metadata' &&
     operation.record.logicalKey !== null
       ? [formatMetadataLogicalKey(operation.record.logicalKey)]
@@ -733,6 +747,7 @@ function buildScopedOpfsReadBreakdown(
   for (const operation of mockAdapter.operations) {
     if (
       operation.type === 'readFile' &&
+      'record' in operation &&
       operation.record.recordKind === 'metadata' &&
       operation.record.logicalKey !== null
     ) {

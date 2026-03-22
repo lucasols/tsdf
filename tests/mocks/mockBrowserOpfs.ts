@@ -41,6 +41,7 @@ type MockBrowserOpfsListDirOperation = MockBrowserOpfsBaseOperation & {
 };
 
 type MockBrowserOpfsDeleteDirOperation = MockBrowserOpfsBaseOperation & {
+  deleted: boolean;
   exists: boolean;
   type: 'deleteDir';
 };
@@ -555,22 +556,24 @@ export class MockBrowserOpfsEnvironment {
 
         const directory = node.directories.get(name);
         const exists = directory !== undefined;
+        const deleted =
+          exists &&
+          (options?.recursive === true ||
+            (directory.files.size === 0 && directory.directories.size === 0));
         operations.push({
           startedTime,
           time: completionTime,
           type: 'deleteDir',
           path: filePath,
           exists,
+          deleted,
         });
 
         if (!exists) {
           throw new Error(`Entry "${name}" does not exist.`);
         }
 
-        if (
-          options?.recursive !== true &&
-          (directory.files.size > 0 || directory.directories.size > 0)
-        ) {
+        if (!deleted) {
           throw new Error(`Directory "${name}" is not empty.`);
         }
 

@@ -552,7 +552,7 @@ describe('async storage efficiency: document', () => {
     expect(entry?.value).toMatchInlineSnapshot(`value: 'second'`);
     expect(
       mockAdapter.operations.flatMap((operation) =>
-        operation.type === 'writeFile'
+        operation.type === 'writeFile' && 'record' in operation
           ? [
               {
                 scope: operation.scope,
@@ -596,7 +596,7 @@ describe('async storage efficiency: document', () => {
     expect(secondRead?.value).toMatchInlineSnapshot(`value: 'cached'`);
     expect(
       mockAdapter.operations.flatMap((operation) =>
-        operation.type === 'writeFile'
+        operation.type === 'writeFile' && 'record' in operation
           ? [
               {
                 scope: operation.scope,
