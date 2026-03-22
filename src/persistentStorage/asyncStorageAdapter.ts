@@ -714,6 +714,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     for (const upsert of upserts) {
       const serializedValue = this.safeSerializeValue(upsert.value);
       const existingMetadata = existingMetadataByKey.get(upsert.key);
+      const customMetadata =
+        upsert.metadata ?? existingMetadata?.customMetadata;
       const nextMetadata: InternalManagedMetadataRecord = {
         key: upsert.key,
         writtenAt: now,
@@ -723,7 +725,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         ...(serializedValue !== null
           ? { sizeBytes: serializedValue.length }
           : {}),
-        ...(upsert.metadata ? { customMetadata: upsert.metadata } : {}),
+        ...(customMetadata ? { customMetadata } : {}),
       };
 
       setEntries.push({

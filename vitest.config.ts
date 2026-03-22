@@ -6,7 +6,7 @@ export default defineConfig({
   oxc: { jsx: { runtime: 'automatic' } },
   test: {
     include: ['src/*.test.{ts,tsx}', 'tests/**/*.test.{ts,tsx}'],
-    testTimeout: 1_000,
+    testTimeout: 2_000,
     environment: 'happy-dom',
     execArgv: ['--no-experimental-webstorage'],
     allowOnly: isDev,

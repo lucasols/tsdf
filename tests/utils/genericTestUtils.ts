@@ -1,5 +1,12 @@
 import { act } from '@testing-library/react';
 import { vi } from 'vitest';
+import {
+  flushMockBrowserOpfsLatenciesForTests,
+  hasPendingMockBrowserOpfsLatenciesForTests,
+} from '../mocks/mockBrowserOpfs';
+
+const MAX_TEST_SETTLE_PASSES = 20;
+
 export function range(start: number, end: number): number[] {
   return Array.from({ length: end - start + 1 }, (_, index) => index + start);
 }
@@ -21,13 +28,33 @@ export function pick<T extends Record<string, unknown>, K extends keyof T>(
 
 export async function flushAllTimers() {
   await act(async () => {
-    await vi.runAllTimersAsync();
+    for (let pass = 0; pass < MAX_TEST_SETTLE_PASSES; pass++) {
+      await vi.runAllTimersAsync();
+      await flushMockBrowserOpfsLatenciesForTests();
+
+      if (
+        vi.getTimerCount() === 0 &&
+        !hasPendingMockBrowserOpfsLatenciesForTests()
+      ) {
+        return;
+      }
+    }
   });
 }
 
 export async function advanceTime(ms: number) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
+
+    let previousTimerCount = vi.getTimerCount();
+    for (let pass = 0; pass < MAX_TEST_SETTLE_PASSES; pass++) {
+      await vi.advanceTimersByTimeAsync(0);
+      const nextTimerCount = vi.getTimerCount();
+
+      if (nextTimerCount === previousTimerCount) return;
+
+      previousTimerCount = nextTimerCount;
+    }
   });
 }
 

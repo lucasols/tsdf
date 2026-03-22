@@ -1,6 +1,7 @@
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
+import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import {
   createOpfsPersistentStorageTestStore,
   type MockOpfsOperation,
@@ -348,14 +349,28 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
   };
 }
 
-export const startPersistentStorageReadCapture =
-  startPersistentStorageOperationCapture;
-
 export function getParsedLocalStorageValue<T = unknown>(key: string): T | null {
   const value = localStorage.getItem(key);
   if (value === null) return null;
 
   return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(value));
+}
+
+export function getParsedOpfsEntryFiles(
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
+  key: string,
+): { metadata: unknown; payload: unknown } | null {
+  return mockAdapter.readEntryFiles(key);
+}
+
+export function getParsedOpfsNamespaceValue<T = unknown>(
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
+  scope: AsyncStorageNamespaceScope,
+  key: string,
+): T | null {
+  return __LEGIT_CAST__<T | null, unknown>(
+    mockAdapter.rawNamespace.get(scope, key),
+  );
 }
 
 function stripScopePrefix(
@@ -370,22 +385,73 @@ function stripScopePrefix(
   return key.startsWith(prefix) ? key.slice(prefix.length) : key;
 }
 
-function getOpfsPersistentStorageOperationTimelineString(
-  operations: Array<{ time: number; label: string }>,
-): string {
+type TimedLabel = { time: number; label: string };
+
+function sortTimedLabels(
+  operations: readonly TimedLabel[],
+): Array<{ time: number; label: string }> {
+  return operations
+    .map((operation, index) => ({ ...operation, index }))
+    .sort((left, right) => {
+      if (left.time !== right.time) return left.time - right.time;
+      return left.index - right.index;
+    })
+    .map(({ time, label }) => ({ time, label }));
+}
+
+function formatTimedLabelTable(operations: TimedLabel[]): string {
   if (operations.length === 0) return 'empty';
 
   const rows: Array<{ cols: string[] }> = [{ cols: ['time', ''] }];
   let previousTime: number | undefined;
 
   for (const operation of operations) {
+    const [firstLine = '', ...extraLines] = operation.label.split('\n');
     rows.push({
-      cols: [formatRelativeTime(operation.time, previousTime), operation.label],
+      cols: [formatRelativeTime(operation.time, previousTime), firstLine],
     });
+    for (const extraLine of extraLines) {
+      rows.push({ cols: ['', extraLine] });
+    }
     previousTime = operation.time;
   }
 
-  return ['\n', formatTableString(rows), '\n'].join('');
+  return formatTableString(rows);
+}
+
+function getOpfsPersistentStorageOperationTimelineString(args: {
+  simplified: TimedLabel[];
+  verbose: TimedLabel[];
+}): string {
+  if (args.simplified.length === 0 && args.verbose.length === 0) {
+    return 'empty';
+  }
+
+  return [
+    '',
+    ['simplified', formatTimedLabelTable(args.simplified)].join('\n'),
+    '',
+    ['verbose', formatTimedLabelTable(args.verbose)].join('\n'),
+    '',
+  ].join('\n');
+}
+
+const OPFS_TIMELINE_WRAP_AT = 100;
+const OPFS_TIMELINE_DETAIL_PREFIX = '   └ ';
+
+function formatWrappedOpfsOperationLabel(
+  prefix: string,
+  path: string,
+  detail?: string,
+): string {
+  const normalizedPath = stripOpfsRootPrefix(path);
+  const mainLine = `${prefix} ${normalizedPath}`;
+  if (detail === undefined) return mainLine;
+
+  const fullLine = `${mainLine} ${detail}`;
+  return fullLine.length > OPFS_TIMELINE_WRAP_AT
+    ? `${mainLine}\n${OPFS_TIMELINE_DETAIL_PREFIX}${detail}`
+    : fullLine;
 }
 
 function formatOpfsPath(scope: {
@@ -397,9 +463,24 @@ function formatOpfsPath(scope: {
 }
 
 function stripOpfsRootPrefix(path: string): string {
-  return path.startsWith('tsdf/')
-    ? path
-    : path.replace(LEADING_SLASHES_REGEX, '');
+  return path.replace(LEADING_SLASHES_REGEX, '');
+}
+
+function describeOpfsDirectoryPath(path: string): string {
+  const pathSegments = stripOpfsRootPrefix(path)
+    .split('/')
+    .filter((segment) => segment.length > 0);
+
+  switch (pathSegments.length) {
+    case 1:
+      return 'root directory';
+    case 2:
+      return 'session directory';
+    case 3:
+      return 'store directory';
+    default:
+      return 'scope directory';
+  }
 }
 
 function describeOpfsInternalRecord(key: string): string {
@@ -413,20 +494,13 @@ function describeOpfsInternalRecord(key: string): string {
   }
 }
 
-function formatGlobalPayloadKey(key: string): string {
-  return key === 'tsdf.__tsdf_async__._o_.p'
-    ? `${key} (protected registry payload)`
-    : key.includes('._o_.p')
-      ? `${key} (protected registry payload)`
-      : `${key} (payload)`;
-}
-
-function formatGlobalMetadataKey(key: string): string {
-  return key === 'tsdf.__tsdf_async__._o_.p'
-    ? `${key} (protected registry metadata)`
-    : key.includes('._o_.p')
-      ? `${key} (protected registry metadata)`
-      : `${key} (metadata)`;
+function formatGlobalRecordKey(
+  key: string,
+  kind: 'payload' | 'metadata',
+): string {
+  return key.includes('._o_.p')
+    ? `${key} (protected registry ${kind})`
+    : `${key} (${kind})`;
 }
 
 export type PersistentStorageReadBreakdown = {
@@ -457,11 +531,11 @@ function formatRecordLabel(record: {
   recordKind: 'payload' | 'metadata' | 'internal';
 }): string {
   if (record.recordKind === 'payload' && record.logicalKey !== null) {
-    return formatGlobalPayloadKey(record.logicalKey);
+    return formatGlobalRecordKey(record.logicalKey, 'payload');
   }
 
   if (record.recordKind === 'metadata' && record.logicalKey !== null) {
-    return formatGlobalMetadataKey(record.logicalKey);
+    return formatGlobalRecordKey(record.logicalKey, 'metadata');
   }
 
   return describeOpfsInternalRecord(record.key);
@@ -470,43 +544,85 @@ function formatRecordLabel(record: {
 function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
   switch (operation.type) {
     case 'openDir':
-      return `📂 open ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+      return formatWrappedOpfsOperationLabel(
+        `📂 dir-open ${operation.exists ? '✅' : '❌'}`,
         operation.path,
-      )} (scope directory)`;
+        `(${describeOpfsDirectoryPath(operation.path)})`,
+      );
     case 'ensureDir':
-      return `📁 ensure ${operation.created ? '🆕' : '✅'} ${stripOpfsRootPrefix(
+      return formatWrappedOpfsOperationLabel(
+        `📁 dir-open-or-create ${operation.created ? '🆕' : '✅'}`,
         operation.path,
-      )} (scope directory)`;
+        `(${describeOpfsDirectoryPath(operation.path)})`,
+      );
     case 'openFile':
-      return `📄 open ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+      return formatWrappedOpfsOperationLabel(
+        `📄 file-open ${operation.exists ? '✅' : '❌'}`,
         operation.path,
-      )} (${formatRecordLabel(operation.record)})`;
+        `(${formatRecordLabel(operation.record)})`,
+      );
     case 'ensureFile':
-      return `📄 ensure ${
-        operation.created ? '🆕' : '✅'
-      } ${stripOpfsRootPrefix(operation.path)} (${formatRecordLabel(
-        operation.record,
-      )})`;
+      return formatWrappedOpfsOperationLabel(
+        `📄 file-open-or-create ${operation.created ? '🆕' : '✅'}`,
+        operation.path,
+        `(${formatRecordLabel(operation.record)})`,
+      );
     case 'readFile':
-      return `📖 ${stripOpfsRootPrefix(operation.path)} (${formatRecordLabel(
-        operation.record,
-      )})`;
+      return formatWrappedOpfsOperationLabel(
+        '📖',
+        operation.path,
+        `(${formatRecordLabel(operation.record)}) | ${formatByteSize(
+          operation.valueByteSize,
+        )}`,
+      );
     case 'writeFile':
-      return `✍️ ${stripOpfsRootPrefix(operation.path)} (${formatRecordLabel(
-        operation.record,
-      )})`;
+      return formatWrappedOpfsOperationLabel(
+        '✍️',
+        operation.path,
+        `(${formatRecordLabel(operation.record)}) | ${formatByteSize(
+          operation.valueByteSizeBefore,
+        )} -> ${formatByteSize(operation.valueByteSizeAfter)}${
+          operation.valueChanged ? '' : ' ⚠️ UNCHANGED'
+        }`,
+      );
     case 'deleteFile':
-      return `🗑️ ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+      return formatWrappedOpfsOperationLabel(
+        `🗑️ ${operation.exists ? '✅' : '❌'}`,
         operation.path,
-      )} (${formatRecordLabel(operation.record)})`;
+        `(${formatRecordLabel(operation.record)})`,
+      );
     case 'listDir':
-      return `🗂️ ${stripOpfsRootPrefix(operation.path)} (scope directory) entries=${JSON.stringify(
-        operation.entries,
-      )}`;
-    case 'deleteDir':
-      return `🧹 ${operation.exists ? '✅' : '❌'} ${stripOpfsRootPrefix(
+      return formatWrappedOpfsOperationLabel(
+        '🗂️',
         operation.path,
-      )} (scope directory)`;
+        `(${describeOpfsDirectoryPath(operation.path)}) entries=${JSON.stringify(
+          operation.entries,
+        )}`,
+      );
+    case 'deleteDir':
+      return formatWrappedOpfsOperationLabel(
+        `🧹 ${operation.exists ? '✅' : '❌'}`,
+        operation.path,
+        `(${describeOpfsDirectoryPath(operation.path)})`,
+      );
+  }
+}
+
+function isRelevantSimplifiedOpfsOperation(
+  operation: MockOpfsOperation,
+): boolean {
+  switch (operation.type) {
+    case 'readFile':
+    case 'writeFile':
+    case 'deleteFile':
+    case 'listDir':
+      return true;
+    case 'openDir':
+    case 'ensureDir':
+    case 'openFile':
+    case 'ensureFile':
+    case 'deleteDir':
+      return false;
   }
 }
 
@@ -518,22 +634,29 @@ export type OpfsPersistentStorageOperationCaptureResult = {
 function buildOpfsOperationCaptureResult(
   mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
 ): OpfsPersistentStorageOperationCaptureResult {
-  const operations = [
-    ...mockAdapter.operations.map(formatOpfsOperationLabel),
-    ...mockAdapter.legacyListKeysFallbackRequests.map(
-      (prefix) => `🗂️ legacyListKeys ${prefix}`,
-    ),
-  ];
-  const timelineString = getOpfsPersistentStorageOperationTimelineString([
-    ...mockAdapter.operations.map((operation) => ({
+  const verboseTimelineEntries: TimedLabel[] = [];
+  const simplifiedTimelineEntries: TimedLabel[] = [];
+
+  for (const operation of mockAdapter.operations) {
+    const entry = {
       time: operation.time,
       label: formatOpfsOperationLabel(operation),
-    })),
-    ...mockAdapter.legacyListKeysFallbackRequests.map((prefix) => ({
-      time: 0,
-      label: `🗂️ legacyListKeys ${prefix}`,
-    })),
-  ]);
+    };
+    verboseTimelineEntries.push(entry);
+    if (isRelevantSimplifiedOpfsOperation(operation)) {
+      simplifiedTimelineEntries.push(entry);
+    }
+  }
+
+  const sortedVerboseTimelineEntries = sortTimedLabels(verboseTimelineEntries);
+  const sortedSimplifiedTimelineEntries = sortTimedLabels(
+    simplifiedTimelineEntries,
+  );
+  const operations = sortedVerboseTimelineEntries.map((entry) => entry.label);
+  const timelineString = getOpfsPersistentStorageOperationTimelineString({
+    simplified: sortedSimplifiedTimelineEntries,
+    verbose: sortedVerboseTimelineEntries,
+  });
 
   return { operations, timelineString };
 }
@@ -653,22 +776,13 @@ export function startOpfsPersistentStorageOperationCapture(
 
   return {
     finish() {
-      const operationsResult = buildOpfsOperationCaptureResult(mockAdapter);
-
       const summary: PersistentStorageOperationSummary = {
-        ...operationsResult,
+        ...buildOpfsOperationCaptureResult(mockAdapter),
         breakdown:
           args === undefined
             ? createEmptyPersistentStorageReadBreakdown()
             : buildScopedOpfsReadBreakdown(mockAdapter, args),
       };
-
-      Object.defineProperty(summary, 'timelineString', {
-        value: operationsResult.timelineString,
-        enumerable: false,
-        configurable: true,
-        writable: false,
-      });
 
       return summary;
     },

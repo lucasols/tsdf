@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await -- test helper intentionally implements a compact in-memory OPFS model. */
+import { sleep } from '@ls-stack/utils/sleep';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 
 type MockBrowserOpfsScopeOperation = {
@@ -17,11 +18,15 @@ type MockBrowserOpfsFileOperation = {
   type: 'ensureFile' | 'openFile';
 };
 
-type MockBrowserOpfsReadWriteOperation = {
-  path: string;
-  time: number;
-  type: 'readFile' | 'writeFile';
-};
+type MockBrowserOpfsReadWriteOperation = { path: string; time: number } & (
+  | { type: 'readFile'; valueByteSize: number }
+  | {
+      type: 'writeFile';
+      valueChanged: boolean;
+      valueByteSizeAfter: number;
+      valueByteSizeBefore: number;
+    }
+);
 
 type MockBrowserOpfsDeleteFileOperation = {
   exists: boolean;
@@ -43,6 +48,8 @@ type MockBrowserOpfsDeleteDirOperation = {
   time: number;
   type: 'deleteDir';
 };
+
+type ReadyAtRef = { value: number };
 
 type MockFileNode = { kind: 'file'; name: string; raw: string };
 
@@ -74,6 +81,22 @@ function joinPath(pathSegments: string[], name?: string): string {
   const parts = name === undefined ? pathSegments : [...pathSegments, name];
   return parts.join('/');
 }
+
+function getStringByteSize(value: string): number {
+  return value.length * 2;
+}
+
+const MOCK_OPFS_LATENCY_MS = {
+  createWritable: 1,
+  directoryHandle: 1,
+  fileHandle: 1,
+  getFile: 1,
+  rootHandle: 1,
+  textRead: 2,
+  writableClose: 2,
+  writableWrite: 1,
+  removeEntry: 1,
+} as const;
 
 function createAsyncIterator<T>(
   values: Iterable<T>,
@@ -115,16 +138,32 @@ export class MockBrowserOpfsEnvironment {
   readonly operations: MockBrowserOpfsOperation[] = [];
 
   private readonly handlePaths = new WeakMap<FileSystemHandle, string[]>();
+  private readonly pendingLatencies = new Set<Promise<void>>();
   private readonly root = createDirectoryNode('');
   private readonly startedAt = Date.now();
   private readonly readDelays = new Map<string, number>();
 
   async getRootDirectoryHandle(): Promise<FileSystemDirectoryHandle> {
-    return this.createDirectoryHandle(this.root, []);
+    const rootReadyAtRef: ReadyAtRef = { value: 0 };
+    await this.waitLatency({
+      delayMs: MOCK_OPFS_LATENCY_MS.rootHandle,
+      readyAtRef: rootReadyAtRef,
+    });
+    return this.createDirectoryHandle(this.root, [], rootReadyAtRef);
   }
 
   clearInstrumentation(): void {
     this.operations.length = 0;
+  }
+
+  hasPendingLatencies(): boolean {
+    return this.pendingLatencies.size > 0;
+  }
+
+  async flushLatencies(): Promise<void> {
+    while (this.pendingLatencies.size > 0) {
+      await Promise.all([...this.pendingLatencies]);
+    }
   }
 
   setReadDelay(pathPrefix: string, delayMs: number): void {
@@ -187,6 +226,33 @@ export class MockBrowserOpfsEnvironment {
     return Date.now() - this.startedAt;
   }
 
+  private getStartTime(readyAtRef: ReadyAtRef): number {
+    return Math.max(this.time(), readyAtRef.value);
+  }
+
+  private async waitLatency(args: {
+    delayMs: number;
+    readyAtRef: ReadyAtRef;
+    useFakeTimeDelay?: boolean;
+  }): Promise<number> {
+    const completionTime = this.getStartTime(args.readyAtRef) + args.delayMs;
+    const actualDelayMs = args.useFakeTimeDelay === true ? args.delayMs : 0;
+    const pendingLatency: Promise<void> =
+      actualDelayMs > 0
+        ? sleep(actualDelayMs).then(() => undefined)
+        : Promise.resolve();
+    this.pendingLatencies.add(pendingLatency);
+
+    try {
+      await pendingLatency;
+    } finally {
+      this.pendingLatencies.delete(pendingLatency);
+    }
+
+    args.readyAtRef.value = completionTime;
+    return completionTime;
+  }
+
   private getReadDelay(path: string): number {
     let bestMatchLength = -1;
     let bestDelayMs = 0;
@@ -232,9 +298,11 @@ export class MockBrowserOpfsEnvironment {
   private createDirectoryHandle(
     node: MockDirectoryNode,
     pathSegments: string[],
+    readyAtRef: ReadyAtRef,
   ): FileSystemDirectoryHandle {
     const operations = this.operations;
-    const getTime = () => this.time();
+    const getStartTime = this.getStartTime.bind(this);
+    const waitLatency = this.waitLatency.bind(this);
     const createDirectoryHandle = this.createDirectoryHandle.bind(this);
     const createFileHandle = this.createFileHandle.bind(this);
     const handlePaths = this.handlePaths;
@@ -252,7 +320,9 @@ export class MockBrowserOpfsEnvironment {
         if (next !== undefined) {
           entries.push([
             name,
-            createDirectoryHandle(next, [...pathSegments, name]),
+            createDirectoryHandle(next, [...pathSegments, name], {
+              value: readyAtRef.value,
+            }),
           ]);
         }
       }
@@ -260,7 +330,10 @@ export class MockBrowserOpfsEnvironment {
       for (const name of [...node.files.keys()].sort(compareStrings)) {
         const next = node.files.get(name);
         if (next !== undefined) {
-          entries.push([name, createFileHandle(next, pathSegments)]);
+          entries.push([
+            name,
+            createFileHandle(next, pathSegments, { value: readyAtRef.value }),
+          ]);
         }
       }
 
@@ -282,6 +355,10 @@ export class MockBrowserOpfsEnvironment {
         name: string,
         options?: { create?: boolean },
       ): Promise<FileSystemDirectoryHandle> {
+        const completionTime = await waitLatency({
+          delayMs: MOCK_OPFS_LATENCY_MS.directoryHandle,
+          readyAtRef,
+        });
         const create = options?.create === true;
         const existing = node.directories.get(name);
         const exists = existing !== undefined;
@@ -289,7 +366,7 @@ export class MockBrowserOpfsEnvironment {
 
         if (!exists && !create) {
           operations.push({
-            time: getTime(),
+            time: completionTime,
             type: 'openDir',
             path,
             exists: false,
@@ -307,19 +384,25 @@ export class MockBrowserOpfsEnvironment {
           })();
 
         operations.push({
-          time: getTime(),
+          time: completionTime,
           type: create ? 'ensureDir' : 'openDir',
           path,
           exists,
           created: !exists,
         });
 
-        return createDirectoryHandle(next, [...pathSegments, name]);
+        return createDirectoryHandle(next, [...pathSegments, name], {
+          value: completionTime,
+        });
       },
       async getFileHandle(
         name: string,
         options?: { create?: boolean },
       ): Promise<FileSystemFileHandle> {
+        const completionTime = await waitLatency({
+          delayMs: MOCK_OPFS_LATENCY_MS.fileHandle,
+          readyAtRef,
+        });
         const create = options?.create === true;
         const existing = node.files.get(name);
         const exists = existing !== undefined;
@@ -327,7 +410,7 @@ export class MockBrowserOpfsEnvironment {
 
         if (!exists && !create) {
           operations.push({
-            time: getTime(),
+            time: completionTime,
             type: 'openFile',
             path,
             exists: false,
@@ -345,24 +428,30 @@ export class MockBrowserOpfsEnvironment {
           })();
 
         operations.push({
-          time: getTime(),
+          time: completionTime,
           type: create ? 'ensureFile' : 'openFile',
           path,
           exists,
           created: !exists,
         });
 
-        return createFileHandle(fileNode, pathSegments);
+        return createFileHandle(fileNode, pathSegments, {
+          value: completionTime,
+        });
       },
       async removeEntry(
         name: string,
         options?: { recursive?: boolean },
       ): Promise<void> {
+        const completionTime = await waitLatency({
+          delayMs: MOCK_OPFS_LATENCY_MS.removeEntry,
+          readyAtRef,
+        });
         const filePath = joinPath(pathSegments, name);
         if (node.files.has(name)) {
           node.files.delete(name);
           operations.push({
-            time: getTime(),
+            time: completionTime,
             type: 'deleteFile',
             path: filePath,
             exists: true,
@@ -373,7 +462,7 @@ export class MockBrowserOpfsEnvironment {
         const directory = node.directories.get(name);
         const exists = directory !== undefined;
         operations.push({
-          time: getTime(),
+          time: completionTime,
           type: 'deleteDir',
           path: filePath,
           exists,
@@ -403,7 +492,7 @@ export class MockBrowserOpfsEnvironment {
           .map((name) => `file:${name}`);
 
         operations.push({
-          time: getTime(),
+          time: getStartTime(readyAtRef),
           type: 'listDir',
           path: currentPath,
           entries: [...directoryNames, ...fileNames],
@@ -448,9 +537,10 @@ export class MockBrowserOpfsEnvironment {
   private createFileHandle(
     node: MockFileNode,
     pathSegments: string[],
+    readyAtRef: ReadyAtRef,
   ): FileSystemFileHandle {
     const operations = this.operations;
-    const getTime = () => this.time();
+    const waitLatency = this.waitLatency.bind(this);
     const getReadDelay = this.getReadDelay.bind(this);
     const handlePaths = this.handlePaths;
 
@@ -467,34 +557,74 @@ export class MockBrowserOpfsEnvironment {
         );
       },
       async getFile(): Promise<File> {
+        const completionTime = await waitLatency({
+          delayMs: MOCK_OPFS_LATENCY_MS.getFile,
+          readyAtRef,
+        });
         const path = joinPath(pathSegments, node.name);
+        const fileReadyAtRef: ReadyAtRef = { value: completionTime };
 
         return __LEGIT_CAST__<File, unknown>({
           async text(): Promise<string> {
+            let readCompletionTime = await waitLatency({
+              delayMs: MOCK_OPFS_LATENCY_MS.textRead,
+              readyAtRef: fileReadyAtRef,
+            });
             const delayMs = getReadDelay(path);
             if (delayMs > 0) {
-              await new Promise<void>((resolve) => {
-                setTimeout(resolve, delayMs);
+              readCompletionTime = await waitLatency({
+                delayMs,
+                readyAtRef: fileReadyAtRef,
+                useFakeTimeDelay: true,
               });
             }
 
-            operations.push({ time: getTime(), type: 'readFile', path });
+            operations.push({
+              time: readCompletionTime,
+              type: 'readFile',
+              path,
+              valueByteSize: getStringByteSize(node.raw),
+            });
 
             return node.raw;
           },
         });
       },
       async createWritable(): Promise<FileSystemWritableFileStream> {
+        const completionTime = await waitLatency({
+          delayMs: MOCK_OPFS_LATENCY_MS.createWritable,
+          readyAtRef,
+        });
         const path = joinPath(pathSegments, node.name);
         let pendingRaw = node.raw;
+        const streamReadyAtRef: ReadyAtRef = { value: completionTime };
 
         return __LEGIT_CAST__<FileSystemWritableFileStream, unknown>({
           async write(data: string): Promise<void> {
+            await waitLatency({
+              delayMs: MOCK_OPFS_LATENCY_MS.writableWrite,
+              readyAtRef: streamReadyAtRef,
+            });
+            readyAtRef.value = streamReadyAtRef.value;
             pendingRaw = data;
           },
           async close(): Promise<void> {
+            const writeCompletionTime = await waitLatency({
+              delayMs: MOCK_OPFS_LATENCY_MS.writableClose,
+              readyAtRef: streamReadyAtRef,
+            });
+            readyAtRef.value = streamReadyAtRef.value;
+            const valueChanged = node.raw !== pendingRaw;
+            const valueByteSizeBefore = getStringByteSize(node.raw);
             node.raw = pendingRaw;
-            operations.push({ time: getTime(), type: 'writeFile', path });
+            operations.push({
+              time: writeCompletionTime,
+              type: 'writeFile',
+              path,
+              valueChanged,
+              valueByteSizeBefore,
+              valueByteSizeAfter: getStringByteSize(node.raw),
+            });
           },
         });
       },
@@ -518,6 +648,14 @@ function ensureEnvironment(): MockBrowserOpfsEnvironment {
 export function createMockBrowserOpfs(): MockBrowserOpfsEnvironment {
   installMockBrowserOpfsForTests();
   return ensureEnvironment();
+}
+
+export function hasPendingMockBrowserOpfsLatenciesForTests(): boolean {
+  return currentEnvironment?.hasPendingLatencies() ?? false;
+}
+
+export async function flushMockBrowserOpfsLatenciesForTests(): Promise<void> {
+  await currentEnvironment?.flushLatencies();
 }
 
 export function installMockBrowserOpfsForTests(): void {

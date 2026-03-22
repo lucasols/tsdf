@@ -8,7 +8,6 @@ import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStora
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type {
   AsyncStorageEntryMetadata,
-  AsyncStorageNamespaceScope,
   PersistentStorageSchema,
 } from '../../../src/persistentStorage/types';
 import {
@@ -19,7 +18,6 @@ import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
-  type ListQueryParams,
   type Row,
   type Tables,
 } from '../../mocks/listQueryStoreTestEnv';
@@ -27,10 +25,7 @@ import { resetMockBrowserOpfsForTests } from '../../mocks/mockBrowserOpfs';
 import { TEST_INITIAL_TIME } from '../../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
-import {
-  startOpfsPersistentStorageOperationCapture,
-  type PersistentStorageOperationSummary,
-} from '../../utils/persistentStorageOptimizationTestUtils';
+import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
 
 export const wrappedDocumentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -111,7 +106,7 @@ export async function captureHookRemount<Result>(args: {
   );
   const firstHook = renderHook(args.render);
   await advanceTime(args.settleTimeMs ?? 250);
-  const firstMountOperations = firstMountCapture.finish();
+  const firstMountOperations = firstMountCapture.finish().timelineString;
 
   firstHook.unmount();
 
@@ -121,7 +116,7 @@ export async function captureHookRemount<Result>(args: {
   );
   const secondHook = renderHook(args.render);
   await advanceTime(args.settleTimeMs ?? 250);
-  const remountOperations = remountCapture.finish();
+  const remountOperations = remountCapture.finish().timelineString;
 
   return { secondHook, firstMountOperations, remountOperations };
 }
@@ -146,35 +141,6 @@ export function createDocumentEnv(options: {
   );
 }
 
-export function registerAsyncNamespace(
-  mockAdapter: MockOpfsAdapter,
-  scope: AsyncStorageNamespaceScope,
-): void {
-  mockAdapter.registerNamespace(scope);
-}
-
-export function documentStorageKey(
-  storeName: string,
-  sessionKey: string,
-): string {
-  return `tsdf.${sessionKey}.${storeName}`;
-}
-
-export function setCachedDocumentData(
-  mockAdapter: MockOpfsAdapter,
-  storeName: string,
-  sessionKey: string,
-  data: DocumentState,
-): string {
-  const key = documentStorageKey(storeName, sessionKey);
-  mockAdapter.setValue(key, {
-    data: { d: { value: data } },
-    timestamp: Date.now(),
-    version: 1,
-  });
-  return key;
-}
-
 export type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
@@ -193,58 +159,6 @@ export function createCollectionEnv(options: {
       maxItems: options.maxItems,
     },
   });
-}
-
-export function collectionStorageKey(
-  storeName: string,
-  sessionKey: string,
-  payload: string,
-): string {
-  return `tsdf.${sessionKey}.${storeName}.ci.${getCompositeKey(payload)}`;
-}
-
-export function setCachedCollectionItem(
-  mockAdapter: MockOpfsAdapter,
-  storeName: string,
-  sessionKey: string,
-  payload: string,
-  data: { value: CollectionItemState },
-  timestamp = Date.now(),
-): string {
-  const key = collectionStorageKey(storeName, sessionKey, payload);
-  mockAdapter.setValue(key, {
-    data: { d: data, p: payload },
-    timestamp,
-    version: 1,
-  });
-  return key;
-}
-
-export function listStoredCollectionItemPayloads(
-  mockAdapter: MockOpfsAdapter,
-  storeName: string,
-  sessionKey: string,
-): string[] {
-  const scope = {
-    sessionKey,
-    storeName,
-    kind: 'collection.item',
-  } satisfies AsyncStorageNamespaceScope;
-
-  return mockAdapter.rawNamespace
-    .listKeys(scope)
-    .filter((key) => key.startsWith('__tsdf_meta__:'))
-    .flatMap((key) => {
-      const metadata = mockAdapter.rawNamespace.get(scope, key);
-      if (typeof metadata !== 'object' || metadata === null) return [];
-      const record = __LEGIT_CAST__<
-        { customMetadata?: { p?: unknown } },
-        unknown
-      >(metadata);
-      return typeof record.customMetadata?.p === 'string'
-        ? [record.customMetadata.p]
-        : [];
-    });
 }
 
 export function rawItemPayload(tableId: string, id: number): string {
@@ -281,72 +195,6 @@ export function createListQueryEnv(options: {
       maxQuerySize: options.maxQuerySize,
     },
   });
-}
-
-export function listQueryItemStorageKey(
-  storeName: string,
-  sessionKey: string,
-  tableId: string,
-  id: number,
-): string {
-  return `tsdf.${sessionKey}.${storeName}.li.${getCompositeKey(`${tableId}||${id}`)}`;
-}
-
-export function listQueryStorageKey(
-  storeName: string,
-  sessionKey: string,
-  params: ListQueryParams,
-): string {
-  return `tsdf.${sessionKey}.${storeName}.lq.${getCompositeKey(params)}`;
-}
-
-export function setCachedItem(
-  mockAdapter: MockOpfsAdapter,
-  storeName: string,
-  sessionKey: string,
-  tableId: string,
-  id: number,
-  data: Row,
-  timestamp = Date.now(),
-): string {
-  const key = listQueryItemStorageKey(storeName, sessionKey, tableId, id);
-  mockAdapter.setValue(key, {
-    data: { d: data, p: `${tableId}||${id}` },
-    timestamp,
-    version: 1,
-  });
-  return key;
-}
-
-export function setCachedQuery(
-  mockAdapter: MockOpfsAdapter,
-  storeName: string,
-  sessionKey: string,
-  params: ListQueryParams,
-  items: string[],
-  options: { hasMore?: boolean; timestamp?: number } = {},
-): string {
-  const key = listQueryStorageKey(storeName, sessionKey, params);
-  mockAdapter.setValue(key, {
-    data: {
-      p: params,
-      i: items,
-      ...(options.hasMore === true ? { h: true } : {}),
-    },
-    timestamp: options.timestamp ?? Date.now(),
-    version: 1,
-  });
-  return key;
-}
-
-export function listStoredKeys(
-  mockAdapter: MockOpfsAdapter,
-  scope: AsyncStorageNamespaceScope,
-): string[] {
-  return mockAdapter.rawNamespace
-    .listKeys(scope)
-    .filter((key) => key.startsWith('__tsdf_meta__:'))
-    .map((key) => key.slice('__tsdf_meta__:'.length));
 }
 
 export function readEntryMetadata(
@@ -402,21 +250,6 @@ export function setProtectedKeysSnapshot(
   setSessionProtectedKeysSnapshot(
     sessionKey,
     keys.map((key) => serializeProtectedStorageKey(key)),
-  );
-}
-
-export function isEmptyOperationSummary(
-  summary: PersistentStorageOperationSummary,
-): boolean {
-  return (
-    summary.operations.length === 0 &&
-    summary.breakdown.metadataReads.length === 0 &&
-    summary.breakdown.scopedPayloadReads.length === 0 &&
-    summary.breakdown.externalPayloadReads.length === 0 &&
-    summary.breakdown.payloadBatchReads.length === 0 &&
-    summary.breakdown.metadataBatchReads.length === 0 &&
-    summary.breakdown.listKeyScans.length === 0 &&
-    summary.breakdown.legacyFallbackReads.length === 0
   );
 }
 

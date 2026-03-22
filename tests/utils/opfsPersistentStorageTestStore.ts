@@ -119,6 +119,14 @@ function getLogicalStorageKey(
   }
 }
 
+type StorageSeedOptions = { timestamp?: number; version?: number };
+
+type ListQuerySeedItemOptions = StorageSeedOptions & {
+  loadedFields?: string[];
+};
+
+type ListQueryItemRef = string | { tableId: string; id: number | string };
+
 type ParsedFlatKey = { scope: AsyncStorageNamespaceScope; key: string };
 
 function parseFlatStorageKey(key: string): ParsedFlatKey | null {
@@ -621,6 +629,15 @@ function parseScopeFromDirPath(
   };
 }
 
+function parseTrackedDirPath(
+  path: string,
+): { path: string; scope: AsyncStorageNamespaceScope | null } | null {
+  const pathSegments = path.split('/');
+  if (pathSegments[0] !== OPFS_ROOT_DIR) return null;
+
+  return { path, scope: parseScopeFromDirPath(path) };
+}
+
 type RecordKind = 'payload' | 'metadata' | 'internal';
 
 type InstrumentedRecord = {
@@ -679,7 +696,7 @@ export type MockOpfsOperation =
       created: boolean;
       exists: boolean;
       path: string;
-      scope: AsyncStorageNamespaceScope;
+      scope: AsyncStorageNamespaceScope | null;
       time: number;
       type: 'ensureDir' | 'openDir';
     }
@@ -692,13 +709,20 @@ export type MockOpfsOperation =
       time: number;
       type: 'ensureFile' | 'openFile';
     }
-  | {
+  | ({
       path: string;
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
       time: number;
-      type: 'readFile' | 'writeFile';
-    }
+    } & (
+      | { type: 'readFile'; valueByteSize: number }
+      | {
+          type: 'writeFile';
+          valueChanged: boolean;
+          valueByteSizeAfter: number;
+          valueByteSizeBefore: number;
+        }
+    ))
   | {
       exists: boolean;
       path: string;
@@ -710,14 +734,14 @@ export type MockOpfsOperation =
   | {
       entries: string[];
       path: string;
-      scope: AsyncStorageNamespaceScope;
+      scope: AsyncStorageNamespaceScope | null;
       time: number;
       type: 'listDir';
     }
   | {
       exists: boolean;
       path: string;
-      scope: AsyncStorageNamespaceScope;
+      scope: AsyncStorageNamespaceScope | null;
       time: number;
       type: 'deleteDir';
     };
@@ -728,14 +752,14 @@ function enrichRawOperation(
   switch (operation.type) {
     case 'openDir':
     case 'ensureDir': {
-      const scope = parseScopeFromDirPath(operation.path);
-      if (scope === null) return null;
-      return { ...operation, scope };
+      const dirContext = parseTrackedDirPath(operation.path);
+      if (dirContext === null) return null;
+      return { ...operation, ...dirContext };
     }
     case 'deleteDir': {
-      const scope = parseScopeFromDirPath(operation.path);
-      if (scope === null) return null;
-      return { ...operation, scope };
+      const dirContext = parseTrackedDirPath(operation.path);
+      if (dirContext === null) return null;
+      return { ...operation, ...dirContext };
     }
     case 'openFile':
     case 'ensureFile':
@@ -747,9 +771,9 @@ function enrichRawOperation(
       return { ...operation, ...fileContext };
     }
     case 'listDir': {
-      const scope = parseScopeFromDirPath(operation.path);
-      if (scope === null) return null;
-      return { ...operation, scope };
+      const dirContext = parseTrackedDirPath(operation.path);
+      if (dirContext === null) return null;
+      return { ...operation, ...dirContext };
     }
   }
 }
@@ -800,13 +824,79 @@ function getListKeysRequests(
   operations: readonly MockOpfsOperation[],
 ): AsyncStorageNamespaceScope[] {
   return operations.flatMap((operation) =>
-    operation.type === 'listDir' ? [operation.scope] : [],
+    operation.type === 'listDir' && operation.scope !== null
+      ? [operation.scope]
+      : [],
   );
 }
 
 export type OpfsPersistentStorageTestStore = ReturnType<
   typeof createOpfsPersistentStorageTestStore
 >;
+
+type RawOpfsLogicalFileContents = { metadata: unknown; payload: unknown };
+
+export type OpfsPersistentStorageTestStoreScope = {
+  document: {
+    namespace: AsyncStorageNamespaceScope;
+    registerNamespace: () => void;
+    storageKey: () => string;
+    seed: <T>(data: T, options?: StorageSeedOptions) => string;
+    readEntry: <T>() => StorageCacheEntry<PersistedDocumentData<T>>;
+    readData: <T>() => T | null;
+    setPayload: (value: unknown) => void;
+    setMetadata: (value: unknown) => void;
+    removePayload: () => void;
+    removeMetadata: () => void;
+  };
+  collection: {
+    namespace: AsyncStorageNamespaceScope;
+    registerNamespace: () => void;
+    itemKey: (payload: string) => string;
+    itemStorageKey: (payload: string) => string;
+    listStoredPayloads: () => string[];
+    seedItem: <T>(
+      payload: string,
+      data: T,
+      options?: StorageSeedOptions,
+    ) => string;
+    readItemEntry: <T>(
+      payload: string,
+    ) => StorageCacheEntry<PersistedCollectionItemData<T>>;
+    readItemData: <T>(payload: string) => T | null;
+  };
+  listQuery: {
+    itemNamespace: AsyncStorageNamespaceScope;
+    queryNamespace: AsyncStorageNamespaceScope;
+    registerItemNamespace: () => void;
+    registerQueryNamespace: () => void;
+    registerNamespaces: () => void;
+    itemKey: (tableId: string, id: number | string) => string;
+    itemStorageKey: (tableId: string, id: number | string) => string;
+    queryStorageKey: (params: unknown) => string;
+    listStoredItemKeys: () => string[];
+    listStoredQueryKeys: () => string[];
+    seedItem: <T>(
+      tableId: string,
+      id: number | string,
+      data: T,
+      options?: ListQuerySeedItemOptions,
+    ) => { itemKey: string; payload: string; storageKey: string };
+    seedQuery: (
+      params: unknown,
+      items: ListQueryItemRef[],
+      options?: StorageSeedOptions & { hasMore?: boolean },
+    ) => string;
+    readItemEntry: <T>(
+      tableId: string,
+      id: number | string,
+    ) => StorageCacheEntry<PersistedListQueryItemData<T>>;
+    readItemData: <T>(tableId: string, id: number | string) => T | null;
+    readQueryEntry: (
+      params: unknown,
+    ) => StorageCacheEntry<PersistedListQueryData>;
+  };
+};
 
 export type OpfsPersistentStorageTestStoreOptions = {
   readDelayMs?: number;
@@ -866,6 +956,11 @@ export function createOpfsPersistentStorageTestStore(
   clearInstrumentation: () => void;
   getRaw: (key: string) => string | null;
   has: (key: string) => boolean;
+  readEntryFiles: (key: string) => RawOpfsLogicalFileContents | null;
+  scope: (
+    storeName: string,
+    sessionKey: string,
+  ) => OpfsPersistentStorageTestStoreScope;
   registerNamespace: (scope: AsyncStorageNamespaceScope) => void;
   setRaw: (key: string, raw: string) => void;
   setValue: <T>(key: string, value: T) => void;
@@ -945,6 +1040,293 @@ export function createOpfsPersistentStorageTestStore(
     return readLogicalStorageEntry(mockBrowserOpfs, key) !== null;
   }
 
+  function readLogicalFileContents(
+    key: string,
+  ): RawOpfsLogicalFileContents | null {
+    const location = getLogicalRecordLocation(key);
+    if (location === null) return null;
+
+    const payloadRaw = readRawRecord(
+      mockBrowserOpfs,
+      location.scope,
+      location.payloadRecordKey,
+    );
+    const metadataRaw = readRawRecord(
+      mockBrowserOpfs,
+      location.scope,
+      location.metadataRecordKey,
+    );
+
+    return {
+      payload: payloadRaw === null ? null : parseJson<unknown>(payloadRaw),
+      metadata: metadataRaw === null ? null : parseJson<unknown>(metadataRaw),
+    };
+  }
+
+  function readRequiredLogicalStorageEntry<T>(
+    key: string,
+  ): StorageCacheEntry<T> {
+    const entry = readLogicalStorageEntry<T>(mockBrowserOpfs, key);
+    if (entry === null) {
+      throw new Error(`Missing persistent test entry for ${key}`);
+    }
+
+    return entry;
+  }
+
+  function createScope(
+    storeName: string,
+    sessionKey: string,
+  ): OpfsPersistentStorageTestStoreScope {
+    const documentNamespace = {
+      sessionKey,
+      storeName,
+      kind: 'document',
+    } satisfies AsyncStorageNamespaceScope;
+    const collectionNamespace = {
+      sessionKey,
+      storeName,
+      kind: 'collection.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const listQueryItemNamespace = {
+      sessionKey,
+      storeName,
+      kind: 'listQuery.item',
+    } satisfies AsyncStorageNamespaceScope;
+    const listQueryQueryNamespace = {
+      sessionKey,
+      storeName,
+      kind: 'listQuery.query',
+    } satisfies AsyncStorageNamespaceScope;
+    const documentStorageKey = getLogicalStorageKey(
+      documentNamespace,
+      'document',
+    );
+
+    function collectionItemStorageKey(payload: string): string {
+      return getLogicalStorageKey(collectionNamespace, itemKey(payload));
+    }
+
+    function rawListQueryItemPayload(
+      tableId: string,
+      id: number | string,
+    ): string {
+      return `${tableId}||${id}`;
+    }
+
+    function listQueryItemStorageKey(
+      tableId: string,
+      id: number | string,
+    ): string {
+      return getLogicalStorageKey(
+        listQueryItemNamespace,
+        listQueryItemKey(tableId, id),
+      );
+    }
+
+    function listQueryStorageKey(params: unknown): string {
+      return getLogicalStorageKey(
+        listQueryQueryNamespace,
+        listQueryQueryKey(params),
+      );
+    }
+
+    function normalizeQueryItemRef(item: ListQueryItemRef): string {
+      if (typeof item === 'string') return item;
+      return listQueryItemKey(item.tableId, item.id);
+    }
+
+    function listStoredKeysForNamespace(
+      namespace: AsyncStorageNamespaceScope,
+    ): string[] {
+      return listRawKeys(mockBrowserOpfs, namespace)
+        .filter((key) => key.startsWith(METADATA_RECORD_PREFIX))
+        .map((key) => key.slice(METADATA_RECORD_PREFIX.length));
+    }
+
+    return {
+      document: {
+        namespace: documentNamespace,
+        registerNamespace: () =>
+          ensureNamespaceRegistered(mockBrowserOpfs, documentNamespace),
+        storageKey: () => documentStorageKey,
+        seed<T>(data: T, seedOptions?: StorageSeedOptions) {
+          setValue(
+            documentStorageKey,
+            createStorageCacheEntry(
+              { d: data },
+              {
+                timestamp: seedOptions?.timestamp,
+                version: seedOptions?.version,
+              },
+            ),
+          );
+          return documentStorageKey;
+        },
+        readEntry<T>() {
+          return readRequiredLogicalStorageEntry<PersistedDocumentData<T>>(
+            documentStorageKey,
+          );
+        },
+        readData<T>() {
+          return (
+            readLogicalStorageEntry<PersistedDocumentData<T>>(
+              mockBrowserOpfs,
+              documentStorageKey,
+            )?.data.data ?? null
+          );
+        },
+        setPayload: (value: unknown) =>
+          setPayloadValue(mockBrowserOpfs, documentStorageKey, value),
+        setMetadata: (value: unknown) =>
+          setMetadataValue(mockBrowserOpfs, documentStorageKey, value),
+        removePayload: () =>
+          removePayloadValue(mockBrowserOpfs, documentStorageKey),
+        removeMetadata: () =>
+          removeMetadataValue(mockBrowserOpfs, documentStorageKey),
+      },
+      collection: {
+        namespace: collectionNamespace,
+        registerNamespace: () =>
+          ensureNamespaceRegistered(mockBrowserOpfs, collectionNamespace),
+        itemKey,
+        itemStorageKey: collectionItemStorageKey,
+        listStoredPayloads() {
+          return listStoredKeysForNamespace(collectionNamespace).flatMap(
+            (key) => {
+              const metadata = readLogicalMetadata(
+                mockBrowserOpfs,
+                getLogicalStorageKey(collectionNamespace, key),
+              );
+
+              return typeof metadata?.customMetadata.p === 'string'
+                ? [metadata.customMetadata.p]
+                : [];
+            },
+          );
+        },
+        seedItem<T>(
+          payload: string,
+          data: T,
+          seedOptions?: StorageSeedOptions,
+        ) {
+          const storageKey = collectionItemStorageKey(payload);
+          setValue(
+            storageKey,
+            createStorageCacheEntry(
+              { d: data, p: payload },
+              {
+                timestamp: seedOptions?.timestamp,
+                version: seedOptions?.version,
+              },
+            ),
+          );
+          return storageKey;
+        },
+        readItemEntry<T>(payload: string) {
+          return readRequiredLogicalStorageEntry<
+            PersistedCollectionItemData<T>
+          >(collectionItemStorageKey(payload));
+        },
+        readItemData<T>(payload: string) {
+          return (
+            readLogicalStorageEntry<PersistedCollectionItemData<T>>(
+              mockBrowserOpfs,
+              collectionItemStorageKey(payload),
+            )?.data.data ?? null
+          );
+        },
+      },
+      listQuery: {
+        itemNamespace: listQueryItemNamespace,
+        queryNamespace: listQueryQueryNamespace,
+        registerItemNamespace: () =>
+          ensureNamespaceRegistered(mockBrowserOpfs, listQueryItemNamespace),
+        registerQueryNamespace: () =>
+          ensureNamespaceRegistered(mockBrowserOpfs, listQueryQueryNamespace),
+        registerNamespaces: () => {
+          ensureNamespaceRegistered(mockBrowserOpfs, listQueryItemNamespace);
+          ensureNamespaceRegistered(mockBrowserOpfs, listQueryQueryNamespace);
+        },
+        itemKey: listQueryItemKey,
+        itemStorageKey: listQueryItemStorageKey,
+        queryStorageKey: listQueryStorageKey,
+        listStoredItemKeys: () =>
+          listStoredKeysForNamespace(listQueryItemNamespace),
+        listStoredQueryKeys: () =>
+          listStoredKeysForNamespace(listQueryQueryNamespace),
+        seedItem<T>(
+          tableId: string,
+          id: number | string,
+          data: T,
+          seedOptions?: ListQuerySeedItemOptions,
+        ) {
+          const payload = rawListQueryItemPayload(tableId, id);
+          const entryKey = listQueryItemKey(tableId, id);
+          const storageKey = listQueryItemStorageKey(tableId, id);
+          setValue(
+            storageKey,
+            createStorageCacheEntry(
+              {
+                d: data,
+                p: payload,
+                ...(seedOptions?.loadedFields !== undefined
+                  ? { lf: seedOptions.loadedFields }
+                  : {}),
+              },
+              {
+                timestamp: seedOptions?.timestamp,
+                version: seedOptions?.version,
+              },
+            ),
+          );
+
+          return { itemKey: entryKey, payload, storageKey };
+        },
+        seedQuery(
+          params: unknown,
+          items: ListQueryItemRef[],
+          queryOptions: StorageSeedOptions & { hasMore?: boolean } = {},
+        ) {
+          const storageKey = listQueryStorageKey(params);
+          setValue(
+            storageKey,
+            createStorageCacheEntry(
+              {
+                p: params,
+                i: items.map(normalizeQueryItemRef),
+                ...(queryOptions.hasMore === true ? { h: true } : {}),
+              },
+              {
+                timestamp: queryOptions.timestamp,
+                version: queryOptions.version,
+              },
+            ),
+          );
+          return storageKey;
+        },
+        readItemEntry<T>(tableId: string, id: number | string) {
+          return readRequiredLogicalStorageEntry<PersistedListQueryItemData<T>>(
+            listQueryItemStorageKey(tableId, id),
+          );
+        },
+        readItemData<T>(tableId: string, id: number | string) {
+          return (
+            readLogicalStorageEntry<PersistedListQueryItemData<T>>(
+              mockBrowserOpfs,
+              listQueryItemStorageKey(tableId, id),
+            )?.data.data ?? null
+          );
+        },
+        readQueryEntry(params: unknown) {
+          return readRequiredLogicalStorageEntry<PersistedListQueryData>(
+            listQueryStorageKey(params),
+          );
+        },
+      },
+    };
+  }
+
   function seedInitialState(): void {
     const storeName = options.storeName;
     const sessionKey = options.sessionKey;
@@ -961,56 +1343,35 @@ export function createOpfsPersistentStorageTestStore(
       return;
     }
 
-    const documentKey = `tsdf.${sessionKey}.${storeName}`;
+    const scope = createScope(storeName, sessionKey);
     const documentState = options.initialState?.document;
     if (documentState !== undefined) {
-      setValue(
-        documentKey,
-        createStorageCacheEntry(
-          { d: documentState.data },
-          {
-            timestamp: documentState.timestamp,
-            version: documentState.version,
-          },
-        ),
-      );
+      scope.document.seed(documentState.data, {
+        timestamp: documentState.timestamp,
+        version: documentState.version,
+      });
     }
 
     for (const item of options.initialState?.collection ?? []) {
-      setValue(
-        `tsdf.${sessionKey}.${storeName}.ci.${itemKey(item.payload)}`,
-        createStorageCacheEntry(
-          { d: item.data, p: item.payload },
-          { timestamp: item.timestamp, version: item.version },
-        ),
-      );
+      scope.collection.seedItem(item.payload, item.data, {
+        timestamp: item.timestamp,
+        version: item.version,
+      });
     }
 
     for (const item of options.initialState?.listQuery?.items ?? []) {
-      const payload = listQueryItemKey(item.tableId, item.id);
-      setValue(
-        `tsdf.${sessionKey}.${storeName}.li.${payload}`,
-        createStorageCacheEntry(
-          { d: item.data, p: `${item.tableId}||${item.id}` },
-          { timestamp: item.timestamp, version: item.version },
-        ),
-      );
+      scope.listQuery.seedItem(item.tableId, item.id, item.data, {
+        timestamp: item.timestamp,
+        version: item.version,
+      });
     }
 
     for (const query of options.initialState?.listQuery?.queries ?? []) {
-      setValue(
-        `tsdf.${sessionKey}.${storeName}.lq.${listQueryQueryKey(query.params)}`,
-        createStorageCacheEntry(
-          {
-            p: query.params,
-            i: query.items.map((item) =>
-              listQueryItemKey(item.tableId, item.id),
-            ),
-            ...(query.hasMore === true ? { h: true } : {}),
-          },
-          { timestamp: query.timestamp, version: query.version },
-        ),
-      );
+      scope.listQuery.seedQuery(query.params, query.items, {
+        hasMore: query.hasMore,
+        timestamp: query.timestamp,
+        version: query.version,
+      });
     }
 
     for (const [key, value] of Object.entries(
@@ -1028,6 +1389,10 @@ export function createOpfsPersistentStorageTestStore(
 
   let instrumentationStartIndex = mockBrowserOpfs.operations.length;
   let readStartIndex = mockBrowserOpfs.operations.length;
+  const defaultScope = createScope(
+    options.storeName ?? 'store',
+    options.sessionKey ?? 'session',
+  );
 
   function getCurrentOperations(): MockOpfsOperation[] {
     return mockBrowserOpfs.operations
@@ -1099,6 +1464,8 @@ export function createOpfsPersistentStorageTestStore(
     },
     getRaw,
     has: hasLogicalStorageEntry,
+    readEntryFiles: readLogicalFileContents,
+    scope: createScope,
     registerNamespace: (scope: AsyncStorageNamespaceScope) =>
       ensureNamespaceRegistered(mockBrowserOpfs, scope),
     setRaw,
@@ -1130,85 +1497,8 @@ export function createOpfsPersistentStorageTestStore(
         );
       },
     },
-    document: {
-      storageKey() {
-        const storeName = options.storeName ?? 'store';
-        const sessionKey = options.sessionKey ?? 'session';
-        return `tsdf.${sessionKey}.${storeName}`;
-      },
-      readData<T>() {
-        return (
-          readLogicalStorageEntry<PersistedDocumentData<T>>(
-            mockBrowserOpfs,
-            `tsdf.${options.sessionKey ?? 'session'}.${options.storeName ?? 'store'}`,
-          )?.data.data ?? null
-        );
-      },
-    },
-    collection: {
-      itemStorageKey(payload: string) {
-        const storeName = options.storeName ?? 'store';
-        const sessionKey = options.sessionKey ?? 'session';
-        return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
-      },
-      readItemData<T>(payload: string) {
-        return (
-          readLogicalStorageEntry<PersistedCollectionItemData<T>>(
-            mockBrowserOpfs,
-            `tsdf.${options.sessionKey ?? 'session'}.${options.storeName ?? 'store'}.ci.${itemKey(
-              payload,
-            )}`,
-          )?.data.data ?? null
-        );
-      },
-    },
-    listQuery: {
-      itemKey: listQueryItemKey,
-      itemStorageKey(tableId: string, id: number | string) {
-        const storeName = options.storeName ?? 'store';
-        const sessionKey = options.sessionKey ?? 'session';
-        return `tsdf.${sessionKey}.${storeName}.li.${listQueryItemKey(tableId, id)}`;
-      },
-      queryStorageKey(params: unknown) {
-        const storeName = options.storeName ?? 'store';
-        const sessionKey = options.sessionKey ?? 'session';
-        return `tsdf.${sessionKey}.${storeName}.lq.${listQueryQueryKey(params)}`;
-      },
-      readItemData<T>(tableId: string, id: number | string) {
-        return (
-          readLogicalStorageEntry<PersistedListQueryItemData<T>>(
-            mockBrowserOpfs,
-            `tsdf.${options.sessionKey ?? 'session'}.${options.storeName ?? 'store'}.li.${listQueryItemKey(
-              tableId,
-              id,
-            )}`,
-          )?.data.data ?? null
-        );
-      },
-      readQueryEntry(params: unknown) {
-        const entry = readLogicalStorageEntry<PersistedListQueryData>(
-          mockBrowserOpfs,
-          `tsdf.${options.sessionKey ?? 'session'}.${options.storeName ?? 'store'}.lq.${listQueryQueryKey(
-            params,
-          )}`,
-        );
-        if (entry === null) {
-          throw new Error('Expected persisted query entry to exist.');
-        }
-        return entry;
-      },
-      seedItem(tableId: string, id: number | string, data: unknown) {
-        setValue(
-          `tsdf.${options.sessionKey ?? 'session'}.${options.storeName ?? 'store'}.li.${listQueryItemKey(
-            tableId,
-            id,
-          )}`,
-          createStorageCacheEntry({ d: data, p: `${tableId}||${id}` }),
-        );
-      },
-    },
+    document: defaultScope.document,
+    collection: defaultScope.collection,
+    listQuery: defaultScope.listQuery,
   };
 }
-
-export const createOpfsPersistentTestStore =
-  createOpfsPersistentStorageTestStore;

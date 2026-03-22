@@ -3,16 +3,16 @@ import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
-import { startOpfsPersistentStorageOperationCapture } from '../../utils/persistentStorageOptimizationTestUtils';
+import {
+  getParsedOpfsEntryFiles,
+  startOpfsPersistentStorageOperationCapture,
+} from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
   createDocumentEnv,
-  documentStorageKey,
   flushInvalidationPersistence,
-  isEmptyOperationSummary,
   markEntryOfflineProtected,
   readEntryMetadata,
-  setCachedDocumentData,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
 } from './shared';
@@ -28,10 +28,10 @@ describe('async storage efficiency: document', () => {
       storeName,
       sessionKey,
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
 
-    setCachedDocumentData(mockAdapter, storeName, sessionKey, {
-      name: 'Cached document',
-      value: 7,
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 7 },
     });
 
     // Store creation should only queue the startup maintenance pass.
@@ -40,20 +40,9 @@ describe('async storage efficiency: document', () => {
       { storeName, sessionKey },
     );
     const env = createDocumentEnv({ storeName, sessionKey });
-    const startupOperations = startupCapture.finish();
+    const startupOperations = startupCapture.finish().timelineString;
 
-    expect(startupOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads: []
-        metadataReads: []
-        payloadBatchReads: []
-        scopedPayloadReads: []
-
-      operations: []
-    `);
+    expect(startupOperations).toMatchInlineSnapshot(`"empty"`);
 
     // Drain the startup scan so this capture focuses only on hook mount behavior.
     await settleStartupBackgroundScan(mockAdapter);
@@ -75,42 +64,52 @@ describe('async storage efficiency: document', () => {
       `value: { name: 'Cached document', value: 7 }`,
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads:
-          - ['document metadata']
-        metadataReads: ['document metadata']
-        payloadBatchReads:
-          - ['document payload']
-        scopedPayloadReads: ['document payload']
+      "
+      simplified
+      time   |
+      3.007s | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+      .      | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
 
-      operations:
-        - '📂 open ✅ tsdf/sess1/doc-remount-flow/document (scope directory)'
-        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
-        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
-        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
-        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
+      verbose
+      time   |
+      3.001s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      3.002s | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
+      3.003s | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow/document (scope directory)
+      3.004s | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (payload))
+      .      | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (metadata))
+      3.007s | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+      .      | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
+      "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads:
-          - ['document metadata']
-        metadataReads: ['document metadata']
-        payloadBatchReads:
-          - ['document payload']
-        scopedPayloadReads: ['document payload']
+      "
+      simplified
+      time   |
+      3.257s | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+      .      | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
 
-      operations:
-        - '📂 open ✅ tsdf/sess1/doc-remount-flow/document (scope directory)'
-        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
-        - '📄 open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
-        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-remount-flow (payload))'
-        - '📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-remount-flow (metadata))'
+      verbose
+      time   |
+      3.251s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      3.252s | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
+      3.253s | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow/document (scope directory)
+      3.254s | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (payload))
+      .      | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (metadata))
+      3.257s | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+      .      | 📖 tsdf/sess1/doc-remount-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
+      "
     `);
   });
 
@@ -122,10 +121,10 @@ describe('async storage efficiency: document', () => {
       sessionKey,
       readDelayMs: 50,
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
 
-    setCachedDocumentData(mockAdapter, storeName, sessionKey, {
-      name: 'Cached document',
-      value: 8,
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 8 },
     });
 
     const env = createDocumentEnv({ storeName, sessionKey });
@@ -155,38 +154,26 @@ describe('async storage efficiency: document', () => {
     expect(env.apiStore.store.state.data).toMatchInlineSnapshot(
       `value: { name: 'Cached document', value: 8 }`,
     );
-    const operationsBreakdown = readCapture.finish();
+    const operationsBreakdown = readCapture.finish().timelineString;
 
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads: []
-        metadataReads: []
-        payloadBatchReads: []
-        scopedPayloadReads: []
-
-      operations: []
-    `);
-    expect(isEmptyOperationSummary(operationsBreakdown)).toBe(true);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
-    const storageKey = documentStorageKey(storeName, sessionKey);
     const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
+    const storageKey = documentScope.document.storageKey();
 
-    mockAdapter.setValue(storageKey, {
-      data: { d: { value: { name: 'Cached document', value: 8 } } },
-      timestamp: Date.now() - 7 * 60 * 60 * 1000,
-      version: 1,
-    });
+    documentScope.document.seed(
+      { value: { name: 'Cached document', value: 8 } },
+      { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
+    );
 
     const env = createDocumentEnv({ storeName, sessionKey });
 
@@ -202,8 +189,7 @@ describe('async storage efficiency: document', () => {
     await flushAllTimers();
 
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: {}
-
+      customMetadata: { o: '✅' }
       key: 'document'
       lastAccessAt: 1735664400000
       payloadRef: '__tsdf_payload__:document'
@@ -211,21 +197,35 @@ describe('async storage efficiency: document', () => {
       version: 1
       writtenAt: 1735689604140
     `);
+    expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
+      .toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: { o: '✅' }
+        key: 'document'
+        lastAccessAt: 1735664400000
+        sizeBytes: 52
+        version: 1
+        writtenAt: 1735689604140
+
+      payload:
+        d:
+          value: { name: 'Cached document', value: 8 }
+    `);
   });
 
   test('updating a hydrated document writes the mutation without rereading cached entries', async () => {
     const storeName = 'doc-mutation-flow';
     const sessionKey = 'sess1';
-    const storageKey = documentStorageKey(storeName, sessionKey);
     const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
+    const storageKey = documentScope.document.storageKey();
 
-    setCachedDocumentData(mockAdapter, storeName, sessionKey, {
-      name: 'Cached document',
-      value: 8,
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 8 },
     });
 
     const env = createDocumentEnv({ storeName, sessionKey });
@@ -246,9 +246,9 @@ describe('async storage efficiency: document', () => {
       });
     });
     await flushInvalidationPersistence();
-    const mutationOperations = mutationCapture.finish();
+    const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(mockAdapter.document.readData()).toMatchInlineSnapshot(
+    expect(documentScope.document.readData()).toMatchInlineSnapshot(
       `value: { name: 'Edited document', value: 99 }`,
     );
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
@@ -262,25 +262,37 @@ describe('async storage efficiency: document', () => {
       writtenAt: 1735689605230
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads:
-          - ['document metadata']
-        metadataReads: ['document metadata']
-        payloadBatchReads: []
-        scopedPayloadReads: []
+      "
+      simplified
+      time   |
+      5.237s | 📖 tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb
+      5.238s | ✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (payload)) | 0.10 kb -> 0.10 kb
+      .      | ✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb -> 0.23 kb
 
-      operations:
-        - '📂 open ✅ tsdf/sess1/doc-mutation-flow/document (scope directory)'
-        - '📄 open ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
-        - '📖 tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
-        - '📁 ensure ✅ tsdf/sess1/doc-mutation-flow/document (scope directory)'
-        - '📄 ensure ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-mutation-flow (payload))'
-        - '📄 ensure ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
-        - '✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-mutation-flow (payload))'
-        - '✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-mutation-flow (metadata))'
+      verbose
+      time   |
+      5.181s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      5.182s | 📂 dir-open ✅ tsdf/sess1/doc-mutation-flow (store directory)
+      5.183s | 📂 dir-open ✅ tsdf/sess1/doc-mutation-flow/document (scope directory)
+      5.184s | 📄 file-open ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata))
+      5.231s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      5.232s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-mutation-flow (store directory)
+      5.233s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-mutation-flow/document (scope directory)
+      5.234s | 📄 file-open-or-create ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (payload))
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata))
+      5.237s | 📖 tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb
+      5.238s | ✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (payload)) | 0.10 kb -> 0.10 kb
+      .      | ✍️ tsdf/sess1/doc-mutation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb -> 0.23 kb
+      "
     `);
   });
 
@@ -292,10 +304,10 @@ describe('async storage efficiency: document', () => {
       sessionKey,
       readDelayMs: 50,
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
 
-    setCachedDocumentData(mockAdapter, storeName, sessionKey, {
-      name: 'Cached document',
-      value: 8,
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 8 },
     });
 
     const env = createDocumentEnv({
@@ -324,34 +336,46 @@ describe('async storage efficiency: document', () => {
       env.apiStore.invalidateData('highPriority');
     });
     await flushInvalidationPersistence();
-    const invalidationOperations = invalidationCapture.finish();
+    const invalidationOperations = invalidationCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(mockAdapter.document.readData()).toMatchInlineSnapshot(
+    expect(documentScope.document.readData()).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
     expect(invalidationOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads:
-          - ['document metadata']
-        metadataReads: ['document metadata']
-        payloadBatchReads: []
-        scopedPayloadReads: []
+      "
+      simplified
+      time   |
+      6.047s | 📖 tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb
+      6.048s | ✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (payload)) | 0.10 kb -> 0.10 kb
+      .      | ✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb -> 0.23 kb
 
-      operations:
-        - '📂 open ✅ tsdf/sess1/doc-invalidation-flow/document (scope directory)'
-        - '📄 open ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
-        - '📖 tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
-        - '📁 ensure ✅ tsdf/sess1/doc-invalidation-flow/document (scope directory)'
-        - '📄 ensure ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (payload))'
-        - '📄 ensure ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
-        - '✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (payload))'
-        - '✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-invalidation-flow (metadata))'
+      verbose
+      time   |
+      5.991s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      5.992s | 📂 dir-open ✅ tsdf/sess1/doc-invalidation-flow (store directory)
+      5.993s | 📂 dir-open ✅ tsdf/sess1/doc-invalidation-flow/document (scope directory)
+      5.994s | 📄 file-open ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata))
+      6.041s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      6.042s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-invalidation-flow (store directory)
+      6.043s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/document (scope directory)
+      6.044s | 📄 file-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (payload))
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata))
+      6.047s | 📖 tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb
+      6.048s | ✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (payload)) | 0.10 kb -> 0.10 kb
+      .      | ✍️ tsdf/sess1/doc-invalidation-flow/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb -> 0.23 kb
+      "
     `);
   });
 
@@ -363,10 +387,10 @@ describe('async storage efficiency: document', () => {
       sessionKey,
       readDelayMs: 50,
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
 
-    setCachedDocumentData(mockAdapter, storeName, sessionKey, {
-      name: 'Cached document',
-      value: 8,
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 8 },
     });
 
     const env = createDocumentEnv({
@@ -395,23 +419,13 @@ describe('async storage efficiency: document', () => {
       env.apiStore.invalidateData('highPriority');
     });
     await advanceTime(900);
-    const firstInvalidationOperations = firstInvalidationCapture.finish();
+    const firstInvalidationOperations =
+      firstInvalidationCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 1', value: 41 }`,
     );
-    expect(firstInvalidationOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads: []
-        metadataReads: []
-        payloadBatchReads: []
-        scopedPayloadReads: []
-
-      operations: []
-    `);
+    expect(firstInvalidationOperations).toMatchInlineSnapshot(`"empty"`);
 
     // A second invalidation before the first debounce flush should replace the pending save.
     const secondInvalidationCapture =
@@ -425,50 +439,63 @@ describe('async storage efficiency: document', () => {
     });
     await advanceTime(1900);
     await flushAllTimers();
-    const secondInvalidationOperations = secondInvalidationCapture.finish();
+    const secondInvalidationOperations =
+      secondInvalidationCapture.finish().timelineString;
 
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 2', value: 42 }`,
     );
-    expect(mockAdapter.document.readData()).toMatchInlineSnapshot(
+    expect(documentScope.document.readData()).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 2', value: 42 }`,
     );
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads:
-          - ['document metadata']
-        metadataReads: ['document metadata']
-        payloadBatchReads: []
-        scopedPayloadReads: []
+      "
+      simplified
+      time   |
+      6.947s | 📖 tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb
+      6.948s | ✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (payload)) | 0.10 kb -> 0.11 kb
+      .      | ✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb -> 0.23 kb
 
-      operations:
-        - '📂 open ✅ tsdf/sess1/doc-coalesced-invalidations/document (scope directory)'
-        - '📄 open ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
-        - '📖 tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
-        - '📁 ensure ✅ tsdf/sess1/doc-coalesced-invalidations/document (scope directory)'
-        - '📄 ensure ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (payload))'
-        - '📄 ensure ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
-        - '✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (payload))'
-        - '✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-coalesced-invalidations (metadata))'
+      verbose
+      time   |
+      6.891s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      6.892s | 📂 dir-open ✅ tsdf/sess1/doc-coalesced-invalidations (store directory)
+      6.893s | 📂 dir-open ✅ tsdf/sess1/doc-coalesced-invalidations/document (scope directory)
+      6.894s | 📄 file-open ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata))
+      6.941s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      6.942s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations (store directory)
+      6.943s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/document (scope directory)
+      6.944s | 📄 file-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (payload))
+      .      | 📄 file-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata))
+      6.947s | 📖 tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb
+      6.948s | ✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (payload)) | 0.10 kb -> 0.11 kb
+      .      | ✍️ tsdf/sess1/doc-coalesced-invalidations/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb -> 0.23 kb
+      "
     `);
   });
 
   test('document invalidation preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'doc-offline-marker-flow';
     const sessionKey = 'sess1';
-    const storageKey = documentStorageKey(storeName, sessionKey);
     const mockAdapter = createOpfsPersistentStorageTestStore({
       storeName,
       sessionKey,
       readDelayMs: 50,
     });
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
+    const storageKey = documentScope.document.storageKey();
 
-    setCachedDocumentData(mockAdapter, storeName, sessionKey, {
-      name: 'Cached document',
-      value: 8,
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 8 },
     });
 
     const env = createDocumentEnv({
@@ -501,14 +528,27 @@ describe('async storage efficiency: document', () => {
       `value: { name: 'Fresh document', value: 42 }`,
     );
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: {}
-
+      customMetadata: { o: '✅' }
       key: 'document'
       lastAccessAt: 1735689600000
       payloadRef: '__tsdf_payload__:document'
       sizeBytes: 52
       version: 1
       writtenAt: 1735689606040
+    `);
+    expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
+      .toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: { o: '✅' }
+        key: 'document'
+        lastAccessAt: 1735689600000
+        sizeBytes: 52
+        version: 1
+        writtenAt: 1735689606040
+
+      payload:
+        d:
+          value: { name: 'Fresh document', value: 42 }
     `);
   });
 
@@ -635,28 +675,32 @@ describe('async storage efficiency: document', () => {
     await advanceTime(50);
     await preloadPromise;
 
-    expect(readCapture.finish()).toMatchInlineSnapshot(`
-      breakdown:
-        externalPayloadReads: []
-        legacyFallbackReads: []
-        listKeyScans: []
-        metadataBatchReads:
-          - ['document metadata']
-        metadataReads: ['document metadata']
-        payloadBatchReads:
-          - ['document payload']
-        scopedPayloadReads: ['document payload']
+    expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      simplified
+      time   |
+      3.057s | 📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-opfs-efficiency (payload)) | 0.08 kb
+      .      | 📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-opfs-efficiency (metadata)) | 0.23 kb
 
-      operations:
-        - '📂 open ✅ tsdf/sess1/doc-opfs-efficiency/document (scope directory)'
-        - '📄 open ✅ tsdf/sess1/doc-opfs-efficiency/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (payload))'
-        - '📄 open ✅ tsdf/sess1/doc-opfs-efficiency/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (metadata))'
-        - '📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (payload))'
-        - '📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.doc-opfs-efficiency (metadata))'
+      verbose
+      time   |
+      3.001s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      3.002s | 📂 dir-open ✅ tsdf/sess1/doc-opfs-efficiency (store directory)
+      3.003s | 📂 dir-open ✅ tsdf/sess1/doc-opfs-efficiency/document (scope directory)
+      3.004s | 📄 file-open ✅ tsdf/sess1/doc-opfs-efficiency/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-opfs-efficiency (payload))
+      .      | 📄 file-open ✅ tsdf/sess1/doc-opfs-efficiency/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-opfs-efficiency (metadata))
+      3.057s | 📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.doc-opfs-efficiency (payload)) | 0.08 kb
+      .      | 📖 tsdf/sess1/doc-opfs-efficiency/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.doc-opfs-efficiency (metadata)) | 0.23 kb
+      "
     `);
 
-    expect(mockAdapter.has(documentStorageKey(storeName, sessionKey))).toBe(
-      true,
-    );
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
+    expect(mockAdapter.has(documentScope.document.storageKey())).toBe(true);
   });
 });
