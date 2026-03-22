@@ -1,20 +1,37 @@
+import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
+import type { DocumentOfflineOperationDefinition } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
+import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
+import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
+import {
+  advanceTime,
+  resolveAfterAllTimers,
+} from '../../utils/genericTestUtils';
+import { createOfflineNetworkMock } from '../../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
   getParsedLocalStorageValue,
   getParsedOpfsEntryFiles,
-  startPersistentStorageOperationCapture,
   startOpfsPersistentStorageOperationCapture,
+  startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   createDocumentEnv,
-  setProtectedKeysSnapshot,
   setupAsyncStorageEfficiencyTestSuite,
   waitForScheduledCleanup,
+  wrappedDocumentSchema,
 } from './shared';
 
 setupAsyncStorageEfficiencyTestSuite();
+
+type ProtectedDocumentOfflineOperations = {
+  markProtected: DocumentOfflineOperationDefinition<
+    { value: { name: string; value: number } },
+    { input: { value: number } }
+  >;
+};
 
 describe('async storage efficiency: maintenance', () => {
   test('startup cleanup removes expired entries and snapshots the full metadata scan history', async () => {
@@ -405,82 +422,219 @@ describe('async storage efficiency: maintenance', () => {
   test('protected dotted-session cleanup keeps the protected entry and snapshots the full metadata scan history', async () => {
     const staleDurationMs = 15 * 24 * 60 * 60 * 1000;
     const dottedSessionKey = 'user@example.com';
+    const offlineNetwork = createOfflineNetworkMock();
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const protectedDoc = mockAdapter.scope('protected-doc', dottedSessionKey);
     const unprotectedDoc = mockAdapter.scope(
       'unprotected-doc',
       dottedSessionKey,
     );
+    const invalidStrayDoc = mockAdapter.scope(
+      'invalid-stray',
+      dottedSessionKey,
+    );
     const protectedDocStorageKey = protectedDoc.document.storageKey();
     const unprotectedDocStorageKey = unprotectedDoc.document.storageKey();
 
-    // Seed two cached dotted-session entries and move far enough forward that both are stale.
-    protectedDoc.document.seed(
-      { value: { name: 'protected', value: 1 } },
-      { timestamp: Date.now() - staleDurationMs },
+    // Seed two cached dotted-session entries through normal store fetch/persist flows.
+    const protectedSeedEnv = createDocumentEnv({
+      storeName: 'protected-doc',
+      sessionKey: dottedSessionKey,
+      serverData: { name: 'protected', value: 1 },
+    });
+    protectedSeedEnv.scheduleFetch('highPriority');
+    await advanceTime(1810);
+
+    const unprotectedSeedEnv = createDocumentEnv({
+      storeName: 'unprotected-doc',
+      sessionKey: dottedSessionKey,
+      serverData: { name: 'unprotected', value: 2 },
+    });
+    unprotectedSeedEnv.scheduleFetch('highPriority');
+    await advanceTime(1810);
+
+    // Move far enough forward that both cached entries are stale before the real cleanup pass.
+    await advanceTime(staleDurationMs);
+
+    // Let a real offline-enabled store register the protected document key for this session.
+    offlineNetwork.install();
+    offlineNetwork.setOffline();
+
+    const protectedDocEnv = createDocumentStoreTestEnv<
+      { name: string; value: number },
+      ProtectedDocumentOfflineOperations
+    >(
+      { name: 'protected', value: 1 },
+      {
+        getSessionKey: () => dottedSessionKey,
+        testScenario: 'loaded',
+        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
+        persistentStorage: {
+          storeName: 'protected-doc',
+          adapter: opfsPersistentStorage,
+          schema: wrappedDocumentSchema,
+          offlineMode: {
+            network: offlineNetwork.config,
+            operations: {
+              markProtected: {
+                inputSchema: rc_object({ value: rc_number }),
+                execute: ({ input }) => input,
+              },
+            },
+          },
+        },
+      },
     );
-    unprotectedDoc.document.seed(
-      { value: { name: 'unprotected', value: 2 } },
-      { timestamp: Date.now() - staleDurationMs },
+
+    await Promise.resolve();
+    offlineNetwork.goOffline();
+    await Promise.resolve();
+
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.123456789);
+    const protectMutationResult = await resolveAfterAllTimers(
+      protectedDocEnv.apiStore.performMutation({
+        mutation: () => Promise.resolve({ name: 'protected', value: 1 }),
+        offline: { operation: 'markProtected', input: { value: 1 } },
+      }),
     );
-    // Mark one dotted-session entry as protected before the real cleanup pass.
-    setProtectedKeysSnapshot(dottedSessionKey, [protectedDocStorageKey]);
+    randomSpy.mockRestore();
+
+    invalidStrayDoc.document.setPayload({
+      d: { value: { name: 'invalid', value: 99 } },
+    });
+    invalidStrayDoc.document.setMetadata('{invalid');
+
+    expect(protectMutationResult.ok).toBe(true);
+
+    // Re-arm the one-off startup cleanup so this same test can trigger a fresh scan after protection is registered.
+    resetExpirationScanTracking();
 
     // A fresh entry in another session triggers the scheduled global cleanup pass.
-    createDocumentEnv({ storeName: 'trigger-doc', sessionKey: 'sess-trigger' });
+    const triggerDoc = mockAdapter.scope('trigger-doc', 'sess-trigger');
+    const triggerDocEnv = createDocumentStoreTestEnv(
+      { name: 'trigger', value: 3 },
+      {
+        getSessionKey: () => 'sess-trigger',
+        __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
+        persistentStorage: {
+          storeName: 'trigger-doc',
+          adapter: opfsPersistentStorage,
+          schema: wrappedDocumentSchema,
+        },
+      },
+    );
+    triggerDocEnv.scheduleFetch('highPriority');
+    await advanceTime(1810);
+
+    // Let the trigger store finish its own async persistence before we start
+    // capturing, so the timeline only shows the cleanup sweep it scheduled.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (mockAdapter.has(triggerDoc.document.storageKey())) break;
+      await advanceTime(10);
+    }
+
+    expect(mockAdapter.has(triggerDoc.document.storageKey())).toBe(true);
 
     // Capture the full sweep so the snapshot shows stale-entry removal.
+    const localStorageCapture = startPersistentStorageOperationCapture();
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
+    const localStorageOperations = localStorageCapture.finish().timelineString;
 
+    // The protected dotted-session entry should survive, while the unprotected stale entry is discarded.
     expect({
+      invalidStrayExists: mockAdapter.has(
+        invalidStrayDoc.document.storageKey(),
+      ),
       protectedEntryExists: mockAdapter.has(protectedDocStorageKey),
       unprotectedEntryExists: mockAdapter.has(unprotectedDocStorageKey),
-      maintenanceState: getParsedLocalStorageValue(
-        ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
-      ),
     }).toMatchInlineSnapshot(`
-      maintenanceState: { lca: 1735689602011 }
+      invalidStrayExists: '❌'
       protectedEntryExists: '✅'
       unprotectedEntryExists: '❌'
     `);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
+    expect(localStorageOperations).toMatchInlineSnapshot(`
       "
-      time   |
-      2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:user%40example.com"]
-      2.003s | 🗂️ list-dir tsdf/user%40example.com
-             |    └ (session directory) entries=["dir:protected-doc","dir:unprotected-doc"]
-      2.004s | 🗂️ list-dir tsdf/user%40example.com/protected-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      .      | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      2.005s | 📄 file-open ✅ tsdf/user%40example.com/protected-doc/d.e.m.json
-             |    └ (tsdf.user@example.com.protected-doc (metadata))
-      .      | 📄 file-open ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
-             |    └ (tsdf.user@example.com.unprotected-doc (metadata))
-      2.007s | 📖 tsdf/user%40example.com/protected-doc/d.e.m.json
-             |    └ (tsdf.user@example.com.protected-doc (metadata)) | 0.23 kb
-      .      | 📖 tsdf/user%40example.com/unprotected-doc/d.e.m.json
-             |    └ (tsdf.user@example.com.unprotected-doc (metadata)) | 0.23 kb
-      2.009s | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.p.json
-             |    └ (tsdf.user@example.com.unprotected-doc (payload))
-      .      | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
-             |    └ (tsdf.user@example.com.unprotected-doc (metadata))
-      2.01s  | 🧹 del-dir ✅ tsdf/user%40example.com/unprotected-doc (store directory)
-      2.011s | end
+      time  |
+      140ms | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
+      .     | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
+      152ms | ✍️ ✅->✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time  |
+      140ms | 🗂️ list-dir tsdf
+            |    └ (root directory) entries=["dir:sess-trigger","dir:user%40example.com"]
+      141ms | 🗂️ list-dir tsdf/sess-trigger (session directory) entries=["dir:trigger-doc"]
+      142ms | 🗂️ list-dir tsdf/sess-trigger/trigger-doc
+            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+      143ms | 🗂️ list-dir tsdf/user%40example.com
+            |    └ (session directory) entries=["dir:_o_.p","dir:_o_.s","dir:invalid-stray","dir:protected-doc","dir:unprotected-doc"]
+      144ms | 🗂️ list-dir tsdf/user%40example.com/_o_.p
+            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+      .     | 🗂️ list-dir tsdf/user%40example.com/_o_.s
+            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+      .     | 🗂️ list-dir tsdf/user%40example.com/invalid-stray
+            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+      .     | 🗂️ list-dir tsdf/user%40example.com/protected-doc
+            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json","file:oe.document.m.json","file:oe.document.p.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
+      .     | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
+            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+      145ms | 📂 dir-open ❌ tsdf/sess-trigger/_o_.p (store directory)
+      146ms | 📄 file-open ✅ tsdf/user%40example.com/_o_.p/d.e.m.json
+            |    └ (tsdf.user@example.com._o_.p (protected registry metadata))
+      .     | 📄 file-open ✅ tsdf/user%40example.com/_o_.s/d.e.m.json
+            |    └ (tsdf.user@example.com._o_.s (metadata))
+      .     | 📄 file-open ✅ tsdf/user%40example.com/invalid-stray/d.e.m.json
+            |    └ (tsdf.user@example.com.invalid-stray (metadata))
+      .     | 📄 file-open ✅ tsdf/user%40example.com/protected-doc/d.e.m.json
+            |    └ (tsdf.user@example.com.protected-doc (metadata))
+      .     | 📄 file-open ✅ tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
+            |    └ (tsdf.user@example.com.protected-doc.oq.protected-doc:1736985603621:4fzzzxjy (metadata))
+      .     | 📄 file-open ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
+            |    └ (tsdf.user@example.com.unprotected-doc (metadata))
+      147ms | 📖 tsdf/sess-trigger/trigger-doc/d.e.m.json
+            |    └ (tsdf.sess-trigger.trigger-doc (metadata)) | 0.20 kb
+      .     | 📖 tsdf/user%40example.com/protected-doc/oe.document.m.json
+            |    └ (tsdf.user@example.com.protected-doc.oe.document (metadata)) | 0.20 kb
+      148ms | 📖 tsdf/user%40example.com/_o_.p/d.e.m.json
+            |    └ (tsdf.user@example.com._o_.p (protected registry metadata)) | 0.38 kb
+      .     | 📖 tsdf/user%40example.com/_o_.s/d.e.m.json
+            |    └ (tsdf.user@example.com._o_.s (metadata)) | 0.20 kb
+      .     | 📖 tsdf/user%40example.com/invalid-stray/d.e.m.json
+            |    └ (tsdf.user@example.com.invalid-stray (metadata)) | 0.02 kb
+      .     | 📖 tsdf/user%40example.com/protected-doc/d.e.m.json
+            |    └ (tsdf.user@example.com.protected-doc (metadata)) | 0.20 kb
+      .     | 📖 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
+            |    └ (tsdf.user@example.com.protected-doc.oq.protected-doc:1736985603621:4fzzzxjy (metadata)) | 0.25 kb
+      .     | 📖 tsdf/user%40example.com/unprotected-doc/d.e.m.json
+            |    └ (tsdf.user@example.com.unprotected-doc (metadata)) | 0.20 kb
+      150ms | 🗑️ ✅ tsdf/user%40example.com/invalid-stray/d.e.p.json
+            |    └ (tsdf.user@example.com.invalid-stray (payload))
+      .     | 🗑️ ✅ tsdf/user%40example.com/invalid-stray/d.e.m.json
+            |    └ (tsdf.user@example.com.invalid-stray (metadata))
+      .     | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.p.json
+            |    └ (tsdf.user@example.com.unprotected-doc (payload))
+      .     | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/d.e.m.json
+            |    └ (tsdf.user@example.com.unprotected-doc (metadata))
+      151ms | 🧹 del-dir ✅ tsdf/user%40example.com/invalid-stray (store directory)
+      .     | 🧹 del-dir ✅ tsdf/user%40example.com/unprotected-doc (store directory)
+      152ms | end
+      "
+    `);
+    expect(
+      getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
+    ).toMatchInlineSnapshot(`lca: 1736985605682`);
     expect(getParsedOpfsEntryFiles(mockAdapter, protectedDocStorageKey))
       .toMatchInlineSnapshot(`
         metadata:
-          customMetadata: {}
           key: 'document'
-          lastAccessAt: 1734393600000
+          lastAccessAt: 1735689601853
           sizeBytes: 46
           version: 1
-          writtenAt: 1734393600000
+          writtenAt: 1735689601853
 
         payload:
           d:

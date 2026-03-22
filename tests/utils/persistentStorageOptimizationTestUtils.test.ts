@@ -49,7 +49,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     );
 
     // Trigger a list scan, a payload read, a metadata write, and a payload delete.
-    void storeDir.values();
+    await resolveAfterAllTimers(storeDir.values().next());
     const payloadFile = await resolveAfterAllTimers(
       storeDir.getFileHandle('d.e.p.json'),
     );
@@ -81,12 +81,12 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | 🗂️ list-dir tsdf/sess1/docs
            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      .    | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
-      5ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata))
-      7ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      11ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
-      13ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
-      14ms | end
+      5ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      6ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata))
+      8ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
+      12ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      14ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      15ms | end
       "
     `);
   });
@@ -128,6 +128,42 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       4ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
       6ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
       58ms | end
+      "
+    `);
+  });
+
+  test('timelineString is relative to when capture starts', async () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    vi.advanceTimersByTime(15 * 24 * 60 * 60 * 1000);
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const navigatorRoot = await resolveAfterAllTimers(
+      navigator.storage.getDirectory(),
+    );
+    const opfsRoot = await resolveAfterAllTimers(
+      navigatorRoot.getDirectoryHandle('tsdf', { create: true }),
+    );
+    const sessionDir = await resolveAfterAllTimers(
+      opfsRoot.getDirectoryHandle('sess1'),
+    );
+    const storeDir = await resolveAfterAllTimers(
+      sessionDir.getDirectoryHandle('docs'),
+    );
+
+    void storeDir.values();
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
+      2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
+      4ms  | end
       "
     `);
   });

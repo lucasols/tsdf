@@ -626,13 +626,14 @@ export type OpfsPersistentStorageOperationCaptureResult = {
 
 function buildOpfsOperationCaptureResult(
   mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
+  captureStartedAt: number,
 ): OpfsPersistentStorageOperationCaptureResult {
   const verboseTimelineEntries: TimedLabel[] = [];
 
   for (const operation of mockAdapter.operations) {
     verboseTimelineEntries.push({
-      endTime: operation.time,
-      time: operation.startedTime,
+      endTime: Math.max(0, operation.time - captureStartedAt),
+      time: Math.max(0, operation.startedTime - captureStartedAt),
       label: formatOpfsOperationLabel(operation),
     });
   }
@@ -759,11 +760,12 @@ export function startOpfsPersistentStorageOperationCapture(
   args?: OpfsCaptureArgs,
 ): { finish: () => PersistentStorageOperationSummary } {
   mockAdapter.clearInstrumentation();
+  const captureStartedAt = mockAdapter.mockBrowserOpfs.getElapsedTime();
 
   return {
     finish() {
       const summary: PersistentStorageOperationSummary = {
-        ...buildOpfsOperationCaptureResult(mockAdapter),
+        ...buildOpfsOperationCaptureResult(mockAdapter, captureStartedAt),
         breakdown:
           args === undefined
             ? createEmptyPersistentStorageReadBreakdown()

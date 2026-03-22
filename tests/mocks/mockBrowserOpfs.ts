@@ -273,6 +273,10 @@ export class MockBrowserOpfsEnvironment {
     return [...directoryNames, ...fileNames];
   }
 
+  getElapsedTime(): number {
+    return this.#time();
+  }
+
   #time(): number {
     return Date.now() - this.#startedAt;
   }

@@ -66,28 +66,28 @@ describe('async storage efficiency: document', () => {
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
-      time   |
-      3s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      3.001s | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
-      3.002s | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.p.json
-             |    └ (tsdf.sess1.doc-remount-flow (payload))
-      .      | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-remount-flow (metadata))
-      3.004s | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
-             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
-      .      | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
-      3.006s | end
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
+      2ms  | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.p.json
+           |    └ (tsdf.sess1.doc-remount-flow (payload))
+      .    | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.m.json
+           |    └ (tsdf.sess1.doc-remount-flow (metadata))
+      4ms  | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
+           |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+      .    | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
+           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
+      6ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       "
-      time   |
-      3.251s | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
-             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
-      .      | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
-      3.253s | end
+      time |
+      1ms  | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
+           |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+      .    | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
+           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
+      3ms  | end
       "
     `);
   });
@@ -236,19 +236,19 @@ describe('async storage efficiency: document', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      5.197s | 📖 tsdf/sess1/doc-mutation-flow/d.e.m.json
+      1.041s | 📖 tsdf/sess1/doc-mutation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb
-      5.249s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      5.25s  | 📁 dir-open-or-create ✅ tsdf/sess1/doc-mutation-flow (store directory)
-      5.251s | 📄 file-open-or-create ✅ tsdf/sess1/doc-mutation-flow/d.e.p.json
+      1.093s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      1.094s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-mutation-flow (store directory)
+      1.095s | 📄 file-open-or-create ✅ tsdf/sess1/doc-mutation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-mutation-flow (payload))
       .      | 📄 file-open-or-create ✅ tsdf/sess1/doc-mutation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-mutation-flow (metadata))
-      5.254s | ✍️ tsdf/sess1/doc-mutation-flow/d.e.p.json
+      1.098s | ✍️ tsdf/sess1/doc-mutation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-mutation-flow (payload)) | 0.10 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/doc-mutation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb -> 0.23 kb
-      5.256s | end
+      1.1s   | end
       "
     `);
   });
@@ -302,19 +302,19 @@ describe('async storage efficiency: document', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      6.007s | 📖 tsdf/sess1/doc-invalidation-flow/d.e.m.json
+      1.851s | 📖 tsdf/sess1/doc-invalidation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb
-      6.059s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      6.06s  | 📁 dir-open-or-create ✅ tsdf/sess1/doc-invalidation-flow (store directory)
-      6.061s | 📄 file-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/d.e.p.json
+      1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-invalidation-flow (store directory)
+      1.905s | 📄 file-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-invalidation-flow (payload))
       .      | 📄 file-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-invalidation-flow (metadata))
-      6.064s | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.p.json
+      1.908s | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-invalidation-flow (payload)) | 0.10 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb -> 0.23 kb
-      6.066s | end
+      1.91s  | end
       "
     `);
   });
@@ -389,19 +389,19 @@ describe('async storage efficiency: document', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      6.907s | 📖 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
+      1.851s | 📖 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb
-      6.959s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      6.96s  | 📁 dir-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations (store directory)
-      6.961s | 📄 file-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
+      1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations (store directory)
+      1.905s | 📄 file-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (payload))
       .      | 📄 file-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata))
-      6.964s | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
+      1.908s | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (payload)) | 0.10 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb -> 0.23 kb
-      6.966s | end
+      1.91s  | end
       "
     `);
   });
@@ -587,18 +587,18 @@ describe('async storage efficiency: document', () => {
 
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       "
-      time   |
-      3s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      3.001s | 📂 dir-open ✅ tsdf/sess1/doc-opfs-efficiency (store directory)
-      3.002s | 📄 file-open ✅ tsdf/sess1/doc-opfs-efficiency/d.e.p.json
-             |    └ (tsdf.sess1.doc-opfs-efficiency (payload))
-      .      | 📄 file-open ✅ tsdf/sess1/doc-opfs-efficiency/d.e.m.json
-             |    └ (tsdf.sess1.doc-opfs-efficiency (metadata))
-      3.004s | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.p.json
-             |    └ (tsdf.sess1.doc-opfs-efficiency (payload)) | 0.08 kb
-      .      | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.m.json
-             |    └ (tsdf.sess1.doc-opfs-efficiency (metadata)) | 0.23 kb
-      3.056s | end
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/doc-opfs-efficiency (store directory)
+      2ms  | 📄 file-open ✅ tsdf/sess1/doc-opfs-efficiency/d.e.p.json
+           |    └ (tsdf.sess1.doc-opfs-efficiency (payload))
+      .    | 📄 file-open ✅ tsdf/sess1/doc-opfs-efficiency/d.e.m.json
+           |    └ (tsdf.sess1.doc-opfs-efficiency (metadata))
+      4ms  | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.p.json
+           |    └ (tsdf.sess1.doc-opfs-efficiency (payload)) | 0.08 kb
+      .    | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.m.json
+           |    └ (tsdf.sess1.doc-opfs-efficiency (metadata)) | 0.23 kb
+      56ms | end
       "
     `);
 
