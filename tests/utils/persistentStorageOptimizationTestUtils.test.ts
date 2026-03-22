@@ -52,20 +52,17 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     const storeDir = await resolveWithTimers(
       sessionDir.getDirectoryHandle('docs'),
     );
-    const scopeDir = await resolveWithTimers(
-      storeDir.getDirectoryHandle('document'),
-    );
 
     // Trigger a list scan, a payload read, a metadata write, and a payload delete.
-    void scopeDir.values();
+    void storeDir.values();
     const payloadFile = await resolveWithTimers(
-      scopeDir.getFileHandle(
-        `${encodeURIComponent('__tsdf_payload__:document')}.json`,
+      storeDir.getFileHandle(
+        `document~${encodeURIComponent('__tsdf_payload__:document')}.json`,
       ),
     );
     const metadataFile = await resolveWithTimers(
-      scopeDir.getFileHandle(
-        `${encodeURIComponent('__tsdf_meta__:document')}.json`,
+      storeDir.getFileHandle(
+        `document~${encodeURIComponent('__tsdf_meta__:document')}.json`,
       ),
     );
     const payloadBlob = await resolveWithTimers(payloadFile.getFile());
@@ -84,8 +81,8 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     );
     await resolveWithTimers(writable.close());
     await resolveWithTimers(
-      scopeDir.removeEntry(
-        `${encodeURIComponent('__tsdf_payload__:document')}.json`,
+      storeDir.removeEntry(
+        `document~${encodeURIComponent('__tsdf_payload__:document')}.json`,
       ),
     );
 
@@ -93,11 +90,11 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       "
       simplified
       time |
-      5ms  | 🗂️ tsdf/sess1/docs/document
-           |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      8ms  | 🗑️ ✅ tsdf/sess1/docs/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload))
-      9ms  | 📖 tsdf/sess1/docs/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      11ms | ✍️ tsdf/sess1/docs/document/__tsdf_meta__%3Adocument.json
+      4ms  | 🗂️ tsdf/sess1/docs
+           |    └ (store directory) entries=["file:document~__tsdf_meta__%3Adocument.json","file:document~__tsdf_payload__%3Adocument.json"]
+      7ms  | 🗑️ ✅ tsdf/sess1/docs/document~__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload))
+      8ms  | 📖 tsdf/sess1/docs/document~__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload)) | 0.10 kb
+      10ms | ✍️ tsdf/sess1/docs/document~__tsdf_meta__%3Adocument.json
            |    └ (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
 
       verbose
@@ -105,14 +102,13 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       2ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
       3ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
       4ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
-      5ms  | 📂 dir-open ✅ tsdf/sess1/docs/document (scope directory)
-      .    | 🗂️ tsdf/sess1/docs/document
-           |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      6ms  | 📄 file-open ✅ tsdf/sess1/docs/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload))
-      7ms  | 📄 file-open ✅ tsdf/sess1/docs/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.docs (metadata))
-      8ms  | 🗑️ ✅ tsdf/sess1/docs/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload))
-      9ms  | 📖 tsdf/sess1/docs/document/__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      11ms | ✍️ tsdf/sess1/docs/document/__tsdf_meta__%3Adocument.json
+      .    | 🗂️ tsdf/sess1/docs
+           |    └ (store directory) entries=["file:document~__tsdf_meta__%3Adocument.json","file:document~__tsdf_payload__%3Adocument.json"]
+      5ms  | 📄 file-open ✅ tsdf/sess1/docs/document~__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload))
+      6ms  | 📄 file-open ✅ tsdf/sess1/docs/document~__tsdf_meta__%3Adocument.json (tsdf.sess1.docs (metadata))
+      7ms  | 🗑️ ✅ tsdf/sess1/docs/document~__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload))
+      8ms  | 📖 tsdf/sess1/docs/document~__tsdf_payload__%3Adocument.json (tsdf.sess1.docs (payload)) | 0.10 kb
+      10ms | ✍️ tsdf/sess1/docs/document~__tsdf_meta__%3Adocument.json
            |    └ (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
       "
     `);

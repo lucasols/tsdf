@@ -252,6 +252,12 @@ class ManagedAsyncStorageNamespaceHandle<
   }
 }
 
+type AsyncStorageCleanupCapableDriver = AsyncStorageDriver & {
+  withIsolatedCleanupDriver?: <T>(
+    callback: (driver: AsyncStorageDriver) => Promise<T>,
+  ) => Promise<T>;
+};
+
 type PendingNamespaceCommit = {
   cancelFlush: (() => void) | null;
   flushPromise: Promise<void> | null;
@@ -268,10 +274,10 @@ type PendingNamespaceCommit = {
 class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
-  private observedScopes = new Map<string, AsyncStorageNamespaceScope>();
-  private pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
-  private recentTouchedBuckets = new Map<string, string>();
-  private startupCleanupScheduled = false;
+  #observedScopes = new Map<string, AsyncStorageNamespaceScope>();
+  #pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
+  #recentTouchedBuckets = new Map<string, string>();
+  #startupCleanupScheduled = false;
 
   constructor(private readonly driver: AsyncStorageDriver) {}
 
@@ -281,8 +287,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   >(
     scope: AsyncStorageNamespaceScope,
   ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
-    this.observedScopes.set(getNamespaceId(scope), scope);
-    this.scheduleStartupCleanupIfNeeded();
+    this.#observedScopes.set(getNamespaceId(scope), scope);
+    this.#scheduleStartupCleanupIfNeeded();
     return new ManagedAsyncStorageNamespaceHandle<TValue, TCustomMetadata>(
       this,
       scope,
@@ -291,7 +297,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async clearSession(sessionKey: string): Promise<void> {
     await this.flushAllPendingNamespaceCommits();
-    const scopesToClear = await this.listDiscoveredScopes(sessionKey);
+    const scopesToClear = await this.#listDiscoveredScopes(sessionKey);
 
     await Promise.all(
       scopesToClear.map((scope) => this.clearManagedNamespace(scope)),
@@ -299,13 +305,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   resetForTests(): void {
-    for (const pending of this.pendingNamespaceCommits.values()) {
+    for (const pending of this.#pendingNamespaceCommits.values()) {
       pending.cancelFlush?.();
     }
-    this.observedScopes.clear();
-    this.pendingNamespaceCommits.clear();
-    this.recentTouchedBuckets.clear();
-    this.startupCleanupScheduled = false;
+    this.#observedScopes.clear();
+    this.#pendingNamespaceCommits.clear();
+    this.#recentTouchedBuckets.clear();
+    this.#startupCleanupScheduled = false;
     this.driver.resetForTests?.();
   }
 
@@ -325,11 +331,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     const namespaceKey = getNamespaceId(scope);
     const touchGuardKey = `${namespaceKey}::${key}`;
-    if (this.recentTouchedBuckets.get(touchGuardKey) === currentBucket) {
+    if (this.#recentTouchedBuckets.get(touchGuardKey) === currentBucket) {
       return false;
     }
 
-    const pending = this.pendingNamespaceCommits.get(namespaceKey);
+    const pending = this.#pendingNamespaceCommits.get(namespaceKey);
     const pendingTouch = pending?.touches.get(key);
     return (
       pendingTouch === undefined || getBucketId(pendingTouch) !== currentBucket
@@ -343,7 +349,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
     args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
   ): Promise<void> {
-    const pending = this.getOrCreatePendingNamespaceCommit(scope);
+    const pending = this.#getOrCreatePendingNamespaceCommit(scope);
     const now = Date.now();
 
     for (const touch of args.touches ?? []) {
@@ -367,7 +373,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       );
     }
 
-    this.schedulePendingNamespaceFlush(pending);
+    this.#schedulePendingNamespaceFlush(pending);
 
     return new Promise<void>((resolve, reject) => {
       pending.waiters.push({ resolve, reject });
@@ -378,7 +384,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
     const namespaceKey = getNamespaceId(scope);
-    const pending = this.pendingNamespaceCommits.get(namespaceKey);
+    const pending = this.#pendingNamespaceCommits.get(namespaceKey);
     if (!pending) return;
     if (pending.flushPromise) {
       await pending.flushPromise;
@@ -400,14 +406,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     pending.waiters = [];
 
     if (upserts.length === 0 && removes.length === 0 && touches.length === 0) {
-      this.pendingNamespaceCommits.delete(namespaceKey);
+      this.#pendingNamespaceCommits.delete(namespaceKey);
       for (const waiter of waiters) {
         waiter.resolve();
       }
       return;
     }
 
-    pending.flushPromise = this.applyManagedCommit(scope, {
+    pending.flushPromise = this.#applyManagedCommit(scope, {
       upserts,
       removes,
       touches,
@@ -415,23 +421,23 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       .then(() => {
         const currentBucket = getBucketId(Date.now());
         for (const touch of touches) {
-          this.recentTouchedBuckets.set(
+          this.#recentTouchedBuckets.set(
             `${namespaceKey}::${touch.key}`,
             getBucketId(touch.lastAccessAt),
           );
         }
         for (const upsert of upserts) {
-          this.recentTouchedBuckets.set(
+          this.#recentTouchedBuckets.set(
             `${namespaceKey}::${upsert.key}`,
             currentBucket,
           );
         }
-        this.pruneRecentTouchedBuckets(currentBucket);
+        this.#pruneRecentTouchedBuckets(currentBucket);
         for (const waiter of waiters) {
           waiter.resolve();
         }
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         for (const waiter of waiters) {
           waiter.reject(error);
         }
@@ -440,10 +446,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       .finally(() => {
         pending.flushPromise = null;
         if (pending.waiters.length === 0) {
-          this.pendingNamespaceCommits.delete(namespaceKey);
+          this.#pendingNamespaceCommits.delete(namespaceKey);
           return;
         }
-        this.schedulePendingNamespaceFlush(pending);
+        this.#schedulePendingNamespaceFlush(pending);
       });
 
     await pending.flushPromise;
@@ -451,7 +457,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async flushAllPendingNamespaceCommits(): Promise<void> {
     await Promise.all(
-      [...this.pendingNamespaceCommits.values()].map((pending) =>
+      [...this.#pendingNamespaceCommits.values()].map((pending) =>
         this.flushPendingNamespaceCommit(pending.scope),
       ),
     );
@@ -461,9 +467,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
   ): void {
     const keyPrefix = `${getNamespaceId(scope)}::`;
-    for (const key of this.recentTouchedBuckets.keys()) {
+    for (const key of this.#recentTouchedBuckets.keys()) {
       if (key.startsWith(keyPrefix)) {
-        this.recentTouchedBuckets.delete(key);
+        this.#recentTouchedBuckets.delete(key);
       }
     }
   }
@@ -477,11 +483,24 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   ): Promise<
     Map<string, AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
   > {
+    return this.#readManagedEntriesUsingDriver(this.driver, scope, keys);
+  }
+
+  async #readManagedEntriesUsingDriver<
+    TValue,
+    TCustomMetadata extends Record<string, unknown>,
+  >(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+  ): Promise<
+    Map<string, AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
+  > {
     const rawKeys = keys.flatMap((key) => [
       getPayloadRecordKey(key),
       getMetadataRecordKey(key),
     ]);
-    const rawValues = await this.driverGetMany(scope, rawKeys);
+    const rawValues = await this.#driverGetManyFrom(driver, scope, rawKeys);
     const valueByRawKey = new Map<string, unknown>();
     for (const [index, rawKey] of rawKeys.entries()) {
       valueByRawKey.set(rawKey, rawValues[index] ?? null);
@@ -514,12 +533,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         metadata: __LEGIT_CAST__<
           AsyncStorageEntryMetadata<TCustomMetadata>,
           AsyncStorageEntryMetadata<Record<string, unknown>>
-        >(this.toPublicMetadata(metadata)),
+        >(this.#toPublicMetadata(metadata)),
       });
     }
 
     if (orphanedKeys.length > 0) {
-      await this.removeManagedKeys(scope, orphanedKeys);
+      await this.#removeManagedKeysUsingDriver(driver, scope, orphanedKeys);
     }
 
     return result;
@@ -529,12 +548,26 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
     args: { order?: AsyncStorageMetadataOrder },
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
+    return this.#listManagedMetadataUsingDriver(this.driver, scope, args);
+  }
+
+  async #listManagedMetadataUsingDriver<
+    TCustomMetadata extends Record<string, unknown>,
+  >(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    args: { order?: AsyncStorageMetadataOrder },
+  ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
     const order = args.order ?? 'key';
-    const keys = await this.driver.listKeys(scope);
+    const keys = await driver.listKeys(scope);
     const metadataKeys = keys.filter((key) =>
       key.startsWith(INTERNAL_METADATA_PREFIX),
     );
-    const metadataValues = await this.driverGetMany(scope, metadataKeys);
+    const metadataValues = await this.#driverGetManyFrom(
+      driver,
+      scope,
+      metadataKeys,
+    );
     const validEntries: AsyncStorageEntryMetadata<Record<string, unknown>>[] =
       [];
     const orphanedUserKeys: string[] = [];
@@ -545,14 +578,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       );
       const userKey = getUserKeyFromMetadataRecord(metadataKey);
       if (metadata !== null && userKey !== null) {
-        validEntries.push(this.toPublicMetadata(metadata));
+        validEntries.push(this.#toPublicMetadata(metadata));
       } else if (userKey !== null) {
         orphanedUserKeys.push(userKey);
       }
     }
 
     if (orphanedUserKeys.length > 0) {
-      await this.removeManagedKeys(scope, orphanedUserKeys);
+      await this.#removeManagedKeysUsingDriver(driver, scope, orphanedUserKeys);
     }
 
     validEntries.sort((left, right) => compareMetadata(left, right, order));
@@ -574,12 +607,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
     await this.driver.clear(scope);
-    this.observedScopes.delete(getNamespaceId(scope));
-    this.pendingNamespaceCommits.delete(getNamespaceId(scope));
+    this.#observedScopes.delete(getNamespaceId(scope));
+    this.#pendingNamespaceCommits.delete(getNamespaceId(scope));
     this.clearRecentTouchedBucketsForNamespace(scope);
   }
 
-  private toPublicMetadata(
+  #toPublicMetadata(
     metadata: InternalManagedMetadataRecord,
   ): AsyncStorageEntryMetadata<Record<string, unknown>> {
     return {
@@ -595,7 +628,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     };
   }
 
-  private async applyManagedCommit(
+  async #applyManagedCommit(
     scope: AsyncStorageNamespaceScope,
     args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
   ): Promise<void> {
@@ -606,7 +639,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const keysNeedingMetadata = [
       ...new Set([...upserts.map((upsert) => upsert.key), ...touchedKeys]),
     ];
-    const existingMetadataValues = await this.driverGetMany(
+    const existingMetadataValues = await this.#driverGetManyFrom(
+      this.driver,
       scope,
       keysNeedingMetadata.map((key) => getMetadataRecordKey(key)),
     );
@@ -635,7 +669,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     for (const upsert of upserts) {
-      const serializedValue = this.safeSerializeValue(upsert.value);
+      const serializedValue = this.#safeSerializeValue(upsert.value);
       const existingMetadata = existingMetadataByKey.get(upsert.key);
       const customMetadata =
         upsert.metadata ?? existingMetadata?.customMetadata;
@@ -673,14 +707,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     if (removeEntries.length > 0) {
-      await this.driverRemoveMany(scope, removeEntries);
+      await this.#driverRemoveManyFrom(this.driver, scope, removeEntries);
     }
     if (setEntries.length > 0) {
-      await this.driverSetMany(scope, setEntries);
+      await this.#driverSetManyFrom(this.driver, scope, setEntries);
     }
   }
 
-  private safeSerializeValue(value: unknown): string | null {
+  #safeSerializeValue(value: unknown): string | null {
     try {
       return JSON.stringify(value);
     } catch {
@@ -688,14 +722,16 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
   }
 
-  private async removeManagedKeys(
+  async #removeManagedKeysUsingDriver(
+    driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     keys: string[],
   ): Promise<void> {
     const uniqueKeys = [...new Set(keys)];
     if (uniqueKeys.length === 0) return;
 
-    await this.driverRemoveMany(
+    await this.#driverRemoveManyFrom(
+      driver,
       scope,
       uniqueKeys.flatMap((key) => [
         getPayloadRecordKey(key),
@@ -704,47 +740,50 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
   }
 
-  private async driverGetMany(
+  async #driverGetManyFrom(
+    driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     keys: string[],
   ): Promise<unknown[]> {
     if (keys.length === 0) return [];
-    if (this.driver.getMany) {
-      return this.driver.getMany(scope, keys);
+    if (driver.getMany) {
+      return driver.getMany(scope, keys);
     }
 
-    return Promise.all(keys.map((key) => this.driver.get(scope, key)));
+    return Promise.all(keys.map((key) => driver.get(scope, key)));
   }
 
-  private async driverSetMany(
+  async #driverSetManyFrom(
+    driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     entries: AsyncStorageDriverSetEntry[],
   ): Promise<void> {
     if (entries.length === 0) return;
-    if (this.driver.setMany) {
-      await this.driver.setMany(scope, entries);
+    if (driver.setMany) {
+      await driver.setMany(scope, entries);
       return;
     }
 
     await Promise.all(
-      entries.map((entry) => this.driver.set(scope, entry.key, entry.value)),
+      entries.map((entry) => driver.set(scope, entry.key, entry.value)),
     );
   }
 
-  private async driverRemoveMany(
+  async #driverRemoveManyFrom(
+    driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     keys: string[],
   ): Promise<void> {
     if (keys.length === 0) return;
-    if (this.driver.removeMany) {
-      await this.driver.removeMany(scope, keys);
+    if (driver.removeMany) {
+      await driver.removeMany(scope, keys);
       return;
     }
 
-    await Promise.all(keys.map((key) => this.driver.remove(scope, key)));
+    await Promise.all(keys.map((key) => driver.remove(scope, key)));
   }
 
-  private readMaintenanceState(): AsyncStorageMaintenanceState {
+  #readMaintenanceState(): AsyncStorageMaintenanceState {
     const raw = localStorage.getItem(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY);
     if (raw === null) return createDefaultMaintenanceState();
 
@@ -758,31 +797,32 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
   }
 
-  private writeMaintenanceState(state: AsyncStorageMaintenanceState): void {
+  #writeMaintenanceState(state: AsyncStorageMaintenanceState): void {
     localStorage.setItem(
       ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
       JSON.stringify({ lca: state.lastSuccessfulCleanupAt }),
     );
   }
 
-  private async listDiscoveredScopes(
+  async #listDiscoveredScopes(
     sessionKey?: string,
+    driver: AsyncStorageDriver = this.driver,
   ): Promise<AsyncStorageNamespaceScope[]> {
-    const discoveredScopes = await this.driver.listScopes?.(sessionKey);
+    const discoveredScopes = await driver.listScopes?.(sessionKey);
     const scopes =
       discoveredScopes ??
-      [...this.observedScopes.values()].filter(
+      [...this.#observedScopes.values()].filter(
         (scope) => sessionKey === undefined || scope.sessionKey === sessionKey,
       );
 
     return scopes.filter((scope) => scope.kind !== '__internal.protected');
   }
 
-  private getOrCreatePendingNamespaceCommit(
+  #getOrCreatePendingNamespaceCommit(
     scope: AsyncStorageNamespaceScope,
   ): PendingNamespaceCommit {
     const namespaceKey = getNamespaceId(scope);
-    const existing = this.pendingNamespaceCommits.get(namespaceKey);
+    const existing = this.#pendingNamespaceCommits.get(namespaceKey);
     if (existing) return existing;
 
     const created: PendingNamespaceCommit = {
@@ -794,11 +834,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       upserts: new Map(),
       waiters: [],
     };
-    this.pendingNamespaceCommits.set(namespaceKey, created);
+    this.#pendingNamespaceCommits.set(namespaceKey, created);
     return created;
   }
 
-  private schedulePendingNamespaceFlush(pending: PendingNamespaceCommit): void {
+  #schedulePendingNamespaceFlush(pending: PendingNamespaceCommit): void {
     if (pending.cancelFlush !== null || pending.flushPromise !== null) return;
 
     const timeoutId = setTimeout(() => {
@@ -809,27 +849,27 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     pending.cancelFlush = () => clearTimeout(timeoutId);
   }
 
-  private pruneRecentTouchedBuckets(currentBucket: string): void {
-    for (const [key, bucket] of this.recentTouchedBuckets) {
+  #pruneRecentTouchedBuckets(currentBucket: string): void {
+    for (const [key, bucket] of this.#recentTouchedBuckets) {
       if (bucket !== currentBucket) {
-        this.recentTouchedBuckets.delete(key);
+        this.#recentTouchedBuckets.delete(key);
       }
     }
   }
 
-  private scheduleStartupCleanupIfNeeded(): void {
-    if (this.startupCleanupScheduled) return;
-    this.startupCleanupScheduled = true;
+  #scheduleStartupCleanupIfNeeded(): void {
+    if (this.#startupCleanupScheduled) return;
+    this.#startupCleanupScheduled = true;
 
     scheduleIdleCleanup(() => {
-      void this.runStartupCleanupIfDue().catch(() => {
+      void this.#runStartupCleanupIfDue().catch(() => {
         // Ignore startup cleanup failures; regular reads and writes still work.
       });
     });
   }
 
-  private async runStartupCleanupIfDue(): Promise<void> {
-    const maintenance = this.readMaintenanceState();
+  async #runStartupCleanupIfDue(): Promise<void> {
+    const maintenance = this.#readMaintenanceState();
     const now = Date.now();
     if (
       maintenance.lastSuccessfulCleanupAt !== null &&
@@ -848,7 +888,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       ASYNC_STARTUP_CLEANUP_LOCK_NAME,
       ASYNC_STARTUP_CLEANUP_LOCK_WARNING,
       async () => {
-        const lockedMaintenance = this.readMaintenanceState();
+        const lockedMaintenance = this.#readMaintenanceState();
         const lockedNow = Date.now();
         if (
           lockedMaintenance.lastSuccessfulCleanupAt !== null &&
@@ -858,31 +898,41 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           return;
         }
 
-        await this.performStartupCleanup();
-        this.writeMaintenanceState({ lastSuccessfulCleanupAt: Date.now() });
+        await this.#performStartupCleanup();
+        this.#writeMaintenanceState({ lastSuccessfulCleanupAt: Date.now() });
       },
     );
   }
 
-  private async performStartupCleanup(): Promise<void> {
+  async #performStartupCleanup(): Promise<void> {
     await this.flushAllPendingNamespaceCommits();
-    const scopes = await this.listDiscoveredScopes();
+    await this.#withCleanupDriver((driver) =>
+      this.#performStartupCleanupWithDriver(driver),
+    );
+  }
+
+  async #performStartupCleanupWithDriver(
+    driver: AsyncStorageDriver,
+  ): Promise<void> {
+    const scopes = await this.#listDiscoveredScopes(undefined, driver);
     const protectedRefsBySession = new Map<string, Set<string>>();
 
     for (const scope of scopes) {
-      const namespace = this.openNamespace<unknown, Record<string, unknown>>(
-        scope,
-      );
       const cachedProtectedRefs = protectedRefsBySession.get(scope.sessionKey);
       const protectedRefs =
-        cachedProtectedRefs ?? (await this.readProtectedRefs(scope.sessionKey));
+        cachedProtectedRefs ??
+        (await this.#readProtectedRefs(scope.sessionKey, driver));
 
       if (!cachedProtectedRefs) {
         protectedRefsBySession.set(scope.sessionKey, protectedRefs);
       }
 
       const keysToRemove: string[] = [];
-      for (const entry of await namespace.listMetadata({ order: 'key' })) {
+      for (const entry of await this.#listManagedMetadataUsingDriver(
+        driver,
+        scope,
+        { order: 'key' },
+      )) {
         const isProtected = protectedRefs.has(
           serializeProtectedRef({ ...scope, key: entry.key }),
         );
@@ -896,24 +946,44 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       }
 
       if (keysToRemove.length > 0) {
-        await this.applyManagedCommit(scope, { removes: keysToRemove });
+        await this.#removeManagedKeysUsingDriver(driver, scope, keysToRemove);
       }
     }
   }
 
-  private async readProtectedRefs(sessionKey: string): Promise<Set<string>> {
+  async #readProtectedRefs(
+    sessionKey: string,
+    driver: AsyncStorageDriver = this.driver,
+  ): Promise<Set<string>> {
     const protectedKeysSnapshot = getSessionProtectedKeysSnapshot(sessionKey);
     if (protectedKeysSnapshot !== null) {
       return new Set(protectedKeysSnapshot);
     }
 
-    const namespace = this.openNamespace<unknown>(
-      getProtectedKeysStorageScope(sessionKey),
-    );
-    const entry = await namespace.get(PROTECTED_KEYS_STORAGE_ENTRY_KEY, {
-      touch: 'never',
-    });
+    const protectedScope = getProtectedKeysStorageScope(sessionKey);
+    const entry = (
+      await this.#readManagedEntriesUsingDriver<
+        unknown,
+        Record<string, unknown>
+      >(driver, protectedScope, [PROTECTED_KEYS_STORAGE_ENTRY_KEY])
+    ).get(PROTECTED_KEYS_STORAGE_ENTRY_KEY);
     return new Set(parseProtectedKeys(entry?.value)?.keys ?? []);
+  }
+
+  async #withCleanupDriver<T>(
+    callback: (driver: AsyncStorageDriver) => Promise<T>,
+  ): Promise<T> {
+    const maybeCleanupCapableDriver = __LEGIT_CAST__<
+      AsyncStorageCleanupCapableDriver,
+      AsyncStorageDriver
+    >(this.driver);
+    if (
+      typeof maybeCleanupCapableDriver.withIsolatedCleanupDriver === 'function'
+    ) {
+      return maybeCleanupCapableDriver.withIsolatedCleanupDriver(callback);
+    }
+
+    return callback(this.driver);
   }
 }
 

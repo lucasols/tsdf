@@ -9,6 +9,7 @@ import type {
   PersistedListQueryItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+import { parseAsyncStorageNamespaceKind } from '../../src/persistentStorage/types';
 import {
   createMockBrowserOpfs,
   type MockBrowserOpfsEnvironment,
@@ -17,6 +18,7 @@ import {
 
 const OPFS_ROOT_DIR = 'tsdf';
 const JSON_FILE_EXTENSION = '.json';
+const OPFS_FILE_NAME_KIND_SEPARATOR = '~';
 const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
 const METADATA_RECORD_PREFIX = '__tsdf_meta__:';
 
@@ -326,24 +328,52 @@ function joinPath(...segments: string[]): string {
   return segments.filter((segment) => segment !== '').join('/');
 }
 
-function scopeDirPath(scope: AsyncStorageNamespaceScope): string {
+function storeDirPath(
+  scope: Pick<AsyncStorageNamespaceScope, 'sessionKey' | 'storeName'>,
+): string {
   return joinPath(
     OPFS_ROOT_DIR,
     encodePathSegment(scope.sessionKey),
     encodePathSegment(scope.storeName),
-    encodePathSegment(scope.kind),
   );
 }
 
-function fileNameForKey(key: string): string {
-  return `${encodePathSegment(key)}${JSON_FILE_EXTENSION}`;
+function fileNameForKey(
+  scope: AsyncStorageNamespaceScope,
+  key: string,
+): string {
+  return `${encodePathSegment(scope.kind)}${OPFS_FILE_NAME_KIND_SEPARATOR}${encodePathSegment(key)}${JSON_FILE_EXTENSION}`;
 }
 
 function filePathForRecord(
   scope: AsyncStorageNamespaceScope,
   key: string,
 ): string {
-  return joinPath(scopeDirPath(scope), fileNameForKey(key));
+  return joinPath(storeDirPath(scope), fileNameForKey(scope, key));
+}
+
+function parseRecordFileName(
+  fileName: string,
+): { key: string; kind: AsyncStorageNamespaceScope['kind'] } | null {
+  if (!fileName.endsWith(JSON_FILE_EXTENSION)) return null;
+
+  const encodedRecord = fileName.slice(0, -JSON_FILE_EXTENSION.length);
+  const separatorIndex = encodedRecord.indexOf(OPFS_FILE_NAME_KIND_SEPARATOR);
+  if (separatorIndex <= 0) return null;
+
+  const kind = parseAsyncStorageNamespaceKind(
+    decodePathSegment(encodedRecord.slice(0, separatorIndex)),
+  );
+  if (kind === null) return null;
+
+  return {
+    kind,
+    key: decodePathSegment(
+      encodedRecord.slice(
+        separatorIndex + OPFS_FILE_NAME_KIND_SEPARATOR.length,
+      ),
+    ),
+  };
 }
 
 function readRawRecord(
@@ -376,14 +406,13 @@ function listRawKeys(
   scope: AsyncStorageNamespaceScope,
 ): string[] {
   return mockBrowserOpfs
-    .listEntries(scopeDirPath(scope))
+    .listEntries(storeDirPath(scope))
     .flatMap((entry) => {
       if (!entry.startsWith('file:')) return [];
       const fileName = entry.slice('file:'.length);
-      if (!fileName.endsWith(JSON_FILE_EXTENSION)) return [];
-      return [
-        decodePathSegment(fileName.slice(0, -JSON_FILE_EXTENSION.length)),
-      ];
+      const parsed = parseRecordFileName(fileName);
+      if (parsed === null || parsed.kind !== scope.kind) return [];
+      return [parsed.key];
     })
     .sort((left, right) => left.localeCompare(right));
 }
@@ -514,31 +543,23 @@ function removeMetadataValue(
   removeRawRecord(mockBrowserOpfs, location.scope, location.metadataRecordKey);
 }
 
-function parseScopeFromDirPath(
+function parseStoreFromDirPath(
   path: string,
-): AsyncStorageNamespaceScope | null {
+): Pick<AsyncStorageNamespaceScope, 'sessionKey' | 'storeName'> | null {
   const pathSegments = path.split('/');
-  if (pathSegments.length !== 4 || pathSegments[0] !== OPFS_ROOT_DIR) {
+  if (pathSegments.length !== 3 || pathSegments[0] !== OPFS_ROOT_DIR) {
     return null;
   }
 
   const encodedSessionKey = pathSegments[1];
   const encodedStoreName = pathSegments[2];
-  const encodedKind = pathSegments[3];
-  if (
-    encodedSessionKey === undefined ||
-    encodedStoreName === undefined ||
-    encodedKind === undefined
-  ) {
+  if (encodedSessionKey === undefined || encodedStoreName === undefined) {
     return null;
   }
 
   return {
     sessionKey: decodePathSegment(encodedSessionKey),
     storeName: decodePathSegment(encodedStoreName),
-    kind: __LEGIT_CAST__<AsyncStorageNamespaceScope['kind'], string>(
-      decodePathSegment(encodedKind),
-    ),
   };
 }
 
@@ -548,7 +569,7 @@ function parseTrackedDirPath(
   const pathSegments = path.split('/');
   if (pathSegments[0] !== OPFS_ROOT_DIR) return null;
 
-  return { path, scope: parseScopeFromDirPath(path) };
+  return { path, scope: null };
 }
 
 type RecordKind = 'payload' | 'metadata' | 'internal';
@@ -595,18 +616,26 @@ function parseFileContext(
   const fileName = pathSegments.pop();
   if (fileName === undefined) return null;
 
-  const scope = parseScopeFromDirPath(pathSegments.join('/'));
-  if (scope === null || !fileName.endsWith(JSON_FILE_EXTENSION)) {
+  const store = parseStoreFromDirPath(pathSegments.join('/'));
+  const parsedRecord = parseRecordFileName(fileName);
+  if (store === null || parsedRecord === null) {
     return null;
   }
 
-  const key = decodePathSegment(fileName.slice(0, -JSON_FILE_EXTENSION.length));
-  return { path, scope, record: getInstrumentedRecord(scope, key) };
+  const scope = {
+    ...store,
+    kind: parsedRecord.kind,
+  } satisfies AsyncStorageNamespaceScope;
+  return {
+    path,
+    scope,
+    record: getInstrumentedRecord(scope, parsedRecord.key),
+  };
 }
 
 function isAppStoreFilePath(path: string): boolean {
   const pathSegments = path.split('/');
-  if (pathSegments.length < 5 || pathSegments[0] !== OPFS_ROOT_DIR) {
+  if (pathSegments.length < 4 || pathSegments[0] !== OPFS_ROOT_DIR) {
     return false;
   }
 
@@ -750,11 +779,26 @@ function getPayloadReadRequests(
 function getListKeysRequests(
   operations: readonly MockOpfsOperation[],
 ): AsyncStorageNamespaceScope[] {
-  return operations.flatMap((operation) =>
-    operation.type === 'listDir' && operation.scope !== null
-      ? [operation.scope]
-      : [],
-  );
+  return operations.flatMap((operation) => {
+    if (operation.type !== 'listDir') return [];
+
+    const store = parseStoreFromDirPath(operation.path);
+    if (store === null) return [];
+
+    const seenKinds = new Set<AsyncStorageNamespaceScope['kind']>();
+    const scopes: AsyncStorageNamespaceScope[] = [];
+
+    for (const entry of operation.entries) {
+      if (!entry.startsWith('file:')) continue;
+      const parsedRecord = parseRecordFileName(entry.slice('file:'.length));
+      if (parsedRecord === null || seenKinds.has(parsedRecord.kind)) continue;
+
+      seenKinds.add(parsedRecord.kind);
+      scopes.push({ ...store, kind: parsedRecord.kind });
+    }
+
+    return scopes;
+  });
 }
 
 export type OpfsPersistentStorageTestStore = ReturnType<
