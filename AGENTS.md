@@ -123,7 +123,7 @@ When adding a new feature, or adjust a existing one:
   - when adding jsdoc to function arguments prefer adding them to the types/interfaces instead of the implementation, to ensure they are visible in IDEs when users hover the relevant types
 - if adding new public exports, update the relevant barrel file (`src/main.ts`)
 - if the feature requires changes to the documentation, update the relevant docs files in `docs/` and public api jsdoc comments in `src/`
-- run all project tests to ensure there are no regressions
+- run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
 
 ## Bug fix instructions
 
@@ -133,7 +133,7 @@ When fixing a bug:
 2. confirm that the test fails before applying the fix, to ensure the test is valid
 3. check the root cause of the issue and apply the fix, don't apply a superficial fix that only makes the test pass without addressing the underlying problem.
 4. apply the fix and confirm that the test passes after the fix is applied
-5. run all project tests to ensure there are no regressions
+5. run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
 
 ## Useful patterns
 
