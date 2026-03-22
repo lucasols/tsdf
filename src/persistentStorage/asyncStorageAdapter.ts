@@ -924,48 +924,58 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     driver: AsyncStorageDriver,
   ): Promise<void> {
     const discoveredScopes = await this.#listDiscoveredCleanupScopes(driver);
-    const protectedRefsBySession = new Map<string, Set<string>>();
     const now = Date.now();
 
-    for (const { scope, metadataRecordKeys } of discoveredScopes) {
-      const cachedProtectedRefs = protectedRefsBySession.get(scope.sessionKey);
-      const protectedRefs =
-        cachedProtectedRefs ??
-        (await this.#readProtectedRefs(scope.sessionKey, driver));
+    const sessionKeys = [
+      ...new Set(discoveredScopes.map(({ scope }) => scope.sessionKey)),
+    ];
+    const protectedRefsBySession = new Map(
+      await Promise.all(
+        sessionKeys.map(
+          async (sessionKey) =>
+            [
+              sessionKey,
+              await this.#readProtectedRefs(sessionKey, driver),
+            ] as const,
+        ),
+      ),
+    );
 
-      if (!cachedProtectedRefs) {
-        protectedRefsBySession.set(scope.sessionKey, protectedRefs);
-      }
+    await Promise.all(
+      discoveredScopes.map(async ({ scope, metadataRecordKeys }) => {
+        const protectedRefs = protectedRefsBySession.get(scope.sessionKey);
+        if (protectedRefs === undefined) return;
 
-      const keysToRemove: string[] = [];
-      const metadataEntries =
-        metadataRecordKeys === null
-          ? await this.#listManagedMetadataUsingDriver(driver, scope, {
-              order: 'key',
-            })
-          : await this.#listManagedMetadataByMetadataKeysUsingDriver(
-              driver,
-              scope,
-              metadataRecordKeys,
-              'key',
-            );
-      for (const entry of metadataEntries) {
-        const isProtected = protectedRefs.has(
-          serializeProtectedRef({ ...scope, key: entry.key }),
-        );
-        if (
-          !isProtected &&
-          now - Math.max(entry.lastAccessAt, entry.writtenAt) >
-            ASYNC_STORAGE_MAX_AGE_MS
-        ) {
-          keysToRemove.push(entry.key);
+        const metadataEntries =
+          metadataRecordKeys === null
+            ? await this.#listManagedMetadataUsingDriver(driver, scope, {
+                order: 'key',
+              })
+            : await this.#listManagedMetadataByMetadataKeysUsingDriver(
+                driver,
+                scope,
+                metadataRecordKeys,
+                'key',
+              );
+        const keysToRemove: string[] = [];
+        for (const entry of metadataEntries) {
+          const isProtected = protectedRefs.has(
+            serializeProtectedRef({ ...scope, key: entry.key }),
+          );
+          if (
+            !isProtected &&
+            now - Math.max(entry.lastAccessAt, entry.writtenAt) >
+              ASYNC_STORAGE_MAX_AGE_MS
+          ) {
+            keysToRemove.push(entry.key);
+          }
         }
-      }
 
-      if (keysToRemove.length > 0) {
-        await this.#removeManagedKeysUsingDriver(driver, scope, keysToRemove);
-      }
-    }
+        if (keysToRemove.length > 0) {
+          await this.#removeManagedKeysUsingDriver(driver, scope, keysToRemove);
+        }
+      }),
+    );
   }
 
   async #listDiscoveredCleanupScopes(

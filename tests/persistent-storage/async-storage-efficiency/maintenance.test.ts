@@ -212,11 +212,11 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
       2.004s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.p.json (tsdf.sess1.expired-doc (payload))
       .      | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
-      .      | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
-      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.p.json (tsdf.sess2.expired-doc (payload))
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.m.json (tsdf.sess2.expired-doc (metadata))
+      .      | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2/expired-doc (store directory) entries=[]
+      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2 (session directory) entries=["dir:fresh-doc"]
       2.006s | 📖 tsdf/sess1/expired-doc/d.e.m.json
              |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
@@ -232,22 +232,22 @@ describe('async storage efficiency: maintenance', () => {
       .      | 🗂️ list-dir tsdf/sess2
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
       2.003s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
+      .      | 📂 dir-open ❌ tsdf/sess2/_o_.p (store directory)
       .      | 📄 file-open ✅ tsdf/sess1/expired-doc/d.e.m.json
              |    └ (tsdf.sess1.expired-doc (metadata))
-      .      | 🧹 del-dir ✅ tsdf/sess1 (session directory)
-      .      | 📂 dir-open ❌ tsdf/sess2/_o_.p (store directory)
       .      | 📄 file-open ✅ tsdf/sess2/expired-doc/d.e.m.json
              |    └ (tsdf.sess2.expired-doc (metadata))
       .      | 📄 file-open ✅ tsdf/sess2/fresh-doc/d.e.m.json (tsdf.sess2.fresh-doc (metadata))
+      .      | 🧹 del-dir ✅ tsdf/sess1 (session directory)
       2.004s | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.p.json (tsdf.sess1.expired-doc (payload))
       .      | 🗑️ ✅ tsdf/sess1/expired-doc/d.e.m.json (tsdf.sess1.expired-doc (metadata))
-      .      | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
-      .      | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
-      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.p.json (tsdf.sess2.expired-doc (payload))
       .      | 🗑️ ✅ tsdf/sess2/expired-doc/d.e.m.json (tsdf.sess2.expired-doc (metadata))
+      .      | 🗂️ list-dir tsdf/sess1/expired-doc (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2/expired-doc (store directory) entries=[]
+      .      | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
       .      | 🧹 del-dir ✅ tsdf/sess2/expired-doc (store directory)
+      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess2 (session directory) entries=["dir:fresh-doc"]
       2.006s | 📖 tsdf/sess1/expired-doc/d.e.m.json
              |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
@@ -305,13 +305,12 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.sess1.invalid-metadata (payload))
       .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.m.json
              |    └ (tsdf.sess1.invalid-metadata (metadata))
-      .      | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
-      .      | 🗂️ list-dir tsdf/sess1
-             |    └ (session directory) entries=["dir:missing-payload","dir:valid-doc"]
       .      | 🗑️ ✅ tsdf/sess1/missing-payload/d.e.m.json
              |    └ (tsdf.sess1.missing-payload (metadata))
+      .      | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess1/missing-payload (store directory) entries=[]
       2.005s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
+      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
       2.006s | 📖 tsdf/sess1/invalid-metadata/d.e.m.json
              |    └ (tsdf.sess1.invalid-metadata (metadata)) | 0.02 kb
       .      | 📖 tsdf/sess1/missing-payload/d.e.m.json
@@ -334,15 +333,14 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (tsdf.sess1.invalid-metadata (payload))
       .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/d.e.m.json
              |    └ (tsdf.sess1.invalid-metadata (metadata))
-      .      | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
-      .      | 🧹 del-dir ✅ tsdf/sess1/invalid-metadata (store directory)
-      .      | 🗂️ list-dir tsdf/sess1
-             |    └ (session directory) entries=["dir:missing-payload","dir:valid-doc"]
       .      | 🧹 del-dir ❌ tsdf/sess1/missing-payload/d.e.p.json (scope directory)
       .      | 🗑️ ✅ tsdf/sess1/missing-payload/d.e.m.json
              |    └ (tsdf.sess1.missing-payload (metadata))
+      .      | 🗂️ list-dir tsdf/sess1/invalid-metadata (store directory) entries=[]
       .      | 🗂️ list-dir tsdf/sess1/missing-payload (store directory) entries=[]
+      .      | 🧹 del-dir ✅ tsdf/sess1/invalid-metadata (store directory)
       2.005s | 🧹 del-dir ✅ tsdf/sess1/missing-payload (store directory)
+      .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
       .      | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:valid-doc"]
       2.006s | 📖 tsdf/sess1/invalid-metadata/d.e.m.json
              |    └ (tsdf.sess1.invalid-metadata (metadata)) | 0.02 kb

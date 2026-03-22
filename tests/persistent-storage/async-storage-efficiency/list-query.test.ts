@@ -97,19 +97,19 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (payload))
       .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))
-      .      | 🗂️ list-dir tsdf/sess1/list-query-expiration
-             |    └ (store directory) entries=["file:li.%22fresh-users%7C%7C2.m.json","file:li.%22fresh-users%7C%7C2.p.json","file:lq.%7BtableId%3A%22expired-users%22%7D.m.json","file:lq.%7BtableId%3A%22expired-users%22%7D.p.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.m.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.p.json"]
-      2.006s | 📖 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
-             |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata)) | 0.30 kb
-      .      | 📖 tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
-             |    └ (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata)) | 0.29 kb
       .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.p.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (payload))
       .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))
       .      | 🗂️ list-dir tsdf/sess1/list-query-expiration
              |    └ (store directory) entries=["file:li.%22fresh-users%7C%7C2.m.json","file:li.%22fresh-users%7C%7C2.p.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.m.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.p.json"]
-      2.008s | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
+      .      | 🗂️ list-dir tsdf/sess1/list-query-expiration
+             |    └ (store directory) entries=["file:li.%22fresh-users%7C%7C2.m.json","file:li.%22fresh-users%7C%7C2.p.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.m.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.p.json"]
+      2.006s | 📖 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
+             |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata)) | 0.30 kb
+      .      | 📖 tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
+             |    └ (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata)) | 0.29 kb
+      .      | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata)) | 0.38 kb
       .      | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata)) | 0.37 kb
@@ -125,6 +125,10 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))
       .      | 📄 file-open ✅ tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata))
+      .      | 📄 file-open ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
+             |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))
+      .      | 📄 file-open ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
+             |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata))
       .      | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:list-query-expiration"]
       .      | 🗂️ list-dir tsdf/sess1
@@ -133,23 +137,19 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (payload))
       .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))
-      .      | 🗂️ list-dir tsdf/sess1/list-query-expiration
-             |    └ (store directory) entries=["file:li.%22fresh-users%7C%7C2.m.json","file:li.%22fresh-users%7C%7C2.p.json","file:lq.%7BtableId%3A%22expired-users%22%7D.m.json","file:lq.%7BtableId%3A%22expired-users%22%7D.p.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.m.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.p.json"]
-      2.005s | 📄 file-open ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
-             |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
-             |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata))
-      2.006s | 📖 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
-             |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata)) | 0.30 kb
-      .      | 📖 tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
-             |    └ (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata)) | 0.29 kb
       .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.p.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (payload))
       .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))
       .      | 🗂️ list-dir tsdf/sess1/list-query-expiration
              |    └ (store directory) entries=["file:li.%22fresh-users%7C%7C2.m.json","file:li.%22fresh-users%7C%7C2.p.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.m.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.p.json"]
-      2.008s | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
+      .      | 🗂️ list-dir tsdf/sess1/list-query-expiration
+             |    └ (store directory) entries=["file:li.%22fresh-users%7C%7C2.m.json","file:li.%22fresh-users%7C%7C2.p.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.m.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.p.json"]
+      2.006s | 📖 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
+             |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata)) | 0.30 kb
+      .      | 📖 tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
+             |    └ (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata)) | 0.29 kb
+      .      | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata)) | 0.38 kb
       .      | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata)) | 0.37 kb
@@ -1039,7 +1039,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||3 (metadata)) | 0.27 kb
       .      | 📖 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C4.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||4 (metadata)) | 0.27 kb
-      2.307s | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)) | 0.58 kb
       .      | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata)) | 0.57 kb
@@ -1059,7 +1059,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||3 (metadata))
       .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C4.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||4 (metadata))
-      2.304s | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))
       .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata))
@@ -1071,7 +1071,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||3 (metadata)) | 0.27 kb
       .      | 📖 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C4.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||4 (metadata)) | 0.27 kb
-      2.307s | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)) | 0.58 kb
       .      | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata)) | 0.57 kb
