@@ -20,22 +20,19 @@ import {
   PROTECTED_KEYS_STORAGE_ENTRY_KEY,
 } from './offline/protectedKeysPersistence';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
+import { runWithNavigatorLock } from './navigatorLocks';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 
 export const ASYNC_STORAGE_COMMIT_DEBOUNCE_MS = 40;
 export const ASYNC_STORAGE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 export const ASYNC_STORAGE_STARTUP_CLEANUP_COOLDOWN_MS = 12 * 60 * 60 * 1000;
-export const ASYNC_STORAGE_STARTUP_CLEANUP_LEASE_TTL_MS = 60 * 1000;
 export const ASYNC_STORAGE_RECENCY_BUCKET_MS = 6 * 60 * 60 * 1000;
+export const ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY = 'tsdf._am.g';
+const ASYNC_STARTUP_CLEANUP_LOCK_NAME = 'tsdf-async-storage-maintenance';
+const ASYNC_STARTUP_CLEANUP_LOCK_WARNING =
+  '[TSDF] navigator.locks is unavailable; async OPFS startup cleanup is using unlocked coordination.';
 const INTERNAL_PAYLOAD_PREFIX = '__tsdf_payload__:';
 const INTERNAL_METADATA_PREFIX = '__tsdf_meta__:';
-const INTERNAL_REGISTRY_KEY = 'registry';
-const INTERNAL_MAINTENANCE_KEY = 'maintenance';
-const INTERNAL_ASYNC_SCOPE: AsyncStorageNamespaceScope = {
-  sessionKey: '__tsdf_async__',
-  storeName: '__tsdf_async__',
-  kind: '__internal.protected',
-};
 
 function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
   return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
@@ -103,47 +100,13 @@ function parseInternalManagedMetadataRecord(
   };
 }
 
-type InternalNamespaceRegistry = { namespaces: AsyncStorageNamespaceScope[] };
-
-function parseInternalNamespaceRegistry(
-  value: unknown,
-): InternalNamespaceRegistry | null {
-  const record = getRecord(value);
-  if (record === null || !Array.isArray(record.namespaces)) {
-    return null;
-  }
-
-  const namespaces: AsyncStorageNamespaceScope[] = [];
-  for (const entry of record.namespaces) {
-    const parsed = getRecord(entry);
-    if (
-      parsed === null ||
-      typeof parsed.sessionKey !== 'string' ||
-      typeof parsed.storeName !== 'string' ||
-      typeof parsed.kind !== 'string'
-    ) {
-      return null;
-    }
-
-    namespaces.push({
-      sessionKey: parsed.sessionKey,
-      storeName: parsed.storeName,
-      kind: __LEGIT_CAST__<AsyncStorageNamespaceScope['kind'], string>(
-        parsed.kind,
-      ),
-    });
-  }
-
-  return { namespaces };
-}
-
 function parseMaintenanceState(
   value: unknown,
 ): AsyncStorageMaintenanceState | null {
   const record = getRecord(value);
   if (record === null) return null;
 
-  const lastSuccessfulCleanupAt = record.lastSuccessfulCleanupAt;
+  const lastSuccessfulCleanupAt = record.lca;
   if (
     lastSuccessfulCleanupAt !== null &&
     typeof lastSuccessfulCleanupAt !== 'number'
@@ -151,30 +114,11 @@ function parseMaintenanceState(
     return null;
   }
 
-  if (record.startupCleanupLease === null) {
-    return { lastSuccessfulCleanupAt, startupCleanupLease: null };
-  }
-
-  const lease = getRecord(record.startupCleanupLease);
-  if (
-    lease === null ||
-    typeof lease.holderId !== 'string' ||
-    typeof lease.expiresAt !== 'number'
-  ) {
-    return null;
-  }
-
-  return {
-    lastSuccessfulCleanupAt,
-    startupCleanupLease: {
-      holderId: lease.holderId,
-      expiresAt: lease.expiresAt,
-    },
-  };
+  return { lastSuccessfulCleanupAt };
 }
 
 function createDefaultMaintenanceState(): AsyncStorageMaintenanceState {
-  return { lastSuccessfulCleanupAt: null, startupCleanupLease: null };
+  return { lastSuccessfulCleanupAt: null };
 }
 
 function compareMetadata(
@@ -193,13 +137,6 @@ function compareMetadata(
   }
 
   return left.key.localeCompare(right.key);
-}
-
-function nowMinusLatest(
-  metadata: AsyncStorageEntryMetadata<Record<string, unknown>>,
-  now: number,
-): number {
-  return now - Math.max(metadata.lastAccessAt, metadata.writtenAt);
 }
 
 class ManagedAsyncStorageNamespaceHandle<
@@ -331,9 +268,9 @@ type PendingNamespaceCommit = {
 class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
+  private observedScopes = new Map<string, AsyncStorageNamespaceScope>();
   private pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
   private recentTouchedBuckets = new Map<string, string>();
-  private knownRegisteredNamespaces = new Set<string>();
   private startupCleanupScheduled = false;
 
   constructor(private readonly driver: AsyncStorageDriver) {}
@@ -344,6 +281,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   >(
     scope: AsyncStorageNamespaceScope,
   ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata> {
+    this.observedScopes.set(getNamespaceId(scope), scope);
     this.scheduleStartupCleanupIfNeeded();
     return new ManagedAsyncStorageNamespaceHandle<TValue, TCustomMetadata>(
       this,
@@ -353,34 +291,20 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async clearSession(sessionKey: string): Promise<void> {
     await this.flushAllPendingNamespaceCommits();
-    const registry = await this.readNamespaceRegistry();
-    const scopesToClear = registry.namespaces.filter(
-      (scope) => scope.sessionKey === sessionKey,
-    );
+    const scopesToClear = await this.listDiscoveredScopes(sessionKey);
 
     await Promise.all(
-      scopesToClear.map(async (scope) => {
-        await this.driver.clear(scope);
-        this.pendingNamespaceCommits.delete(getNamespaceId(scope));
-        this.knownRegisteredNamespaces.delete(getNamespaceId(scope));
-        this.clearRecentTouchedBucketsForNamespace(scope);
-      }),
+      scopesToClear.map((scope) => this.clearManagedNamespace(scope)),
     );
-
-    await this.writeNamespaceRegistry({
-      namespaces: registry.namespaces.filter(
-        (scope) => scope.sessionKey !== sessionKey,
-      ),
-    });
   }
 
   resetForTests(): void {
     for (const pending of this.pendingNamespaceCommits.values()) {
       pending.cancelFlush?.();
     }
+    this.observedScopes.clear();
     this.pendingNamespaceCommits.clear();
     this.recentTouchedBuckets.clear();
-    this.knownRegisteredNamespaces.clear();
     this.startupCleanupScheduled = false;
     this.driver.resetForTests?.();
   }
@@ -553,8 +477,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   ): Promise<
     Map<string, AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
   > {
-    const uniqueKeys = [...new Set(keys)];
-    const rawKeys = uniqueKeys.flatMap((key) => [
+    const rawKeys = keys.flatMap((key) => [
       getPayloadRecordKey(key),
       getMetadataRecordKey(key),
     ]);
@@ -570,7 +493,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     >();
     const orphanedKeys: string[] = [];
 
-    for (const key of uniqueKeys) {
+    for (const key of keys) {
       const rawPayload = valueByRawKey.get(getPayloadRecordKey(key)) ?? null;
       const rawMetadata = valueByRawKey.get(getMetadataRecordKey(key)) ?? null;
       const metadata = parseInternalManagedMetadataRecord(rawMetadata);
@@ -651,7 +574,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
     await this.driver.clear(scope);
-    await this.unregisterNamespace(scope);
+    this.observedScopes.delete(getNamespaceId(scope));
     this.pendingNamespaceCommits.delete(getNamespaceId(scope));
     this.clearRecentTouchedBucketsForNamespace(scope);
   }
@@ -755,16 +678,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     if (setEntries.length > 0) {
       await this.driverSetMany(scope, setEntries);
     }
-
-    if (upserts.length > 0) {
-      await this.registerNamespace(scope);
-    } else if (removes.length > 0) {
-      if (await this.namespaceHasManagedEntries(scope)) {
-        await this.registerNamespace(scope);
-      } else {
-        await this.unregisterNamespace(scope);
-      }
-    }
   }
 
   private safeSerializeValue(value: unknown): string | null {
@@ -789,16 +702,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         getMetadataRecordKey(key),
       ]),
     );
-
-    if (!(await this.namespaceHasManagedEntries(scope))) {
-      await this.unregisterNamespace(scope);
-    }
-  }
-
-  private async namespaceHasManagedEntries(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<boolean> {
-    return (await this.listManagedKeys(scope)).length > 0;
   }
 
   private async driverGetMany(
@@ -841,75 +744,38 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     await Promise.all(keys.map((key) => this.driver.remove(scope, key)));
   }
 
-  private async readNamespaceRegistry(): Promise<InternalNamespaceRegistry> {
-    const raw = await this.driver.get(
-      INTERNAL_ASYNC_SCOPE,
-      INTERNAL_REGISTRY_KEY,
-    );
-    return parseInternalNamespaceRegistry(raw) ?? { namespaces: [] };
-  }
+  private readMaintenanceState(): AsyncStorageMaintenanceState {
+    const raw = localStorage.getItem(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY);
+    if (raw === null) return createDefaultMaintenanceState();
 
-  private async writeNamespaceRegistry(
-    registry: InternalNamespaceRegistry,
-  ): Promise<void> {
-    await this.driver.set(
-      INTERNAL_ASYNC_SCOPE,
-      INTERNAL_REGISTRY_KEY,
-      registry,
-    );
-  }
-
-  private async registerNamespace(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<void> {
-    const scopeId = getNamespaceId(scope);
-    if (this.knownRegisteredNamespaces.has(scopeId)) return;
-
-    const registry = await this.readNamespaceRegistry();
-    if (
-      registry.namespaces.some((entry) => getNamespaceId(entry) === scopeId)
-    ) {
-      this.knownRegisteredNamespaces.add(scopeId);
-      return;
+    try {
+      return (
+        parseMaintenanceState(JSON.parse(raw)) ??
+        createDefaultMaintenanceState()
+      );
+    } catch {
+      return createDefaultMaintenanceState();
     }
-
-    registry.namespaces.push(scope);
-    await this.writeNamespaceRegistry(registry);
-    this.knownRegisteredNamespaces.add(scopeId);
   }
 
-  private async unregisterNamespace(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<void> {
-    const scopeId = getNamespaceId(scope);
-    this.knownRegisteredNamespaces.delete(scopeId);
-    const registry = await this.readNamespaceRegistry();
-    const namespaces = registry.namespaces.filter(
-      (entry) => getNamespaceId(entry) !== scopeId,
+  private writeMaintenanceState(state: AsyncStorageMaintenanceState): void {
+    localStorage.setItem(
+      ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+      JSON.stringify({ lca: state.lastSuccessfulCleanupAt }),
     );
-    if (namespaces.length === registry.namespaces.length) {
-      return;
-    }
-
-    await this.writeNamespaceRegistry({ namespaces });
   }
 
-  private async readMaintenanceState(): Promise<AsyncStorageMaintenanceState> {
-    const raw = await this.driver.get(
-      INTERNAL_ASYNC_SCOPE,
-      INTERNAL_MAINTENANCE_KEY,
-    );
-    return parseMaintenanceState(raw) ?? createDefaultMaintenanceState();
-  }
+  private async listDiscoveredScopes(
+    sessionKey?: string,
+  ): Promise<AsyncStorageNamespaceScope[]> {
+    const discoveredScopes = await this.driver.listScopes?.(sessionKey);
+    const scopes =
+      discoveredScopes ??
+      [...this.observedScopes.values()].filter(
+        (scope) => sessionKey === undefined || scope.sessionKey === sessionKey,
+      );
 
-  private async writeMaintenanceState(
-    state: AsyncStorageMaintenanceState,
-  ): Promise<void> {
-    await this.driver.set(
-      INTERNAL_ASYNC_SCOPE,
-      INTERNAL_MAINTENANCE_KEY,
-      state,
-    );
+    return scopes.filter((scope) => scope.kind !== '__internal.protected');
   }
 
   private getOrCreatePendingNamespaceCommit(
@@ -963,7 +829,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   private async runStartupCleanupIfDue(): Promise<void> {
-    const maintenance = await this.readMaintenanceState();
+    const maintenance = this.readMaintenanceState();
     const now = Date.now();
     if (
       maintenance.lastSuccessfulCleanupAt !== null &&
@@ -978,72 +844,32 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         setTimeout(resolve, 150);
       });
     }
+    await runWithNavigatorLock(
+      ASYNC_STARTUP_CLEANUP_LOCK_NAME,
+      ASYNC_STARTUP_CLEANUP_LOCK_WARNING,
+      async () => {
+        const lockedMaintenance = this.readMaintenanceState();
+        const lockedNow = Date.now();
+        if (
+          lockedMaintenance.lastSuccessfulCleanupAt !== null &&
+          lockedNow - lockedMaintenance.lastSuccessfulCleanupAt <
+            ASYNC_STORAGE_STARTUP_CLEANUP_COOLDOWN_MS
+        ) {
+          return;
+        }
 
-    const holderId = `startup-cleanup-${Math.random().toString(36).slice(2, 10)}`;
-    const acquired = await this.tryAcquireStartupCleanupLease({
-      holderId,
-      ttlMs: ASYNC_STORAGE_STARTUP_CLEANUP_LEASE_TTL_MS,
-    });
-    if (!acquired) return;
-
-    try {
-      await this.performStartupCleanup();
-      await this.finishStartupCleanup({ holderId, finishedAt: Date.now() });
-    } catch {
-      // Leave the lease to expire naturally if cleanup crashes.
-    }
-  }
-
-  private async tryAcquireStartupCleanupLease(args: {
-    holderId: string;
-    ttlMs: number;
-  }): Promise<boolean> {
-    const state = await this.readMaintenanceState();
-    const now = Date.now();
-    const currentLease = state.startupCleanupLease;
-
-    if (
-      currentLease &&
-      currentLease.holderId !== args.holderId &&
-      currentLease.expiresAt > now
-    ) {
-      return false;
-    }
-
-    await this.writeMaintenanceState({
-      ...state,
-      startupCleanupLease: {
-        holderId: args.holderId,
-        expiresAt: now + args.ttlMs,
+        await this.performStartupCleanup();
+        this.writeMaintenanceState({ lastSuccessfulCleanupAt: Date.now() });
       },
-    });
-
-    return true;
-  }
-
-  private async finishStartupCleanup(args: {
-    holderId: string;
-    finishedAt: number;
-  }): Promise<void> {
-    const state = await this.readMaintenanceState();
-    const currentLease = state.startupCleanupLease;
-
-    if (currentLease && currentLease.holderId !== args.holderId) {
-      return;
-    }
-
-    await this.writeMaintenanceState({
-      lastSuccessfulCleanupAt: args.finishedAt,
-      startupCleanupLease: null,
-    });
+    );
   }
 
   private async performStartupCleanup(): Promise<void> {
     await this.flushAllPendingNamespaceCommits();
-    const registry = await this.readNamespaceRegistry();
+    const scopes = await this.listDiscoveredScopes();
     const protectedRefsBySession = new Map<string, Set<string>>();
 
-    for (const scope of registry.namespaces) {
+    for (const scope of scopes) {
       const namespace = this.openNamespace<unknown, Record<string, unknown>>(
         scope,
       );
@@ -1062,7 +888,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         );
         if (
           !isProtected &&
-          nowMinusLatest(entry, Date.now()) > ASYNC_STORAGE_MAX_AGE_MS
+          Date.now() - Math.max(entry.lastAccessAt, entry.writtenAt) >
+            ASYNC_STORAGE_MAX_AGE_MS
         ) {
           keysToRemove.push(entry.key);
         }

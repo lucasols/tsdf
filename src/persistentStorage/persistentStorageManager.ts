@@ -30,6 +30,7 @@ import type {
   StorageAdapter,
   StorageCacheEntry,
 } from './types';
+import { parseAsyncStorageNamespaceKind } from './types';
 
 const DEBOUNCE_MS = 1000;
 export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
@@ -90,29 +91,22 @@ function scheduleAdapterExpirationScan(adapter: StorageAdapter): void {
 function ensureAsyncNamespaceKind(
   entryPrefix: string,
 ): AsyncStorageNamespaceKind {
+  const directKind = parseAsyncStorageNamespaceKind(entryPrefix);
+  if (directKind !== null) return directKind;
+
   switch (entryPrefix) {
-    case 'document':
-      return 'document';
     case 'ci':
-    case 'collection.item':
       return 'collection.item';
     case 'li':
-    case 'listQuery.item':
       return 'listQuery.item';
     case 'lq':
-    case 'listQuery.query':
       return 'listQuery.query';
     case 'oq':
-    case 'offline.queue':
       return 'offline.queue';
     case 'oc':
-    case 'offline.conflict':
       return 'offline.conflict';
     case 'oe':
-    case 'offline.entity':
       return 'offline.entity';
-    case '__internal.protected':
-      return '__internal.protected';
     default:
       throw new Error(
         `[tsdf] Unsupported async namespace kind: ${entryPrefix}`,

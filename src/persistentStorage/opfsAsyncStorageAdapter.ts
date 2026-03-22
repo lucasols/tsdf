@@ -4,6 +4,7 @@ import type {
   AsyncStorageDriverSetEntry,
   AsyncStorageNamespaceScope,
 } from './types';
+import { parseAsyncStorageNamespaceKind } from './types';
 
 const OPFS_CACHE_DIR = 'tsdf';
 const JSON_FILE_EXTENSION = '.json';
@@ -190,6 +191,50 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     }
   }
 
+  async listScopes(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]> {
+    const root = await this.getRootDir();
+    const sessionEntries =
+      sessionKey === undefined
+        ? await this.listDirectoryEntries(root)
+        : [
+            {
+              handle: await getDirectoryHandleIfExists(
+                root,
+                encodePathSegment(sessionKey),
+              ),
+              name: encodePathSegment(sessionKey),
+            },
+          ];
+    const scopes: AsyncStorageNamespaceScope[] = [];
+
+    for (const sessionEntry of sessionEntries) {
+      if (sessionEntry.handle === null) continue;
+
+      const decodedSessionKey = decodePathSegment(sessionEntry.name);
+      const storeEntries = await this.listDirectoryEntries(sessionEntry.handle);
+
+      for (const storeEntry of storeEntries) {
+        const decodedStoreName = decodePathSegment(storeEntry.name);
+        const scopeEntries = await this.listDirectoryEntries(storeEntry.handle);
+
+        for (const scopeEntry of scopeEntries) {
+          const kind = parseAsyncStorageNamespaceKind(
+            decodePathSegment(scopeEntry.name),
+          );
+          if (kind === null) continue;
+
+          scopes.push({
+            sessionKey: decodedSessionKey,
+            storeName: decodedStoreName,
+            kind,
+          });
+        }
+      }
+    }
+
+    return scopes;
+  }
+
   resetForTests(): void {
     this.rootDirPromise = null;
   }
@@ -242,5 +287,20 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
           create: true,
         })
       : getDirectoryHandleIfExists(storeDir, encodePathSegment(scope.kind));
+  }
+
+  private async listDirectoryEntries(
+    dir: FileSystemDirectoryHandle,
+  ): Promise<Array<{ handle: FileSystemDirectoryHandle; name: string }>> {
+    const entries: Array<{ handle: FileSystemDirectoryHandle; name: string }> =
+      [];
+
+    for await (const entry of dir.values()) {
+      if (entry.kind !== 'directory') continue;
+      entries.push({ handle: entry, name: entry.name });
+    }
+
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    return entries;
   }
 }

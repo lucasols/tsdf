@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/consistent-type-assertions, @ls-stack/use-top-level-regex -- test helper intentionally optimizes for compact fixture code. */
+/* eslint-disable @typescript-eslint/consistent-type-assertions -- test helper intentionally optimizes for compact fixture code. */
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type {
@@ -19,12 +19,6 @@ const OPFS_ROOT_DIR = 'tsdf';
 const JSON_FILE_EXTENSION = '.json';
 const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
 const METADATA_RECORD_PREFIX = '__tsdf_meta__:';
-const INTERNAL_REGISTRY_KEY = 'registry';
-const INTERNAL_ASYNC_SCOPE: AsyncStorageNamespaceScope = {
-  sessionKey: '__tsdf_async__',
-  storeName: '__tsdf_async__',
-  kind: '__internal.protected',
-};
 
 function encodePathSegment(value: string): string {
   return encodeURIComponent(value);
@@ -32,10 +26,6 @@ function encodePathSegment(value: string): string {
 
 function decodePathSegment(value: string): string {
   return decodeURIComponent(value);
-}
-
-function compareStrings(left: string, right: string): number {
-  return left.localeCompare(right);
 }
 
 function itemKey(payload: string): string {
@@ -130,64 +120,65 @@ type ListQueryItemRef = string | { tableId: string; id: number | string };
 type ParsedFlatKey = { scope: AsyncStorageNamespaceScope; key: string };
 
 function parseFlatStorageKey(key: string): ParsedFlatKey | null {
-  let match =
-    /^tsdf\.([^.]+)\.(.+?)\.ci\.(.+)$/.exec(key) ??
-    /^tsdf\.([^.]+)\.(.+?)\.li\.(.+)$/.exec(key) ??
-    /^tsdf\.([^.]+)\.(.+?)\.lq\.(.+)$/.exec(key) ??
-    /^tsdf\.([^.]+)\.(.+?)\.oq\.(.+)$/.exec(key) ??
-    /^tsdf\.([^.]+)\.(.+?)\.oc\.(.+)$/.exec(key) ??
-    /^tsdf\.([^.]+)\.(.+?)\.oe\.(.+)$/.exec(key);
+  const prefix = 'tsdf.';
+  if (!key.startsWith(prefix)) return null;
 
-  if (match?.[1] && match[2] && match[3]) {
-    const [, sessionKey, storeName, entryKey] = match;
-    const suffix = key.includes('.ci.')
-      ? 'collection.item'
-      : key.includes('.li.')
-        ? 'listQuery.item'
-        : key.includes('.lq.')
-          ? 'listQuery.query'
-          : key.includes('.oq.')
-            ? 'offline.queue'
-            : key.includes('.oc.')
-              ? 'offline.conflict'
-              : 'offline.entity';
+  const withoutPrefix = key.slice(prefix.length);
+
+  if (withoutPrefix.endsWith('._o_.p')) {
+    const sessionKey = withoutPrefix.slice(0, -'._o_.p'.length);
+    return {
+      scope: { sessionKey, storeName: '_o_.p', kind: 'document' },
+      key: 'document',
+    };
+  }
+
+  if (withoutPrefix.endsWith('.__offline__.session')) {
+    const sessionKey = withoutPrefix.slice(0, -'.__offline__.session'.length);
+    return {
+      scope: { sessionKey, storeName: '__offline__', kind: 'document' },
+      key: 'session',
+    };
+  }
+
+  const namespaceMarkers = [
+    ['.ci.', 'collection.item'],
+    ['.li.', 'listQuery.item'],
+    ['.lq.', 'listQuery.query'],
+    ['.oq.', 'offline.queue'],
+    ['.oc.', 'offline.conflict'],
+    ['.oe.', 'offline.entity'],
+  ] as const;
+
+  for (const [marker, kind] of namespaceMarkers) {
+    const markerIndex = withoutPrefix.indexOf(marker);
+    if (markerIndex < 0) continue;
+
+    const beforeMarker = withoutPrefix.slice(0, markerIndex);
+    const entryKey = withoutPrefix.slice(markerIndex + marker.length);
+    const lastSeparatorIndex = beforeMarker.lastIndexOf('.');
+    if (lastSeparatorIndex < 0 || entryKey.length === 0) {
+      return null;
+    }
 
     return {
       scope: {
-        sessionKey,
-        storeName,
-        kind: __LEGIT_CAST__<AsyncStorageNamespaceScope['kind'], string>(
-          suffix,
-        ),
+        sessionKey: beforeMarker.slice(0, lastSeparatorIndex),
+        storeName: beforeMarker.slice(lastSeparatorIndex + 1),
+        kind: __LEGIT_CAST__<AsyncStorageNamespaceScope['kind'], string>(kind),
       },
       key: entryKey,
     };
   }
 
-  match = /^tsdf\.([^.]+)\._o_\.p$/.exec(key);
-  if (match?.[1]) {
-    return {
-      scope: { sessionKey: match[1], storeName: '_o_.p', kind: 'document' },
-      key: 'document',
-    };
-  }
-
-  match = /^tsdf\.([^.]+)\.__offline__\.session$/.exec(key);
-  if (match?.[1]) {
+  const lastSeparatorIndex = withoutPrefix.lastIndexOf('.');
+  if (lastSeparatorIndex > 0) {
     return {
       scope: {
-        sessionKey: match[1],
-        storeName: '__offline__',
+        sessionKey: withoutPrefix.slice(0, lastSeparatorIndex),
+        storeName: withoutPrefix.slice(lastSeparatorIndex + 1),
         kind: 'document',
       },
-      key: 'session',
-    };
-  }
-
-  match = /^tsdf\.([^.]+)\.(.+)$/.exec(key);
-  if (match?.[1] && match[2]) {
-    return {
-      scope: { sessionKey: match[1], storeName: match[2], kind: 'document' },
       key: 'document',
     };
   }
@@ -394,85 +385,7 @@ function listRawKeys(
         decodePathSegment(fileName.slice(0, -JSON_FILE_EXTENSION.length)),
       ];
     })
-    .sort(compareStrings);
-}
-
-function readRegisteredNamespaces(
-  mockBrowserOpfs: MockBrowserOpfsEnvironment,
-): AsyncStorageNamespaceScope[] {
-  const raw = readRawRecord(
-    mockBrowserOpfs,
-    INTERNAL_ASYNC_SCOPE,
-    INTERNAL_REGISTRY_KEY,
-  );
-  if (raw === null) return [];
-
-  const record = getRecord(parseJson<unknown>(raw));
-  if (record === null || !Array.isArray(record.namespaces)) {
-    return [];
-  }
-
-  const namespaces: AsyncStorageNamespaceScope[] = [];
-  for (const entry of record.namespaces) {
-    const namespace = getRecord(entry);
-    if (
-      namespace === null ||
-      typeof namespace.sessionKey !== 'string' ||
-      typeof namespace.storeName !== 'string' ||
-      typeof namespace.kind !== 'string'
-    ) {
-      continue;
-    }
-
-    namespaces.push({
-      sessionKey: namespace.sessionKey,
-      storeName: namespace.storeName,
-      kind: __LEGIT_CAST__<AsyncStorageNamespaceScope['kind'], string>(
-        namespace.kind,
-      ),
-    });
-  }
-
-  return namespaces;
-}
-
-function writeRegisteredNamespaces(
-  mockBrowserOpfs: MockBrowserOpfsEnvironment,
-  namespaces: AsyncStorageNamespaceScope[],
-): void {
-  writeRawRecord(
-    mockBrowserOpfs,
-    INTERNAL_ASYNC_SCOPE,
-    INTERNAL_REGISTRY_KEY,
-    JSON.stringify({ namespaces }),
-  );
-}
-
-function ensureNamespaceRegistered(
-  mockBrowserOpfs: MockBrowserOpfsEnvironment,
-  scope: AsyncStorageNamespaceScope,
-): void {
-  if (
-    scope.sessionKey === INTERNAL_ASYNC_SCOPE.sessionKey &&
-    scope.storeName === INTERNAL_ASYNC_SCOPE.storeName &&
-    scope.kind === INTERNAL_ASYNC_SCOPE.kind
-  ) {
-    return;
-  }
-
-  const existing = readRegisteredNamespaces(mockBrowserOpfs);
-  if (
-    existing.some(
-      (entry) =>
-        entry.sessionKey === scope.sessionKey &&
-        entry.storeName === scope.storeName &&
-        entry.kind === scope.kind,
-    )
-  ) {
-    return;
-  }
-
-  writeRegisteredNamespaces(mockBrowserOpfs, [...existing, scope]);
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function writeLogicalStorageEntry(
@@ -697,20 +610,10 @@ function isAppStoreFilePath(path: string): boolean {
     return false;
   }
 
-  const encodedSessionKey = pathSegments[1];
   const encodedStoreName = pathSegments[2];
-  if (encodedSessionKey === undefined || encodedStoreName === undefined) {
-    return false;
-  }
+  if (encodedStoreName === undefined) return false;
 
-  const sessionKey = decodePathSegment(encodedSessionKey);
   const storeName = decodePathSegment(encodedStoreName);
-  if (
-    sessionKey === INTERNAL_ASYNC_SCOPE.sessionKey &&
-    storeName === INTERNAL_ASYNC_SCOPE.storeName
-  ) {
-    return false;
-  }
 
   return storeName !== '_o_.p';
 }
@@ -863,7 +766,6 @@ type RawOpfsLogicalFileContents = { metadata: unknown; payload: unknown };
 export type OpfsPersistentStorageTestStoreScope = {
   document: {
     namespace: AsyncStorageNamespaceScope;
-    registerNamespace: () => void;
     storageKey: () => string;
     seed: <T>(data: T, options?: StorageSeedOptions) => string;
     readEntry: <T>() => StorageCacheEntry<PersistedDocumentData<T>>;
@@ -875,7 +777,6 @@ export type OpfsPersistentStorageTestStoreScope = {
   };
   collection: {
     namespace: AsyncStorageNamespaceScope;
-    registerNamespace: () => void;
     itemKey: (payload: string) => string;
     itemStorageKey: (payload: string) => string;
     listStoredPayloads: () => string[];
@@ -892,9 +793,6 @@ export type OpfsPersistentStorageTestStoreScope = {
   listQuery: {
     itemNamespace: AsyncStorageNamespaceScope;
     queryNamespace: AsyncStorageNamespaceScope;
-    registerItemNamespace: () => void;
-    registerQueryNamespace: () => void;
-    registerNamespaces: () => void;
     itemKey: (tableId: string, id: number | string) => string;
     itemStorageKey: (tableId: string, id: number | string) => string;
     queryStorageKey: (params: unknown) => string;
@@ -973,7 +871,6 @@ export function createOpfsPersistentStorageTestStore(
   payloadGetRequests: string[];
   payloadGetManyRequests: string[][];
   listKeysRequests: AsyncStorageNamespaceScope[];
-  legacyListKeysFallbackRequests: string[];
   operations: MockOpfsOperation[];
   scopeReadRequests: (args?: {
     storeName: string;
@@ -988,7 +885,6 @@ export function createOpfsPersistentStorageTestStore(
     storeName: string,
     sessionKey: string,
   ) => OpfsPersistentStorageTestStoreScope;
-  registerNamespace: (scope: AsyncStorageNamespaceScope) => void;
   setRaw: (key: string, raw: string) => void;
   setValue: <T>(key: string, value: T) => void;
   setPayload: (key: string, value: unknown) => void;
@@ -1141,8 +1037,6 @@ export function createOpfsPersistentStorageTestStore(
     return {
       document: {
         namespace: documentNamespace,
-        registerNamespace: () =>
-          ensureNamespaceRegistered(mockBrowserOpfs, documentNamespace),
         storageKey: () => documentStorageKey,
         seed<T>(data: T, seedOptions?: StorageSeedOptions) {
           setValue(
@@ -1181,8 +1075,6 @@ export function createOpfsPersistentStorageTestStore(
       },
       collection: {
         namespace: collectionNamespace,
-        registerNamespace: () =>
-          ensureNamespaceRegistered(mockBrowserOpfs, collectionNamespace),
         itemKey,
         itemStorageKey: collectionItemStorageKey,
         listStoredPayloads() {
@@ -1234,14 +1126,6 @@ export function createOpfsPersistentStorageTestStore(
       listQuery: {
         itemNamespace: listQueryItemNamespace,
         queryNamespace: listQueryQueryNamespace,
-        registerItemNamespace: () =>
-          ensureNamespaceRegistered(mockBrowserOpfs, listQueryItemNamespace),
-        registerQueryNamespace: () =>
-          ensureNamespaceRegistered(mockBrowserOpfs, listQueryQueryNamespace),
-        registerNamespaces: () => {
-          ensureNamespaceRegistered(mockBrowserOpfs, listQueryItemNamespace);
-          ensureNamespaceRegistered(mockBrowserOpfs, listQueryQueryNamespace);
-        },
         itemKey: listQueryItemKey,
         itemStorageKey: listQueryItemStorageKey,
         queryStorageKey: listQueryStorageKey,
@@ -1420,9 +1304,6 @@ export function createOpfsPersistentStorageTestStore(
     get listKeysRequests() {
       return getListKeysRequests(getCurrentOperations());
     },
-    get legacyListKeysFallbackRequests() {
-      return [];
-    },
     get operations() {
       return getCurrentOperations();
     },
@@ -1449,8 +1330,6 @@ export function createOpfsPersistentStorageTestStore(
     has: hasLogicalStorageEntry,
     readEntryFiles: readLogicalFileContents,
     scope: createScope,
-    registerNamespace: (scope: AsyncStorageNamespaceScope) =>
-      ensureNamespaceRegistered(mockBrowserOpfs, scope),
     setRaw,
     setValue,
     setPayload: (key: string, value: unknown) =>

@@ -19,6 +19,24 @@ export type AsyncStorageNamespaceKind =
   | 'offline.entity'
   | '__internal.protected';
 
+export function parseAsyncStorageNamespaceKind(
+  value: string,
+): AsyncStorageNamespaceKind | null {
+  switch (value) {
+    case 'document':
+    case 'collection.item':
+    case 'listQuery.item':
+    case 'listQuery.query':
+    case 'offline.queue':
+    case 'offline.conflict':
+    case 'offline.entity':
+    case '__internal.protected':
+      return value;
+    default:
+      return null;
+  }
+}
+
 export type AsyncStorageNamespaceScope = {
   sessionKey: string;
   storeName: string;
@@ -74,7 +92,6 @@ export type AsyncStorageNamespaceCommitArgs<
 
 export type AsyncStorageMaintenanceState = {
   lastSuccessfulCleanupAt: number | null;
-  startupCleanupLease: { holderId: string; expiresAt: number } | null;
 };
 
 export type AsyncStorageDriverSetEntry = { key: string; value: unknown };
@@ -95,6 +112,8 @@ export type AsyncStorageDriver = {
   listKeys(scope: AsyncStorageNamespaceScope): Promise<string[]>;
   /** Remove every record from a logical namespace. */
   clear(scope: AsyncStorageNamespaceScope): Promise<void>;
+  /** Optional namespace discovery fast path used by OPFS cleanup/session clearing. */
+  listScopes?(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]>;
   /** Optional bulk read fast path for backends that support it cheaply. */
   getMany?(
     scope: AsyncStorageNamespaceScope,
@@ -154,8 +173,6 @@ export type AsyncStorageAdapter = {
 
 /** Injected persistent storage adapter. */
 export type StorageAdapter = 'local-sync' | AsyncStorageAdapter;
-
-export type StorageBackend = 'localStorage' | 'opfs';
 
 // --- Schema Types ---
 

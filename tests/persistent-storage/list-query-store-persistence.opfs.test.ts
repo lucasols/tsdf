@@ -203,8 +203,8 @@ describe('opfs: list query store persistence', () => {
 
     expect(mockAdapter.scopeReadRequests({ storeName, sessionKey }).slice(0, 2))
       .toMatchInlineSnapshot(`
-      ['lq.{tableId:"users"}', 'li."users||1']
-    `);
+        ['lq.{tableId:"users"}', 'li."users||1']
+      `);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "

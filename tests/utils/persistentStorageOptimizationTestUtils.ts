@@ -1,6 +1,7 @@
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
+import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import {
   createOpfsPersistentStorageTestStore,
@@ -18,6 +19,7 @@ const MANAGED_PERSISTENT_SPECIAL_KEYS: Readonly<Record<string, string>> = {
   'tsdf._m.l': 'lease',
   'tsdf.__lsm__.l': 'lease',
   'tsdf._m.g': 'global maintenance',
+  [ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY]: 'async global maintenance',
 } as const;
 const MANIFEST_PART = '.manifest.';
 
@@ -510,7 +512,6 @@ export type PersistentStorageReadBreakdown = {
   payloadBatchReads: string[][];
   metadataBatchReads: string[][];
   listKeyScans: string[];
-  legacyFallbackReads: string[];
 };
 
 function createEmptyPersistentStorageReadBreakdown(): PersistentStorageReadBreakdown {
@@ -521,7 +522,6 @@ function createEmptyPersistentStorageReadBreakdown(): PersistentStorageReadBreak
     payloadBatchReads: [],
     metadataBatchReads: [],
     listKeyScans: [],
-    legacyFallbackReads: [],
   };
 }
 
@@ -759,7 +759,6 @@ function buildScopedOpfsReadBreakdown(
     listKeyScans: mockAdapter.listKeysRequests.map((scope) =>
       formatOpfsPath(scope),
     ),
-    legacyFallbackReads: [...mockAdapter.legacyListKeysFallbackRequests],
   };
 }
 

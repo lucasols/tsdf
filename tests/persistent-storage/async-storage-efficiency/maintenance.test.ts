@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'vitest';
-import type { AsyncStorageNamespaceScope } from '../../../src/persistentStorage/types';
+import { describe, expect, test, vi } from 'vitest';
+import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
+  getParsedLocalStorageValue,
   getParsedOpfsEntryFiles,
-  getParsedOpfsNamespaceValue,
+  startPersistentStorageOperationCapture,
   startOpfsPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
@@ -14,12 +15,6 @@ import {
 } from './shared';
 
 setupAsyncStorageEfficiencyTestSuite();
-
-const INTERNAL_ASYNC_SCOPE: AsyncStorageNamespaceScope = {
-  sessionKey: '__tsdf_async__',
-  storeName: '__tsdf_async__',
-  kind: '__internal.protected',
-};
 
 describe('async storage efficiency: maintenance', () => {
   test('startup cleanup removes expired entries and snapshots the full metadata scan history', async () => {
@@ -36,9 +31,6 @@ describe('async storage efficiency: maintenance', () => {
       { timestamp: oneWeekAgo },
     );
     freshDoc.document.seed({ value: { name: 'fresh', value: 2 } });
-    expiredDoc.document.registerNamespace();
-    freshDoc.document.registerNamespace();
-
     // Startup should only schedule the sweep; it should not perform storage I/O yet.
     const startupReadCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
@@ -48,9 +40,11 @@ describe('async storage efficiency: maintenance', () => {
     expect(startupOperations).toMatchInlineSnapshot(`"empty"`);
 
     // Once the scheduled sweep runs, snapshot the complete maintenance history.
+    const localStorageCapture = startPersistentStorageOperationCapture();
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
+    const localStorageOperations = localStorageCapture.finish().timelineString;
 
     expect({
       expiredEntryExists: mockAdapter.has(expiredKey),
@@ -59,140 +53,80 @@ describe('async storage efficiency: maintenance', () => {
       expiredEntryExists: '❌'
       freshEntryExists: '✅'
     `);
+    expect(localStorageOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 ❌ #1 tsdf._am.g (async global maintenance)
+      .    | 📖 ❌ #1 tsdf._am.g (async global maintenance)
+      .    | ✍️ ❌->✅ #1 tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
+      "
+    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       simplified
       time   |
-      2.01s  | 🗂️ tsdf/sess1/expired-doc/document
+      2.002s | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
+      .      | 🗂️ tsdf/sess1/expired-doc (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/fresh-doc (store directory) entries=["dir:document"]
+      2.006s | 🗂️ tsdf/sess1/expired-doc/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.29 kb
-      2.013s | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_payload__%3Adocument.json
+      2.009s | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_payload__%3Adocument.json
              |    └ (tsdf.sess1.expired-doc (payload))
       .      | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.expired-doc (metadata))
-      .      | 🗂️ tsdf/sess1/expired-doc/document (scope directory) entries=[]
-      2.015s | 📖 tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
-      2.016s | 🗂️ tsdf/sess1/fresh-doc/document
+      .      | 🗂️ tsdf/sess1/fresh-doc/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      2.018s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.29 kb
-      2.02s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.29 kb -> 0.16 kb
-      2.021s | 📖 tsdf/sess1/fresh-doc/document/__tsdf_meta__%3Adocument.json
+      2.011s | 📖 tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
+      2.014s | 📖 tsdf/sess1/fresh-doc/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.fresh-doc (metadata)) | 0.23 kb
-      2.022s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.024s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
 
       verbose
       time   |
       2.002s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.003s | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.004s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.005s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.006s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.007s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
+      .      | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
+      .      | 🗂️ tsdf/sess1/expired-doc (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/fresh-doc (store directory) entries=["dir:document"]
+      2.003s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      2.004s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.008s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
+      2.005s | 📂 dir-open ✅ tsdf/sess1/expired-doc (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.009s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📂 dir-open ✅ tsdf/sess1/expired-doc (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.01s  | 📂 dir-open ✅ tsdf/sess1/expired-doc/document (scope directory)
+      2.006s | 📂 dir-open ✅ tsdf/sess1/expired-doc/document (scope directory)
       .      | 🗂️ tsdf/sess1/expired-doc/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .      | 📂 dir-open ✅ tsdf/sess1/expired-doc (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.011s | 📂 dir-open ✅ tsdf/sess1/expired-doc/document (scope directory)
+      2.007s | 📂 dir-open ✅ tsdf/sess1/expired-doc/document (scope directory)
       .      | 📂 dir-open ✅ tsdf/sess1/expired-doc (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.29 kb
-      .      | 📄 file-open ✅ tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
+      2.008s | 📄 file-open ✅ tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.expired-doc (metadata))
       .      | 📂 dir-open ✅ tsdf/sess1/expired-doc/document (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/expired-doc (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.013s | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_payload__%3Adocument.json
+      .      | 📂 dir-open ✅ tsdf/sess1/fresh-doc (store directory)
+      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      2.009s | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_payload__%3Adocument.json
              |    └ (tsdf.sess1.expired-doc (payload))
       .      | 🗑️ ✅ tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.expired-doc (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/expired-doc/document (scope directory)
-      .      | 🗂️ tsdf/sess1/expired-doc/document (scope directory) entries=[]
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.014s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.015s | 📖 tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
-      .      | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/fresh-doc (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.016s | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
       .      | 📂 dir-open ✅ tsdf/sess1/fresh-doc/document (scope directory)
       .      | 🗂️ tsdf/sess1/fresh-doc/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .      | 📂 dir-open ✅ tsdf/sess1/fresh-doc (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.017s | 📂 dir-open ✅ tsdf/sess1/fresh-doc/document (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.018s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.29 kb
+      2.01s  | 📂 dir-open ✅ tsdf/sess1/fresh-doc/document (scope directory)
+      2.011s | 📖 tsdf/sess1/expired-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.expired-doc (metadata)) | 0.23 kb
       .      | 📄 file-open ✅ tsdf/sess1/fresh-doc/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.fresh-doc (metadata))
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      2.019s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      2.02s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.29 kb -> 0.16 kb
-      .      | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      2.021s | 📖 tsdf/sess1/fresh-doc/document/__tsdf_meta__%3Adocument.json
+      2.014s | 📖 tsdf/sess1/fresh-doc/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.fresh-doc (metadata)) | 0.23 kb
-      2.022s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.024s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
       "
     `);
     expect(
-      getParsedOpfsNamespaceValue(
-        mockAdapter,
-        INTERNAL_ASYNC_SCOPE,
-        'maintenance',
-      ),
-    ).toMatchInlineSnapshot(`
-      lastSuccessfulCleanupAt: 1735689602000
-      startupCleanupLease: null
-    `);
+      getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
+    ).toMatchInlineSnapshot(`lca: 1735689602000`);
   });
 
   test('malformed persisted records are tolerated and handled predictably', async () => {
@@ -208,9 +142,6 @@ describe('async storage efficiency: maintenance', () => {
     });
     corruptedDoc.document.setMetadata('{invalid');
     triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
-    corruptedDoc.document.registerNamespace();
-    triggerDoc.document.registerNamespace();
-
     createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
@@ -232,122 +163,61 @@ describe('async storage efficiency: maintenance', () => {
       "
       simplified
       time   |
-      2.01s  | 🗂️ tsdf/sess1/corrupted/document
+      2.002s | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:corrupted","dir:trigger"]
+      .      | 🗂️ tsdf/sess1/corrupted (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/trigger (store directory) entries=["dir:document"]
+      2.006s | 🗂️ tsdf/sess1/corrupted/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.28 kb
-      2.013s | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_payload__%3Adocument.json
+      2.009s | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_payload__%3Adocument.json
              |    └ (tsdf.sess1.corrupted (payload))
       .      | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.corrupted (metadata))
-      .      | 🗂️ tsdf/sess1/corrupted/document (scope directory) entries=[]
-      2.015s | 📖 tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.corrupted (metadata)) | 0.02 kb
-      2.016s | 🗂️ tsdf/sess1/trigger/document
+      .      | 🗂️ tsdf/sess1/trigger/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      2.018s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.28 kb
-      2.02s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.28 kb -> 0.15 kb
-      2.021s | 📖 tsdf/sess1/trigger/document/__tsdf_meta__%3Adocument.json
+      2.011s | 📖 tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.corrupted (metadata)) | 0.02 kb
+      2.014s | 📖 tsdf/sess1/trigger/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.trigger (metadata)) | 0.23 kb
-      2.022s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.024s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
 
       verbose
       time   |
       2.002s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.003s | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.004s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.005s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.006s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.007s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
+      .      | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:corrupted","dir:trigger"]
+      .      | 🗂️ tsdf/sess1/corrupted (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/trigger (store directory) entries=["dir:document"]
+      2.003s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      2.004s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.008s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
+      2.005s | 📂 dir-open ✅ tsdf/sess1/corrupted (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.009s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📂 dir-open ✅ tsdf/sess1/corrupted (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.01s  | 📂 dir-open ✅ tsdf/sess1/corrupted/document (scope directory)
+      2.006s | 📂 dir-open ✅ tsdf/sess1/corrupted/document (scope directory)
       .      | 🗂️ tsdf/sess1/corrupted/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .      | 📂 dir-open ✅ tsdf/sess1/corrupted (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.011s | 📂 dir-open ✅ tsdf/sess1/corrupted/document (scope directory)
+      2.007s | 📂 dir-open ✅ tsdf/sess1/corrupted/document (scope directory)
       .      | 📂 dir-open ✅ tsdf/sess1/corrupted (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.28 kb
-      .      | 📄 file-open ✅ tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json
+      2.008s | 📄 file-open ✅ tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.corrupted (metadata))
       .      | 📂 dir-open ✅ tsdf/sess1/corrupted/document (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/corrupted (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.013s | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_payload__%3Adocument.json
-             |    └ (tsdf.sess1.corrupted (payload))
-      .      | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.corrupted (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/corrupted/document (scope directory)
-      .      | 🗂️ tsdf/sess1/corrupted/document (scope directory) entries=[]
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.014s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.015s | 📖 tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.corrupted (metadata)) | 0.02 kb
-      .      | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
       .      | 📂 dir-open ✅ tsdf/sess1/trigger (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.016s | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
+      2.009s | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.sess1.corrupted (payload))
+      .      | 🗑️ ✅ tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json (tsdf.sess1.corrupted (metadata))
       .      | 📂 dir-open ✅ tsdf/sess1/trigger/document (scope directory)
       .      | 🗂️ tsdf/sess1/trigger/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .      | 📂 dir-open ✅ tsdf/sess1/trigger (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.017s | 📂 dir-open ✅ tsdf/sess1/trigger/document (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.018s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.28 kb
+      2.01s  | 📂 dir-open ✅ tsdf/sess1/trigger/document (scope directory)
+      2.011s | 📖 tsdf/sess1/corrupted/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.corrupted (metadata)) | 0.02 kb
       .      | 📄 file-open ✅ tsdf/sess1/trigger/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.trigger (metadata))
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      2.019s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      2.02s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.28 kb -> 0.15 kb
-      .      | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      2.021s | 📖 tsdf/sess1/trigger/document/__tsdf_meta__%3Adocument.json
+      2.014s | 📖 tsdf/sess1/trigger/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.trigger (metadata)) | 0.23 kb
-      2.022s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.024s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
       "
     `);
   });
@@ -373,10 +243,6 @@ describe('async storage efficiency: maintenance', () => {
       version: 1,
       customMetadata: {},
     });
-    validDoc.document.registerNamespace();
-    invalidMetadataDoc.document.registerNamespace();
-    missingPayloadDoc.document.registerNamespace();
-
     createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
@@ -396,182 +262,93 @@ describe('async storage efficiency: maintenance', () => {
       "
       simplified
       time   |
-      2.01s  | 🗂️ tsdf/sess1/valid-doc/document
+      2.002s | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1
+             |    └ (session directory) entries=["dir:invalid-metadata","dir:missing-payload","dir:valid-doc"]
+      .      | 🗂️ tsdf/sess1/invalid-metadata (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/missing-payload (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/valid-doc (store directory) entries=["dir:document"]
+      2.006s | 🗂️ tsdf/sess1/invalid-metadata/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.44 kb
-      .      | 🗂️ tsdf/sess1/invalid-metadata/document
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      2.015s | 📖 tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.valid-doc (metadata)) | 0.23 kb
-      .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_payload__%3Adocument.json
+      2.009s | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_payload__%3Adocument.json
              |    └ (tsdf.sess1.invalid-metadata (payload))
       .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.invalid-metadata (metadata))
-      .      | 🗂️ tsdf/sess1/invalid-metadata/document (scope directory) entries=[]
-      2.017s | 📖 tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.invalid-metadata (metadata)) | 0.02 kb
-      2.018s | 🗂️ tsdf/sess1/missing-payload/document
+      .      | 🗂️ tsdf/sess1/missing-payload/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json"]
-      2.02s  | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.44 kb
-      2.021s | 🗑️ ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
+      2.011s | 📖 tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.invalid-metadata (metadata)) | 0.02 kb
+      2.012s | 🗑️ ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.missing-payload (metadata))
-      .      | 🗂️ tsdf/sess1/missing-payload/document (scope directory) entries=[]
-      2.022s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.44 kb -> 0.30 kb
-      2.023s | 📖 tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
+      .      | 🗂️ tsdf/sess1/valid-doc/document
+             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      2.014s | 📖 tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.missing-payload (metadata)) | 0.21 kb
-      2.026s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.30 kb
-      2.028s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.30 kb -> 0.16 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.03s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
+      2.017s | 📖 tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.valid-doc (metadata)) | 0.23 kb
 
       verbose
       time   |
       2.002s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.003s | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.004s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.005s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.006s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.007s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
+      .      | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1
+             |    └ (session directory) entries=["dir:invalid-metadata","dir:missing-payload","dir:valid-doc"]
+      .      | 🗂️ tsdf/sess1/invalid-metadata (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/missing-payload (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/sess1/valid-doc (store directory) entries=["dir:document"]
+      2.003s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      2.004s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.008s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
+      2.005s | 📂 dir-open ✅ tsdf/sess1/invalid-metadata (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.009s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📂 dir-open ✅ tsdf/sess1/valid-doc (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.01s  | 📂 dir-open ✅ tsdf/sess1/valid-doc/document (scope directory)
-      .      | 🗂️ tsdf/sess1/valid-doc/document
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
-      .      | 📂 dir-open ✅ tsdf/sess1/valid-doc (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.011s | 📂 dir-open ✅ tsdf/sess1/valid-doc/document (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/invalid-metadata (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.44 kb
-      .      | 📄 file-open ✅ tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.valid-doc (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
+      2.006s | 📂 dir-open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
       .      | 🗂️ tsdf/sess1/invalid-metadata/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
       .      | 📂 dir-open ✅ tsdf/sess1/invalid-metadata (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.013s | 📂 dir-open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
+      2.007s | 📂 dir-open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
       .      | 📂 dir-open ✅ tsdf/sess1/invalid-metadata (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.014s | 📄 file-open ✅ tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
+      2.008s | 📄 file-open ✅ tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.invalid-metadata (metadata))
       .      | 📂 dir-open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/invalid-metadata (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.015s | 📖 tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.valid-doc (metadata)) | 0.23 kb
-      .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_payload__%3Adocument.json
+      .      | 📂 dir-open ✅ tsdf/sess1/missing-payload (store directory)
+      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      2.009s | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_payload__%3Adocument.json
              |    └ (tsdf.sess1.invalid-metadata (payload))
       .      | 🗑️ ✅ tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.invalid-metadata (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/invalid-metadata/document (scope directory)
-      .      | 🗂️ tsdf/sess1/invalid-metadata/document (scope directory) entries=[]
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.016s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.017s | 📖 tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
-             |    └ (tsdf.sess1.invalid-metadata (metadata)) | 0.02 kb
-      .      | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/missing-payload (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.018s | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
       .      | 📂 dir-open ✅ tsdf/sess1/missing-payload/document (scope directory)
       .      | 🗂️ tsdf/sess1/missing-payload/document
              |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json"]
       .      | 📂 dir-open ✅ tsdf/sess1/missing-payload (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.019s | 📂 dir-open ✅ tsdf/sess1/missing-payload/document (scope directory)
+      2.01s  | 📂 dir-open ✅ tsdf/sess1/missing-payload/document (scope directory)
       .      | 📂 dir-open ✅ tsdf/sess1/missing-payload (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.02s  | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.44 kb
+      2.011s | 📖 tsdf/sess1/invalid-metadata/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.invalid-metadata (metadata)) | 0.02 kb
       .      | 📄 file-open ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.missing-payload (metadata))
       .      | 📂 dir-open ✅ tsdf/sess1/missing-payload/document (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/missing-payload (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.021s | 🧹 ❌ tsdf/sess1/missing-payload/document/__tsdf_payload__%3Adocument.json (scope directory)
+      .      | 📂 dir-open ✅ tsdf/sess1/valid-doc (store directory)
+      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      2.012s | 🧹 ❌ tsdf/sess1/missing-payload/document/__tsdf_payload__%3Adocument.json (scope directory)
       .      | 🗑️ ✅ tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.missing-payload (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/missing-payload/document (scope directory)
-      .      | 🗂️ tsdf/sess1/missing-payload/document (scope directory) entries=[]
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.022s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.44 kb -> 0.30 kb
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.023s | 📖 tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
+      .      | 📂 dir-open ✅ tsdf/sess1/valid-doc/document (scope directory)
+      .      | 🗂️ tsdf/sess1/valid-doc/document
+             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .      | 📂 dir-open ✅ tsdf/sess1/valid-doc (store directory)
+      2.013s | 📂 dir-open ✅ tsdf/sess1/valid-doc/document (scope directory)
+      2.014s | 📖 tsdf/sess1/missing-payload/document/__tsdf_meta__%3Adocument.json
              |    └ (tsdf.sess1.missing-payload (metadata)) | 0.21 kb
-      .      | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.024s | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      2.025s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      2.026s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.30 kb
-      .      | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      2.028s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.30 kb -> 0.16 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.03s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
+      .      | 📄 file-open ✅ tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.valid-doc (metadata))
+      2.017s | 📖 tsdf/sess1/valid-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.sess1.valid-doc (metadata)) | 0.23 kb
       "
     `);
-    expect({
-      globalMaintenance: getParsedOpfsNamespaceValue(
-        mockAdapter,
-        INTERNAL_ASYNC_SCOPE,
-        'maintenance',
-      ),
-    }).toMatchInlineSnapshot(
-      `globalMaintenance: { lastSuccessfulCleanupAt: 1735689602000, startupCleanupLease: null }`,
-    );
   });
 
   test('protected dotted-session cleanup keeps the protected entry and snapshots the full metadata scan history', async () => {
@@ -595,9 +372,6 @@ describe('async storage efficiency: maintenance', () => {
       { value: { name: 'unprotected', value: 2 } },
       { timestamp: Date.now() - staleDurationMs },
     );
-    protectedDoc.document.registerNamespace();
-    unprotectedDoc.document.registerNamespace();
-
     // Mark one dotted-session entry as protected before the real cleanup pass.
     setProtectedKeysSnapshot(dottedSessionKey, [protectedDocStorageKey]);
 
@@ -612,71 +386,73 @@ describe('async storage efficiency: maintenance', () => {
     expect({
       protectedEntryExists: mockAdapter.has(protectedDocStorageKey),
       unprotectedEntryExists: mockAdapter.has(unprotectedDocStorageKey),
-      maintenanceState: mockAdapter.rawNamespace.get(
-        INTERNAL_ASYNC_SCOPE,
-        'maintenance',
+      maintenanceState: getParsedLocalStorageValue(
+        ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
       ),
     }).toMatchInlineSnapshot(`
-      maintenanceState: { lastSuccessfulCleanupAt: 1735689602000, startupCleanupLease: null }
+      maintenanceState: { lca: 1735689602000 }
       protectedEntryExists: '✅'
-      unprotectedEntryExists: '✅'
+      unprotectedEntryExists: '❌'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       simplified
       time   |
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.35 kb
-      2.015s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.017s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
+      2.002s | 🗂️ tsdf (root directory) entries=["dir:user%40example.com"]
+      .      | 🗂️ tsdf/user%40example.com (session directory) entries=["dir:protected-doc","dir:unprotected-doc"]
+      .      | 🗂️ tsdf/user%40example.com/protected-doc (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/user%40example.com/unprotected-doc (store directory) entries=["dir:document"]
+      2.005s | 🗂️ tsdf/user%40example.com/protected-doc/document
+             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      2.007s | 🗂️ tsdf/user%40example.com/unprotected-doc/document
+             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      2.01s  | 📖 tsdf/user%40example.com/protected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.protected-doc (metadata)) | 0.23 kb
+      .      | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.user@example.com.unprotected-doc (payload))
+      .      | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.unprotected-doc (metadata))
+      2.012s | 📖 tsdf/user%40example.com/unprotected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.unprotected-doc (metadata)) | 0.23 kb
 
       verbose
       time   |
       2.002s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.003s | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.004s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.005s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.006s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.007s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ❌ tsdf/user%40example.com (session directory)
-      2.008s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ❌ tsdf/user%40example.com (session directory)
-      2.009s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.01s  | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.011s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.35 kb
-      .      | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      2.013s | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      2.015s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.017s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
+      .      | 🗂️ tsdf (root directory) entries=["dir:user%40example.com"]
+      .      | 🗂️ tsdf/user%40example.com (session directory) entries=["dir:protected-doc","dir:unprotected-doc"]
+      .      | 🗂️ tsdf/user%40example.com/protected-doc (store directory) entries=["dir:document"]
+      .      | 🗂️ tsdf/user%40example.com/unprotected-doc (store directory) entries=["dir:document"]
+      2.003s | 📂 dir-open ✅ tsdf/user%40example.com (session directory)
+      2.004s | 📂 dir-open ✅ tsdf/user%40example.com/protected-doc (store directory)
+      .      | 📂 dir-open ✅ tsdf/user%40example.com (session directory)
+      2.005s | 📂 dir-open ✅ tsdf/user%40example.com/protected-doc/document (scope directory)
+      .      | 🗂️ tsdf/user%40example.com/protected-doc/document
+             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .      | 📂 dir-open ✅ tsdf/user%40example.com/protected-doc (store directory)
+      .      | 📂 dir-open ✅ tsdf/user%40example.com (session directory)
+      2.006s | 📂 dir-open ✅ tsdf/user%40example.com/protected-doc/document (scope directory)
+      .      | 📂 dir-open ✅ tsdf/user%40example.com/unprotected-doc (store directory)
+      .      | 📂 dir-open ✅ tsdf/user%40example.com (session directory)
+      2.007s | 📄 file-open ✅ tsdf/user%40example.com/protected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.protected-doc (metadata))
+      .      | 📂 dir-open ✅ tsdf/user%40example.com/unprotected-doc/document (scope directory)
+      .      | 🗂️ tsdf/user%40example.com/unprotected-doc/document
+             |    └ (scope directory) entries=["file:__tsdf_meta__%3Adocument.json","file:__tsdf_payload__%3Adocument.json"]
+      .      | 📂 dir-open ✅ tsdf/user%40example.com/unprotected-doc (store directory)
+      .      | 📂 dir-open ✅ tsdf/user%40example.com (session directory)
+      2.008s | 📂 dir-open ✅ tsdf/user%40example.com/unprotected-doc/document (scope directory)
+      .      | 📂 dir-open ✅ tsdf/user%40example.com/unprotected-doc (store directory)
+      2.009s | 📄 file-open ✅ tsdf/user%40example.com/unprotected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.unprotected-doc (metadata))
+      .      | 📂 dir-open ✅ tsdf/user%40example.com/unprotected-doc/document (scope directory)
+      2.01s  | 📖 tsdf/user%40example.com/protected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.protected-doc (metadata)) | 0.23 kb
+      .      | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/document/__tsdf_payload__%3Adocument.json
+             |    └ (tsdf.user@example.com.unprotected-doc (payload))
+      .      | 🗑️ ✅ tsdf/user%40example.com/unprotected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.unprotected-doc (metadata))
+      2.012s | 📖 tsdf/user%40example.com/unprotected-doc/document/__tsdf_meta__%3Adocument.json
+             |    └ (tsdf.user@example.com.unprotected-doc (metadata)) | 0.23 kb
       "
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, protectedDocStorageKey))
@@ -693,5 +469,58 @@ describe('async storage efficiency: maintenance', () => {
           d:
             value: { name: 'protected', value: 1 }
       `);
+  });
+
+  test('startup cleanup falls back to unlocked coordination when navigator.locks is unavailable', async () => {
+    const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const staleDoc = mockAdapter.scope('stale-doc', 'sess1');
+    const staleKey = staleDoc.document.storageKey();
+    const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis.navigator,
+      'locks',
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    staleDoc.document.seed(
+      { value: { name: 'stale', value: 1 } },
+      { timestamp: staleTimestamp },
+    );
+
+    Object.defineProperty(globalThis.navigator, 'locks', {
+      value: null,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      createDocumentEnv({ storeName: 'trigger-doc', sessionKey: 'sess1' });
+      await waitForScheduledCleanup();
+
+      expect({
+        maintenanceState: getParsedLocalStorageValue(
+          ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+        ),
+        staleEntryExists: mockAdapter.has(staleKey),
+      }).toMatchInlineSnapshot(`
+        maintenanceState: { lca: 1735689602000 }
+        staleEntryExists: '❌'
+      `);
+      expect(warnSpy.mock.calls).toMatchInlineSnapshot(`
+        - - '[TSDF] navigator.locks is unavailable; async OPFS startup cleanup is using unlocked coordination.'
+      `);
+    } finally {
+      warnSpy.mockRestore();
+
+      if (originalLocksDescriptor) {
+        Object.defineProperty(
+          globalThis.navigator,
+          'locks',
+          originalLocksDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(globalThis.navigator, 'locks');
+      }
+    }
   });
 });

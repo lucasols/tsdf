@@ -1,6 +1,7 @@
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
+import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
 import { upsertManagedLocalStorageSingleEntry } from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
@@ -137,6 +138,10 @@ describe('sync storage efficiency: maintenance', () => {
     localStorage.setItem(straySingleKey, JSON.stringify({ timestamp: 1 }));
     localStorage.setItem(strayNamespaceKey, JSON.stringify({ timestamp: 1 }));
     localStorage.setItem('tsdf._m.g', '{invalid');
+    localStorage.setItem(
+      ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+      JSON.stringify({ lca: 123 }),
+    );
     localStorage.setItem(malformedManifestKey, '{invalid');
     localStorage.setItem(malformedCompactQueryKey, '{invalid');
     localStorage.setItem(
@@ -181,9 +186,13 @@ describe('sync storage efficiency: maintenance', () => {
         localStorage.getItem(malformedCompactQueryKey) !== null,
       validCompactQueryExists:
         localStorage.getItem(validCompactQueryKey) !== null,
+      asyncGlobalMaintenance: getParsedLocalStorageValue(
+        ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+      ),
       externalCache: localStorage.getItem('external-cache'),
       globalMaintenance: getParsedLocalStorageValue('tsdf._m.g'),
     }).toMatchInlineSnapshot(`
+      asyncGlobalMaintenance: { lca: 123 }
       externalCache: '{"keep":true}'
       globalMaintenance: { lca: 1735689602000 }
       malformedCompactQueryExists: '❌'

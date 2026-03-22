@@ -581,12 +581,6 @@ describe('async storage efficiency: document', () => {
       - key: '__tsdf_meta__:document'
         kind: 'metadata'
         scope: { kind: 'document', sessionKey: 'sess1', storeName: 'coalesced-opfs' }
-      - key: 'registry'
-        kind: 'internal'
-        scope:
-          kind: '__internal.protected'
-          sessionKey: '__tsdf_async__'
-          storeName: '__tsdf_async__'
     `);
   });
 

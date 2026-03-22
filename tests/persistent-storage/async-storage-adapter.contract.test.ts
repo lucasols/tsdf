@@ -263,6 +263,10 @@ describe('createAsyncStorageAdapter', () => {
     await Promise.all(pendingCommits);
 
     await clearSessionStorage('sess-clear', adapter);
+    const clearOperationsAfterFirstClear = driverState.operations.filter(
+      (operation) => operation.type === 'clear',
+    ).length;
+    await clearSessionStorage('sess-clear', adapter);
 
     expect(
       await clearedDocument.get('document', { touch: 'never' }),
@@ -292,6 +296,9 @@ describe('createAsyncStorageAdapter', () => {
       - { kind: 'document', sessionKey: 'sess-clear', storeName: 'docs' }
       - { kind: 'collection.item', sessionKey: 'sess-clear', storeName: 'users' }
     `);
+    expect(
+      driverState.operations.filter((operation) => operation.type === 'clear'),
+    ).toHaveLength(clearOperationsAfterFirstClear);
     expect(
       [...driverState.namespaces.entries()]
         .filter(([, entries]) =>

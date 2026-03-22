@@ -1,5 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  getNavigatorLockManager,
+  warnIfNavigatorLockUnavailable,
+} from './navigatorLocks';
+import {
   clearManagedLocalStorageManifest,
   clearManagedLocalStorageSession,
   directManagedLocalStorageIo,
@@ -25,16 +29,11 @@ import {
 import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import { OpfsAsyncStorageDriver } from './opfsAsyncStorageAdapter';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import type {
-  AsyncStorageAdapter,
-  StorageAdapter,
-  StorageBackend,
-} from './types';
+import type { AsyncStorageAdapter, StorageAdapter } from './types';
 
 const MANAGED_LOCAL_STORAGE_LOCK_NAME = 'tsdf-local-storage-metadata';
 const MANAGED_LOCAL_STORAGE_LOCK_WARNING =
   '[TSDF] navigator.locks is unavailable; localPersistentStorage is using unlocked localStorage coordination.';
-let warnedManagedLocalStorageLockUnavailable = false;
 const managedLocalStorageIoStack: ManagedLocalStorageIo[] = [];
 
 function createCachedManagedLocalStorageIo(): {
@@ -177,28 +176,8 @@ function getActiveManagedLocalStorageIo(): ManagedLocalStorageIo {
 }
 
 function getManagedLocalStorageIoWithWarning(): ManagedLocalStorageIo {
-  warnIfManagedLocalStorageLockUnavailable();
+  warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
   return getActiveManagedLocalStorageIo();
-}
-
-function getManagedLocalStorageLockManager(): LockManager | null {
-  const globalNavigator = __LEGIT_CAST__<Navigator | null | undefined, unknown>(
-    globalThis.navigator,
-  );
-  return (
-    __LEGIT_CAST__<LockManager | null | undefined, unknown>(
-      globalNavigator?.locks,
-    ) ?? null
-  );
-}
-
-function warnIfManagedLocalStorageLockUnavailable(): void {
-  if (getManagedLocalStorageLockManager() !== null) return;
-
-  if (!warnedManagedLocalStorageLockUnavailable) {
-    warnedManagedLocalStorageLockUnavailable = true;
-    console.warn(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
-  }
 }
 
 async function runWithManagedLocalStorageLock<T>(
@@ -208,10 +187,10 @@ async function runWithManagedLocalStorageLock<T>(
     return await callback();
   }
 
-  const lockManager = getManagedLocalStorageLockManager();
+  const lockManager = getNavigatorLockManager();
 
-  if (lockManager == null) {
-    warnIfManagedLocalStorageLockUnavailable();
+  if (lockManager === null) {
+    warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
     return await callback();
   }
 
@@ -414,11 +393,11 @@ export const localPersistentStorage: LocalPersistentStorage = {
     manifestKey: string,
     callback: () => Promise<void>,
   ): void {
-    warnIfManagedLocalStorageLockUnavailable();
+    warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
     registerManagedLocalStorageMaintenanceCallback(manifestKey, callback);
   },
   unregisterMaintenanceCallback(manifestKey: string): void {
-    warnIfManagedLocalStorageLockUnavailable();
+    warnIfNavigatorLockUnavailable(MANAGED_LOCAL_STORAGE_LOCK_WARNING);
     unregisterManagedLocalStorageMaintenanceCallback(manifestKey);
   },
   runMaintenance(forceManifestKeys?: Iterable<string>): Promise<void> {
@@ -448,20 +427,3 @@ export const localPersistentStorage: LocalPersistentStorage = {
 
 export const opfsPersistentStorage: AsyncStorageAdapter =
   createAsyncStorageAdapter(new OpfsAsyncStorageDriver());
-
-export function isAsyncStorageAdapter(adapter: StorageAdapter): boolean {
-  return adapter !== 'local-sync';
-}
-
-export function isSyncStorageAdapter(adapter: StorageAdapter): boolean {
-  return adapter === 'local-sync';
-}
-
-export function createStorageAdapter(backend: StorageBackend): StorageAdapter {
-  switch (backend) {
-    case 'localStorage':
-      return 'local-sync';
-    case 'opfs':
-      return opfsPersistentStorage;
-  }
-}

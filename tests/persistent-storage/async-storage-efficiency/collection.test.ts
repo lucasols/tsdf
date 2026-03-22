@@ -43,8 +43,6 @@ describe('async storage efficiency: collection', () => {
     const freshItemKey = collectionScope.collection.seedItem('fresh-user', {
       value: { id: 'fresh-user', name: 'Fresh User' },
     });
-    collectionScope.collection.registerNamespace();
-
     // Startup should only queue the background scan.
     const startupOperationCapture = startOpfsPersistentStorageOperationCapture(
       mockAdapter,
@@ -77,13 +75,12 @@ describe('async storage efficiency: collection', () => {
       "
       simplified
       time   |
-      2.01s  | 🗂️ tsdf/sess1/collection-expiration/collection.item
+      2.002s | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:collection-expiration"]
+      .      | 🗂️ tsdf/sess1/collection-expiration (store directory) entries=["dir:collection.item"]
+      2.006s | 🗂️ tsdf/sess1/collection-expiration/collection.item
              |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22expired-user-2.json","file:__tsdf_meta__%3A%22expired-user.json","file:__tsdf_meta__%3A%22fresh-user.json","file:__tsdf_payload__%3A%22expired-user-2.json","file:__tsdf_payload__%3A%22expired-user.json","file:__tsdf_payload__%3A%22fresh-user.json"]
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.20 kb
-      2.013s | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_payload__%3A%22expired-user.json
+      2.009s | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_payload__%3A%22expired-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (payload))
       .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
@@ -91,71 +88,39 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (payload))
       .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
-      .      | 🗂️ tsdf/sess1/collection-expiration/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22fresh-user.json","file:__tsdf_payload__%3A%22fresh-user.json"]
-      2.015s | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
+      2.011s | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
       .      | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
       .      | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22fresh-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
-      2.018s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.20 kb
-      2.019s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.021s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
 
       verbose
       time   |
       2.002s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.003s | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.004s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.005s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.006s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.007s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
+      .      | 🗂️ tsdf (root directory) entries=["dir:sess1"]
+      .      | 🗂️ tsdf/sess1 (session directory) entries=["dir:collection-expiration"]
+      .      | 🗂️ tsdf/sess1/collection-expiration (store directory) entries=["dir:collection.item"]
+      2.003s | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      2.004s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.008s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
+      2.005s | 📂 dir-open ✅ tsdf/sess1/collection-expiration (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.009s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📂 dir-open ✅ tsdf/sess1/collection-expiration (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.01s  | 📂 dir-open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)
+      2.006s | 📂 dir-open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)
       .      | 🗂️ tsdf/sess1/collection-expiration/collection.item
              |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22expired-user-2.json","file:__tsdf_meta__%3A%22expired-user.json","file:__tsdf_meta__%3A%22fresh-user.json","file:__tsdf_payload__%3A%22expired-user-2.json","file:__tsdf_payload__%3A%22expired-user.json","file:__tsdf_payload__%3A%22fresh-user.json"]
       .      | 📂 dir-open ✅ tsdf/sess1/collection-expiration (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.011s | 📂 dir-open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)
+      2.007s | 📂 dir-open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)
       .      | 📂 dir-open ✅ tsdf/sess1/collection-expiration (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.012s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.00 kb -> 0.23 kb
-      .      | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.20 kb
-      .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
+      2.008s | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
       .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
       .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22fresh-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata))
       .      | 📂 dir-open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/collection-expiration (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.013s | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_payload__%3A%22expired-user.json
+      2.009s | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_payload__%3A%22expired-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (payload))
       .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
@@ -163,35 +128,12 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (payload))
       .      | 🗑️ ✅ tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/collection-expiration/collection.item (scope directory)
-      .      | 🗂️ tsdf/sess1/collection-expiration/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22fresh-user.json","file:__tsdf_payload__%3A%22fresh-user.json"]
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
-      2.014s | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
-      2.015s | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
+      2.011s | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
       .      | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22expired-user-2.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
       .      | 📖 tsdf/sess1/collection-expiration/collection.item/__tsdf_meta__%3A%22fresh-user.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
-      .      | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      2.016s | 📄 file-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      2.017s | 📄 file-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance)
-      2.018s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.20 kb
-      2.019s | 📖 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb
-      2.021s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/maintenance.json
-             |    └ (global maintenance) | 0.23 kb -> 0.13 kb
       "
     `);
     expect(getParsedOpfsEntryFiles(mockAdapter, freshItemKey))
@@ -262,8 +204,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.00 kb -> 0.24 kb
-      4.151s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.20 kb
       6.144s | 🗂️ tsdf/sess1/col-max-items-metadata/collection.item
              |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22a.json","file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_payload__%3A%22a.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json"]
       6.149s | 📖 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22a.json
@@ -276,8 +216,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22a.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata))
-      .      | 🗂️ tsdf/sess1/col-max-items-metadata/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json"]
 
       verbose
       time   |
@@ -291,29 +229,17 @@ describe('async storage efficiency: collection', () => {
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.143s | 📂 dir-open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1/col-max-items-metadata (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
       4.144s | 📄 file-open ❌ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata))
       .      | 📁 dir-open-or-create ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
       4.145s | 📄 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_payload__%3A%22c.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (payload))
       .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata))
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      4.146s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      4.147s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
       4.149s | ✍️ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_payload__%3A%22c.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.00 kb -> 0.24 kb
-      4.151s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.20 kb
       6.141s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.142s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
@@ -338,16 +264,11 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.24 kb
       6.181s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.182s | 📂 dir-open ✅ tsdf/sess1/col-max-items-metadata (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.183s | 📂 dir-open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/col-max-items-metadata (store directory)
       6.184s | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_payload__%3A%22a.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/collection.item/__tsdf_meta__%3A%22a.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/col-max-items-metadata/collection.item (scope directory)
-      .      | 🗂️ tsdf/sess1/col-max-items-metadata/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22b.json","file:__tsdf_meta__%3A%22c.json","file:__tsdf_payload__%3A%22b.json","file:__tsdf_payload__%3A%22c.json"]
       "
     `);
   });
@@ -399,8 +320,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.00 kb -> 0.24 kb
-      4.151s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.20 kb
       5.249s | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22d.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22d.json
@@ -423,8 +342,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22a.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))
-      .      | 🗂️ tsdf/sess1/col-coalesced-maintenance/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22c.json","file:__tsdf_meta__%3A%22d.json","file:__tsdf_payload__%3A%22c.json","file:__tsdf_payload__%3A%22d.json"]
 
       verbose
       time   |
@@ -438,29 +355,17 @@ describe('async storage efficiency: collection', () => {
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.143s | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
       4.144s | 📄 file-open ❌ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))
       .      | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
       4.145s | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22c.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (payload))
       .      | 📄 file-open-or-create 🆕 tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata))
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      4.146s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      4.147s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
       4.149s | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22c.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22c.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.00 kb -> 0.24 kb
-      4.151s | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.20 kb
       5.241s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       5.242s | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
@@ -505,9 +410,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.24 kb
       6.181s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.182s | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.183s | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
       6.184s | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_payload__%3A%22b.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22b.json
@@ -516,9 +419,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/collection.item/__tsdf_meta__%3A%22a.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance/collection.item (scope directory)
-      .      | 🗂️ tsdf/sess1/col-coalesced-maintenance/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%22c.json","file:__tsdf_meta__%3A%22d.json","file:__tsdf_payload__%3A%22c.json","file:__tsdf_payload__%3A%22d.json"]
       "
     `);
   });
@@ -678,8 +578,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
-      4.15s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.19 kb
       6.143s | 🗂️ tsdf/sess1/col-mutation-flow/collection.item
              |    └ (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]
       6.198s | 📖 tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json
@@ -699,29 +597,17 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata))
       4.141s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.142s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-flow (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
       4.143s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-flow/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
       4.144s | 📄 file-open-or-create ✅ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_payload__%3A%221.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload))
       .      | 📄 file-open-or-create ✅ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata))
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      4.145s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      4.146s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
       4.147s | 📖 tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb
       4.148s | ✍️ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_payload__%3A%221.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-mutation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
-      4.15s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.19 kb
       6.141s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.142s | 📂 dir-open ✅ tsdf/sess1/col-mutation-flow (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
@@ -775,8 +661,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (metadata))
-      .      | 🗂️ tsdf/sess1/col-delete-flow/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%222.json","file:__tsdf_payload__%3A%222.json"]
       6.084s | 🗂️ tsdf/sess1/col-delete-flow/collection.item
              |    └ (scope directory) entries=["file:__tsdf_meta__%3A%222.json","file:__tsdf_payload__%3A%222.json"]
       6.089s | 📖 tsdf/sess1/col-delete-flow/collection.item/__tsdf_meta__%3A%222.json
@@ -786,16 +670,11 @@ describe('async storage efficiency: collection', () => {
       time   |
       4.081s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       4.082s | 📂 dir-open ✅ tsdf/sess1/col-delete-flow (store directory)
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
       4.083s | 📂 dir-open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/sess1/col-delete-flow (store directory)
       4.084s | 🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item/__tsdf_payload__%3A%221.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-delete-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (metadata))
-      .      | 📂 dir-open ✅ tsdf/sess1/col-delete-flow/collection.item (scope directory)
-      .      | 🗂️ tsdf/sess1/col-delete-flow/collection.item
-             |    └ (scope directory) entries=["file:__tsdf_meta__%3A%222.json","file:__tsdf_payload__%3A%222.json"]
       6.081s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.082s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
@@ -872,8 +751,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
-      4.96s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.20 kb
       6.954s | 🗂️ tsdf/sess1/col-invalidation-flow/collection.item
              |    └ (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]
       7.009s | 📖 tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json
@@ -893,29 +770,17 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))
       4.951s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       4.952s | 📁 dir-open-or-create ✅ tsdf/sess1/col-invalidation-flow (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
       4.953s | 📁 dir-open-or-create ✅ tsdf/sess1/col-invalidation-flow/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
       4.954s | 📄 file-open-or-create ✅ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_payload__%3A%221.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload))
       .      | 📄 file-open-or-create ✅ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata))
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      4.955s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      4.956s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
       4.957s | 📖 tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb
       4.958s | ✍️ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_payload__%3A%221.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-invalidation-flow/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
-      4.96s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.20 kb
       6.951s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       6.952s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
@@ -1081,8 +946,6 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
-      5.86s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.21 kb
       7.854s | 🗂️ tsdf/sess1/col-coalesced-invalidations/collection.item
              |    └ (scope directory) entries=["file:__tsdf_meta__%3A%221.json","file:__tsdf_payload__%3A%221.json"]
       7.909s | 📖 tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json
@@ -1102,29 +965,17 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))
       5.851s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       5.852s | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations (store directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__ (session directory)
       5.853s | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/collection.item (scope directory)
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__ (session directory)
       5.854s | 📄 file-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_payload__%3A%221.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload))
       .      | 📄 file-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata))
-      .      | 📂 dir-open ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__ (store directory)
-      5.855s | 📄 file-open ❌ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
-      .      | 📁 dir-open-or-create ✅ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected (scope directory)
-      5.856s | 📄 file-open-or-create 🆕 tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry)
       5.857s | 📖 tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb
       5.858s | ✍️ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_payload__%3A%221.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-coalesced-invalidations/collection.item/__tsdf_meta__%3A%221.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
-      5.86s  | ✍️ tsdf/__tsdf_async__/__tsdf_async__/__internal.protected/registry.json
-             |    └ (internal registry) | 0.00 kb -> 0.21 kb
       7.851s | 📂 dir-open ✅ tsdf/sess1 (session directory)
       7.852s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)

@@ -360,8 +360,8 @@ describe('opfs: converted list query store persistence', () => {
       readStoredQuery(mockAdapter, 'lq-opfs-save-error', 'sess1', usersQuery)
         .payload,
     ).toMatchInlineSnapshot(`
-        tableId: 'users'
-      `);
+      tableId: 'users'
+    `);
     expect(
       readStoredQuery(mockAdapter, 'lq-opfs-save-error', 'sess1', usersQuery)
         .items,
