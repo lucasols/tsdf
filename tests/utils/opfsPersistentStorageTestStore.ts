@@ -1,6 +1,18 @@
 /* eslint-disable @typescript-eslint/consistent-type-assertions -- test helper intentionally optimizes for compact fixture code. */
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  buildFileName,
+  decodePathSegment,
+  encodePathSegment,
+  getMetadataRecordKey,
+  getPayloadRecordKey,
+  joinPath,
+  METADATA_RECORD_PREFIX,
+  OPFS_ROOT_DIR,
+  parseFileName,
+  PAYLOAD_RECORD_PREFIX,
+} from '../../src/persistentStorage/opfsFileNaming';
 import type {
   AsyncStorageNamespaceScope,
   PersistedCollectionItemData,
@@ -15,154 +27,6 @@ import {
   type MockBrowserOpfsOperation as RawMockBrowserOpfsOperation,
 } from '../mocks/mockBrowserOpfs';
 
-const OPFS_ROOT_DIR = 'tsdf';
-const JSON_FILE_EXTENSION = '.json';
-
-const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
-const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
-const METADATA_RECORD_PREFIX = '__tsdf_meta__:';
-
-function encodePathSegment(value: string): string {
-  return encodeURIComponent(value);
-}
-
-function decodePathSegment(value: string): string {
-  return decodeURIComponent(value);
-}
-
-function encodeFileNameSegment(value: string): string {
-  return encodePathSegment(value).replaceAll('.', '%2E');
-}
-
-function getFileNameKindAlias(
-  kind: AsyncStorageNamespaceScope['kind'],
-): string {
-  switch (kind) {
-    case 'document':
-      return 'd';
-    case 'collection.item':
-      return 'ci';
-    case 'listQuery.item':
-      return 'li';
-    case 'listQuery.query':
-      return 'lq';
-    case 'offline.queue':
-      return 'oq';
-    case 'offline.conflict':
-      return 'oc';
-    case 'offline.entity':
-      return 'oe';
-    case '__internal.protected':
-      return 'ip';
-  }
-}
-
-function parseFileNameKindAlias(
-  value: string,
-): AsyncStorageNamespaceScope['kind'] | null {
-  switch (value) {
-    case 'd':
-      return 'document';
-    case 'ci':
-      return 'collection.item';
-    case 'li':
-      return 'listQuery.item';
-    case 'lq':
-      return 'listQuery.query';
-    case 'oq':
-      return 'offline.queue';
-    case 'oc':
-      return 'offline.conflict';
-    case 'oe':
-      return 'offline.entity';
-    case 'ip':
-      return '__internal.protected';
-    default:
-      return null;
-  }
-}
-
-type OpfsRecordKind = 'metadata' | 'payload' | 'raw';
-
-function getRecordKindAlias(kind: OpfsRecordKind): string {
-  switch (kind) {
-    case 'payload':
-      return 'p';
-    case 'metadata':
-      return 'm';
-    case 'raw':
-      return 'r';
-  }
-}
-
-function parseRecordKindAlias(value: string): OpfsRecordKind | null {
-  switch (value) {
-    case 'p':
-      return 'payload';
-    case 'm':
-      return 'metadata';
-    case 'r':
-      return 'raw';
-    default:
-      return null;
-  }
-}
-
-function getEntryToken(
-  scope: AsyncStorageNamespaceScope,
-  userKey: string,
-): string {
-  if (scope.kind === 'document' && userKey === 'document') {
-    return OPFS_SINGLETON_ENTRY_TOKEN;
-  }
-
-  return encodeFileNameSegment(userKey);
-}
-
-function parseEntryToken(
-  scopeKind: AsyncStorageNamespaceScope['kind'],
-  token: string,
-): string {
-  if (scopeKind === 'document' && token === OPFS_SINGLETON_ENTRY_TOKEN) {
-    return 'document';
-  }
-
-  return decodePathSegment(token);
-}
-
-function parseRecordKey(
-  key: string,
-):
-  | { recordKind: 'payload' | 'metadata'; userKey: string }
-  | { rawKey: string; recordKind: 'raw' } {
-  if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
-    return {
-      recordKind: 'payload',
-      userKey: key.slice(PAYLOAD_RECORD_PREFIX.length),
-    };
-  }
-
-  if (key.startsWith(METADATA_RECORD_PREFIX)) {
-    return {
-      recordKind: 'metadata',
-      userKey: key.slice(METADATA_RECORD_PREFIX.length),
-    };
-  }
-
-  return { rawKey: key, recordKind: 'raw' };
-}
-
-function toRecordKey(recordKind: OpfsRecordKind, userKey: string): string {
-  switch (recordKind) {
-    case 'payload':
-      return getPayloadRecordKey(userKey);
-    case 'metadata':
-      return getMetadataRecordKey(userKey);
-    case 'raw':
-      return userKey;
-  }
-}
-
 function itemKey(payload: string): string {
   return getCompositeKey(payload);
 }
@@ -173,14 +37,6 @@ function listQueryItemKey(tableId: string, id: number | string): string {
 
 function listQueryQueryKey(params: unknown): string {
   return getCompositeKey(params);
-}
-
-function getPayloadRecordKey(key: string): string {
-  return `${PAYLOAD_RECORD_PREFIX}${key}`;
-}
-
-function getMetadataRecordKey(key: string): string {
-  return `${METADATA_RECORD_PREFIX}${key}`;
 }
 
 function safeStringify(value: unknown): string | null {
@@ -457,10 +313,6 @@ function normalizeLogicalPayload(
   }
 }
 
-function joinPath(...segments: string[]): string {
-  return segments.filter((segment) => segment !== '').join('/');
-}
-
 function storeDirPath(
   scope: Pick<AsyncStorageNamespaceScope, 'sessionKey' | 'storeName'>,
 ): string {
@@ -471,65 +323,11 @@ function storeDirPath(
   );
 }
 
-function fileNameForKey(
-  scope: AsyncStorageNamespaceScope,
-  key: string,
-): string {
-  const parsedRecordKey = parseRecordKey(key);
-  const kindAlias = getFileNameKindAlias(scope.kind);
-
-  if (parsedRecordKey.recordKind === 'raw') {
-    return (
-      [
-        kindAlias,
-        encodeFileNameSegment(parsedRecordKey.rawKey),
-        getRecordKindAlias('raw'),
-      ].join('.') + JSON_FILE_EXTENSION
-    );
-  }
-
-  return (
-    [
-      kindAlias,
-      getEntryToken(scope, parsedRecordKey.userKey),
-      getRecordKindAlias(parsedRecordKey.recordKind),
-    ].join('.') + JSON_FILE_EXTENSION
-  );
-}
-
 function filePathForRecord(
   scope: AsyncStorageNamespaceScope,
   key: string,
 ): string {
-  return joinPath(storeDirPath(scope), fileNameForKey(scope, key));
-}
-
-function parseRecordFileName(
-  fileName: string,
-): { key: string; kind: AsyncStorageNamespaceScope['kind'] } | null {
-  if (!fileName.endsWith(JSON_FILE_EXTENSION)) return null;
-
-  const encodedRecord = fileName.slice(0, -JSON_FILE_EXTENSION.length);
-  const parts = encodedRecord.split('.');
-  if (parts.length !== 3) return null;
-
-  const kindPart = parts[0] ?? '';
-  const entryPart = parts[1] ?? '';
-  const recordPart = parts[2] ?? '';
-
-  const kind = parseFileNameKindAlias(kindPart);
-  if (kind === null) return null;
-
-  const recordKind = parseRecordKindAlias(recordPart);
-  if (recordKind === null) return null;
-
-  return {
-    kind,
-    key:
-      recordKind === 'raw'
-        ? decodePathSegment(entryPart)
-        : toRecordKey(recordKind, parseEntryToken(kind, entryPart)),
-  };
+  return joinPath(storeDirPath(scope), buildFileName(scope, key));
 }
 
 function readRawRecord(
@@ -566,7 +364,7 @@ function listRawKeys(
     .flatMap((entry) => {
       if (!entry.startsWith('file:')) return [];
       const fileName = entry.slice('file:'.length);
-      const parsed = parseRecordFileName(fileName);
+      const parsed = parseFileName(fileName);
       if (parsed === null || parsed.kind !== scope.kind) return [];
       return [parsed.key];
     })
@@ -773,7 +571,7 @@ function parseFileContext(
   if (fileName === undefined) return null;
 
   const store = parseStoreFromDirPath(pathSegments.join('/'));
-  const parsedRecord = parseRecordFileName(fileName);
+  const parsedRecord = parseFileName(fileName);
   if (store === null || parsedRecord === null) {
     return null;
   }
@@ -946,7 +744,7 @@ function getListKeysRequests(
 
     for (const entry of operation.entries) {
       if (!entry.startsWith('file:')) continue;
-      const parsedRecord = parseRecordFileName(entry.slice('file:'.length));
+      const parsedRecord = parseFileName(entry.slice('file:'.length));
       if (parsedRecord === null || seenKinds.has(parsedRecord.kind)) continue;
 
       seenKinds.add(parsedRecord.kind);

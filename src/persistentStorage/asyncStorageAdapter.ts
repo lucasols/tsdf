@@ -1,4 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  getMetadataRecordKey,
+  getPayloadRecordKey,
+  METADATA_RECORD_PREFIX,
+} from './opfsFileNaming';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDriver,
@@ -31,9 +36,6 @@ export const ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY = 'tsdf._am.g';
 const ASYNC_STARTUP_CLEANUP_LOCK_NAME = 'tsdf-async-storage-maintenance';
 const ASYNC_STARTUP_CLEANUP_LOCK_WARNING =
   '[TSDF] navigator.locks is unavailable; async OPFS startup cleanup is using unlocked coordination.';
-const INTERNAL_PAYLOAD_PREFIX = '__tsdf_payload__:';
-const INTERNAL_METADATA_PREFIX = '__tsdf_meta__:';
-
 function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
   return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
 }
@@ -42,17 +44,9 @@ function getBucketId(timestamp: number): string {
   return String(Math.floor(timestamp / ASYNC_STORAGE_RECENCY_BUCKET_MS));
 }
 
-function getPayloadRecordKey(key: string): string {
-  return `${INTERNAL_PAYLOAD_PREFIX}${key}`;
-}
-
-function getMetadataRecordKey(key: string): string {
-  return `${INTERNAL_METADATA_PREFIX}${key}`;
-}
-
 function getUserKeyFromMetadataRecord(recordKey: string): string | null {
-  return recordKey.startsWith(INTERNAL_METADATA_PREFIX)
-    ? recordKey.slice(INTERNAL_METADATA_PREFIX.length)
+  return recordKey.startsWith(METADATA_RECORD_PREFIX)
+    ? recordKey.slice(METADATA_RECORD_PREFIX.length)
     : null;
 }
 
@@ -561,7 +555,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const order = args.order ?? 'key';
     const keys = await driver.listKeys(scope);
     const metadataKeys = keys.filter((key) =>
-      key.startsWith(INTERNAL_METADATA_PREFIX),
+      key.startsWith(METADATA_RECORD_PREFIX),
     );
     const metadataValues = await this.#driverGetManyFrom(
       driver,

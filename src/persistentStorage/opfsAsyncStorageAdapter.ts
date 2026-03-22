@@ -1,32 +1,22 @@
 import { createCache, type Cache } from '@ls-stack/utils/cache';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import {
+  buildFileName,
+  decodePathSegment,
+  encodePathSegment,
+  joinPath,
+  OPFS_ROOT_DIR,
+  parseFileName,
+} from './opfsFileNaming';
 import type {
   AsyncStorageDriver,
   AsyncStorageDriverSetEntry,
   AsyncStorageNamespaceScope,
 } from './types';
 
-const OPFS_CACHE_DIR = 'tsdf';
-const JSON_FILE_EXTENSION = '.json';
-
 const OPFS_DIR_HANDLE_CACHE_MAX_SIZE = 500;
 const OPFS_FILE_HANDLE_CACHE_MAX_SIZE = 10_000;
 const OPFS_MISSING_HANDLE_CACHE_DURATION = { seconds: 5 } as const;
-const INTERNAL_PAYLOAD_PREFIX = '__tsdf_payload__:';
-const INTERNAL_METADATA_PREFIX = '__tsdf_meta__:';
-const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
-
-function encodePathSegment(value: string): string {
-  return encodeURIComponent(value);
-}
-
-function decodePathSegment(value: string): string {
-  return decodeURIComponent(value);
-}
-
-function encodeFileNameSegment(value: string): string {
-  return encodePathSegment(value).replaceAll('.', '%2E');
-}
 
 async function getNavigatorStorageDirectory(): Promise<FileSystemDirectoryHandle> {
   const storage = __LEGIT_CAST__<
@@ -63,10 +53,6 @@ async function getFileHandleIfExists(
   }
 }
 
-function joinPath(...segments: string[]): string {
-  return segments.filter((segment) => segment.length > 0).join('/');
-}
-
 type OpfsDirectoryCache = Cache<FileSystemDirectoryHandle | null>;
 type OpfsFileCache = Cache<FileSystemFileHandle | null>;
 
@@ -94,135 +80,6 @@ function withExpiringNull<T extends FileSystemHandle>(
   return __LEGIT_CAST__<T | null, unknown>(
     utils.withExpiration(null, OPFS_MISSING_HANDLE_CACHE_DURATION),
   );
-}
-
-function getFileNameKindAlias(
-  kind: AsyncStorageNamespaceScope['kind'],
-): string {
-  switch (kind) {
-    case 'document':
-      return 'd';
-    case 'collection.item':
-      return 'ci';
-    case 'listQuery.item':
-      return 'li';
-    case 'listQuery.query':
-      return 'lq';
-    case 'offline.queue':
-      return 'oq';
-    case 'offline.conflict':
-      return 'oc';
-    case 'offline.entity':
-      return 'oe';
-    case '__internal.protected':
-      return 'ip';
-  }
-}
-
-function parseFileNameKindAlias(
-  value: string,
-): AsyncStorageNamespaceScope['kind'] | null {
-  switch (value) {
-    case 'd':
-      return 'document';
-    case 'ci':
-      return 'collection.item';
-    case 'li':
-      return 'listQuery.item';
-    case 'lq':
-      return 'listQuery.query';
-    case 'oq':
-      return 'offline.queue';
-    case 'oc':
-      return 'offline.conflict';
-    case 'oe':
-      return 'offline.entity';
-    case 'ip':
-      return '__internal.protected';
-    default:
-      return null;
-  }
-}
-
-type OpfsRecordKind = 'metadata' | 'payload' | 'raw';
-
-function getRecordKindAlias(kind: OpfsRecordKind): string {
-  switch (kind) {
-    case 'payload':
-      return 'p';
-    case 'metadata':
-      return 'm';
-    case 'raw':
-      return 'r';
-  }
-}
-
-function parseRecordKindAlias(value: string): OpfsRecordKind | null {
-  switch (value) {
-    case 'p':
-      return 'payload';
-    case 'm':
-      return 'metadata';
-    case 'r':
-      return 'raw';
-    default:
-      return null;
-  }
-}
-
-function getEntryToken(
-  scope: AsyncStorageNamespaceScope,
-  userKey: string,
-): string {
-  if (scope.kind === 'document' && userKey === 'document') {
-    return OPFS_SINGLETON_ENTRY_TOKEN;
-  }
-
-  return encodeFileNameSegment(userKey);
-}
-
-function parseEntryToken(
-  scopeKind: AsyncStorageNamespaceScope['kind'],
-  token: string,
-): string {
-  if (scopeKind === 'document' && token === OPFS_SINGLETON_ENTRY_TOKEN) {
-    return 'document';
-  }
-
-  return decodePathSegment(token);
-}
-
-function parseRecordKey(
-  key: string,
-):
-  | { recordKind: 'payload' | 'metadata'; userKey: string }
-  | { rawKey: string; recordKind: 'raw' } {
-  if (key.startsWith(INTERNAL_PAYLOAD_PREFIX)) {
-    return {
-      recordKind: 'payload',
-      userKey: key.slice(INTERNAL_PAYLOAD_PREFIX.length),
-    };
-  }
-
-  if (key.startsWith(INTERNAL_METADATA_PREFIX)) {
-    return {
-      recordKind: 'metadata',
-      userKey: key.slice(INTERNAL_METADATA_PREFIX.length),
-    };
-  }
-
-  return { rawKey: key, recordKind: 'raw' };
-}
-
-function toRecordKey(recordKind: OpfsRecordKind, userKey: string): string {
-  switch (recordKind) {
-    case 'payload':
-      return `${INTERNAL_PAYLOAD_PREFIX}${userKey}`;
-    case 'metadata':
-      return `${INTERNAL_METADATA_PREFIX}${userKey}`;
-    case 'raw':
-      return userKey;
-  }
 }
 
 export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
@@ -412,7 +269,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
 
     await Promise.all(
       keys.map(async (key) => {
-        const fileName = this.#getFileNameForKey(scope, key);
+        const fileName = buildFileName(scope, key);
         try {
           await storeDir.removeEntry(fileName);
         } catch {
@@ -470,7 +327,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const root = await this.#getRootDir();
     const sessionEntries =
       sessionKey === undefined
-        ? await this.#listDirectoryEntries(root, OPFS_CACHE_DIR, cacheContext)
+        ? await this.#listDirectoryEntries(root, OPFS_ROOT_DIR, cacheContext)
         : [
             {
               handle: await this.#getSessionDir(sessionKey, {
@@ -499,7 +356,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
 
         for await (const entry of storeEntry.handle.values()) {
           if (entry.kind !== 'file') continue;
-          const parsed = this.#parseFileName(entry.name);
+          const parsed = parseFileName(entry.name);
           if (parsed === null || seenKinds.has(parsed.kind)) continue;
 
           seenKinds.add(parsed.kind);
@@ -519,34 +376,11 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     return [...discoveredScopes.values()];
   }
 
-  #getFileNameForKey(scope: AsyncStorageNamespaceScope, key: string): string {
-    const parsedRecordKey = parseRecordKey(key);
-    const kindAlias = getFileNameKindAlias(scope.kind);
-
-    if (parsedRecordKey.recordKind === 'raw') {
-      return (
-        [
-          kindAlias,
-          encodeFileNameSegment(parsedRecordKey.rawKey),
-          getRecordKindAlias('raw'),
-        ].join('.') + JSON_FILE_EXTENSION
-      );
-    }
-
-    return (
-      [
-        kindAlias,
-        getEntryToken(scope, parsedRecordKey.userKey),
-        getRecordKindAlias(parsedRecordKey.recordKind),
-      ].join('.') + JSON_FILE_EXTENSION
-    );
-  }
-
   async #getRootDir(): Promise<FileSystemDirectoryHandle> {
     if (this.#rootDirPromise === null) {
       this.#rootDirPromise = (async () => {
         const navigatorRoot = await getNavigatorStorageDirectory();
-        return navigatorRoot.getDirectoryHandle(OPFS_CACHE_DIR, {
+        return navigatorRoot.getDirectoryHandle(OPFS_ROOT_DIR, {
           create: true,
         });
       })();
@@ -556,7 +390,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
   }
 
   #getSessionDirPath(sessionKey: string): string {
-    return joinPath(OPFS_CACHE_DIR, encodePathSegment(sessionKey));
+    return joinPath(OPFS_ROOT_DIR, encodePathSegment(sessionKey));
   }
 
   #getStoreDirPath(
@@ -569,38 +403,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
   }
 
   #getFilePath(scope: AsyncStorageNamespaceScope, key: string): string {
-    return joinPath(
-      this.#getStoreDirPath(scope),
-      this.#getFileNameForKey(scope, key),
-    );
-  }
-
-  #parseFileName(
-    fileName: string,
-  ): { key: string; kind: AsyncStorageNamespaceScope['kind'] } | null {
-    if (!fileName.endsWith(JSON_FILE_EXTENSION)) return null;
-
-    const encoded = fileName.slice(0, -JSON_FILE_EXTENSION.length);
-    const parts = encoded.split('.');
-    if (parts.length !== 3) return null;
-
-    const kindPart = parts[0] ?? '';
-    const entryPart = parts[1] ?? '';
-    const recordPart = parts[2] ?? '';
-
-    const kind = parseFileNameKindAlias(kindPart);
-    if (kind === null) return null;
-
-    const recordKind = parseRecordKindAlias(recordPart);
-    if (recordKind === null) return null;
-
-    return {
-      kind,
-      key:
-        recordKind === 'raw'
-          ? decodePathSegment(entryPart)
-          : toRecordKey(recordKind, parseEntryToken(kind, entryPart)),
-    };
+    return joinPath(this.#getStoreDirPath(scope), buildFileName(scope, key));
   }
 
   async #getSessionDir(
@@ -672,7 +475,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       storeDir: FileSystemDirectoryHandle;
     },
   ): Promise<FileSystemFileHandle | null> {
-    const fileName = this.#getFileNameForKey(scope, key);
+    const fileName = buildFileName(scope, key);
     const filePath = joinPath(this.#getStoreDirPath(scope), fileName);
 
     if (options.create) {
@@ -709,7 +512,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const scopedEntries: ScopedDirectoryEntry[] = [];
     for await (const entry of storeDir.values()) {
       if (entry.kind !== 'file') continue;
-      const parsed = this.#parseFileName(entry.name);
+      const parsed = parseFileName(entry.name);
       if (parsed === null || parsed.kind !== scope.kind) continue;
 
       const fileHandle = await this.#getFileHandle(scope, parsed.key, {
