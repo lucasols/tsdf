@@ -18,8 +18,8 @@ importers:
         specifier: ^0.12.1
         version: 0.12.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@ls-stack/utils':
-        specifier: ^3.74.0
-        version: 3.74.0
+        specifier: ^3.75.0
+        version: 3.75.0
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -490,8 +490,8 @@ packages:
     resolution: {integrity: sha512-DxtUXHMWXbzbk7iVSNkPaOJ53NTFT3X5zZ3AgXijj0FWl9a11+avC9SlZ7O14rnujeZOsCSExeFYa+jVWQN4PQ==}
     engines: {node: '>=20.0.0'}
 
-  '@ls-stack/utils@3.74.0':
-    resolution: {integrity: sha512-tQNopFyPN1CLrES26jIQl3fUBNVyk/1F2Muisy6XrirwYmB84v1oiJ4KggcxaQOQx7R2XU3uczFCzf4C+0mIiQ==}
+  '@ls-stack/utils@3.75.0':
+    resolution: {integrity: sha512-IhVeWDjzMmPOu/4N0yE70/AAlkLm6++weJu2oMtsdbDEv82M0F4oMnlzZF9XB2boRX3T7a8GsUAMo92DoSKFbg==}
     engines: {node: '>=20.0.0'}
 
   '@napi-rs/wasm-runtime@1.1.1':
@@ -2756,7 +2756,7 @@ snapshots:
       evtmitter: 1.0.2
       t-result: 0.6.1
 
-  '@ls-stack/utils@3.74.0':
+  '@ls-stack/utils@3.75.0':
     dependencies:
       '@leeoniya/ufuzzy': 1.0.19
       evtmitter: 1.0.2
