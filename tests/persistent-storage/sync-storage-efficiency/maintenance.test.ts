@@ -3,7 +3,10 @@ import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
-import { upsertManagedLocalStorageSingleEntry } from '../../../src/persistentStorage/localStorageMetadata';
+import {
+  getManagedLocalStorageManifestKeyForSingle,
+  upsertManagedLocalStorageSingleEntry,
+} from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { advanceTime } from '../../utils/genericTestUtils';
@@ -119,6 +122,79 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 📖 ✅ #3 tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.05 kb
       .    | 📖 ✅ #5 tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.05 kb
       .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      "
+    `);
+  });
+
+  test('startup cleanup checks expiration across multiple sessions', async () => {
+    const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const sess1ExpiredDoc = persistentStore.scope('expired-doc', 'sess1');
+    const sess2ExpiredDoc = persistentStore.scope('expired-doc', 'sess2');
+    const sess2FreshDoc = persistentStore.scope('fresh-doc', 'sess2');
+    const sess1ExpiredKey = sess1ExpiredDoc.document.storageKey();
+    const sess2ExpiredKey = sess2ExpiredDoc.document.storageKey();
+    const sess2FreshKey = sess2FreshDoc.document.storageKey();
+
+    // Seed stale entries in two sessions so startup cleanup has to sweep both namespaces.
+    sess1ExpiredDoc.document.seed(
+      { value: { name: 'sess1-stale', value: 1 } },
+      { timestamp: staleTimestamp },
+    );
+    sess2ExpiredDoc.document.seed(
+      { value: { name: 'sess2-stale', value: 2 } },
+      { timestamp: staleTimestamp },
+    );
+    sess2FreshDoc.document.seed({ value: { name: 'sess2-fresh', value: 3 } });
+
+    // A fresh store mount in a third session should still trigger the global cleanup pass.
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey: 'sess-trigger' });
+
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      sess1ExpiredEntryExists: localStorage.getItem(sess1ExpiredKey) !== null,
+      sess1ExpiredManifestExists:
+        localStorage.getItem(
+          getManagedLocalStorageManifestKeyForSingle(sess1ExpiredKey),
+        ) !== null,
+      sess2ExpiredEntryExists: localStorage.getItem(sess2ExpiredKey) !== null,
+      sess2ExpiredManifestExists:
+        localStorage.getItem(
+          getManagedLocalStorageManifestKeyForSingle(sess2ExpiredKey),
+        ) !== null,
+      sess2FreshEntryExists: localStorage.getItem(sess2FreshKey) !== null,
+      sess2FreshManifestExists:
+        localStorage.getItem(
+          getManagedLocalStorageManifestKeyForSingle(sess2FreshKey),
+        ) !== null,
+    }).toMatchInlineSnapshot(`
+      sess1ExpiredEntryExists: '❌'
+      sess1ExpiredManifestExists: '❌'
+      sess2ExpiredEntryExists: '❌'
+      sess2ExpiredManifestExists: '❌'
+      sess2FreshEntryExists: '✅'
+      sess2FreshManifestExists: '✅'
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
+      .    | 🔑[0] ✅ #2 tsdf.sess1.expired-doc (entry)
+      .    | 🔑[1] ✅ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
+      .    | 🔑[2] ✅ #4 tsdf.sess2.expired-doc (entry)
+      .    | 🔑[3] ✅ #5 tsdf._m.r.s:sess2.expired-doc.m (root, single, manifest)
+      .    | 🔑[4] ✅ #6 tsdf.sess2.fresh-doc (entry)
+      .    | 🔑[5] ✅ #7 tsdf._m.r.s:sess2.fresh-doc.m (root, single, manifest)
+      .    | 📖 ✅ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ #5 tsdf._m.r.s:sess2.expired-doc.m (root, single, manifest) | 0.05 kb
+      .    | 📖 ✅ #7 tsdf._m.r.s:sess2.fresh-doc.m (root, single, manifest) | 0.05 kb
+      .    | 🗑️ ✅->❌ #2 tsdf.sess1.expired-doc (entry)
+      .    | 🗑️ ✅->❌ #4 tsdf.sess2.expired-doc (entry)
+      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | 🗑️ ✅->❌ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
+      .    | 🗑️ ✅->❌ #5 tsdf._m.r.s:sess2.expired-doc.m (root, single, manifest)
       "
     `);
   });
