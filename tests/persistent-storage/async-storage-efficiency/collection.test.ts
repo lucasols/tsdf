@@ -84,10 +84,10 @@ describe('async storage efficiency: collection', () => {
              |    └ (session directory) entries=["dir:collection-expiration"]
       2.004s | 🗂️ list-dir tsdf/sess1/collection-expiration
              |    └ (store directory) entries=["file:ci.%22expired-user-2.m.json","file:ci.%22expired-user-2.p.json","file:ci.%22expired-user.m.json","file:ci.%22expired-user.p.json","file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
-      2.008s | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
-      .      | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
+      2.008s | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
+      .      | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
       .      | 📖 tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
       2.01s  | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.p.json
@@ -109,16 +109,16 @@ describe('async storage efficiency: collection', () => {
       2.004s | 🗂️ list-dir tsdf/sess1/collection-expiration
              |    └ (store directory) entries=["file:ci.%22expired-user-2.m.json","file:ci.%22expired-user-2.p.json","file:ci.%22expired-user.m.json","file:ci.%22expired-user.p.json","file:ci.%22fresh-user.m.json","file:ci.%22fresh-user.p.json"]
       2.005s | 📂 dir-open ❌ tsdf/sess1/_o_.p (store directory)
-      2.006s | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
+      2.006s | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata))
+      .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata))
       .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata))
-      2.008s | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
-      .      | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
+      2.008s | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
+      .      | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
       .      | 📖 tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
       2.01s  | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.p.json
