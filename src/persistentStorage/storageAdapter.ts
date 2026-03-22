@@ -29,7 +29,7 @@ import {
 import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import { OpfsAsyncStorageDriver } from './opfsAsyncStorageAdapter';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import type { AsyncStorageAdapter, StorageAdapter } from './types';
+import type { AsyncStorageAdapter } from './types';
 
 const MANAGED_LOCAL_STORAGE_LOCK_NAME = 'tsdf-local-storage-metadata';
 const MANAGED_LOCAL_STORAGE_LOCK_WARNING =

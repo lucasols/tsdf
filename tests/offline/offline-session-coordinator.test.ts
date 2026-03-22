@@ -18,7 +18,7 @@ class FakeBroadcastChannel {
   static instancesByChannel = new Map<string, Set<FakeBroadcastChannel>>();
 
   readonly name: string;
-  private readonly listeners = new Set<MessageListener>();
+  readonly #listeners = new Set<MessageListener>();
 
   constructor(name: string) {
     this.name = name;
@@ -29,11 +29,11 @@ class FakeBroadcastChannel {
   }
 
   addEventListener(_type: string, listener: MessageListener): void {
-    this.listeners.add(listener);
+    this.#listeners.add(listener);
   }
 
   removeEventListener(_type: string, listener: MessageListener): void {
-    this.listeners.delete(listener);
+    this.#listeners.delete(listener);
   }
 
   postMessage(message: unknown): void {
@@ -44,7 +44,7 @@ class FakeBroadcastChannel {
     ) ?? []) {
       if (instance === this) continue;
 
-      for (const listener of instance.listeners) {
+      for (const listener of instance.#listeners) {
         listener({ data: message });
       }
     }
@@ -52,7 +52,7 @@ class FakeBroadcastChannel {
 
   close(): void {
     FakeBroadcastChannel.instancesByChannel.get(this.name)?.delete(this);
-    this.listeners.clear();
+    this.#listeners.clear();
   }
 
   static reset(): void {

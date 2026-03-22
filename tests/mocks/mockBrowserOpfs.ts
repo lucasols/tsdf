@@ -137,23 +137,23 @@ export type MockBrowserOpfsOperation =
 export class MockBrowserOpfsEnvironment {
   readonly operations: MockBrowserOpfsOperation[] = [];
 
-  private readonly handlePaths = new WeakMap<FileSystemHandle, string[]>();
-  private readonly pendingLatencies = new Set<Promise<void>>();
-  private readonly root = createDirectoryNode('');
-  private readonly startedAt = Date.now();
-  private readonly readDelays = new Map<string, number>();
-  private readonly dynamicReadDelays: Array<{
+  readonly #handlePaths = new WeakMap<FileSystemHandle, string[]>();
+  readonly #pendingLatencies = new Set<Promise<void>>();
+  readonly #root = createDirectoryNode('');
+  readonly #startedAt = Date.now();
+  readonly #readDelays = new Map<string, number>();
+  readonly #dynamicReadDelays: Array<{
     delayMs: number;
     matches: (path: string) => boolean;
   }> = [];
 
   async getRootDirectoryHandle(): Promise<FileSystemDirectoryHandle> {
     const rootReadyAtRef: ReadyAtRef = { value: 0 };
-    await this.waitLatency({
+    await this.#waitLatency({
       delayMs: MOCK_OPFS_LATENCY_MS.rootHandle,
       readyAtRef: rootReadyAtRef,
     });
-    return this.createDirectoryHandle(this.root, [], rootReadyAtRef);
+    return this.#createDirectoryHandle(this.#root, [], rootReadyAtRef);
   }
 
   clearInstrumentation(): void {
@@ -161,23 +161,23 @@ export class MockBrowserOpfsEnvironment {
   }
 
   hasPendingLatencies(): boolean {
-    return this.pendingLatencies.size > 0;
+    return this.#pendingLatencies.size > 0;
   }
 
   async flushLatencies(): Promise<void> {
-    while (this.pendingLatencies.size > 0) {
-      await Promise.all([...this.pendingLatencies]);
+    while (this.#pendingLatencies.size > 0) {
+      await Promise.all([...this.#pendingLatencies]);
     }
   }
 
   setReadDelay(pathPrefix: string, delayMs: number): void {
     const normalizedPrefix = normalizePath(pathPrefix);
     if (delayMs <= 0) {
-      this.readDelays.delete(normalizedPrefix);
+      this.#readDelays.delete(normalizedPrefix);
       return;
     }
 
-    this.readDelays.set(normalizedPrefix, delayMs);
+    this.#readDelays.set(normalizedPrefix, delayMs);
   }
 
   setDynamicReadDelay(
@@ -186,16 +186,16 @@ export class MockBrowserOpfsEnvironment {
   ): void {
     if (delayMs <= 0) return;
 
-    this.dynamicReadDelays.push({ matches, delayMs });
+    this.#dynamicReadDelays.push({ matches, delayMs });
   }
 
   ensureDir(path: string): void {
-    this.getDirectoryBySegments(splitPath(path), true);
+    this.#getDirectoryBySegments(splitPath(path), true);
   }
 
   writeFile(path: string, raw: string): void {
     const { dirSegments, fileName } = splitFilePath(path);
-    const directory = this.getDirectoryBySegments(dirSegments, true);
+    const directory = this.#getDirectoryBySegments(dirSegments, true);
     if (directory === null) {
       throw new Error(`Expected directory for "${path}".`);
     }
@@ -205,7 +205,7 @@ export class MockBrowserOpfsEnvironment {
 
   readFile(path: string): string | null {
     const { dirSegments, fileName } = splitFilePath(path);
-    const directory = this.getDirectoryBySegments(dirSegments, false);
+    const directory = this.#getDirectoryBySegments(dirSegments, false);
     if (directory === null) return null;
 
     return directory.files.get(fileName)?.raw ?? null;
@@ -213,7 +213,7 @@ export class MockBrowserOpfsEnvironment {
 
   removeFile(path: string): void {
     const { dirSegments, fileName } = splitFilePath(path);
-    const directory = this.getDirectoryBySegments(dirSegments, false);
+    const directory = this.#getDirectoryBySegments(dirSegments, false);
     directory?.files.delete(fileName);
   }
 
@@ -222,7 +222,7 @@ export class MockBrowserOpfsEnvironment {
   }
 
   listEntries(path: string): string[] {
-    const directory = this.getDirectoryBySegments(splitPath(path), false);
+    const directory = this.#getDirectoryBySegments(splitPath(path), false);
     if (directory === null) return [];
 
     const directoryNames = [...directory.directories.keys()]
@@ -235,42 +235,42 @@ export class MockBrowserOpfsEnvironment {
     return [...directoryNames, ...fileNames];
   }
 
-  private time(): number {
-    return Date.now() - this.startedAt;
+  #time(): number {
+    return Date.now() - this.#startedAt;
   }
 
-  private getStartTime(readyAtRef: ReadyAtRef): number {
-    return Math.max(this.time(), readyAtRef.value);
+  #getStartTime(readyAtRef: ReadyAtRef): number {
+    return Math.max(this.#time(), readyAtRef.value);
   }
 
-  private async waitLatency(args: {
+  async #waitLatency(args: {
     delayMs: number;
     readyAtRef: ReadyAtRef;
     useFakeTimeDelay?: boolean;
   }): Promise<number> {
-    const completionTime = this.getStartTime(args.readyAtRef) + args.delayMs;
+    const completionTime = this.#getStartTime(args.readyAtRef) + args.delayMs;
     const actualDelayMs = args.useFakeTimeDelay === true ? args.delayMs : 0;
     const pendingLatency: Promise<void> =
       actualDelayMs > 0
         ? sleep(actualDelayMs).then(() => undefined)
         : Promise.resolve();
-    this.pendingLatencies.add(pendingLatency);
+    this.#pendingLatencies.add(pendingLatency);
 
     try {
       await pendingLatency;
     } finally {
-      this.pendingLatencies.delete(pendingLatency);
+      this.#pendingLatencies.delete(pendingLatency);
     }
 
     args.readyAtRef.value = completionTime;
     return completionTime;
   }
 
-  private getReadDelay(path: string): number {
+  #getReadDelay(path: string): number {
     let bestMatchLength = -1;
     let bestDelayMs = 0;
 
-    for (const [pathPrefix, delayMs] of this.readDelays) {
+    for (const [pathPrefix, delayMs] of this.#readDelays) {
       if (
         path === pathPrefix ||
         pathPrefix === '' ||
@@ -283,7 +283,7 @@ export class MockBrowserOpfsEnvironment {
       }
     }
 
-    for (const rule of this.dynamicReadDelays) {
+    for (const rule of this.#dynamicReadDelays) {
       if (rule.matches(path)) {
         bestDelayMs = Math.max(bestDelayMs, rule.delayMs);
       }
@@ -292,11 +292,11 @@ export class MockBrowserOpfsEnvironment {
     return bestDelayMs;
   }
 
-  private getDirectoryBySegments(
+  #getDirectoryBySegments(
     pathSegments: string[],
     create: boolean,
   ): MockDirectoryNode | null {
-    let current = this.root;
+    let current = this.#root;
     for (const segment of pathSegments) {
       const next = current.directories.get(segment);
       if (next !== undefined) {
@@ -314,17 +314,17 @@ export class MockBrowserOpfsEnvironment {
     return current;
   }
 
-  private createDirectoryHandle(
+  #createDirectoryHandle(
     node: MockDirectoryNode,
     pathSegments: string[],
     readyAtRef: ReadyAtRef,
   ): FileSystemDirectoryHandle {
     const operations = this.operations;
-    const getStartTime = this.getStartTime.bind(this);
-    const waitLatency = this.waitLatency.bind(this);
-    const createDirectoryHandle = this.createDirectoryHandle.bind(this);
-    const createFileHandle = this.createFileHandle.bind(this);
-    const handlePaths = this.handlePaths;
+    const getStartTime = this.#getStartTime.bind(this);
+    const waitLatency = this.#waitLatency.bind(this);
+    const createDirectoryHandle = this.#createDirectoryHandle.bind(this);
+    const createFileHandle = this.#createFileHandle.bind(this);
+    const handlePaths = this.#handlePaths;
     const currentPath = joinPath(pathSegments);
 
     function getDirectoryEntries(): Array<
@@ -549,19 +549,19 @@ export class MockBrowserOpfsEnvironment {
       },
     };
 
-    this.handlePaths.set(handle, [...pathSegments]);
+    this.#handlePaths.set(handle, [...pathSegments]);
     return handle;
   }
 
-  private createFileHandle(
+  #createFileHandle(
     node: MockFileNode,
     pathSegments: string[],
     readyAtRef: ReadyAtRef,
   ): FileSystemFileHandle {
     const operations = this.operations;
-    const waitLatency = this.waitLatency.bind(this);
-    const getReadDelay = this.getReadDelay.bind(this);
-    const handlePaths = this.handlePaths;
+    const waitLatency = this.#waitLatency.bind(this);
+    const getReadDelay = this.#getReadDelay.bind(this);
+    const handlePaths = this.#handlePaths;
 
     const filePath = [...pathSegments, node.name];
     const handle: FileSystemFileHandle = {
@@ -649,7 +649,7 @@ export class MockBrowserOpfsEnvironment {
       },
     };
 
-    this.handlePaths.set(handle, filePath);
+    this.#handlePaths.set(handle, filePath);
     return handle;
   }
 }
