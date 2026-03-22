@@ -74,7 +74,6 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2s     | 📖 ❌ #1 tsdf._am.g (async global maintenance)
-      .      | 📖 ❌ #1 tsdf._am.g (async global maintenance)
       2.012s | ✍️ ❌->✅ #1 tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
       "
     `);
@@ -558,7 +557,6 @@ describe('async storage efficiency: maintenance', () => {
       "
       time  |
       140ms | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
-      .     | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
       152ms | ✍️ ✅->✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);

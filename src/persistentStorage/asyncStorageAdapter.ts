@@ -1,9 +1,18 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { sleep } from '@ls-stack/utils/sleep';
+import { runWithNavigatorLock } from './navigatorLocks';
+import {
+  getProtectedKeysStorageScope,
+  parseProtectedKeys,
+  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
+} from './offline/protectedKeysPersistence';
+import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import {
   getMetadataRecordKey,
   getPayloadRecordKey,
   METADATA_RECORD_PREFIX,
 } from './opfsFileNaming';
+import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDiscoveredScope,
@@ -20,14 +29,6 @@ import type {
   AsyncStorageProtectedEntryRef,
   AsyncStorageReadOptions,
 } from './types';
-import {
-  getProtectedKeysStorageScope,
-  parseProtectedKeys,
-  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
-} from './offline/protectedKeysPersistence';
-import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
-import { runWithNavigatorLock } from './navigatorLocks';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 
 export const ASYNC_STORAGE_COMMIT_DEBOUNCE_MS = 40;
 export const ASYNC_STORAGE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -878,30 +879,18 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   async #runStartupCleanupIfDue(): Promise<void> {
-    const maintenance = this.#readMaintenanceState();
-    const now = Date.now();
-    if (
-      maintenance.lastSuccessfulCleanupAt !== null &&
-      now - maintenance.lastSuccessfulCleanupAt <
-        ASYNC_STORAGE_STARTUP_CLEANUP_COOLDOWN_MS
-    ) {
-      return;
-    }
-
     if (document.hidden) {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 150);
-      });
+      await sleep(2_000);
     }
     await runWithNavigatorLock(
       ASYNC_STARTUP_CLEANUP_LOCK_NAME,
       ASYNC_STARTUP_CLEANUP_LOCK_WARNING,
       async () => {
-        const lockedMaintenance = this.#readMaintenanceState();
-        const lockedNow = Date.now();
+        const maintenance = this.#readMaintenanceState();
+        const now = Date.now();
         if (
-          lockedMaintenance.lastSuccessfulCleanupAt !== null &&
-          lockedNow - lockedMaintenance.lastSuccessfulCleanupAt <
+          maintenance.lastSuccessfulCleanupAt !== null &&
+          now - maintenance.lastSuccessfulCleanupAt <
             ASYNC_STORAGE_STARTUP_CLEANUP_COOLDOWN_MS
         ) {
           return;
