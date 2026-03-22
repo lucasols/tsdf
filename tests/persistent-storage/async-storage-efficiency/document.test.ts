@@ -66,15 +66,6 @@ describe('async storage efficiency: document', () => {
     );
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
-      simplified
-      time   |
-      3.004s | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
-             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
-      .      | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
-      3.006s | end
-
-      verbose
       time   |
       3s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3.001s | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
@@ -91,15 +82,6 @@ describe('async storage efficiency: document', () => {
     `);
     expect(remountOperations).toMatchInlineSnapshot(`
       "
-      simplified
-      time   |
-      3.251s | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
-             |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
-      .      | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
-      3.253s | end
-
-      verbose
       time   |
       3.251s | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
@@ -253,17 +235,6 @@ describe('async storage efficiency: document', () => {
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
-      simplified
-      time   |
-      5.197s | 📖 tsdf/sess1/doc-mutation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb
-      5.254s | ✍️ tsdf/sess1/doc-mutation-flow/d.e.p.json
-             |    └ (tsdf.sess1.doc-mutation-flow (payload)) | 0.10 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/doc-mutation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb -> 0.23 kb
-      5.256s | end
-
-      verbose
       time   |
       5.197s | 📖 tsdf/sess1/doc-mutation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb
@@ -330,17 +301,6 @@ describe('async storage efficiency: document', () => {
     );
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
-      simplified
-      time   |
-      6.007s | 📖 tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb
-      6.064s | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.p.json
-             |    └ (tsdf.sess1.doc-invalidation-flow (payload)) | 0.10 kb -> 0.10 kb
-      .      | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb -> 0.23 kb
-      6.066s | end
-
-      verbose
       time   |
       6.007s | 📖 tsdf/sess1/doc-invalidation-flow/d.e.m.json
              |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb
@@ -428,17 +388,6 @@ describe('async storage efficiency: document', () => {
     );
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
-      simplified
-      time   |
-      6.907s | 📖 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb
-      6.964s | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
-             |    └ (tsdf.sess1.doc-coalesced-invalidations (payload)) | 0.10 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb -> 0.23 kb
-      6.966s | end
-
-      verbose
       time   |
       6.907s | 📖 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb
@@ -638,15 +587,6 @@ describe('async storage efficiency: document', () => {
 
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       "
-      simplified
-      time   |
-      3.004s | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.p.json
-             |    └ (tsdf.sess1.doc-opfs-efficiency (payload)) | 0.08 kb
-      .      | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.m.json
-             |    └ (tsdf.sess1.doc-opfs-efficiency (metadata)) | 0.23 kb
-      3.056s | end
-
-      verbose
       time   |
       3s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3.001s | 📂 dir-open ✅ tsdf/sess1/doc-opfs-efficiency (store directory)

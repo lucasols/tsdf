@@ -428,21 +428,12 @@ function formatTimedLabelTable(operations: TimedLabel[]): string {
   return formatTableString(rows);
 }
 
-function getOpfsPersistentStorageOperationTimelineString(args: {
-  simplified: TimedLabel[];
-  verbose: TimedLabel[];
-}): string {
-  if (args.simplified.length === 0 && args.verbose.length === 0) {
-    return 'empty';
-  }
+function getOpfsPersistentStorageOperationTimelineString(
+  operations: TimedLabel[],
+): string {
+  if (operations.length === 0) return 'empty';
 
-  return [
-    '',
-    ['simplified', formatTimedLabelTable(args.simplified)].join('\n'),
-    '',
-    ['verbose', formatTimedLabelTable(args.verbose)].join('\n'),
-    '',
-  ].join('\n');
+  return ['\n', formatTimedLabelTable(operations), '\n'].join('');
 }
 
 const OPFS_TIMELINE_WRAP_AT = 80;
@@ -628,24 +619,6 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
   }
 }
 
-function isRelevantSimplifiedOpfsOperation(
-  operation: MockOpfsOperation,
-): boolean {
-  switch (operation.type) {
-    case 'readFile':
-    case 'writeFile':
-    case 'deleteFile':
-    case 'listDir':
-      return true;
-    case 'openDir':
-    case 'ensureDir':
-    case 'openFile':
-    case 'ensureFile':
-    case 'deleteDir':
-      return false;
-  }
-}
-
 export type OpfsPersistentStorageOperationCaptureResult = {
   operations: string[];
   timelineString: string;
@@ -655,29 +628,20 @@ function buildOpfsOperationCaptureResult(
   mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
 ): OpfsPersistentStorageOperationCaptureResult {
   const verboseTimelineEntries: TimedLabel[] = [];
-  const simplifiedTimelineEntries: TimedLabel[] = [];
 
   for (const operation of mockAdapter.operations) {
-    const entry = {
+    verboseTimelineEntries.push({
       endTime: operation.time,
       time: operation.startedTime,
       label: formatOpfsOperationLabel(operation),
-    };
-    verboseTimelineEntries.push(entry);
-    if (isRelevantSimplifiedOpfsOperation(operation)) {
-      simplifiedTimelineEntries.push(entry);
-    }
+    });
   }
 
   const sortedVerboseTimelineEntries = sortTimedLabels(verboseTimelineEntries);
-  const sortedSimplifiedTimelineEntries = sortTimedLabels(
-    simplifiedTimelineEntries,
-  );
   const operations = sortedVerboseTimelineEntries.map((entry) => entry.label);
-  const timelineString = getOpfsPersistentStorageOperationTimelineString({
-    simplified: sortedSimplifiedTimelineEntries,
-    verbose: sortedVerboseTimelineEntries,
-  });
+  const timelineString = getOpfsPersistentStorageOperationTimelineString(
+    sortedVerboseTimelineEntries,
+  );
 
   return { operations, timelineString };
 }

@@ -27,7 +27,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     resetMockBrowserOpfsForTests();
   });
 
-  test('timelineString shows simplified effects first and full verbose detail second', async () => {
+  test('timelineString shows the full verbose OPFS timeline', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope('docs', 'sess1');
     documentScope.document.seed({
@@ -75,16 +75,6 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
 
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
-      simplified
-      time |
-      4ms  | 🗂️ list-dir tsdf/sess1/docs
-           |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      7ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      11ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
-      13ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
-      14ms | end
-
-      verbose
       time |
       1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
       2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
@@ -131,12 +121,6 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
 
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
-      simplified
-      time |
-      6ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      58ms | end
-
-      verbose
       time |
       1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
       2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
