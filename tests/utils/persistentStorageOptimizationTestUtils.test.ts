@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { flushAllTimers } from './genericTestUtils';
+import { resolveAfterAllTimers } from './genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from './opfsPersistentStorageTestStore';
 import {
   getParsedOpfsEntryFiles,
@@ -28,11 +28,6 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
   });
 
   test('timelineString shows simplified effects first and full verbose detail second', async () => {
-    async function resolveWithTimers<T>(promise: Promise<T>): Promise<T> {
-      await flushAllTimers();
-      return await promise;
-    }
-
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope('docs', 'sess1');
     documentScope.document.seed({
@@ -40,31 +35,31 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     });
 
     const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
-    const navigatorRoot = await resolveWithTimers(
+    const navigatorRoot = await resolveAfterAllTimers(
       navigator.storage.getDirectory(),
     );
-    const opfsRoot = await resolveWithTimers(
+    const opfsRoot = await resolveAfterAllTimers(
       navigatorRoot.getDirectoryHandle('tsdf', { create: true }),
     );
-    const sessionDir = await resolveWithTimers(
+    const sessionDir = await resolveAfterAllTimers(
       opfsRoot.getDirectoryHandle('sess1'),
     );
-    const storeDir = await resolveWithTimers(
+    const storeDir = await resolveAfterAllTimers(
       sessionDir.getDirectoryHandle('docs'),
     );
 
     // Trigger a list scan, a payload read, a metadata write, and a payload delete.
     void storeDir.values();
-    const payloadFile = await resolveWithTimers(
+    const payloadFile = await resolveAfterAllTimers(
       storeDir.getFileHandle('d.e.p.json'),
     );
-    const metadataFile = await resolveWithTimers(
+    const metadataFile = await resolveAfterAllTimers(
       storeDir.getFileHandle('d.e.m.json'),
     );
-    const payloadBlob = await resolveWithTimers(payloadFile.getFile());
-    await resolveWithTimers(payloadBlob.text());
-    const writable = await resolveWithTimers(metadataFile.createWritable());
-    await resolveWithTimers(
+    const payloadBlob = await resolveAfterAllTimers(payloadFile.getFile());
+    await resolveAfterAllTimers(payloadBlob.text());
+    const writable = await resolveAfterAllTimers(metadataFile.createWritable());
+    await resolveAfterAllTimers(
       writable.write(
         JSON.stringify({
           key: 'document',
@@ -75,8 +70,8 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
         }),
       ),
     );
-    await resolveWithTimers(writable.close());
-    await resolveWithTimers(storeDir.removeEntry('d.e.p.json'));
+    await resolveAfterAllTimers(writable.close());
+    await resolveAfterAllTimers(storeDir.removeEntry('d.e.p.json'));
 
     expect(capture.finish().timelineString).toMatchInlineSnapshot(`
       "
@@ -84,22 +79,71 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       time |
       4ms  | 🗂️ list-dir tsdf/sess1/docs
            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      7ms  | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
       8ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      10ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      12ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      14ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      15ms | end
 
       verbose
       time |
-      2ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
-      3ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      4ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
-      .    | 🗂️ list-dir tsdf/sess1/docs
+      1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
+      2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
+      4ms  | 🗂️ list-dir tsdf/sess1/docs
            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
       5ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
       6ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata))
-      7ms  | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
       8ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      10ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      12ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      14ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      15ms | end
+      "
+    `);
+  });
+
+  test('timelineString end marker uses completion time instead of the last start time', async () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 50,
+    });
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const navigatorRoot = await resolveAfterAllTimers(
+      navigator.storage.getDirectory(),
+    );
+    const opfsRoot = await resolveAfterAllTimers(
+      navigatorRoot.getDirectoryHandle('tsdf', { create: true }),
+    );
+    const sessionDir = await resolveAfterAllTimers(
+      opfsRoot.getDirectoryHandle('sess1'),
+    );
+    const storeDir = await resolveAfterAllTimers(
+      sessionDir.getDirectoryHandle('docs'),
+    );
+    const payloadFile = await resolveAfterAllTimers(
+      storeDir.getFileHandle('d.e.p.json'),
+    );
+    const payloadBlob = await resolveAfterAllTimers(payloadFile.getFile());
+    await resolveAfterAllTimers(payloadBlob.text());
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      simplified
+      time |
+      6ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
+      58ms | end
+
+      verbose
+      time |
+      1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
+      2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
+      4ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
+      6ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
+      58ms | end
       "
     `);
   });

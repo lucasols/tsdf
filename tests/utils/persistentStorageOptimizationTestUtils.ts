@@ -387,18 +387,16 @@ function stripScopePrefix(
   return key.startsWith(prefix) ? key.slice(prefix.length) : key;
 }
 
-type TimedLabel = { time: number; label: string };
+type TimedLabel = { endTime: number; label: string; time: number };
 
-function sortTimedLabels(
-  operations: readonly TimedLabel[],
-): Array<{ time: number; label: string }> {
+function sortTimedLabels(operations: readonly TimedLabel[]): TimedLabel[] {
   return operations
     .map((operation, index) => ({ ...operation, index }))
     .sort((left, right) => {
       if (left.time !== right.time) return left.time - right.time;
       return left.index - right.index;
     })
-    .map(({ time, label }) => ({ time, label }));
+    .map(({ endTime, time, label }) => ({ endTime, time, label }));
 }
 
 function formatTimedLabelTable(operations: TimedLabel[]): string {
@@ -417,6 +415,15 @@ function formatTimedLabelTable(operations: TimedLabel[]): string {
     }
     previousTime = operation.time;
   }
+
+  rows.push({
+    cols: [
+      formatTimeMs(
+        Math.max(...operations.map((operation) => operation.endTime)),
+      ),
+      'end',
+    ],
+  });
 
   return formatTableString(rows);
 }
@@ -639,7 +646,8 @@ function buildOpfsOperationCaptureResult(
 
   for (const operation of mockAdapter.operations) {
     const entry = {
-      time: operation.time,
+      endTime: operation.time,
+      time: operation.startedTime,
       label: formatOpfsOperationLabel(operation),
     };
     verboseTimelineEntries.push(entry);

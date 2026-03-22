@@ -31,6 +31,7 @@ export async function flushAllTimers() {
     for (let pass = 0; pass < MAX_TEST_SETTLE_PASSES; pass++) {
       await vi.runAllTimersAsync();
       await flushMockBrowserOpfsLatenciesForTests();
+      await vi.advanceTimersByTimeAsync(0);
 
       if (
         vi.getTimerCount() === 0 &&
@@ -56,6 +57,51 @@ export async function advanceTime(ms: number) {
       previousTimerCount = nextTimerCount;
     }
   });
+}
+
+export async function resolveAfterAllTimers<T>(
+  promise: Promise<T>,
+): Promise<T> {
+  const pendingResult = Symbol('pendingResult');
+  let didSettle = false;
+
+  const settledResultPromise = promise.then(
+    (value) => {
+      didSettle = true;
+      return { status: 'resolved' as const, value };
+    },
+    (error) => {
+      didSettle = true;
+      return { status: 'rejected' as const, error };
+    },
+  );
+
+  await act(async () => {
+    for (let pass = 0; pass < MAX_TEST_SETTLE_PASSES * 10; pass++) {
+      if (didSettle) return;
+
+      if (vi.getTimerCount() > 0) {
+        await vi.advanceTimersToNextTimerAsync();
+      } else {
+        await Promise.resolve();
+      }
+    }
+  });
+
+  const settledResult = await Promise.race([
+    settledResultPromise,
+    Promise.resolve(pendingResult),
+  ]);
+
+  if (settledResult === pendingResult) {
+    throw new Error('Promise did not settle while advancing fake timers.');
+  }
+
+  if (settledResult.status === 'rejected') {
+    throw settledResult.error;
+  }
+
+  return settledResult.value;
 }
 
 export async function waitForScheduledCleanup(delayMs = 2100) {

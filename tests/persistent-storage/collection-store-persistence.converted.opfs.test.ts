@@ -17,7 +17,11 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 
 const itemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -124,8 +128,8 @@ describe('opfs: converted collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('1');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: '1', preloaded: '✅' }
     `);
 
@@ -189,13 +193,11 @@ describe('opfs: converted collection store persistence', () => {
 
     const invalidStoragePreload =
       invalidStorageEnv.apiStore.preloadItemFromStorage('1');
-    await advanceTime(50);
-    await invalidStoragePreload;
+    await resolveAfterAllTimers(invalidStoragePreload);
     await advanceTime(2100);
 
     const throwingPreload = throwingEnv.apiStore.preloadItemFromStorage('1');
-    await advanceTime(50);
-    await throwingPreload;
+    await resolveAfterAllTimers(throwingPreload);
     await advanceTime(2100);
 
     expect(
@@ -245,8 +247,7 @@ describe('opfs: converted collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('1');
-    await advanceTime(50);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
     await advanceTime(2100);
 
     expect(mockAdapter.has(persistedCollection.itemStorageKey('1'))).toBe(

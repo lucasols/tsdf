@@ -601,60 +601,54 @@ function isAppStoreFilePath(path: string): boolean {
   return storeName !== '_o_.p';
 }
 
+type MockOpfsBaseOperation = {
+  path: string;
+  startedTime: number;
+  time: number;
+};
+
 export type MockOpfsOperation =
-  | {
+  | (MockOpfsBaseOperation & {
       created: boolean;
       exists: boolean;
-      path: string;
       scope: AsyncStorageNamespaceScope | null;
-      time: number;
       type: 'ensureDir' | 'openDir';
-    }
-  | {
+    })
+  | (MockOpfsBaseOperation & {
       created: boolean;
       exists: boolean;
-      path: string;
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
-      time: number;
       type: 'ensureFile' | 'openFile';
-    }
-  | ({
-      path: string;
+    })
+  | (MockOpfsBaseOperation & {
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
-      time: number;
     } & (
-      | { type: 'readFile'; valueByteSize: number }
-      | {
-          type: 'writeFile';
-          valueChanged: boolean;
-          valueByteSizeAfter: number;
-          valueByteSizeBefore: number;
-        }
-    ))
-  | {
+        | { type: 'readFile'; valueByteSize: number }
+        | {
+            type: 'writeFile';
+            valueChanged: boolean;
+            valueByteSizeAfter: number;
+            valueByteSizeBefore: number;
+          }
+      ))
+  | (MockOpfsBaseOperation & {
       exists: boolean;
-      path: string;
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
-      time: number;
       type: 'deleteFile';
-    }
-  | {
+    })
+  | (MockOpfsBaseOperation & {
       entries: string[];
-      path: string;
       scope: AsyncStorageNamespaceScope | null;
-      time: number;
       type: 'listDir';
-    }
-  | {
+    })
+  | (MockOpfsBaseOperation & {
       exists: boolean;
-      path: string;
       scope: AsyncStorageNamespaceScope | null;
-      time: number;
       type: 'deleteDir';
-    };
+    });
 
 function enrichRawOperation(
   operation: RawMockBrowserOpfsOperation,

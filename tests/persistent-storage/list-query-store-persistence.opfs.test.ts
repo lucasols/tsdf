@@ -33,7 +33,11 @@ import {
   type OpfsPersistentStorageTestStoreOptions,
 } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -237,8 +241,8 @@ describe('opfs: list query store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(200);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
         preloaded: '✅'
     `);
@@ -296,8 +300,7 @@ describe('opfs: list query store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
     await advanceTime(2100);
     await flushAllTimers();
 
@@ -355,7 +358,7 @@ describe('opfs: list query store persistence', () => {
       renders.add({ status, names: items.map((item) => item.name) });
     });
 
-    await advanceTime(200);
+    await flushAllTimers();
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -575,8 +578,7 @@ describe('opfs: list query store persistence', () => {
 
     const preloadPromise =
       readerEnv.apiStore.preloadQueryFromStorage(productsQuery);
-    await advanceTime(200);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore();
 
@@ -797,8 +799,7 @@ describe('opfs: list query store persistence', () => {
 
     const preloadPromise =
       readerEnv.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(200);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore({ arrays: 'all' });
 
@@ -890,8 +891,8 @@ describe('opfs: list query store persistence', () => {
     const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '✅' }
     `);
 
@@ -925,8 +926,8 @@ describe('opfs: list query store persistence', () => {
     const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
     await flushAllTimers();
@@ -955,8 +956,8 @@ describe('opfs: list query store persistence', () => {
     const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
     await flushAllTimers();
@@ -991,8 +992,8 @@ describe('opfs: list query store persistence', () => {
     const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
         preloaded: '❌'
     `);
@@ -1019,8 +1020,7 @@ describe('opfs: list query store persistence', () => {
 
     env.apiStore.reset();
 
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     expect(env.apiStore.getItemState('users||1')).toBeUndefined();
   });

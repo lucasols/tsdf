@@ -17,7 +17,11 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 
 const documentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -117,8 +121,7 @@ describe('opfs: converted document store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore();
 
@@ -177,13 +180,11 @@ describe('opfs: converted document store persistence', () => {
 
     const invalidStoragePreload =
       invalidStorageEnv.apiStore.preloadPersistentStorage();
-    await advanceTime(50);
-    await invalidStoragePreload;
+    await resolveAfterAllTimers(invalidStoragePreload);
     await advanceTime(2100);
 
     const throwingPreload = throwingEnv.apiStore.preloadPersistentStorage();
-    await advanceTime(50);
-    await throwingPreload;
+    await resolveAfterAllTimers(throwingPreload);
     await advanceTime(2100);
 
     expect(
@@ -225,8 +226,7 @@ describe('opfs: converted document store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await advanceTime(50);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
     await advanceTime(2100);
 
     expect(

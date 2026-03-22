@@ -25,7 +25,11 @@ import {
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({ id: rc_number, name: rc_string, age: rc_number.optional() }),
@@ -154,8 +158,8 @@ describe('opfs: converted list query store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(200);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
         preloaded: '✅'
     `);
@@ -242,14 +246,12 @@ describe('opfs: converted list query store persistence', () => {
 
     const invalidStoragePreload =
       invalidStorageEnv.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(100);
-    await invalidStoragePreload;
+    await resolveAfterAllTimers(invalidStoragePreload);
     await advanceTime(2100);
 
     const throwingPreload =
       throwingEnv.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(100);
-    await throwingPreload;
+    await resolveAfterAllTimers(throwingPreload);
     await advanceTime(2100);
 
     expect(
@@ -296,8 +298,7 @@ describe('opfs: converted list query store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
     await advanceTime(2100);
 
     expect(mockAdapter.has(persistedQuery.itemStorageKey('users', 1))).toBe(

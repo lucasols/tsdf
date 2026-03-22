@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { advanceTime } from '../utils/genericTestUtils';
+import { advanceTime, resolveAfterAllTimers } from '../utils/genericTestUtils';
 import {
   createMockBrowserOpfs,
   resetMockBrowserOpfsForTests,
@@ -73,6 +73,82 @@ describe('mockBrowserOpfs', () => {
       - { time: 3, type: 'ensureFile' }
       - { time: 7, type: 'writeFile' }
       - { time: 10, type: 'readFile' }
+    `);
+  });
+
+  test('file handles stop reading once the file is deleted', async () => {
+    const mockBrowserOpfs = createMockBrowserOpfs();
+    const root = await resolveAfterAllTimers(navigator.storage.getDirectory());
+    const docsDir = await resolveAfterAllTimers(
+      root.getDirectoryHandle('docs', { create: true }),
+    );
+    const file = await resolveAfterAllTimers(
+      docsDir.getFileHandle('entry.json', { create: true }),
+    );
+    const writable = await resolveAfterAllTimers(file.createWritable());
+    await resolveAfterAllTimers(writable.write('{"value":"test"}'));
+    await resolveAfterAllTimers(writable.close());
+
+    const savedFile = await resolveAfterAllTimers(file.getFile());
+    await resolveAfterAllTimers(docsDir.removeEntry('entry.json'));
+
+    const textPromise = savedFile.text();
+    const rejectedRead = expect(textPromise).rejects.toMatchObject({
+      name: 'NotFoundError',
+    });
+    await advanceTime(2);
+    await rejectedRead;
+
+    expect(
+      mockBrowserOpfs.operations.map((operation) => ({
+        time: operation.time,
+        type: operation.type,
+      })),
+    ).toMatchInlineSnapshot(`
+      - { time: 2, type: 'ensureDir' }
+      - { time: 3, type: 'ensureFile' }
+      - { time: 7, type: 'writeFile' }
+      - { time: 9, type: 'deleteFile' }
+    `);
+  });
+
+  test('files returned by getFile stop reading after the file is overwritten', async () => {
+    const mockBrowserOpfs = createMockBrowserOpfs();
+    const root = await resolveAfterAllTimers(navigator.storage.getDirectory());
+    const docsDir = await resolveAfterAllTimers(
+      root.getDirectoryHandle('docs', { create: true }),
+    );
+    const file = await resolveAfterAllTimers(
+      docsDir.getFileHandle('entry.json', { create: true }),
+    );
+
+    const firstWritable = await resolveAfterAllTimers(file.createWritable());
+    await resolveAfterAllTimers(firstWritable.write('{"value":"first"}'));
+    await resolveAfterAllTimers(firstWritable.close());
+
+    const savedFile = await resolveAfterAllTimers(file.getFile());
+
+    const secondWritable = await resolveAfterAllTimers(file.createWritable());
+    await resolveAfterAllTimers(secondWritable.write('{"value":"second"}'));
+    await resolveAfterAllTimers(secondWritable.close());
+
+    const textPromise = savedFile.text();
+    const rejectedRead = expect(textPromise).rejects.toMatchObject({
+      name: 'NotReadableError',
+    });
+    await advanceTime(2);
+    await rejectedRead;
+
+    expect(
+      mockBrowserOpfs.operations.map((operation) => ({
+        time: operation.time,
+        type: operation.type,
+      })),
+    ).toMatchInlineSnapshot(`
+      - { time: 2, type: 'ensureDir' }
+      - { time: 3, type: 'ensureFile' }
+      - { time: 7, type: 'writeFile' }
+      - { time: 12, type: 'writeFile' }
     `);
   });
 });

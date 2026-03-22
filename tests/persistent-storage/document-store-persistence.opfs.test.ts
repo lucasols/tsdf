@@ -16,7 +16,11 @@ import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 
 const wrappedSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -105,8 +109,7 @@ describe('opfs: document store persistence', () => {
     expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await advanceTime(50);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
     await flushAllTimers();
 
     expect(mockAdapter.payloadGetRequests).toEqual([key]);
@@ -133,8 +136,7 @@ describe('opfs: document store persistence', () => {
     expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await advanceTime(50);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
     await flushAllTimers();
 
     expect(mockAdapter.payloadGetRequests).toEqual([key]);
@@ -202,8 +204,7 @@ describe('opfs: document store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore();
 
@@ -239,7 +240,7 @@ describe('opfs: document store persistence', () => {
 
     env.apiStore.reset();
 
-    await advanceTime(200);
+    await flushAllTimers();
 
     expect(env.store.state).toMatchInlineSnapshot(`
       data: null

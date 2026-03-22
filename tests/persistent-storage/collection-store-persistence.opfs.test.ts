@@ -20,7 +20,11 @@ import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -170,8 +174,8 @@ describe('opfs: collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('1');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: '1', preloaded: '✅' }
     `);
 
@@ -215,8 +219,8 @@ describe('opfs: collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'bad', preloaded: '❌' }
     `);
     await flushAllTimers();
@@ -244,8 +248,8 @@ describe('opfs: collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('bad');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'bad', preloaded: '❌' }
     `);
     await flushAllTimers();
@@ -272,8 +276,8 @@ describe('opfs: collection store persistence', () => {
     });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('secret');
-    await advanceTime(50);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'secret', preloaded: '❌' }
     `);
     await advanceTime(2100);
@@ -297,8 +301,7 @@ describe('opfs: collection store persistence', () => {
 
     env.apiStore.addItemToState('1', { value: { id: '1', name: 'Live' } });
 
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     expect(env.apiStore.getItemState('1')).toMatchInlineSnapshot(`
       data:
