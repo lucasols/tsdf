@@ -551,17 +551,25 @@ const OPFS_TIMELINE_DETAIL_PREFIX = '   └ ';
 
 function formatWrappedOpfsOperationLabel(
   prefix: string,
-  path: string,
+  value: string,
   detail?: string,
 ): string {
-  const normalizedPath = stripOpfsRootPrefix(path);
-  const mainLine = `${prefix} ${normalizedPath}`;
+  const mainLine = `${prefix} ${value}`;
   if (detail === undefined) return mainLine;
 
   const fullLine = `${mainLine} ${detail}`;
   return fullLine.length > OPFS_TIMELINE_WRAP_AT
     ? `${mainLine}\n${OPFS_TIMELINE_DETAIL_PREFIX}${detail}`
     : fullLine;
+}
+
+function formatOpfsOperationPath(
+  path: string,
+  pathIdMap?: Map<string, number>,
+): string {
+  const normalizedPath = stripOpfsRootPrefix(path);
+  const pathId = pathIdMap?.get(normalizedPath);
+  return pathId === undefined ? normalizedPath : `#${pathId} ${normalizedPath}`;
 }
 
 function formatOpfsPath(scope: {
@@ -683,36 +691,39 @@ function formatOpfsFileDescription(operation: MockOpfsOperation): string {
   return 'untracked file';
 }
 
-function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
+function formatOpfsOperationLabel(
+  operation: MockOpfsOperation,
+  pathIdMap: Map<string, number>,
+): string {
   switch (operation.type) {
     case 'openDir':
       return formatWrappedOpfsOperationLabel(
         `📂 dir-open ${operation.exists ? '✅' : '❌'}`,
-        operation.path,
+        formatOpfsOperationPath(operation.path),
         `(${describeOpfsDirectoryPath(operation.path)})`,
       );
     case 'ensureDir':
       return formatWrappedOpfsOperationLabel(
         `📁 dir-open-or-create ${operation.created ? '🆕' : '✅'}`,
-        operation.path,
+        formatOpfsOperationPath(operation.path),
         `(${describeOpfsDirectoryPath(operation.path)})`,
       );
     case 'openFile':
       return formatWrappedOpfsOperationLabel(
         `📄 file-open ${operation.exists ? '✅' : '❌'}`,
-        operation.path,
+        formatOpfsOperationPath(operation.path, pathIdMap),
         `(${formatOpfsFileDescription(operation)})`,
       );
     case 'ensureFile':
       return formatWrappedOpfsOperationLabel(
         `📄 file-open-or-create ${operation.created ? '🆕' : '✅'}`,
-        operation.path,
+        formatOpfsOperationPath(operation.path, pathIdMap),
         `(${formatOpfsFileDescription(operation)})`,
       );
     case 'readFile':
       return formatWrappedOpfsOperationLabel(
         '📖',
-        operation.path,
+        formatOpfsOperationPath(operation.path, pathIdMap),
         `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
           operation.valueByteSize,
         )}`,
@@ -720,7 +731,7 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
     case 'writeFile':
       return formatWrappedOpfsOperationLabel(
         '✍️',
-        operation.path,
+        formatOpfsOperationPath(operation.path, pathIdMap),
         `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
           operation.valueByteSizeBefore,
         )} -> ${formatByteSize(operation.valueByteSizeAfter)}${
@@ -730,13 +741,13 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
     case 'deleteFile':
       return formatWrappedOpfsOperationLabel(
         `🗑️ ${operation.exists ? '✅' : '❌'}`,
-        operation.path,
+        formatOpfsOperationPath(operation.path, pathIdMap),
         `(${formatOpfsFileDescription(operation)})`,
       );
     case 'listDir':
       return formatWrappedOpfsOperationLabel(
         '🗂️ list-dir',
-        operation.path,
+        formatOpfsOperationPath(operation.path),
         `(${describeOpfsDirectoryPath(operation.path)}) entries=${JSON.stringify(
           operation.entries,
         )}`,
@@ -744,7 +755,7 @@ function formatOpfsOperationLabel(operation: MockOpfsOperation): string {
     case 'deleteDir':
       return formatWrappedOpfsOperationLabel(
         `🧹 del-dir ${operation.deleted ? '✅' : '❌'}`,
-        operation.path,
+        formatOpfsOperationPath(operation.path),
         `(${describeOpfsDirectoryPath(operation.path)})`,
       );
   }
@@ -760,12 +771,27 @@ function buildOpfsOperationCaptureResult(
   captureStartedAt: number,
 ): OpfsPersistentStorageOperationCaptureResult {
   const verboseTimelineEntries: TimelineLabel[] = [];
+  const pathIdMap = new Map<string, number>();
+  let nextPathId = 1;
 
   for (const operation of mockAdapter.operations) {
+    const pathKey =
+      operation.type === 'openFile' ||
+      operation.type === 'ensureFile' ||
+      operation.type === 'readFile' ||
+      operation.type === 'writeFile' ||
+      operation.type === 'deleteFile'
+        ? stripOpfsRootPrefix(operation.path)
+        : null;
+
+    if (pathKey !== null && !pathIdMap.has(pathKey)) {
+      pathIdMap.set(pathKey, nextPathId++);
+    }
+
     verboseTimelineEntries.push({
       endTime: Math.max(0, operation.time - captureStartedAt),
       time: Math.max(0, operation.startedTime - captureStartedAt),
-      label: formatOpfsOperationLabel(operation),
+      label: formatOpfsOperationLabel(operation, pathIdMap),
     });
   }
 

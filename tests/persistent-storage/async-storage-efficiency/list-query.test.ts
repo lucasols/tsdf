@@ -95,29 +95,29 @@ describe('async storage efficiency: list-query', () => {
              |    └ (session directory) entries=["dir:list-query-expiration"]
       2.004s | 🗂️ list-dir tsdf/sess1/list-query-expiration
              |    └ (store directory) entries=["file:li.%22expired-users%7C%7C1.m.json","file:li.%22expired-users%7C%7C1.p.json","file:li.%22fresh-users%7C%7C2.m.json","file:li.%22fresh-users%7C%7C2.p.json","file:lq.%7BtableId%3A%22expired-users%22%7D.m.json","file:lq.%7BtableId%3A%22expired-users%22%7D.p.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.m.json","file:lq.%7BtableId%3A%22fresh-users%22%7D.p.json"]
-      2.005s | 📄 file-open ✅ tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
+      2.005s | 📄 file-open ✅ #1 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
+      .      | 📄 file-open ✅ #2 tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
+      .      | 📄 file-open ✅ #3 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
+      .      | 📄 file-open ✅ #4 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata))
-      2.007s | 📖 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
+      2.007s | 📖 #1 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata)) | 0.09 kb
-      .      | 📖 tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
+      .      | 📖 #2 tsdf/sess1/list-query-expiration/li.%22fresh-users%7C%7C2.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."fresh-users||2 (metadata)) | 0.09 kb
-      .      | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
+      .      | 📖 #3 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata)) | 0.16 kb
-      .      | 📖 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
+      .      | 📖 #4 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22fresh-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (metadata)) | 0.16 kb
-      2.009s | 🗑️ ✅ tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.p.json
+      2.009s | 🗑️ ✅ #5 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.p.json
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
+      .      | 🗑️ ✅ #1 tsdf/sess1/list-query-expiration/li.%22expired-users%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-expiration.li."expired-users||1 (metadata))
-      .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.p.json
+      .      | 🗑️ ✅ #6 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.p.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (payload))
-      .      | 🗑️ ✅ tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
+      .      | 🗑️ ✅ #3 tsdf/sess1/list-query-expiration/lq.%7BtableId%3A%22expired-users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (metadata))
       2.01s  | end
       "
@@ -170,54 +170,54 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:lq.%7BtableId%3A%22first%22%7D.m.json","file:lq.%7BtableId%3A%22first%22%7D.p.json","file:lq.%7BtableId%3A%22second%22%7D.m.json","file:lq.%7BtableId%3A%22second%22%7D.p.json"]
       1.813s | 🗂️ list-dir tsdf/sess1/lq-query-metadata
              |    └ (store directory) entries=["file:lq.%7BtableId%3A%22first%22%7D.m.json","file:lq.%7BtableId%3A%22first%22%7D.p.json","file:lq.%7BtableId%3A%22second%22%7D.m.json","file:lq.%7BtableId%3A%22second%22%7D.p.json"]
-      1.814s | 📄 file-open ✅ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.m.json
+      1.814s | 📄 file-open ✅ #1 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (metadata))
-      1.815s | 📄 file-open ✅ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.p.json
+      1.815s | 📄 file-open ✅ #2 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (payload))
-      1.816s | 📄 file-open ✅ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22second%22%7D.m.json
+      1.816s | 📄 file-open ✅ #3 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22second%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (metadata))
-      1.817s | 📄 file-open ✅ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22second%22%7D.p.json
+      1.817s | 📄 file-open ✅ #4 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22second%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (payload))
-      1.858s | 📄 file-open ❌ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
+      1.858s | 📄 file-open ❌ #5 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata))
-      .      | 📄 file-open ❌ tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
+      .      | 📄 file-open ❌ #6 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-metadata.li."third||1 (metadata))
       1.859s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.86s  | 📁 dir-open-or-create ✅ tsdf/sess1/lq-query-metadata (store directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1/lq-query-metadata (store directory)
-      1.861s | 📄 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.p.json
+      1.861s | 📄 file-open-or-create 🆕 #7 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
+      .      | 📄 file-open-or-create 🆕 #5 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.p.json
+      .      | 📄 file-open-or-create 🆕 #8 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-query-metadata.li."third||1 (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
+      .      | 📄 file-open-or-create 🆕 #6 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-metadata.li."third||1 (metadata))
-      1.864s | ✍️ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.p.json
+      1.864s | ✍️ #7 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
+      .      | ✍️ #5 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata)) | 0.00 kb -> 0.13 kb
-      .      | ✍️ tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.p.json
+      .      | ✍️ #8 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-query-metadata.li."third||1 (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
+      .      | ✍️ #6 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-metadata.li."third||1 (metadata)) | 0.00 kb -> 0.08 kb
       3.866s | 🗂️ list-dir tsdf/sess1/lq-query-metadata
              |    └ (store directory) entries=["file:li.%22third%7C%7C1.m.json","file:li.%22third%7C%7C1.p.json","file:lq.%7BtableId%3A%22first%22%7D.m.json","file:lq.%7BtableId%3A%22first%22%7D.p.json","file:lq.%7BtableId%3A%22second%22%7D.m.json","file:lq.%7BtableId%3A%22second%22%7D.p.json","file:lq.%7BtableId%3A%22third%22%7D.m.json","file:lq.%7BtableId%3A%22third%22%7D.p.json"]
-      3.868s | 📖 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.m.json
+      3.868s | 📖 #1 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (metadata)) | 0.11 kb
-      .      | 📖 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22second%22%7D.m.json
+      .      | 📖 #3 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22second%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (metadata)) | 0.11 kb
-      .      | 📖 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
+      .      | 📖 #5 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (metadata)) | 0.13 kb
-      3.91s  | 🗑️ ✅ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.p.json
+      3.91s  | 🗑️ ✅ #2 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (payload))
-      .      | 🗑️ ✅ tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.m.json
+      .      | 🗑️ ✅ #1 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (metadata))
       3.911s | 🧹 del-dir ❌ tsdf/sess1/lq-query-metadata (store directory)
       3.912s | 🗂️ list-dir tsdf/sess1/lq-query-metadata
              |    └ (store directory) entries=["file:li.%22third%7C%7C1.m.json","file:li.%22third%7C%7C1.p.json","file:lq.%7BtableId%3A%22second%22%7D.m.json","file:lq.%7BtableId%3A%22second%22%7D.p.json","file:lq.%7BtableId%3A%22third%22%7D.m.json","file:lq.%7BtableId%3A%22third%22%7D.p.json"]
-      3.914s | 📖 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
+      3.914s | 📖 #6 tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-metadata.li."third||1 (metadata)) | 0.08 kb
       3.916s | end
       "
@@ -307,17 +307,17 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:lq.%7BtableId%3A%22first%22%7D.m.json","file:lq.%7BtableId%3A%22first%22%7D.p.json","file:lq.%7BtableId%3A%22second%22%7D.m.json","file:lq.%7BtableId%3A%22second%22%7D.p.json"]
       1.813s | 🗂️ list-dir tsdf/sess1/lq-coalesced-query-maintenance
              |    └ (store directory) entries=["file:lq.%7BtableId%3A%22first%22%7D.m.json","file:lq.%7BtableId%3A%22first%22%7D.p.json","file:lq.%7BtableId%3A%22second%22%7D.m.json","file:lq.%7BtableId%3A%22second%22%7D.p.json"]
-      1.814s | 📄 file-open ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.m.json
+      1.814s | 📄 file-open ✅ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (metadata))
-      1.815s | 📄 file-open ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.p.json
+      1.815s | 📄 file-open ✅ #2 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (payload))
-      1.816s | 📄 file-open ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.m.json
+      1.816s | 📄 file-open ✅ #3 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (metadata))
-      1.817s | 📄 file-open ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.p.json
+      1.817s | 📄 file-open ✅ #4 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (payload))
-      1.858s | 📄 file-open ❌ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
+      1.858s | 📄 file-open ❌ #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata))
-      .      | 📄 file-open ❌ tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
+      .      | 📄 file-open ❌ #6 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))
       1.859s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
@@ -325,82 +325,82 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1/lq-coalesced-query-maintenance
              |    └ (store directory)
-      1.861s | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.p.json
+      1.861s | 📄 file-open-or-create 🆕 #7 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
+      .      | 📄 file-open-or-create 🆕 #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
+      .      | 📄 file-open-or-create 🆕 #8 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
+      .      | 📄 file-open-or-create 🆕 #6 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))
-      1.864s | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.p.json
+      1.864s | ✍️ #7 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
+      .      | ✍️ #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata)) | 0.00 kb -> 0.13 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
+      .      | ✍️ #8 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
+      .      | ✍️ #6 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata)) | 0.00 kb -> 0.08 kb
-      3.66s  | 📄 file-open ❌ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
+      3.66s  | 📄 file-open ❌ #9 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata))
-      .      | 📄 file-open ❌ tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
+      .      | 📄 file-open ❌ #10 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))
       3.661s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      .      | 📖 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
+      .      | 📖 #6 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata)) | 0.08 kb
       3.662s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-coalesced-query-maintenance
              |    └ (store directory)
       3.663s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.p.json
+      .      | 📄 file-open-or-create 🆕 #11 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
+      .      | 📄 file-open-or-create 🆕 #9 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata))
       3.664s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-coalesced-query-maintenance
              |    └ (store directory)
-      3.665s | 📄 file-open-or-create ✅ tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
+      3.665s | 📄 file-open-or-create ✅ #8 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
+      .      | 📄 file-open-or-create ✅ #6 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.p.json
+      .      | 📄 file-open-or-create 🆕 #12 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
+      .      | 📄 file-open-or-create 🆕 #10 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata))
-      3.666s | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.p.json
+      3.666s | ✍️ #11 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
+      .      | ✍️ #9 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata)) | 0.00 kb -> 0.14 kb
-      3.668s | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
+      3.668s | ✍️ #8 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (payload)) | 0.09 kb -> 0.15 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
+      .      | ✍️ #6 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata)) | 0.08 kb -> 0.08 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.p.json
+      .      | ✍️ #12 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
+      .      | ✍️ #10 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata)) | 0.00 kb -> 0.08 kb
       3.866s | 🗂️ list-dir tsdf/sess1/lq-coalesced-query-maintenance
              |    └ (store directory) entries=["file:li.%22fourth%7C%7C2.m.json","file:li.%22fourth%7C%7C2.p.json","file:li.%22third%7C%7C1.m.json","file:li.%22third%7C%7C1.p.json","file:lq.%7BtableId%3A%22first%22%7D.m.json","file:lq.%7BtableId%3A%22first%22%7D.p.json","file:lq.%7BtableId%3A%22fourth%22%7D.m.json","file:lq.%7BtableId%3A%22fourth%22%7D.p.json","file:lq.%7BtableId%3A%22second%22%7D.m.json","file:lq.%7BtableId%3A%22second%22%7D.p.json","file:lq.%7BtableId%3A%22third%22%7D.m.json","file:lq.%7BtableId%3A%22third%22%7D.p.json"]
-      3.868s | 📖 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.m.json
+      3.868s | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (metadata)) | 0.11 kb
-      .      | 📖 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
+      .      | 📖 #9 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22fourth%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (metadata)) | 0.14 kb
-      .      | 📖 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.m.json
+      .      | 📖 #3 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (metadata)) | 0.11 kb
-      .      | 📖 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
+      .      | 📖 #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22third%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (metadata)) | 0.13 kb
-      3.91s  | 🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.p.json
+      3.91s  | 🗑️ ✅ #4 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (payload))
-      .      | 🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.m.json
+      .      | 🗑️ ✅ #3 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22second%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (metadata))
-      .      | 🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.p.json
+      .      | 🗑️ ✅ #2 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.p.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (payload))
-      .      | 🗑️ ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.m.json
+      .      | 🗑️ ✅ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (metadata))
       3.911s | 🧹 del-dir ❌ tsdf/sess1/lq-coalesced-query-maintenance (store directory)
       3.912s | 🗂️ list-dir tsdf/sess1/lq-coalesced-query-maintenance
              |    └ (store directory) entries=["file:li.%22fourth%7C%7C2.m.json","file:li.%22fourth%7C%7C2.p.json","file:li.%22third%7C%7C1.m.json","file:li.%22third%7C%7C1.p.json","file:lq.%7BtableId%3A%22fourth%22%7D.m.json","file:lq.%7BtableId%3A%22fourth%22%7D.p.json","file:lq.%7BtableId%3A%22third%22%7D.m.json","file:lq.%7BtableId%3A%22third%22%7D.p.json"]
-      3.914s | 📖 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
+      3.914s | 📖 #10 tsdf/sess1/lq-coalesced-query-maintenance/li.%22fourth%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
+      .      | 📖 #6 tsdf/sess1/lq-coalesced-query-maintenance/li.%22third%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (metadata)) | 0.08 kb
       3.916s | end
       "
@@ -449,17 +449,17 @@ describe('async storage efficiency: list-query', () => {
       1.81s  | 📂 dir-open ❌ tsdf/sess1 (session directory)
       1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest (store directory)
-      1.853s | 📄 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
+      1.853s | 📄 file-open-or-create 🆕 #1 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📄 file-open-or-create 🆕 #2 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata))
-      1.856s | ✍️ tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
+      1.856s | ✍️ #1 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (payload)) | 0.00 kb -> 0.18 kb
-      .      | ✍️ tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | ✍️ #2 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata)) | 0.00 kb -> 0.23 kb
       3.858s | 🗂️ list-dir tsdf/sess1/lq-empty-query-manifest
              |    └ (store directory) entries=["file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.p.json"]
-      3.86s  | 📖 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      3.86s  | 📖 #2 tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (metadata)) | 0.23 kb
       3.862s | 🗂️ list-dir tsdf/sess1/lq-empty-query-manifest
              |    └ (store directory) entries=["file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.p.json"]
@@ -562,37 +562,37 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
       1.811s | 🗂️ list-dir tsdf/sess1/lq-query-becomes-empty
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      1.853s | 📖 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
+      1.853s | 📖 #1 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      .      | 📖 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
+      .      | 📖 #2 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata)) | 0.08 kb
       1.905s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.906s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-query-becomes-empty (store directory)
       .      | 📁 dir-open-or-create ✅ tsdf/sess1/lq-query-becomes-empty (store directory)
-      1.907s | 📄 file-open-or-create ✅ tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.p.json
+      1.907s | 📄 file-open-or-create ✅ #3 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
+      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.p.json
+      .      | 📄 file-open-or-create ✅ #4 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
+      .      | 📄 file-open-or-create ✅ #2 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata))
-      1.91s  | ✍️ tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.p.json
+      1.91s  | ✍️ #3 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (payload)) | 0.09 kb -> 0.06 kb
-      .      | ✍️ tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
+      .      | ✍️ #1 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata)) | 0.13 kb -> 0.11 kb
-      .      | ✍️ tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.p.json
+      .      | ✍️ #4 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
-      .      | ✍️ tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
+      .      | ✍️ #2 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
       3.912s | 🗂️ list-dir tsdf/sess1/lq-query-becomes-empty
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.914s | 📖 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
+      3.914s | 📖 #1 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata)) | 0.11 kb
       3.966s | 🗂️ list-dir tsdf/sess1/lq-query-becomes-empty
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.968s | 📖 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
+      3.968s | 📖 #2 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata)) | 0.08 kb
       4.02s  | end
       "
@@ -675,47 +675,47 @@ describe('async storage efficiency: list-query', () => {
       1.001s | 📂 dir-open ✅ tsdf/sess1/lq-item-metadata (store directory)
       1.002s | 🗂️ list-dir tsdf/sess1/lq-item-metadata
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:li.%22users%7C%7C2.m.json","file:li.%22users%7C%7C2.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      1.003s | 📄 file-open ✅ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C1.m.json
+      1.003s | 📄 file-open ✅ #1 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||1 (metadata))
-      1.004s | 📄 file-open ✅ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C1.p.json
+      1.004s | 📄 file-open ✅ #2 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||1 (payload))
-      1.005s | 📄 file-open ✅ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C2.m.json
+      1.005s | 📄 file-open ✅ #3 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||2 (metadata))
-      1.006s | 📄 file-open ✅ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C2.p.json
+      1.006s | 📄 file-open ✅ #4 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C2.p.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||2 (payload))
       1.007s | 🗂️ list-dir tsdf/sess1/lq-item-metadata
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:li.%22users%7C%7C2.m.json","file:li.%22users%7C%7C2.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      1.008s | 📄 file-open ✅ tsdf/sess1/lq-item-metadata/lq.%7BtableId%3A%22users%22%7D.m.json
+      1.008s | 📄 file-open ✅ #5 tsdf/sess1/lq-item-metadata/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (metadata))
-      1.009s | 📄 file-open ✅ tsdf/sess1/lq-item-metadata/lq.%7BtableId%3A%22users%22%7D.p.json
+      1.009s | 📄 file-open ✅ #6 tsdf/sess1/lq-item-metadata/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (payload))
-      1.05s  | 📄 file-open ❌ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
+      1.05s  | 📄 file-open ❌ #7 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))
       1.051s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.052s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-item-metadata (store directory)
-      1.053s | 📄 file-open-or-create 🆕 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.p.json
+      1.053s | 📄 file-open-or-create 🆕 #8 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.p.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
+      .      | 📄 file-open-or-create 🆕 #7 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))
-      1.056s | ✍️ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.p.json
+      1.056s | ✍️ #8 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.p.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
+      .      | ✍️ #7 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (metadata)) | 0.00 kb -> 0.08 kb
       3.058s | 🗂️ list-dir tsdf/sess1/lq-item-metadata
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:li.%22users%7C%7C2.m.json","file:li.%22users%7C%7C2.p.json","file:li.%22users%7C%7C3.m.json","file:li.%22users%7C%7C3.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.06s  | 📖 tsdf/sess1/lq-item-metadata/lq.%7BtableId%3A%22users%22%7D.m.json
+      3.06s  | 📖 #5 tsdf/sess1/lq-item-metadata/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (metadata)) | 0.16 kb
       3.062s | 🗂️ list-dir tsdf/sess1/lq-item-metadata
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:li.%22users%7C%7C2.m.json","file:li.%22users%7C%7C2.p.json","file:li.%22users%7C%7C3.m.json","file:li.%22users%7C%7C3.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.064s | 📖 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C1.m.json
+      3.064s | 📖 #1 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||1 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C2.m.json
+      .      | 📖 #3 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||2 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
+      .      | 📖 #7 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (metadata)) | 0.08 kb
-      3.106s | 🗑️ ✅ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.p.json
+      3.106s | 🗑️ ✅ #8 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.p.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
+      .      | 🗑️ ✅ #7 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.m.json
              |    └ (tsdf.sess1.lq-item-metadata.li."users||3 (metadata))
       3.107s | 🧹 del-dir ❌ tsdf/sess1/lq-item-metadata (store directory)
       3.108s | end
@@ -815,29 +815,29 @@ describe('async storage efficiency: list-query', () => {
              |    └ (session directory) entries=["dir:lq-shared-item-cleanup"]
       2.004s | 🗂️ list-dir tsdf/sess1/lq-shared-item-cleanup
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:li.%22users%7C%7C2.m.json","file:li.%22users%7C%7C2.p.json","file:li.%22users%7C%7C3.m.json","file:li.%22users%7C%7C3.p.json","file:li.%22users%7C%7C4.m.json","file:li.%22users%7C%7C4.p.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.p.json"]
-      2.005s | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C1.m.json
+      2.005s | 📄 file-open ✅ #1 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||1 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C2.m.json
+      .      | 📄 file-open ✅ #2 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||2 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C3.m.json
+      .      | 📄 file-open ✅ #3 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C3.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||3 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C4.m.json
+      .      | 📄 file-open ✅ #4 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C4.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||4 (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📄 file-open ✅ #5 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))
-      .      | 📄 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📄 file-open ✅ #6 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata))
-      2.007s | 📖 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C1.m.json
+      2.007s | 📖 #1 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||1 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C2.m.json
+      .      | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||2 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C3.m.json
+      .      | 📖 #3 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C3.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||3 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C4.m.json
+      .      | 📖 #4 tsdf/sess1/lq-shared-item-cleanup/li.%22users%7C%7C4.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.li."users||4 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📖 #5 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)) | 0.27 kb
-      .      | 📖 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📖 #6 tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (metadata)) | 0.26 kb
       2.009s | end
       "
@@ -916,56 +916,56 @@ describe('async storage efficiency: list-query', () => {
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.041s | 📖 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      1.041s | 📖 #1 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata)) | 0.16 kb
-      .      | 📖 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📖 #2 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)) | 0.24 kb
-      .      | 📖 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
+      .      | 📖 #3 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||2 (metadata)) | 0.08 kb
       1.043s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1.044s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-delete-flow (store directory)
       .      | 📂 dir-open ✅ tsdf/sess1/lq-delete-flow (store directory)
-      1.045s | 📄 file-open-or-create ✅ tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+      1.045s | 📄 file-open-or-create ✅ #4 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
+      .      | 📄 file-open-or-create ✅ #5 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | 📄 file-open-or-create ✅ #2 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata))
-      .      | 🗑️ ✅ tsdf/sess1/lq-delete-flow/li.%22users%7C%7C1.p.json
+      .      | 🗑️ ✅ #6 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||1 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/lq-delete-flow/li.%22users%7C%7C1.m.json
+      .      | 🗑️ ✅ #7 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||1 (metadata))
       1.046s | 🧹 del-dir ❌ tsdf/sess1/lq-delete-flow (store directory)
       1.047s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.048s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-delete-flow (store directory)
-      .      | ✍️ tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+      .      | ✍️ #4 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (payload)) | 0.11 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      .      | ✍️ #1 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata)) | 0.16 kb -> 0.13 kb
-      .      | ✍️ tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
+      .      | ✍️ #5 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (payload)) | 0.19 kb -> 0.17 kb
-      .      | ✍️ tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      .      | ✍️ #2 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)) | 0.24 kb -> 0.22 kb
-      1.049s | 📄 file-open-or-create ✅ tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.p.json
+      1.049s | 📄 file-open-or-create ✅ #8 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.p.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||2 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
+      .      | 📄 file-open-or-create ✅ #3 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||2 (metadata))
-      1.052s | ✍️ tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.p.json
+      1.052s | ✍️ #8 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.p.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||2 (payload)) | 0.08 kb -> 0.15 kb
-      .      | ✍️ tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
+      .      | ✍️ #3 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||2 (metadata)) | 0.08 kb -> 0.08 kb
       3.054s | 🗂️ list-dir tsdf/sess1/lq-delete-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C2.m.json","file:li.%22users%7C%7C2.p.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.056s | 📖 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
+      3.056s | 📖 #2 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (metadata)) | 0.22 kb
-      .      | 📖 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      .      | 📖 #1 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
       3.058s | 🗂️ list-dir tsdf/sess1/lq-delete-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C2.m.json","file:li.%22users%7C%7C2.p.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json","file:lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.06s  | 📖 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
+      3.06s  | 📖 #3 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.m.json
              |    └ (tsdf.sess1.lq-delete-flow.li."users||2 (metadata)) | 0.08 kb
       3.062s | end
       "
@@ -1184,25 +1184,25 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
       1.811s | 🗂️ list-dir tsdf/sess1/lq-query-invalidation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      1.853s | 📖 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
+      1.853s | 📖 #1 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata)) | 0.08 kb
       1.905s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.906s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-query-invalidation-flow (store directory)
-      1.907s | 📄 file-open-or-create ✅ tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.p.json
+      1.907s | 📄 file-open-or-create ✅ #2 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
+      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata))
-      1.91s  | ✍️ tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.p.json
+      1.91s  | ✍️ #2 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
-      .      | ✍️ tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
+      .      | ✍️ #1 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
       3.912s | 🗂️ list-dir tsdf/sess1/lq-query-invalidation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.914s | 📖 tsdf/sess1/lq-query-invalidation-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      3.914s | 📖 #3 tsdf/sess1/lq-query-invalidation-flow/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
       3.966s | 🗂️ list-dir tsdf/sess1/lq-query-invalidation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.968s | 📖 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
+      3.968s | 📖 #1 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata)) | 0.08 kb
       4.02s  | end
       "
@@ -1294,25 +1294,25 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
       1.811s | 🗂️ list-dir tsdf/sess1/lq-coalesced-invalidations
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      1.853s | 📖 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
+      1.853s | 📖 #1 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata)) | 0.08 kb
       1.905s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.906s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-coalesced-invalidations (store directory)
-      1.907s | 📄 file-open-or-create ✅ tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.p.json
+      1.907s | 📄 file-open-or-create ✅ #2 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
+      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata))
-      1.91s  | ✍️ tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.p.json
+      1.91s  | ✍️ #2 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
-      .      | ✍️ tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
+      .      | ✍️ #1 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
       3.912s | 🗂️ list-dir tsdf/sess1/lq-coalesced-invalidations
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.914s | 📖 tsdf/sess1/lq-coalesced-invalidations/lq.%7BtableId%3A%22users%22%7D.m.json
+      3.914s | 📖 #3 tsdf/sess1/lq-coalesced-invalidations/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.lq.{tableId:"users"} (metadata)) | 0.13 kb
       3.966s | 🗂️ list-dir tsdf/sess1/lq-coalesced-invalidations
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.968s | 📖 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
+      3.968s | 📖 #1 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata)) | 0.08 kb
       4.02s  | end
       "
@@ -1467,21 +1467,21 @@ describe('async storage efficiency: list-query', () => {
       time  |
       0     | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms   | 📂 dir-open ✅ tsdf/sess1/lq-remount-flow (store directory)
-      2ms   | 📄 file-open ✅ tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+      2ms   | 📄 file-open ✅ #1 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
             |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      .     | 📄 file-open ✅ #2 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
             |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata))
-      4ms   | 📖 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+      4ms   | 📖 #1 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
             |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload)) | 0.09 kb
-      .     | 📖 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      .     | 📖 #2 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
             |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      56ms  | 📄 file-open ✅ tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
+      56ms  | 📄 file-open ✅ #3 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
             |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
+      .     | 📄 file-open ✅ #4 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
             |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (metadata))
-      58ms  | 📖 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
+      58ms  | 📖 #3 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
             |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (payload)) | 0.10 kb
-      .     | 📖 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
+      .     | 📖 #4 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
             |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (metadata)) | 0.08 kb
       110ms | end
       "
@@ -1547,23 +1547,23 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json"]
       1.811s | 🗂️ list-dir tsdf/sess1/lq-item-invalidation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json"]
-      1.853s | 📖 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
+      1.853s | 📖 #1 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata)) | 0.08 kb
       1.905s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.906s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-item-invalidation-flow (store directory)
-      1.907s | 📄 file-open-or-create ✅ tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.p.json
+      1.907s | 📄 file-open-or-create ✅ #2 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
+      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata))
-      1.91s  | ✍️ tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.p.json
+      1.91s  | ✍️ #2 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
-      .      | ✍️ tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
+      .      | ✍️ #1 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
       3.912s | 🗂️ list-dir tsdf/sess1/lq-item-invalidation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json"]
       3.913s | 🗂️ list-dir tsdf/sess1/lq-item-invalidation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json"]
-      3.915s | 📖 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
+      3.915s | 📖 #1 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata)) | 0.08 kb
       3.967s | end
       "
@@ -1608,13 +1608,13 @@ describe('async storage efficiency: list-query', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/lq-item-remount-flow (store directory)
-      2ms  | 📄 file-open ✅ tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.p.json
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.p.json
            |    └ (tsdf.sess1.lq-item-remount-flow.li."users||1 (payload))
-      .    | 📄 file-open ✅ tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.m.json
+      .    | 📄 file-open ✅ #2 tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.m.json
            |    └ (tsdf.sess1.lq-item-remount-flow.li."users||1 (metadata))
-      4ms  | 📖 tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.p.json
+      4ms  | 📖 #1 tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.p.json
            |    └ (tsdf.sess1.lq-item-remount-flow.li."users||1 (payload)) | 0.10 kb
-      .    | 📖 tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.m.json
+      .    | 📖 #2 tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.m.json
            |    └ (tsdf.sess1.lq-item-remount-flow.li."users||1 (metadata)) | 0.08 kb
       56ms | end
       "
@@ -1668,21 +1668,21 @@ describe('async storage efficiency: list-query', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/lq-multi-item-remount-flow (store directory)
-      2ms  | 📄 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.p.json
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.p.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (payload))
-      .    | 📄 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.m.json
+      .    | 📄 file-open ✅ #2 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.m.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (metadata))
-      .    | 📄 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.p.json
+      .    | 📄 file-open ✅ #3 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.p.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (payload))
-      .    | 📄 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.m.json
+      .    | 📄 file-open ✅ #4 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.m.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (metadata))
-      4ms  | 📖 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.p.json
+      4ms  | 📖 #1 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.p.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (payload)) | 0.10 kb
-      .    | 📖 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.m.json
+      .    | 📖 #2 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C1.m.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (metadata)) | 0.08 kb
-      .    | 📖 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.p.json
+      .    | 📖 #3 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.p.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (payload)) | 0.10 kb
-      .    | 📖 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.m.json
+      .    | 📖 #4 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.m.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (metadata)) | 0.08 kb
       56ms | end
       "
@@ -1742,37 +1742,37 @@ describe('async storage efficiency: list-query', () => {
       time  |
       0     | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms   | 📂 dir-open ✅ tsdf/sess1/lq-multi-query-remount-flow (store directory)
-      2ms   | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+      2ms   | 📄 file-open ✅ #1 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      .     | 📄 file-open ✅ #2 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
+      .     | 📄 file-open ✅ #3 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
+      .     | 📄 file-open ✅ #4 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata))
-      4ms   | 📖 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+      4ms   | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload)) | 0.09 kb
-      .     | 📖 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      .     | 📖 #2 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      .     | 📖 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
+      .     | 📖 #3 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload)) | 0.10 kb
-      .     | 📖 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
+      .     | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata)) | 0.14 kb
-      56ms  | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
+      56ms  | 📄 file-open ✅ #5 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
+      .     | 📄 file-open ✅ #6 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
+      .     | 📄 file-open ✅ #7 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
+      .     | 📄 file-open ✅ #8 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata))
-      58ms  | 📖 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
+      58ms  | 📖 #5 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload)) | 0.10 kb
-      .     | 📖 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
+      .     | 📖 #6 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata)) | 0.08 kb
-      .     | 📖 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
+      .     | 📖 #7 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload)) | 0.11 kb
-      .     | 📖 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
+      .     | 📖 #8 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
             |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata)) | 0.08 kb
       110ms | end
       "
@@ -1840,25 +1840,25 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
       1.001s | 🗂️ list-dir tsdf/sess1/lq-mutation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      1.043s | 📖 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
+      1.043s | 📖 #1 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata)) | 0.08 kb
       1.095s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.096s | 📁 dir-open-or-create ✅ tsdf/sess1/lq-mutation-flow (store directory)
-      1.097s | 📄 file-open-or-create ✅ tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.p.json
+      1.097s | 📄 file-open-or-create ✅ #2 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
+      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata))
-      1.1s   | ✍️ tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.p.json
+      1.1s   | ✍️ #2 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
-      .      | ✍️ tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
+      .      | ✍️ #1 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
       3.102s | 🗂️ list-dir tsdf/sess1/lq-mutation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.104s | 📖 tsdf/sess1/lq-mutation-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+      3.104s | 📖 #3 tsdf/sess1/lq-mutation-flow/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-mutation-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
       3.156s | 🗂️ list-dir tsdf/sess1/lq-mutation-flow
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.158s | 📖 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
+      3.158s | 📖 #1 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata)) | 0.08 kb
       3.21s  | end
       "
@@ -1912,21 +1912,21 @@ describe('async storage efficiency: list-query', () => {
       time  |
       0     | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms   | 📂 dir-open ✅ tsdf/sess1/list-query-opfs-efficiency (store directory)
-      2ms   | 📄 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
+      2ms   | 📄 file-open ✅ #1 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
+      .     | 📄 file-open ✅ #2 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata))
-      4ms   | 📖 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
+      4ms   | 📖 #1 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload)) | 0.09 kb
-      .     | 📖 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
+      .     | 📖 #2 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      56ms  | 📄 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
+      56ms  | 📄 file-open ✅ #3 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload))
-      .     | 📄 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
+      .     | 📄 file-open ✅ #4 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata))
-      58ms  | 📖 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
+      58ms  | 📖 #3 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload)) | 0.09 kb
-      .     | 📖 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
+      .     | 📖 #4 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
             |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata)) | 0.08 kb
       110ms | end
       "
@@ -1985,66 +1985,66 @@ describe('async storage efficiency: list-query', () => {
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       "
       time   |
-      1.85s  | 📄 file-open ❌ tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
+      1.85s  | 📄 file-open ❌ #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata))
-      .      | 📄 file-open ❌ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
+      .      | 📄 file-open ❌ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))
       1.851s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      .      | 📖 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
+      .      | 📖 #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata)) | 0.08 kb
       1.852s | 📁 dir-open-or-create ✅ tsdf/sess1/list-query-opfs-eviction-efficiency
              |    └ (store directory)
       1.853s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.p.json
+      .      | 📄 file-open-or-create 🆕 #4 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
+      .      | 📄 file-open-or-create 🆕 #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata))
       1.854s | 📁 dir-open-or-create ✅ tsdf/sess1/list-query-opfs-eviction-efficiency
              |    └ (store directory)
-      1.855s | 📄 file-open-or-create ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.p.json
+      1.855s | 📄 file-open-or-create ✅ #5 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (payload))
-      .      | 📄 file-open-or-create ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
+      .      | 📄 file-open-or-create ✅ #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.p.json
+      .      | 📄 file-open-or-create 🆕 #6 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (payload))
-      .      | 📄 file-open-or-create 🆕 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
+      .      | 📄 file-open-or-create 🆕 #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata))
-      1.856s | ✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.p.json
+      1.856s | ✍️ #4 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
+      .      | ✍️ #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata)) | 0.00 kb -> 0.13 kb
-      1.858s | ✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.p.json
+      1.858s | ✍️ #5 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (payload)) | 0.10 kb -> 0.16 kb
-      .      | ✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
+      .      | ✍️ #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata)) | 0.08 kb -> 0.08 kb
-      .      | ✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.p.json
+      .      | ✍️ #6 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (payload)) | 0.00 kb -> 0.09 kb
-      .      | ✍️ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
+      .      | ✍️ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata)) | 0.00 kb -> 0.08 kb
       3.86s  | 🗂️ list-dir tsdf/sess1/list-query-opfs-eviction-efficiency
              |    └ (store directory) entries=["file:li.%22projects%7C%7C1.m.json","file:li.%22projects%7C%7C1.p.json","file:li.%22tasks%7C%7C1.m.json","file:li.%22tasks%7C%7C1.p.json","file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22projects%22%7D.m.json","file:lq.%7BtableId%3A%22projects%22%7D.p.json","file:lq.%7BtableId%3A%22tasks%22%7D.m.json","file:lq.%7BtableId%3A%22tasks%22%7D.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
-      3.862s | 📖 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22projects%22%7D.m.json
+      3.862s | 📖 #7 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22projects%22%7D.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"projects"} (metadata)) | 0.14 kb
-      .      | 📖 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
+      .      | 📖 #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22tasks%22%7D.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"tasks"} (metadata)) | 0.13 kb
-      .      | 📖 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
+      .      | 📖 #8 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      3.904s | 🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
+      3.904s | 🗑️ ✅ #9 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (payload))
-      .      | 🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
+      .      | 🗑️ ✅ #8 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.lq.{tableId:"users"} (metadata))
       3.905s | 🧹 del-dir ❌ tsdf/sess1/list-query-opfs-eviction-efficiency (store directory)
       3.906s | 🗂️ list-dir tsdf/sess1/list-query-opfs-eviction-efficiency
              |    └ (store directory) entries=["file:li.%22projects%7C%7C1.m.json","file:li.%22projects%7C%7C1.p.json","file:li.%22tasks%7C%7C1.m.json","file:li.%22tasks%7C%7C1.p.json","file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22projects%22%7D.m.json","file:lq.%7BtableId%3A%22projects%22%7D.p.json","file:lq.%7BtableId%3A%22tasks%22%7D.m.json","file:lq.%7BtableId%3A%22tasks%22%7D.p.json"]
-      3.908s | 📖 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
+      3.908s | 📖 #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22projects%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."projects||1 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
+      .      | 📖 #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22tasks%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."tasks||1 (metadata)) | 0.08 kb
-      .      | 📖 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.m.json
+      .      | 📖 #10 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."users||1 (metadata)) | 0.08 kb
-      3.95s  | 🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.p.json
+      3.95s  | 🗑️ ✅ #11 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."users||1 (payload))
-      .      | 🗑️ ✅ tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.m.json
+      .      | 🗑️ ✅ #10 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.list-query-opfs-eviction-efficiency.li."users||1 (metadata))
       3.951s | 🧹 del-dir ❌ tsdf/sess1/list-query-opfs-eviction-efficiency (store directory)
       3.952s | end
