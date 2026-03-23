@@ -245,7 +245,8 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1","file:root-junk.txt"]
+      2.002s | 🗂️ list-dir tsdf
+             |    └ (root directory) entries=["dir:sess1","file:root-junk.txt"]
       2.003s | 🗑️ ✅ #1 tsdf/root-junk.txt (untracked root file)
       2.004s | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc","dir:invalid-only-store","file:session-junk.txt"]
@@ -256,9 +257,11 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json","file:store-junk.txt"]
       .      | 🗂️ list-dir tsdf/sess1/invalid-only-store
              |    └ (store directory) entries=["file:store-junk.txt"]
-      2.007s | 🗑️ ✅ #3 tsdf/sess1/expired-doc/store-junk.txt (untracked store file)
+      2.007s | 🗑️ ✅ #3 tsdf/sess1/expired-doc/store-junk.txt
+             |    └ (untracked store file)
       2.008s | 🗑️ ✅ #4 tsdf/sess1/fresh-doc/store-junk.txt (untracked store file)
-      2.009s | 🗑️ ✅ #5 tsdf/sess1/invalid-only-store/store-junk.txt (untracked store file)
+      2.009s | 🗑️ ✅ #5 tsdf/sess1/invalid-only-store/store-junk.txt
+             |    └ (untracked store file)
       2.01s  | 🧹 del-dir ✅ tsdf/sess1/invalid-only-store (store directory)
       2.011s | 📄 file-open ✅ #6 tsdf/sess1/expired-doc/d.e.m.json (metadata)
       .      | 📄 file-open ✅ #7 tsdf/sess1/fresh-doc/d.e.m.json (metadata)
@@ -314,7 +317,8 @@ describe('async storage efficiency: maintenance', () => {
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
       2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1","dir:sess2"]
-      2.003s | 🗂️ list-dir tsdf/sess1 (session directory) entries=["dir:expired-doc"]
+      2.003s | 🗂️ list-dir tsdf/sess1
+             |    └ (session directory) entries=["dir:expired-doc"]
       2.004s | 🗂️ list-dir tsdf/sess1/expired-doc
              |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
       2.005s | 🗂️ list-dir tsdf/sess2
@@ -558,7 +562,8 @@ describe('async storage efficiency: maintenance', () => {
       time  |
       140ms | 🗂️ list-dir tsdf
             |    └ (root directory) entries=["dir:sess-trigger","dir:user%40example.com"]
-      141ms | 🗂️ list-dir tsdf/sess-trigger (session directory) entries=["dir:trigger-doc"]
+      141ms | 🗂️ list-dir tsdf/sess-trigger
+            |    └ (session directory) entries=["dir:trigger-doc"]
       142ms | 🗂️ list-dir tsdf/sess-trigger/trigger-doc
             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
       143ms | 🗂️ list-dir tsdf/user%40example.com
@@ -571,27 +576,37 @@ describe('async storage efficiency: maintenance', () => {
             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json","file:oe.document.m.json","file:oe.document.p.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
       .     | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      145ms | 📄 file-open ✅ #1 tsdf/user%40example.com/_o_.s/d.e.m.json (metadata)
-      .     | 📄 file-open ✅ #2 tsdf/user%40example.com/invalid-stray/d.e.m.json (metadata)
-      .     | 📄 file-open ✅ #3 tsdf/user%40example.com/protected-doc/d.e.m.json (metadata)
+      145ms | 📄 file-open ✅ #1 tsdf/user%40example.com/_o_.s/d.e.m.json
+            |    └ (metadata)
+      .     | 📄 file-open ✅ #2 tsdf/user%40example.com/invalid-stray/d.e.m.json
+            |    └ (metadata)
+      .     | 📄 file-open ✅ #3 tsdf/user%40example.com/protected-doc/d.e.m.json
+            |    └ (metadata)
       .     | 📄 file-open ✅ #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
             |    └ (tsdf.user@example.com.protected-doc.oq.protected-doc:1736985603621:4fzzzxjy (metadata))
-      .     | 📄 file-open ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json (metadata)
+      .     | 📄 file-open ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
+            |    └ (metadata)
       146ms | 📖 #6 tsdf/sess-trigger/trigger-doc/d.e.m.json (metadata) | 0.05 kb
       .     | 📖 #7 tsdf/user%40example.com/protected-doc/oe.document.m.json
             |    └ (tsdf.user@example.com.protected-doc.oe.document (metadata)) | 0.05 kb
       147ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.m.json (metadata) | 0.05 kb
-      .     | 📖 #2 tsdf/user%40example.com/invalid-stray/d.e.m.json (metadata) | 0.02 kb
-      .     | 📖 #3 tsdf/user%40example.com/protected-doc/d.e.m.json (metadata) | 0.07 kb
+      .     | 📖 #2 tsdf/user%40example.com/invalid-stray/d.e.m.json
+            |    └ (metadata) | 0.02 kb
+      .     | 📖 #3 tsdf/user%40example.com/protected-doc/d.e.m.json
+            |    └ (metadata) | 0.07 kb
       .     | 📖 #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
             |    └ (tsdf.user@example.com.protected-doc.oq.protected-doc:1736985603621:4fzzzxjy (metadata)) | 0.05 kb
-      .     | 📖 #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json (metadata) | 0.05 kb
+      .     | 📖 #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
+            |    └ (metadata) | 0.05 kb
       149ms | 🗑️ ✅ #8 tsdf/user%40example.com/invalid-stray/d.e.p.json (payload)
       .     | 🗑️ ✅ #2 tsdf/user%40example.com/invalid-stray/d.e.m.json (metadata)
-      .     | 🗑️ ✅ #9 tsdf/user%40example.com/unprotected-doc/d.e.p.json (payload)
-      .     | 🗑️ ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json (metadata)
+      .     | 🗑️ ✅ #9 tsdf/user%40example.com/unprotected-doc/d.e.p.json
+            |    └ (payload)
+      .     | 🗑️ ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
+            |    └ (metadata)
       150ms | 🧹 del-dir ✅ tsdf/user%40example.com/invalid-stray (store directory)
-      .     | 🧹 del-dir ✅ tsdf/user%40example.com/unprotected-doc (store directory)
+      .     | 🧹 del-dir ✅ tsdf/user%40example.com/unprotected-doc
+            |    └ (store directory)
       151ms | end
       "
     `);

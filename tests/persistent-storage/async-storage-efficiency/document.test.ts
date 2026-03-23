@@ -116,11 +116,16 @@ describe('async storage efficiency: document', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
-      2ms  | 📄 file-open ✅ #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json (payload)
-      .    | 📄 file-open ✅ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata)
-      4ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json (payload) | 0.10 kb
-      .    | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata) | 0.05 kb
-      47ms | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata) | 0.05 kb
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
+           |    └ (payload)
+      .    | 📄 file-open ✅ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
+           |    └ (metadata)
+      4ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
+           |    └ (payload) | 0.10 kb
+      .    | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
+           |    └ (metadata) | 0.05 kb
+      47ms | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
+           |    └ (metadata) | 0.05 kb
       51ms | ✍️ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
            |    └ (metadata) | 0.05 kb -> 0.05 kb
       53ms | end
@@ -160,13 +165,16 @@ describe('async storage efficiency: document', () => {
       time   |
       0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
       1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
-      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache (store directory)
+      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
+             |    └ (store directory)
       1.853s | 📄 file-open-or-create 🆕 #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (payload)
       .      | 📄 file-open-or-create 🆕 #2 tsdf/sess1/doc-remount-no-cache/d.e.m.json
              |    └ (metadata)
-      1.856s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json (payload) | 0.00 kb -> 0.08 kb
-      .      | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d.e.m.json (metadata) | 0.00 kb -> 0.05 kb
+      1.856s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
+             |    └ (payload) | 0.00 kb -> 0.08 kb
+      .      | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d.e.m.json
+             |    └ (metadata) | 0.00 kb -> 0.05 kb
       1.858s | end
       "
     `);
@@ -316,8 +324,10 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.041s | 📖 #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.05 kb
-      1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
-      .      | ✍️ #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.05 kb -> 0.05 kb
+      1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json
+             |    └ (payload) | 0.10 kb -> 0.10 kb
+      .      | ✍️ #1 tsdf/sess1/doc-mutation-flow/d.e.m.json
+             |    └ (metadata) | 0.05 kb -> 0.05 kb
       1.047s | end
       "
     `);
@@ -368,8 +378,10 @@ describe('async storage efficiency: document', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.851s | 📖 #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json (metadata) | 0.05 kb
-      1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
+      1.851s | 📖 #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json
+             |    └ (metadata) | 0.05 kb
+      1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
+             |    └ (payload) | 0.10 kb -> 0.10 kb
       .      | ✍️ #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json
              |    └ (metadata) | 0.05 kb -> 0.05 kb
       1.857s | end
@@ -440,7 +452,8 @@ describe('async storage efficiency: document', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.851s | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json (metadata) | 0.05 kb
+      1.851s | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
+             |    └ (metadata) | 0.05 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (payload) | 0.10 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
@@ -630,7 +643,8 @@ describe('async storage efficiency: document', () => {
       1ms  | 📖 #1 tsdf/sess1/touch-reuse-opfs/d.e.p.json (payload) | 0.10 kb
       .    | 📖 #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb
       44ms | 📖 #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb
-      48ms | ✍️ #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb -> 0.05 kb
+      48ms | ✍️ #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json
+           |    └ (metadata) | 0.05 kb -> 0.05 kb
       50ms | end
       "
     `);
@@ -660,8 +674,10 @@ describe('async storage efficiency: document', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/doc-opfs-efficiency (store directory)
-      2ms  | 📄 file-open ✅ #1 tsdf/sess1/doc-opfs-efficiency/d.e.p.json (payload)
-      .    | 📄 file-open ✅ #2 tsdf/sess1/doc-opfs-efficiency/d.e.m.json (metadata)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/doc-opfs-efficiency/d.e.p.json
+           |    └ (payload)
+      .    | 📄 file-open ✅ #2 tsdf/sess1/doc-opfs-efficiency/d.e.m.json
+           |    └ (metadata)
       4ms  | 📖 #1 tsdf/sess1/doc-opfs-efficiency/d.e.p.json (payload) | 0.08 kb
       .    | 📖 #2 tsdf/sess1/doc-opfs-efficiency/d.e.m.json (metadata) | 0.05 kb
       6ms  | end

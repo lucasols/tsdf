@@ -491,9 +491,6 @@ function getOpfsPersistentStorageOperationTimelineString(
   return getTimelineString(operations, { showEndMarker: true });
 }
 
-const OPFS_TIMELINE_WRAP_AT = 80;
-const OPFS_TIMELINE_DETAIL_PREFIX = '   └ ';
-
 function formatWrappedOpfsOperationLabel(
   prefix: string,
   value: string,
@@ -503,8 +500,8 @@ function formatWrappedOpfsOperationLabel(
   if (detail === undefined) return mainLine;
 
   const fullLine = `${mainLine} ${detail}`;
-  return fullLine.length > OPFS_TIMELINE_WRAP_AT
-    ? `${mainLine}\n${OPFS_TIMELINE_DETAIL_PREFIX}${detail}`
+  return fullLine.length > PERSISTENT_TIMELINE_WRAP_AT
+    ? `${mainLine}\n${PERSISTENT_TIMELINE_DETAIL_PREFIX}${detail}`
     : fullLine;
 }
 

@@ -811,7 +811,8 @@ describe('async storage efficiency: collection', () => {
       time   |
       0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
       1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
-      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache (store directory)
+      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
+             |    └ (store directory)
       1.853s | 📄 file-open-or-create 🆕 #1 tsdf/sess1/col-remount-no-cache/ci.%221.p.json
              |    └ (tsdf.sess1.col-remount-no-cache.ci."1 (payload))
       .      | 📄 file-open-or-create 🆕 #2 tsdf/sess1/col-remount-no-cache/ci.%221.m.json
@@ -957,7 +958,8 @@ describe('async storage efficiency: collection', () => {
       "
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/collection-opfs-efficiency (store directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/collection-opfs-efficiency
+           |    └ (store directory)
       2ms  | 📄 file-open ✅ #1 tsdf/sess1/collection-opfs-efficiency/ci.%221.p.json
            |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload))
       .    | 📄 file-open ✅ #2 tsdf/sess1/collection-opfs-efficiency/ci.%221.m.json
