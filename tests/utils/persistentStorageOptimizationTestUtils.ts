@@ -547,6 +547,16 @@ function formatGlobalRecordKey(
     : `${key} (${kind})`;
 }
 
+function isPlainDocumentLogicalKey(
+  scope: AsyncStorageNamespaceScope,
+  logicalKey: string,
+): boolean {
+  return (
+    scope.kind === 'document' &&
+    logicalKey === `tsdf.${scope.sessionKey}.${scope.storeName}`
+  );
+}
+
 export type PersistentStorageReadBreakdown = {
   metadataReads: string[];
   scopedPayloadReads: string[];
@@ -567,11 +577,22 @@ function createEmptyPersistentStorageReadBreakdown(): PersistentStorageReadBreak
   };
 }
 
-function formatRecordLabel(record: {
-  key: string;
-  logicalKey: string | null;
-  recordKind: 'payload' | 'metadata' | 'internal';
-}): string {
+function formatRecordLabel(
+  record: {
+    key: string;
+    logicalKey: string | null;
+    recordKind: 'payload' | 'metadata' | 'internal';
+  },
+  scope: AsyncStorageNamespaceScope | null,
+): string {
+  if (
+    scope !== null &&
+    record.logicalKey !== null &&
+    isPlainDocumentLogicalKey(scope, record.logicalKey)
+  ) {
+    return record.recordKind;
+  }
+
   if (record.recordKind === 'payload' && record.logicalKey !== null) {
     return formatGlobalRecordKey(record.logicalKey, 'payload');
   }
@@ -585,7 +606,7 @@ function formatRecordLabel(record: {
 
 function formatOpfsFileDescription(operation: MockOpfsOperation): string {
   if ('record' in operation) {
-    return formatRecordLabel(operation.record);
+    return formatRecordLabel(operation.record, operation.scope);
   }
 
   const pathSegments = operation.path.split('/');
