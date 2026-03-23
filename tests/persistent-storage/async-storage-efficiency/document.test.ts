@@ -90,9 +90,9 @@ describe('async storage efficiency: document', () => {
 
     expect(getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d.e.p.json'))
       .toMatchInlineSnapshot(`
-      d:
-        value: { name: 'Cached document', value: 7 }
-    `);
+        d:
+          value: { name: 'Cached document', value: 7 }
+      `);
   });
 
   test('document hook hydration does not skip the touch write once the cached document falls outside the current recency bucket', async () => {

@@ -80,12 +80,12 @@ describe('sync storage efficiency: document', () => {
 
     expect(getParsedLocalStorageValue('tsdf.sess1.doc-remount-flow'))
       .toMatchInlineSnapshot(`
-      data:
         data:
-          value: { name: 'Cached document', value: 7 }
+          data:
+            value: { name: 'Cached document', value: 7 }
 
-      timestamp: 1735689600000
-    `);
+        timestamp: 1735689600000
+      `);
   });
 
   test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {
