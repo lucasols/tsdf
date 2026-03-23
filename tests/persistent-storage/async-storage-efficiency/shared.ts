@@ -7,12 +7,16 @@ import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
+import type { BrowserTabsTransportFactory } from '../../../src/utils/browserTabsSync';
 import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
 import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv';
-import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
+import {
+  createDocumentStoreTestEnv,
+  type DocumentStoreTestScenario,
+} from '../../mocks/documentStoreTestEnv';
 import {
   createListQueryStoreTestEnv,
   type Row,
@@ -117,14 +121,18 @@ export async function captureHookRemount<Result>(args: {
 export type DocumentState = { name: string; value: number };
 
 export function createDocumentEnv(options: {
+  browserTabsTransportFactory?: BrowserTabsTransportFactory;
   serverData?: DocumentState;
   sessionKey?: string;
   storeName: string;
+  testScenario?: DocumentStoreTestScenario<DocumentState>;
 }) {
   return createDocumentStoreTestEnv(
     options.serverData ?? { name: 'test', value: 42 },
     {
+      browserTabsTransportFactory: options.browserTabsTransportFactory,
       getSessionKey: () => options.sessionKey ?? 'session1',
+      testScenario: options.testScenario,
       persistentStorage: {
         storeName: options.storeName,
         adapter: opfsPersistentStorage,

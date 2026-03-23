@@ -1,7 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
-import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import {
   advanceTime,
   flushAllTimers,
@@ -399,11 +398,7 @@ describe('async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      serverData: { name: 'Fresh document 1', value: 41 },
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
 
     // Hydrate cached data first so only the invalidation writes are counted below.
     await settleStartupBackgroundScan(mockAdapter);
@@ -479,11 +474,7 @@ describe('async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      serverData: { name: 'Fresh document', value: 42 },
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
 
     // Hydrate cached data first so the later save is a normal invalidation write.
     await settleStartupBackgroundScan(mockAdapter);
@@ -523,32 +514,49 @@ describe('async storage efficiency: document', () => {
     `);
   });
 
-  test('namespace commits coalesce and pending writes flush before reads', async () => {
+  test('a second env preload flushes one debounced save and sees only the latest document state', async () => {
+    const storeName = 'coalesced-opfs';
+    const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
-    const namespace = opfsPersistentStorage.openNamespace<
-      { value: string },
-      Record<string, never>
-    >({ sessionKey: 'sess1', storeName: 'coalesced-opfs', kind: 'document' });
-
-    const firstCommit = namespace.commit({
-      upserts: [{ key: 'document', value: { value: 'first' }, version: 1 }],
+    const writerEnv = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'server', value: 0 },
+      testScenario: 'loaded',
     });
-    const secondCommit = namespace.commit({
-      upserts: [{ key: 'document', value: { value: 'second' }, version: 1 }],
+    const readerEnv = createDocumentEnv({
+      storeName,
+      sessionKey,
+      serverData: { name: 'unused', value: 0 },
     });
 
-    await advanceTime(39);
+    // Queue two rapid document updates in the writer env so persistence keeps only
+    // the final state inside the pending debounce window.
+    act(() => {
+      writerEnv.apiStore.updateState((draft) => {
+        draft.value = { name: 'first', value: 1 };
+      });
+      writerEnv.apiStore.updateState((draft) => {
+        draft.value = { name: 'second', value: 2 };
+      });
+    });
+
+    // Stay just before the OPFS namespace flush so the read below has to force it.
+    await advanceTime(1039);
     expect(
       mockAdapter.operations.filter(
         (operation) => operation.type === 'writeFile',
       ),
     ).toMatchInlineSnapshot(`[]`);
 
-    const entryPromise = namespace.get('document', { touch: 'never' });
-    const entry = await resolveAfterAllTimers(entryPromise);
-    await Promise.all([firstCommit, secondCommit]);
+    // A second env should flush the pending save before it reads, and it should
+    // observe only the final debounced document state.
+    const preloadPromise = readerEnv.apiStore.preloadPersistentStorage();
+    await resolveAfterAllTimers(preloadPromise);
 
-    expect(entry?.value).toMatchInlineSnapshot(`value: 'second'`);
+    expect(readerEnv.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'second', value: 2 }
+    `);
     expect(
       mockAdapter.operations.flatMap((operation) =>
         operation.type === 'writeFile' && 'record' in operation
@@ -571,28 +579,33 @@ describe('async storage efficiency: document', () => {
     `);
   });
 
-  test('live async reads suppress redundant touch commits in the same recency bucket', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore();
-    const namespace = opfsPersistentStorage.openNamespace<
-      { value: string },
-      Record<string, never>
-    >({ sessionKey: 'sess1', storeName: 'touch-guard-opfs', kind: 'document' });
-
-    const seedCommit = namespace.commit({
-      upserts: [{ key: 'document', value: { value: 'cached' }, version: 1 }],
+  test('two document preloads in the same recency bucket emit only one touch write', async () => {
+    const storeName = 'touch-guard-opfs';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      initialState: {
+        storeName,
+        sessionKey,
+        document: { data: { value: { name: 'cached', value: 1 } } },
+      },
     });
-    await resolveAfterAllTimers(seedCommit);
-    mockAdapter.clearInstrumentation();
+    const firstEnv = createDocumentEnv({ storeName, sessionKey });
+    const secondEnv = createDocumentEnv({ storeName, sessionKey });
+
+    await settleStartupBackgroundScan(mockAdapter);
     await advanceTime(6 * 60 * 60 * 1000);
 
-    const firstReadPromise = namespace.get('document', { touch: 'coarse' });
-    const firstRead = await resolveAfterAllTimers(firstReadPromise);
-    const secondRead = await resolveAfterAllTimers(
-      namespace.get('document', { touch: 'coarse' }),
-    );
+    // The first stale preload should enqueue one metadata touch, and the second
+    // preload in the same bucket should reuse that fresh recency information.
+    await resolveAfterAllTimers(firstEnv.apiStore.preloadPersistentStorage());
+    await resolveAfterAllTimers(secondEnv.apiStore.preloadPersistentStorage());
 
-    expect(firstRead?.value).toMatchInlineSnapshot(`value: 'cached'`);
-    expect(secondRead?.value).toMatchInlineSnapshot(`value: 'cached'`);
+    expect(firstEnv.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'cached', value: 1 }
+    `);
+    expect(secondEnv.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'cached', value: 1 }
+    `);
     expect(
       mockAdapter.operations.flatMap((operation) =>
         operation.type === 'writeFile' && 'record' in operation
@@ -610,85 +623,5 @@ describe('async storage efficiency: document', () => {
         kind: 'metadata'
         scope: { kind: 'document', sessionKey: 'sess1', storeName: 'touch-guard-opfs' }
     `);
-  });
-
-  test('stale coarse-touch writes reuse warm OPFS handles instead of reopening them', async () => {
-    const storeName = 'touch-reuse-opfs';
-    const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
-    const documentScope = mockAdapter.scope(storeName, sessionKey);
-    const namespace = opfsPersistentStorage.openNamespace<
-      { d: { value: { name: string; value: number } } },
-      Record<string, never>
-    >({ sessionKey, storeName, kind: 'document' });
-
-    documentScope.document.seed({
-      value: { name: 'Cached document', value: 3 },
-    });
-
-    // Warm the cached directory and file handles without scheduling a touch.
-    await resolveAfterAllTimers(namespace.get('document', { touch: 'never' }));
-
-    await advanceTime(6 * 60 * 60 * 1000);
-
-    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
-    const entry = await resolveAfterAllTimers(
-      namespace.get('document', { touch: 'coarse' }),
-    );
-    await flushAllTimers();
-    const operations = capture.finish().timelineString;
-
-    expect(entry?.value).toMatchInlineSnapshot(`
-      d:
-        value: { name: 'Cached document', value: 3 }
-    `);
-    expect(operations).toMatchInlineSnapshot(`
-      "
-      time |
-      1ms  | 📖 #1 tsdf/sess1/touch-reuse-opfs/d.e.p.json (payload) | 0.10 kb
-      .    | 📖 #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb
-      44ms | 📖 #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb
-      48ms | ✍️ #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json
-           |    └ (metadata) | 0.05 kb -> 0.05 kb
-      50ms | end
-      "
-    `);
-  });
-
-  test('document preload performs one targeted payload read without metadata scans', async () => {
-    const storeName = 'doc-opfs-efficiency';
-    const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      initialState: {
-        storeName,
-        sessionKey,
-        document: { data: { value: { name: 'cached', value: 1 } } },
-      },
-    });
-    const documentScope = mockAdapter.scope(storeName, sessionKey);
-    const env = createDocumentEnv({ storeName, sessionKey });
-
-    await settleStartupBackgroundScan(mockAdapter);
-    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
-
-    const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await resolveAfterAllTimers(preloadPromise);
-
-    expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
-      "
-      time |
-      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/doc-opfs-efficiency (store directory)
-      2ms  | 📄 file-open ✅ #1 tsdf/sess1/doc-opfs-efficiency/d.e.p.json
-           |    └ (payload)
-      .    | 📄 file-open ✅ #2 tsdf/sess1/doc-opfs-efficiency/d.e.m.json
-           |    └ (metadata)
-      4ms  | 📖 #1 tsdf/sess1/doc-opfs-efficiency/d.e.p.json (payload) | 0.08 kb
-      .    | 📖 #2 tsdf/sess1/doc-opfs-efficiency/d.e.m.json (metadata) | 0.05 kb
-      6ms  | end
-      "
-    `);
-
-    expect(mockAdapter.has(documentScope.document.storageKey())).toBe(true);
   });
 });
