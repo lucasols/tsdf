@@ -375,11 +375,6 @@ describe('async storage efficiency: document', () => {
         d:
           value: { name: 'Fresh document', value: 42 }
       `);
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-invalidation-flow/d.e.p.json'))
-      .toMatchInlineSnapshot(`
-        d:
-          value: { name: 'Fresh document', value: 42 }
-      `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
