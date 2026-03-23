@@ -92,18 +92,18 @@ describe('sync storage efficiency: collection', () => {
     `);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.39 kb)
-      ├ _m (0.16 kb)
+      "tsdf (0.46 kb)
+      ├ _m (0.23 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.12 kb)
-      │   └ n:sess1 (0.12 kb)
-      │     └ collection-expiration (0.12 kb)
-      │       └ ci (0.12 kb)
-      │         └ m (0.12 kb)
-      └ sess1 (0.23 kb)
-        └ collection-expiration (0.23 kb)
-          └ ci (0.23 kb)
-            └ "fresh-user (0.23 kb)"
+      │ └ r (0.19 kb)
+      │   └ n:sess1 (0.18 kb)
+      │     └ collection-expiration (0.17 kb)
+      │       └ ci (0.13 kb)
+      │         └ m (0.13 kb)
+      └ sess1 (0.22 kb)
+        └ collection-expiration (0.21 kb)
+          └ ci (0.17 kb)
+            └ "fresh-user (0.16 kb)"
     `);
 
     expect(
@@ -118,12 +118,10 @@ describe('sync storage efficiency: collection', () => {
     `);
 
     expect(getParsedLocalStorageValue(freshItemKey)).toMatchInlineSnapshot(`
-      data:
-        data:
-          value: { id: 'fresh-user', name: 'Fresh User' }
-        payload: 'fresh-user'
+      d:
+        value: { id: 'fresh-user', name: 'Fresh User' }
 
-      timestamp: 1735689600000
+      p: 'fresh-user'
     `);
   });
 
@@ -171,7 +169,7 @@ describe('sync storage efficiency: collection', () => {
       1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb
       .    | ✍️ ❌->✅ #2 tsdf.sess1.col-max-items-metadata.ci."c
-           |    └ (collection entry) | ❌ -> 0.18 kb
+           |    └ (collection entry) | ❌ -> 0.10 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb -> 0.24 kb
       3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
@@ -184,19 +182,19 @@ describe('sync storage efficiency: collection', () => {
     `);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.58 kb)
-      ├ _m (0.20 kb)
+      "tsdf (0.55 kb)
+      ├ _m (0.27 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.16 kb)
-      │   └ n:sess1 (0.16 kb)
-      │     └ col-max-items-metadata (0.16 kb)
-      │       └ ci (0.16 kb)
+      │ └ r (0.23 kb)
+      │   └ n:sess1 (0.22 kb)
+      │     └ col-max-items-metadata (0.21 kb)
+      │       └ ci (0.17 kb)
       │         └ m (0.16 kb)
-      └ sess1 (0.38 kb)
-        └ col-max-items-metadata (0.38 kb)
-          └ ci (0.38 kb)
-            ├ "b (0.20 kb)
-            └ "c (0.18 kb)"
+      └ sess1 (0.27 kb)
+        └ col-max-items-metadata (0.26 kb)
+          └ ci (0.22 kb)
+            ├ "b (0.11 kb)
+            └ "c (0.10 kb)"
     `);
   });
 
@@ -245,11 +243,11 @@ describe('sync storage efficiency: collection', () => {
       1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb
       .    | ✍️ ❌->✅ #2 tsdf.sess1.col-coalesced-maintenance.ci."c
-           |    └ (collection entry) | ❌ -> 0.18 kb
+           |    └ (collection entry) | ❌ -> 0.10 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb -> 0.24 kb
       2.1s | ✍️ ❌->✅ #3 tsdf.sess1.col-coalesced-maintenance.ci."d
-           |    └ (collection entry) | ❌ -> 0.18 kb
+           |    └ (collection entry) | ❌ -> 0.10 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (root, namespace, manifest) | 0.24 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
@@ -304,7 +302,7 @@ describe('sync storage efficiency: collection', () => {
       0    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | 📖 ✅ #2 tsdf.sess1.col-direct-get-item-state.ci."1
-           |    └ (collection entry) | 0.19 kb
+           |    └ (collection entry) | 0.11 kb
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
@@ -411,7 +409,7 @@ describe('sync storage efficiency: collection', () => {
       1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-mutation-flow.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | ✍️ ✅->✅ #2 tsdf.sess1.col-mutation-flow.ci."1
-           |    └ (collection entry) | 0.19 kb -> 0.19 kb
+           |    └ (collection entry) | 0.11 kb -> 0.11 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-mutation-flow.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb -> 0.09 kb
       "
@@ -505,7 +503,7 @@ describe('sync storage efficiency: collection', () => {
       1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
             |    └ (root, namespace, manifest) | 0.09 kb
       .     | ✍️ ✅->✅ #2 tsdf.sess1.col-invalidation-flow.ci."1
-            |    └ (collection entry) | 0.19 kb -> 0.19 kb
+            |    └ (collection entry) | 0.11 kb -> 0.11 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
             |    └ (root, namespace, manifest) | 0.09 kb -> 0.09 kb
       "
@@ -649,7 +647,7 @@ describe('sync storage efficiency: collection', () => {
       1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
             |    └ (root, namespace, manifest) | 0.09 kb
       .     | ✍️ ✅->✅ #2 tsdf.sess1.col-coalesced-invalidations.ci."1
-            |    └ (collection entry) | 0.19 kb -> 0.20 kb
+            |    └ (collection entry) | 0.11 kb -> 0.11 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
             |    └ (root, namespace, manifest) | 0.09 kb -> 0.09 kb
       "
@@ -687,7 +685,7 @@ describe('sync storage efficiency: collection', () => {
       0    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | 📖 ✅ #2 tsdf.sess1.col-remount-flow.ci."1
-           |    └ (collection entry) | 0.19 kb
+           |    └ (collection entry) | 0.11 kb
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
@@ -731,7 +729,7 @@ describe('sync storage efficiency: collection', () => {
       1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #2 tsdf.sess1.col-remount-no-cache.ci."1
-            |    └ (collection entry) | ❌ -> 0.20 kb
+            |    └ (collection entry) | ❌ -> 0.11 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (root, namespace, manifest) | ❌ -> 0.09 kb
       "
@@ -775,11 +773,11 @@ describe('sync storage efficiency: collection', () => {
       0    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb
       .    | 📖 ✅ #2 tsdf.sess1.col-multi-remount-flow.ci."1
-           |    └ (collection entry) | 0.20 kb
+           |    └ (collection entry) | 0.11 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb
       .    | 📖 ✅ #3 tsdf.sess1.col-multi-remount-flow.ci."2
-           |    └ (collection entry) | 0.20 kb
+           |    └ (collection entry) | 0.11 kb
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m

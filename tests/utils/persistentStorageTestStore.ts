@@ -2,11 +2,17 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  createCompactLocalStorageEntry,
+  parseCompactLocalStorageEntry,
+} from '../../src/persistentStorage/compactLocalStorageEntry';
+import {
   createCompactListQueryLocalStorageEntry,
   parseCompactListQueryLocalStorageEntry,
 } from '../../src/persistentStorage/compactListQueryLocalStorageEntry';
 import {
   getManagedLocalStorageManifestKeyForSingle,
+  readManagedLocalStorageNamespaceEntryByPayload,
+  readManagedLocalStorageSingleEntryByPayload,
   upsertManagedLocalStorageNamespaceEntry,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
@@ -143,6 +149,25 @@ function createPersistentTestStore(
     };
   }
 
+  function readLocalStorageCompactEntry<TData>(
+    key: string,
+    readMetadata: () => { lastAccessAt: number } | null,
+    mapData: (value: Record<string, unknown>) => TData | null,
+  ): StorageCacheEntry<TData> | null {
+    const parsed = parseCompactLocalStorageEntry(storage.getRaw(key));
+    const metadata = readMetadata();
+    if (parsed === null || metadata === null) return null;
+
+    const data = mapData(parsed.value);
+    if (data === null) return null;
+
+    return {
+      data,
+      timestamp: metadata.lastAccessAt,
+      ...(parsed.version !== undefined ? { version: parsed.version } : {}),
+    };
+  }
+
   function createScope(
     storeName: string,
     sessionKey: string,
@@ -189,27 +214,69 @@ function createPersistentTestStore(
       document: {
         storageKey: () => documentStorageKey,
         seed<T>(data: T, options?: StorageSeedOptions) {
-          const entry = createCacheEntry<PersistedDocumentData<T>>(
-            { data },
-            options,
-          );
-          storage.writeValue(documentStorageKey, entry);
+          const entryTimestamp = options?.timestamp ?? Date.now();
+
+          if (storage.storageKind === 'localStorage') {
+            storage.writeValue(
+              documentStorageKey,
+              createCompactLocalStorageEntry({ d: data }, options?.version),
+            );
+          } else {
+            storage.writeValue(
+              documentStorageKey,
+              createCacheEntry<PersistedDocumentData<T>>({ data }, options),
+            );
+          }
+
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageSingleEntry({
               storageKey: documentStorageKey,
-              lastAccessAt: entry.timestamp,
+              lastAccessAt: entryTimestamp,
             });
           }
 
           return documentStorageKey;
         },
         readEntry<T>() {
+          if (storage.storageKind === 'localStorage') {
+            const entry = readLocalStorageCompactEntry<
+              PersistedDocumentData<T>
+            >(
+              documentStorageKey,
+              () =>
+                readManagedLocalStorageSingleEntryByPayload(documentStorageKey),
+              (v) =>
+                'd' in v ? { data: __LEGIT_CAST__<T, unknown>(v.d) } : null,
+            );
+            if (entry === null) {
+              throw new Error(
+                `Missing persistent test entry for ${documentStorageKey}`,
+              );
+            }
+
+            return entry;
+          }
+
           return readRequiredEntry<StorageCacheEntry<PersistedDocumentData<T>>>(
             storage,
             documentStorageKey,
           );
         },
         readData<T>() {
+          if (storage.storageKind === 'localStorage') {
+            return (
+              readLocalStorageCompactEntry<PersistedDocumentData<T>>(
+                documentStorageKey,
+                () =>
+                  readManagedLocalStorageSingleEntryByPayload(
+                    documentStorageKey,
+                  ),
+                (v) =>
+                  'd' in v ? { data: __LEGIT_CAST__<T, unknown>(v.d) } : null,
+              )?.data.data ?? null
+            );
+          }
+
           return (
             storage.readEntry<StorageCacheEntry<PersistedDocumentData<T>>>(
               documentStorageKey,
@@ -234,16 +301,31 @@ function createPersistentTestStore(
         itemStorageKey: collectionItemStorageKey,
         seedItem<T>(payload: string, data: T, options?: StorageSeedOptions) {
           const key = collectionItemStorageKey(payload);
-          const entry = createCacheEntry<PersistedCollectionItemData<T>>(
-            { data, payload },
-            options,
-          );
-          storage.writeValue(key, entry);
+          const entryTimestamp = options?.timestamp ?? Date.now();
+
+          if (storage.storageKind === 'localStorage') {
+            storage.writeValue(
+              key,
+              createCompactLocalStorageEntry(
+                { d: data, p: payload },
+                options?.version,
+              ),
+            );
+          } else {
+            storage.writeValue(
+              key,
+              createCacheEntry<PersistedCollectionItemData<T>>(
+                { data, payload },
+                options,
+              ),
+            );
+          }
+
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
               storagePrefix: `tsdf.${sessionKey}.${storeName}.ci.`,
               entryKey: collectionItemKey(payload),
-              lastAccessAt: entry.timestamp,
+              lastAccessAt: entryTimestamp,
               meta: { p: payload },
             });
           }
@@ -251,11 +333,53 @@ function createPersistentTestStore(
           return key;
         },
         readItemEntry<T>(payload: string) {
+          if (storage.storageKind === 'localStorage') {
+            const key = collectionItemStorageKey(payload);
+            const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
+            const entry = readLocalStorageCompactEntry<
+              PersistedCollectionItemData<T>
+            >(
+              key,
+              () => readManagedLocalStorageNamespaceEntryByPayload(key, prefix),
+              (v) =>
+                'd' in v && 'p' in v
+                  ? {
+                      data: __LEGIT_CAST__<T, unknown>(v.d),
+                      payload: __LEGIT_CAST__<string, unknown>(v.p),
+                    }
+                  : null,
+            );
+            if (entry === null) {
+              throw new Error(`Missing persistent test entry for ${key}`);
+            }
+
+            return entry;
+          }
+
           return readRequiredEntry<
             StorageCacheEntry<PersistedCollectionItemData<T>>
           >(storage, collectionItemStorageKey(payload));
         },
         readItemData<T>(payload: string) {
+          if (storage.storageKind === 'localStorage') {
+            const key = collectionItemStorageKey(payload);
+            const prefix = `tsdf.${sessionKey}.${storeName}.ci.`;
+            return (
+              readLocalStorageCompactEntry<PersistedCollectionItemData<T>>(
+                key,
+                () =>
+                  readManagedLocalStorageNamespaceEntryByPayload(key, prefix),
+                (v) =>
+                  'd' in v && 'p' in v
+                    ? {
+                        data: __LEGIT_CAST__<T, unknown>(v.d),
+                        payload: __LEGIT_CAST__<string, unknown>(v.p),
+                      }
+                    : null,
+              )?.data.data ?? null
+            );
+          }
+
           return (
             storage.readEntry<
               StorageCacheEntry<PersistedCollectionItemData<T>>
@@ -276,17 +400,37 @@ function createPersistentTestStore(
           const payload = rawListQueryItemPayload(tableId, id);
           const itemKey = listQueryItemKey(tableId, id);
           const storageKey = listQueryItemStorageKey(tableId, id);
-          const entry = createCacheEntry<PersistedListQueryItemData<T>>(
-            { data, payload, loadedFields: options?.loadedFields },
-            options,
-          );
+          const entryTimestamp = options?.timestamp ?? Date.now();
 
-          storage.writeValue(storageKey, entry);
+          if (storage.storageKind === 'localStorage') {
+            storage.writeValue(
+              storageKey,
+              createCompactLocalStorageEntry(
+                {
+                  d: data,
+                  p: payload,
+                  ...(options?.loadedFields !== undefined
+                    ? { lf: options.loadedFields }
+                    : {}),
+                },
+                options?.version,
+              ),
+            );
+          } else {
+            storage.writeValue(
+              storageKey,
+              createCacheEntry<PersistedListQueryItemData<T>>(
+                { data, payload, loadedFields: options?.loadedFields },
+                options,
+              ),
+            );
+          }
+
           if (storage.storageKind === 'localStorage') {
             upsertManagedLocalStorageNamespaceEntry({
               storagePrefix: `tsdf.${sessionKey}.${storeName}.li.`,
               entryKey: itemKey,
-              lastAccessAt: entry.timestamp,
+              lastAccessAt: entryTimestamp,
               meta: { p: payload },
             });
           }
@@ -328,11 +472,67 @@ function createPersistentTestStore(
           return key;
         },
         readItemEntry<T>(tableId: string, id: number | string) {
+          if (storage.storageKind === 'localStorage') {
+            const key = listQueryItemStorageKey(tableId, id);
+            const prefix = `tsdf.${sessionKey}.${storeName}.li.`;
+            const entry = readLocalStorageCompactEntry<
+              PersistedListQueryItemData<T>
+            >(
+              key,
+              () => readManagedLocalStorageNamespaceEntryByPayload(key, prefix),
+              (v) =>
+                'd' in v && 'p' in v
+                  ? {
+                      data: __LEGIT_CAST__<T, unknown>(v.d),
+                      payload: __LEGIT_CAST__<string, unknown>(v.p),
+                      ...('lf' in v && Array.isArray(v.lf)
+                        ? {
+                            loadedFields: __LEGIT_CAST__<string[], unknown>(
+                              v.lf,
+                            ),
+                          }
+                        : {}),
+                    }
+                  : null,
+            );
+            if (entry === null) {
+              throw new Error(`Missing persistent test entry for ${key}`);
+            }
+
+            return entry;
+          }
+
           return readRequiredEntry<
             StorageCacheEntry<PersistedListQueryItemData<T>>
           >(storage, listQueryItemStorageKey(tableId, id));
         },
         readItemData<T>(tableId: string, id: number | string) {
+          if (storage.storageKind === 'localStorage') {
+            const key = listQueryItemStorageKey(tableId, id);
+            const prefix = `tsdf.${sessionKey}.${storeName}.li.`;
+            return (
+              readLocalStorageCompactEntry<PersistedListQueryItemData<T>>(
+                key,
+                () =>
+                  readManagedLocalStorageNamespaceEntryByPayload(key, prefix),
+                (v) =>
+                  'd' in v && 'p' in v
+                    ? {
+                        data: __LEGIT_CAST__<T, unknown>(v.d),
+                        payload: __LEGIT_CAST__<string, unknown>(v.p),
+                        ...('lf' in v && Array.isArray(v.lf)
+                          ? {
+                              loadedFields: __LEGIT_CAST__<string[], unknown>(
+                                v.lf,
+                              ),
+                            }
+                          : {}),
+                      }
+                    : null,
+              )?.data.data ?? null
+            );
+          }
+
           return (
             storage.readEntry<StorageCacheEntry<PersistedListQueryItemData<T>>>(
               listQueryItemStorageKey(tableId, id),

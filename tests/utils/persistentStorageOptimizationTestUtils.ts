@@ -158,6 +158,10 @@ function formatByteSize(byteSize: number): string {
   return `${(byteSize / 1024).toFixed(2)} kb`;
 }
 
+function getStringByteSize(value: string): number {
+  return value.length * 2;
+}
+
 const secondsFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
 });
@@ -485,25 +489,43 @@ function formatStorageEntryLabel(
 function addTreePath(
   root: StorageTreeNode,
   pathSegments: readonly string[],
-  byteSize: number,
+  leafByteSize: number,
 ): void {
   if (pathSegments.length === 0) return;
 
-  root.totalByteSize += byteSize;
-  let current = root;
+  addTreePathSegment(root, pathSegments, leafByteSize);
+}
 
-  for (const pathSegment of pathSegments) {
-    let next = current.children.get(pathSegment);
-    if (next === undefined) {
-      next = createStorageTreeNode();
-      current.children.set(pathSegment, next);
-    }
+function addTreePathSegment(
+  parent: StorageTreeNode,
+  [pathSegment, ...restPathSegments]: readonly string[],
+  leafByteSize: number,
+): number {
+  if (pathSegment === undefined) return 0;
 
-    next.totalByteSize += byteSize;
-    current = next;
+  let child = parent.children.get(pathSegment);
+  let addedByteSize = 0;
+
+  if (child === undefined) {
+    child = createStorageTreeNode();
+    parent.children.set(pathSegment, child);
+
+    const pathSegmentByteSize = getStringByteSize(pathSegment);
+    child.ownByteSize += pathSegmentByteSize;
+    child.totalByteSize += pathSegmentByteSize;
+    addedByteSize += pathSegmentByteSize;
   }
 
-  current.ownByteSize += byteSize;
+  if (restPathSegments.length === 0) {
+    child.ownByteSize += leafByteSize;
+    child.totalByteSize += leafByteSize;
+    addedByteSize += leafByteSize;
+  } else {
+    addedByteSize += addTreePathSegment(child, restPathSegments, leafByteSize);
+  }
+
+  parent.totalByteSize += addedByteSize;
+  return addedByteSize;
 }
 
 function formatStorageTree(node: StorageTreeNode): string[] {
@@ -594,7 +616,7 @@ function addOpfsDirectoryToTree(args: {
     addTreePath(
       args.root,
       [...args.pathSegments, ...getOpfsTreeFileSegments(fileName)],
-      raw.length * 2,
+      getStringByteSize(raw),
     );
   }
 }
@@ -612,7 +634,7 @@ export function getLocalStorageTree(): string {
     const value = localStorage.getItem(key);
     if (value === null) continue;
 
-    addTreePath(root, key.split('.'), value.length * 2);
+    addTreePath(root, key.split('.'), getStringByteSize(value));
   }
 
   return getStorageTreeString(root);
@@ -643,7 +665,7 @@ export function getOpfsDirTree(
     addTreePath(
       root,
       [OPFS_ROOT_DIR, 'tsdf._am.g*'],
-      asyncGlobalMaintenance.length * 2,
+      getStringByteSize(asyncGlobalMaintenance),
     );
   }
 

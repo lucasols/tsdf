@@ -156,7 +156,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-metadata.li."third||1
-            |    └ (item entry) | ❌ -> 0.17 kb
+            |    └ (item entry) | ❌ -> 0.09 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
             |    └ (root, namespace, manifest) | ❌ -> 0.12 kb
       3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
@@ -258,7 +258,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
-            |    └ (item entry) | ❌ -> 0.17 kb
+            |    └ (item entry) | ❌ -> 0.09 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest) | ❌ -> 0.12 kb
       3.62s | 📖 ❌ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
@@ -266,11 +266,11 @@ describe('sync storage efficiency: list-query', () => {
       .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
             |    └ (query entry) | ❌ -> 0.13 kb
       .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
-            |    └ (item entry) | 0.17 kb -> 0.26 kb
+            |    └ (item entry) | 0.09 kb -> 0.15 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ❌->✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
-            |    └ (item entry) | ❌ -> 0.18 kb
+            |    └ (item entry) | ❌ -> 0.09 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest) | 0.12 kb -> 0.22 kb
       3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
@@ -444,7 +444,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
             |    └ (query entry) | 0.12 kb -> 0.10 kb
       .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-query-becomes-empty.li."users||1
-            |    └ (item entry) | 0.18 kb -> 0.27 kb
+            |    └ (item entry) | 0.10 kb -> 0.16 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
@@ -498,7 +498,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-metadata.li."users||3
-           |    └ (item entry) | ❌ -> 0.17 kb
+           |    └ (item entry) | ❌ -> 0.09 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
@@ -718,7 +718,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 ✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #5 tsdf.sess1.lq-delete-flow.li."users||2
-           |    └ (item entry) | 0.17 kb -> 0.25 kb
+           |    └ (item entry) | 0.08 kb -> 0.15 kb
       .    | ✍️ ✅->✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m
            |    └ (root, namespace, manifest) | 0.22 kb -> 0.12 kb
       "
@@ -805,7 +805,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-direct-get-query-state.li."users||1
-           |    └ (item entry) | 0.18 kb
+           |    └ (item entry) | 0.10 kb
       2s   | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
            |    └ (query entry) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
@@ -959,7 +959,7 @@ describe('sync storage efficiency: list-query', () => {
       1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-invalidation-flow.li."users||1
-            |    └ (item entry) | 0.18 kb -> 0.27 kb
+            |    └ (item entry) | 0.10 kb -> 0.16 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
@@ -1046,7 +1046,7 @@ describe('sync storage efficiency: list-query', () => {
       1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-coalesced-invalidations.li."users||1
-            |    └ (item entry) | 0.18 kb -> 0.27 kb
+            |    └ (item entry) | 0.10 kb -> 0.16 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
@@ -1194,7 +1194,7 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1
-           |    └ (item entry) | 0.18 kb
+           |    └ (item entry) | 0.10 kb
       2s   | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
            |    └ (query entry) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
@@ -1284,7 +1284,7 @@ describe('sync storage efficiency: list-query', () => {
       .     | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-remount-no-cache.li."users||1
-            |    └ (item entry) | ❌ -> 0.19 kb
+            |    └ (item entry) | ❌ -> 0.10 kb
       .     | ✍️ ❌->✅ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (root, namespace, manifest) | ❌ -> 0.12 kb
       "
@@ -1345,7 +1345,7 @@ describe('sync storage efficiency: list-query', () => {
       1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-item-invalidation-flow.li."users||1
-            |    └ (item entry) | 0.18 kb -> 0.27 kb
+            |    └ (item entry) | 0.10 kb -> 0.16 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
@@ -1387,7 +1387,7 @@ describe('sync storage efficiency: list-query', () => {
       0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #2 tsdf.sess1.lq-item-remount-flow.li."users||1
-           |    └ (item entry) | 0.18 kb
+           |    └ (item entry) | 0.10 kb
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
@@ -1433,7 +1433,7 @@ describe('sync storage efficiency: list-query', () => {
       1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-remount-no-cache.li."users||1
-            |    └ (item entry) | ❌ -> 0.19 kb
+            |    └ (item entry) | ❌ -> 0.10 kb
       .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
@@ -1484,11 +1484,11 @@ describe('sync storage efficiency: list-query', () => {
       0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | 📖 ✅ #2 tsdf.sess1.lq-multi-item-remount-flow.li."users||1
-           |    └ (item entry) | 0.19 kb
+           |    └ (item entry) | 0.10 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-multi-item-remount-flow.li."users||2
-           |    └ (item entry) | 0.19 kb
+           |    └ (item entry) | 0.10 kb
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
@@ -1553,13 +1553,13 @@ describe('sync storage efficiency: list-query', () => {
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.23 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-multi-query-remount-flow.li."users||1
-           |    └ (item entry) | 0.18 kb
+           |    └ (item entry) | 0.10 kb
       .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
            |    └ (query entry) | 0.13 kb
       .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.23 kb
       .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1
-           |    └ (item entry) | 0.20 kb
+           |    └ (item entry) | 0.11 kb
       2s   | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
            |    └ (query entry) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
@@ -1628,7 +1628,7 @@ describe('sync storage efficiency: list-query', () => {
       1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | ✍️ ✅->✅ #2 tsdf.sess1.lq-mutation-flow.li."users||1
-           |    └ (item entry) | 0.18 kb -> 0.27 kb
+           |    └ (item entry) | 0.10 kb -> 0.16 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m

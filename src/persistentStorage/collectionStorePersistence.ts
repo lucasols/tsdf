@@ -146,6 +146,31 @@ export function setupCollectionPersistence<
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
+  const itemStorageValueCodec = {
+    serialize: (
+      data: PersistedCollectionItemData<ItemState | StorageState>,
+    ) => ({ d: data.data, p: data.payload }),
+    deserialize: (value: unknown) =>
+      typeof value === 'object' &&
+      value !== null &&
+      'd' in value &&
+      'p' in value
+        ? (() => {
+            const parsed = parsePersistedCollectionItemData(
+              { data: value.d, payload: value.p },
+              config.payloadSchema,
+            );
+            return parsed
+              ? {
+                  data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
+                    parsed.data,
+                  ),
+                  payload: parsed.payload,
+                }
+              : null;
+          })()
+        : null,
+  };
 
   const namespace = createPersistentStorageNamespaceHandle<
     PersistedCollectionItemData<ItemState | StorageState>,
@@ -154,29 +179,7 @@ export function setupCollectionPersistence<
     { ...persistentConfig, entryPrefix: COLLECTION_STORAGE_ENTRY_PREFIX },
     {
       getManifestMeta: (data) => ({ p: data.payload }),
-      asyncValueCodec: {
-        serialize: (data) => ({ d: data.data, p: data.payload }),
-        deserialize: (value) =>
-          typeof value === 'object' &&
-          value !== null &&
-          'd' in value &&
-          'p' in value
-            ? (() => {
-                const parsed = parsePersistedCollectionItemData(
-                  { data: value.d, payload: value.p },
-                  config.payloadSchema,
-                );
-                return parsed
-                  ? {
-                      data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
-                        parsed.data,
-                      ),
-                      payload: parsed.payload,
-                    }
-                  : null;
-              })()
-            : null,
-      },
+      valueCodec: itemStorageValueCodec,
     },
   );
 
@@ -312,7 +315,12 @@ export function setupCollectionPersistence<
     const storageKey = `${prefix}${itemKey}`;
     const cacheEntry = readStorageEntryFromLocalStorageSync<
       PersistedCollectionItemData<unknown>
-    >(storageKey, version, { metadata: 'namespace', namespacePrefix: prefix });
+    >(
+      storageKey,
+      version,
+      { metadata: 'namespace', namespacePrefix: prefix },
+      itemStorageValueCodec,
+    );
 
     if (!cacheEntry) {
       knownMissingPersistedKeys.add(itemKey);
@@ -320,21 +328,14 @@ export function setupCollectionPersistence<
       return undefined;
     }
 
-    const persisted = parsePersistedCollectionItemData(
-      cacheEntry.data,
-      config.payloadSchema,
+    const item = toCollectionItemState(
+      __LEGIT_CAST__<
+        ParsedPersistedCollectionItemData<ItemPayload>,
+        PersistedCollectionItemData<unknown>
+      >(cacheEntry.data),
+      dataSchema,
+      shouldIgnoreItem,
     );
-    if (!persisted) {
-      scheduleLocalStorageRemoval(storageKey, {
-        metadata: 'namespace',
-        namespacePrefix: prefix,
-      });
-      knownMissingPersistedKeys.add(itemKey);
-      forgetPersistedItem(itemKey);
-      return undefined;
-    }
-
-    const item = toCollectionItemState(persisted, dataSchema, shouldIgnoreItem);
     if (!item) {
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',

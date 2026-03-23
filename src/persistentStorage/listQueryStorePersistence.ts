@@ -236,6 +236,66 @@ export function setupListQueryPersistence<
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
+  const itemStorageValueCodec = {
+    serialize: (
+      data: PersistedListQueryItemData<ItemState | StorageState>,
+    ) => ({
+      d: data.data,
+      p: data.payload,
+      ...(data.loadedFields !== undefined ? { lf: data.loadedFields } : {}),
+    }),
+    deserialize: (value: unknown) =>
+      typeof value === 'object' &&
+      value !== null &&
+      'd' in value &&
+      'p' in value
+        ? (() => {
+            const parsed = parsePersistedListQueryItemData(
+              {
+                data: value.d,
+                payload: value.p,
+                ...('lf' in value && Array.isArray(value.lf)
+                  ? { loadedFields: value.lf }
+                  : {}),
+              },
+              config.itemPayloadSchema,
+            );
+            return parsed
+              ? {
+                  data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
+                    parsed.data,
+                  ),
+                  payload: parsed.payload,
+                  ...(parsed.loadedFields
+                    ? { loadedFields: parsed.loadedFields }
+                    : {}),
+                }
+              : null;
+          })()
+        : null,
+  };
+  const queryStorageValueCodec = {
+    serialize: (data: PersistedListQueryData) => ({
+      p: data.payload,
+      i: data.items,
+      ...(data.hasMore ? { h: true } : {}),
+    }),
+    deserialize: (value: unknown) =>
+      typeof value === 'object' &&
+      value !== null &&
+      'p' in value &&
+      'i' in value &&
+      Array.isArray(value.i)
+        ? parsePersistedListQueryData(
+            {
+              payload: value.p,
+              items: value.i,
+              hasMore: 'h' in value && value.h === true,
+            },
+            config.queryPayloadSchema,
+          )
+        : null,
+  };
 
   const itemNamespace = createPersistentStorageNamespaceHandle<
     PersistedListQueryItemData<ItemState | StorageState>,
@@ -244,42 +304,7 @@ export function setupListQueryPersistence<
     { ...persistentConfig, entryPrefix: LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX },
     {
       getManifestMeta: (data) => ({ p: data.payload }),
-      asyncValueCodec: {
-        serialize: (data) => ({
-          d: data.data,
-          p: data.payload,
-          ...(data.loadedFields !== undefined ? { lf: data.loadedFields } : {}),
-        }),
-        deserialize: (value) =>
-          typeof value === 'object' &&
-          value !== null &&
-          'd' in value &&
-          'p' in value
-            ? (() => {
-                const parsed = parsePersistedListQueryItemData(
-                  {
-                    data: value.d,
-                    payload: value.p,
-                    ...('lf' in value && Array.isArray(value.lf)
-                      ? { loadedFields: value.lf }
-                      : {}),
-                  },
-                  config.itemPayloadSchema,
-                );
-                return parsed
-                  ? {
-                      data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
-                        parsed.data,
-                      ),
-                      payload: parsed.payload,
-                      ...(parsed.loadedFields
-                        ? { loadedFields: parsed.loadedFields }
-                        : {}),
-                    }
-                  : null;
-              })()
-            : null,
-      },
+      valueCodec: itemStorageValueCodec,
     },
   );
   const queryNamespace = createPersistentStorageNamespaceHandle<
@@ -288,28 +313,7 @@ export function setupListQueryPersistence<
   >(
     { ...persistentConfig, entryPrefix: LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX },
     {
-      asyncValueCodec: {
-        serialize: (data) => ({
-          p: data.payload,
-          i: data.items,
-          ...(data.hasMore ? { h: true } : {}),
-        }),
-        deserialize: (value) =>
-          typeof value === 'object' &&
-          value !== null &&
-          'p' in value &&
-          'i' in value &&
-          Array.isArray(value.i)
-            ? parsePersistedListQueryData(
-                {
-                  payload: value.p,
-                  items: value.i,
-                  hasMore: 'h' in value && value.h === true,
-                },
-                config.queryPayloadSchema,
-              )
-            : null,
-      },
+      valueCodec: queryStorageValueCodec,
       getManifestMeta: (data) => ({
         p: data.payload,
         i: data.items,
@@ -704,7 +708,12 @@ export function setupListQueryPersistence<
     const storageKey = `${prefix}${itemKey}`;
     const cacheEntry = readStorageEntryFromLocalStorageSync<
       PersistedListQueryItemData<unknown>
-    >(storageKey, version, { metadata: 'namespace', namespacePrefix: prefix });
+    >(
+      storageKey,
+      version,
+      { metadata: 'namespace', namespacePrefix: prefix },
+      itemStorageValueCodec,
+    );
 
     if (!cacheEntry) {
       knownMissingPersistedItemKeys.add(itemKey);
@@ -712,21 +721,14 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    const persisted = parsePersistedListQueryItemData(
-      cacheEntry.data,
-      config.itemPayloadSchema,
+    const itemState = toItemState(
+      __LEGIT_CAST__<
+        ParsedPersistedListQueryItemData<ItemPayload>,
+        PersistedListQueryItemData<unknown>
+      >(cacheEntry.data),
+      dataSchema,
+      shouldIgnoreItem,
     );
-    if (!persisted) {
-      scheduleLocalStorageRemoval(storageKey, {
-        metadata: 'namespace',
-        namespacePrefix: prefix,
-      });
-      knownMissingPersistedItemKeys.add(itemKey);
-      forgetPersistedItem(itemKey);
-      return undefined;
-    }
-
-    const itemState = toItemState(persisted, dataSchema, shouldIgnoreItem);
     if (!itemState) {
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',

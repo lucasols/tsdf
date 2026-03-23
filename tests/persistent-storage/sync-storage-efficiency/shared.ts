@@ -169,13 +169,14 @@ export function listStoredCollectionItemPayloads(
     if (rawEntry === null) continue;
 
     const entry = __LEGIT_CAST__<
-      StorageCacheEntry<{
-        data: PersistedCollectionItemState;
-        payload: string;
-      }>,
+      | StorageCacheEntry<{
+          data: PersistedCollectionItemState;
+          payload: string;
+        }>
+      | { p: string },
       unknown
     >(JSON.parse(rawEntry));
-    payloads.push(entry.data.payload);
+    payloads.push('p' in entry ? entry.p : entry.data.payload);
   }
 
   return payloads;

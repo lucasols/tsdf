@@ -11,11 +11,8 @@ import {
   test,
   vi,
 } from 'vitest';
-import type {
-  CollectionPersistentStorageConfig,
-  PersistedCollectionItemData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
+import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -157,18 +154,14 @@ describe('localStorage: converted collection store persistence', () => {
       label: 'Cached',
     });
     const invalidPayloadEntry =
-      invalidPayloadStore.storage.readEntry<
-        StorageCacheEntry<PersistedCollectionItemData<unknown>>
-      >(invalidPayloadKey);
-    if (invalidPayloadEntry === null) {
-      throw new Error(`Missing seeded entry for ${invalidPayloadKey}`);
-    }
-    invalidPayloadStore.setValue(invalidPayloadKey, {
-      ...invalidPayloadEntry,
-      data: { ...invalidPayloadEntry.data, payload: true },
-    } satisfies StorageCacheEntry<
-      PersistedCollectionItemData<unknown> & { payload: boolean }
-    >);
+      invalidPayloadStore.collection.readItemEntry<unknown>('true');
+    invalidPayloadStore.setValue(
+      invalidPayloadKey,
+      createCompactLocalStorageEntry(
+        { d: invalidPayloadEntry.data.data, p: true },
+        invalidPayloadEntry.version,
+      ),
+    );
 
     const invalidDataEnv = createEnv({
       storeName: 'col-converted-invalid-data',

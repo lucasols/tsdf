@@ -1,5 +1,4 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import { rc_number, rc_object, rc_parse_json, rc_unknown } from 'runcheck';
 import {
   getManagedLocalStorageRuntimeConfig,
   isManagedLocalStorageEntryOfflineProtected,
@@ -7,6 +6,11 @@ import {
   setManagedLocalStorageEntryOfflineProtected,
 } from './localStorageMetadata';
 import { serializeProtectedRef } from './asyncStorageAdapter';
+import {
+  createCompactLocalStorageEntry,
+  type CompactLocalStorageEntryValue,
+  parseCompactLocalStorageEntry,
+} from './compactLocalStorageEntry';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
@@ -27,12 +31,6 @@ import { parseAsyncStorageNamespaceKind } from './types';
 
 const DEBOUNCE_MS = 1000;
 export const SYNC_STORAGE_TOUCH_THROTTLE_MS = 60_000;
-
-const cacheEntrySchema = rc_object({
-  data: rc_unknown,
-  timestamp: rc_number,
-  version: rc_number.optional(),
-});
 
 let localStorageExpirationScanScheduled = false;
 let scannedAsyncAdapters = new WeakSet<AsyncStorageAdapter>();
@@ -243,6 +241,52 @@ function refreshLocalStorageTimestampUnlocked(
   }
 }
 
+type LocalStorageValueCodec<T> = {
+  serialize(data: T): CompactLocalStorageEntryValue;
+  deserialize(data: CompactLocalStorageEntryValue): T | null;
+};
+
+const defaultLocalStorageValueCodec: LocalStorageValueCodec<unknown> = {
+  serialize: (data) => ({ d: data }),
+  deserialize: (data) => ('d' in data ? data.d : null),
+};
+
+type AsyncStorageValueCodec<T, TSerialized = unknown> = {
+  serialize(data: T): TSerialized;
+  deserialize(data: TSerialized): T | null;
+};
+
+function toLocalStorageValueCodec<T>(
+  valueCodec: AsyncStorageValueCodec<T> | undefined,
+): LocalStorageValueCodec<T> {
+  if (valueCodec === undefined) {
+    return __LEGIT_CAST__<
+      LocalStorageValueCodec<T>,
+      LocalStorageValueCodec<unknown>
+    >(defaultLocalStorageValueCodec);
+  }
+
+  return {
+    serialize(data) {
+      const serialized = valueCodec.serialize(data);
+      if (
+        typeof serialized !== 'object' ||
+        serialized === null ||
+        Array.isArray(serialized)
+      ) {
+        throw new Error(
+          '[TSDF] local-sync persistence codecs must serialize to an object.',
+        );
+      }
+
+      return __LEGIT_CAST__<CompactLocalStorageEntryValue, unknown>(serialized);
+    },
+    deserialize(data) {
+      return valueCodec.deserialize(__LEGIT_CAST__<never, unknown>(data));
+    },
+  };
+}
+
 export type PersistentStorageHandle<T> = {
   /** Loads persisted data, validating version and schema. Returns null if not found or invalid. */
   load(options?: { touch?: AsyncStorageTouchMode }): Promise<T | null>;
@@ -254,11 +298,6 @@ export type PersistentStorageHandle<T> = {
   clear(): Promise<void>;
   /** Cancels any pending debounce timer without saving. */
   dispose(): void;
-};
-
-type AsyncStorageValueCodec<T, TSerialized = unknown> = {
-  serialize(data: T): TSerialized;
-  deserialize(data: TSerialized): T | null;
 };
 
 /**
@@ -274,7 +313,7 @@ export function createPersistentStorageHandle<T>(
   {
     getManifestMeta,
     asyncNamespace,
-    asyncValueCodec,
+    valueCodec,
   }: {
     getManifestMeta?: (data: T) => Record<string, unknown> | undefined;
     asyncNamespace?: {
@@ -282,7 +321,7 @@ export function createPersistentStorageHandle<T>(
       kind?: AsyncStorageNamespaceKind;
       entryKey?: string;
     };
-    asyncValueCodec?: AsyncStorageValueCodec<T>;
+    valueCodec?: AsyncStorageValueCodec<T>;
   } = {},
 ): PersistentStorageHandle<T> {
   const version = config.version;
@@ -291,6 +330,7 @@ export function createPersistentStorageHandle<T>(
   const adapter = config.adapter;
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncEntryKey = asyncNamespace?.entryKey ?? 'document';
+  const localCodec = toLocalStorageValueCodec(valueCodec);
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   scheduleAdapterExpirationScan(adapter);
@@ -343,8 +383,8 @@ export function createPersistentStorageHandle<T>(
           return null;
         }
 
-        const decoded = asyncValueCodec
-          ? asyncValueCodec.deserialize(entry.value)
+        const decoded = valueCodec
+          ? valueCodec.deserialize(entry.value)
           : __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [asyncEntryKey] });
@@ -357,9 +397,12 @@ export function createPersistentStorageHandle<T>(
       const key = getKey();
       if (key === false) return null;
 
-      const entry = readStorageEntryFromLocalStorageSync<T>(key, version, {
-        metadata: 'single',
-      });
+      const entry = readStorageEntryFromLocalStorageSync<T>(
+        key,
+        version,
+        { metadata: 'single' },
+        localCodec,
+      );
       if (!entry) return null;
 
       scheduleIdleCleanup(() =>
@@ -384,7 +427,7 @@ export function createPersistentStorageHandle<T>(
           upserts: [
             {
               key: asyncEntryKey,
-              value: asyncValueCodec ? asyncValueCodec.serialize(data) : data,
+              value: valueCodec ? valueCodec.serialize(data) : data,
               version: asyncVersion,
               metadata: getManifestMeta?.(data),
             },
@@ -396,13 +439,17 @@ export function createPersistentStorageHandle<T>(
       if (key === false) return;
       const sessionKey = config.getSessionKey();
       if (sessionKey === false) return;
-      const entry = createStorageCacheEntry(data, Date.now(), version);
+      const timestamp = Date.now();
+      const entry = createCompactLocalStorageEntry(
+        localCodec.serialize(data),
+        version,
+      );
 
       await runLocalStorageMutation(() => {
         localPersistentStorage.write(key, entry);
         localPersistentStorage.upsertSingleEntry({
           storageKey: key,
-          lastAccessAt: entry.timestamp,
+          lastAccessAt: timestamp,
           meta: preserveOfflineProtectionFlag(
             sessionKey,
             key,
@@ -412,7 +459,7 @@ export function createPersistentStorageHandle<T>(
                 ?.meta,
           ),
         });
-        recordLocalStorageTouch(key, entry.timestamp);
+        recordLocalStorageTouch(key, timestamp);
       });
     } catch (error) {
       onPersistentStorageError?.(error);
@@ -524,10 +571,10 @@ export function createPersistentStorageNamespaceHandle<
   },
   {
     getManifestMeta,
-    asyncValueCodec,
+    valueCodec,
   }: {
     getManifestMeta?: (data: T, entryKey: string) => TMetadata | undefined;
-    asyncValueCodec?: AsyncStorageValueCodec<T>;
+    valueCodec?: AsyncStorageValueCodec<T>;
   } = {},
 ): PersistentStorageNamespaceHandle<T, TMetadata> {
   const version = config.version;
@@ -536,6 +583,7 @@ export function createPersistentStorageNamespaceHandle<
   const adapter = config.adapter;
   const asyncAdapter = adapter === 'local-sync' ? null : adapter;
   const asyncNamespaceKind = ensureAsyncNamespaceKind(config.entryPrefix);
+  const localCodec = toLocalStorageValueCodec(valueCodec);
   scheduleAdapterExpirationScan(adapter);
 
   function getPrefix(): string | false {
@@ -587,8 +635,8 @@ export function createPersistentStorageNamespaceHandle<
           return null;
         }
 
-        const decoded = asyncValueCodec
-          ? asyncValueCodec.deserialize(entry.value)
+        const decoded = valueCodec
+          ? valueCodec.deserialize(entry.value)
           : __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
@@ -606,10 +654,12 @@ export function createPersistentStorageNamespaceHandle<
       if (prefix === false) return null;
       const key = `${prefix}${entryKey}`;
 
-      return readStorageEntryFromLocalStorageSync<T>(key, version, {
-        metadata: 'namespace',
-        namespacePrefix: prefix,
-      });
+      return readStorageEntryFromLocalStorageSync<T>(
+        key,
+        version,
+        { metadata: 'namespace', namespacePrefix: prefix },
+        localCodec,
+      );
     } catch (error) {
       onPersistentStorageError?.(error);
       return null;
@@ -635,8 +685,8 @@ export function createPersistentStorageNamespaceHandle<
           return null;
         }
 
-        const decoded = asyncValueCodec
-          ? asyncValueCodec.deserialize(entry.value)
+        const decoded = valueCodec
+          ? valueCodec.deserialize(entry.value)
           : __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
@@ -692,8 +742,8 @@ export function createPersistentStorageNamespaceHandle<
             }
             return null;
           }
-          const decoded = asyncValueCodec
-            ? asyncValueCodec.deserialize(entry.value)
+          const decoded = valueCodec
+            ? valueCodec.deserialize(entry.value)
             : __LEGIT_CAST__<T, unknown>(entry.value);
           if (decoded === null) {
             const key = entryKeys[index];
@@ -732,7 +782,7 @@ export function createPersistentStorageNamespaceHandle<
           upserts: [
             {
               key: entryKey,
-              value: asyncValueCodec ? asyncValueCodec.serialize(data) : data,
+              value: valueCodec ? valueCodec.serialize(data) : data,
               version: asyncVersion,
               metadata: getManifestMeta?.(data, entryKey),
             },
@@ -744,7 +794,11 @@ export function createPersistentStorageNamespaceHandle<
       if (key === false) return;
       const sessionKey = config.getSessionKey();
       if (sessionKey === false) return;
-      const entry = createStorageCacheEntry(data, Date.now(), version);
+      const timestamp = Date.now();
+      const entry = createCompactLocalStorageEntry(
+        localCodec.serialize(data),
+        version,
+      );
 
       await runLocalStorageMutation(() => {
         const prefix = getPrefix();
@@ -754,7 +808,7 @@ export function createPersistentStorageNamespaceHandle<
         localPersistentStorage.upsertNamespaceEntry({
           storagePrefix: prefix,
           entryKey,
-          lastAccessAt: entry.timestamp,
+          lastAccessAt: timestamp,
           meta: preserveOfflineProtectionFlag(
             sessionKey,
             key,
@@ -766,7 +820,7 @@ export function createPersistentStorageNamespaceHandle<
               )?.meta,
           ),
         });
-        recordLocalStorageTouch(key, entry.timestamp);
+        recordLocalStorageTouch(key, timestamp);
       });
     } catch (error) {
       onPersistentStorageError?.(error);
@@ -898,6 +952,10 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
   version: number | undefined,
   options: LocalStorageMetadataOptions,
+  valueCodec: LocalStorageValueCodec<T> = __LEGIT_CAST__<
+    LocalStorageValueCodec<T>,
+    LocalStorageValueCodec<unknown>
+  >(defaultLocalStorageValueCodec),
 ): StorageCacheEntry<T> | null {
   const metadata =
     options.metadata === 'single'
@@ -924,20 +982,21 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
   const raw = localPersistentStorage.readRaw(key);
   if (raw === null) return removeAndReturnNull();
 
-  try {
-    const result = rc_parse_json(raw, cacheEntrySchema);
-    if (!result.ok) return removeAndReturnNull();
-    const entry = result.value;
-    if (!doesStorageEntryVersionMatch(entry.version, version)) {
-      return removeAndReturnNull();
-    }
+  const entry = parseCompactLocalStorageEntry(raw);
+  if (entry === null) return removeAndReturnNull();
 
-    return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
-      entry,
-    );
-  } catch {
+  if (!doesStorageEntryVersionMatch(entry.version, version)) {
     return removeAndReturnNull();
   }
+
+  const decoded = valueCodec.deserialize(entry.value);
+  if (decoded === null) return removeAndReturnNull();
+
+  return {
+    data: decoded,
+    timestamp: metadata.lastAccessAt,
+    ...(entry.version !== undefined ? { version: entry.version } : {}),
+  };
 }
 
 function doesStorageEntryVersionMatch(
@@ -949,18 +1008,6 @@ function doesStorageEntryVersionMatch(
   }
 
   return entryVersion === expectedVersion;
-}
-
-function createStorageCacheEntry<T>(
-  data: T,
-  timestamp: number,
-  version: number | undefined,
-): StorageCacheEntry<T> {
-  if (version === undefined) {
-    return { data, timestamp };
-  }
-
-  return { data, timestamp, version };
 }
 
 /**

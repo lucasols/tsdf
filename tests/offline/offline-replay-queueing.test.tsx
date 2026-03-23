@@ -248,7 +248,6 @@ describe('offline replay queueing and retry behavior', () => {
           storeType: 'document'
           syncState: 'pending'
           updatedAt: 1735689600050
-        timestamp: 1735689600050
     `);
 
     act(() => {

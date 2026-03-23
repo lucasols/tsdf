@@ -28,17 +28,24 @@ type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
       ([State] extends [never] ? never : unknown))
   | null;
 
+const documentStorageValueCodec = {
+  serialize: (data: PersistedDocumentData<unknown>) => ({ d: data.data }),
+  deserialize: (value: unknown) =>
+    typeof value === 'object' && value !== null && 'd' in value
+      ? parsePersistedDocumentData({ data: value.d })
+      : null,
+};
+
 function readDocumentFromLocalStorageSync(
   key: string,
   version: number | undefined,
 ): { persisted: PersistedDocumentData<unknown> | null; foundEntry: boolean } {
   const entry = readStorageEntryFromLocalStorageSync<
     PersistedDocumentData<unknown>
-  >(key, version, { metadata: 'single' });
+  >(key, version, { metadata: 'single' }, documentStorageValueCodec);
   if (!entry) return { persisted: null, foundEntry: false };
 
-  const persisted = parsePersistedDocumentData(entry.data);
-  return { persisted, foundEntry: true };
+  return { persisted: entry.data, foundEntry: true };
 }
 
 export type DocumentPersistenceSetup<State extends ValidStoreState> = {
@@ -73,7 +80,7 @@ export function setupDocumentPersistence<
   const handle = createPersistentStorageHandle<
     PersistedDocumentData<State | StorageState>
   >(config, {
-    asyncValueCodec: {
+    valueCodec: {
       serialize: (data) => ({ d: data.data }),
       deserialize: (value) =>
         typeof value === 'object' && value !== null && 'd' in value

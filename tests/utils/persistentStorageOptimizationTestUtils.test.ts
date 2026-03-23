@@ -230,18 +230,18 @@ describe('startPersistentStorageOperationCapture', () => {
     `);
   });
 
-  test('getLocalStorageTree groups dotted keys and rolls up folder sizes', () => {
+  test('getLocalStorageTree counts each node name once and rolls up descendant sizes', () => {
     localStorage.setItem('tsdf.docs.item.a', 'x'.repeat(40));
     localStorage.setItem('tsdf.docs.item.b', 'x'.repeat(60));
     localStorage.setItem('tsdf.docs.meta', 'x'.repeat(20));
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.23 kb)
-      └ docs (0.23 kb)
-        ├ item (0.20 kb)
+      "tsdf (0.27 kb)
+      └ docs (0.26 kb)
+        ├ item (0.21 kb)
         │ ├ a (0.08 kb)
         │ └ b (0.12 kb)
-        └ meta (0.04 kb)"
+        └ meta (0.05 kb)"
     `);
   });
 });
@@ -255,7 +255,7 @@ describe('storage tree helpers', () => {
     resetMockBrowserOpfsForTests();
   });
 
-  test('getOpfsDirTree expands file names into a dotted hierarchy', () => {
+  test('getOpfsDirTree counts directory and file names once and rolls up descendant sizes', () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
 
     mockAdapter.mockBrowserOpfs.writeFile(
@@ -272,13 +272,13 @@ describe('storage tree helpers', () => {
     );
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.23 kb)
-      └ sess1 (0.23 kb)
-        ├ docs (0.12 kb)
-        │ ├ d.e.m.json (0.04 kb)
-        │ └ d.e.p.json (0.08 kb)
-        └ users (0.12 kb)
-          └ ci.%22user-1.p.json (0.12 kb)"
+      "tsdf (0.35 kb)
+      └ sess1 (0.34 kb)
+        ├ docs (0.16 kb)
+        │ ├ d.e.m.json (0.06 kb)
+        │ └ d.e.p.json (0.10 kb)
+        └ users (0.16 kb)
+          └ ci.%22user-1.p.json (0.15 kb)"
     `);
   });
 });

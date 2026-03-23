@@ -57,7 +57,7 @@ describe('sync storage efficiency: document', () => {
       time |
       0    | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
            |    └ (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ #2 tsdf.sess1.doc-remount-flow (entry) | 0.18 kb
+      .    | 📖 ✅ #2 tsdf.sess1.doc-remount-flow (entry) | 0.10 kb
       2s   | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
            |    └ (root, single, manifest) | 0.05 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
@@ -67,25 +67,28 @@ describe('sync storage efficiency: document', () => {
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
 
     expect(getLocalStorageTree()).toMatchInlineSnapshot(`
-      "tsdf (0.27 kb)
-      ├ _m (0.09 kb)
+      "tsdf (0.30 kb)
+      ├ _m (0.15 kb)
       │ ├ g (0.04 kb)
-      │ └ r (0.05 kb)
-      │   └ s:sess1 (0.05 kb)
-      │     └ doc-remount-flow (0.05 kb)
+      │ └ r (0.10 kb)
+      │   └ s:sess1 (0.10 kb)
+      │     └ doc-remount-flow (0.09 kb)
       │       └ m (0.05 kb)
-      └ sess1 (0.18 kb)
-        └ doc-remount-flow (0.18 kb)"
+      └ sess1 (0.14 kb)
+        └ doc-remount-flow (0.13 kb)"
     `);
 
     expect(getParsedLocalStorageValue('tsdf.sess1.doc-remount-flow'))
       .toMatchInlineSnapshot(`
-        data:
-          data:
-            value: { name: 'Cached document', value: 7 }
-
-        timestamp: 1735689600000
+        d:
+          value: { name: 'Cached document', value: 7 }
       `);
+
+    expect(getParsedLocalStorageValue('tsdf._m.r.s:sess1.doc-remount-flow.m'))
+      .toMatchInlineSnapshot(`
+      e:
+        - a: 1735689604100
+    `);
   });
 
   test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {
@@ -115,7 +118,7 @@ describe('sync storage efficiency: document', () => {
       time  |
       0     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
             |    └ (root, single, manifest)
-      1.81s | ✍️ ❌->✅ #2 tsdf.sess1.doc-remount-no-cache (entry) | ❌ -> 0.16 kb
+      1.81s | ✍️ ❌->✅ #2 tsdf.sess1.doc-remount-no-cache (entry) | ❌ -> 0.08 kb
       .     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
             |    └ (root, single, manifest)
       .     | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
@@ -252,7 +255,7 @@ describe('sync storage efficiency: document', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | ✍️ ✅->✅ #1 tsdf.sess1.doc-mutation-flow (entry) | 0.18 kb -> 0.18 kb
+      1s   | ✍️ ✅->✅ #1 tsdf.sess1.doc-mutation-flow (entry) | 0.10 kb -> 0.10 kb
       .    | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-mutation-flow.m
            |    └ (root, single, manifest) | 0.05 kb
       .    | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-mutation-flow.m
@@ -305,7 +308,7 @@ describe('sync storage efficiency: document', () => {
       "
       time  |
       1.81s | ✍️ ✅->✅ #1 tsdf.sess1.doc-invalidation-flow
-            |    └ (entry) | 0.18 kb -> 0.18 kb
+            |    └ (entry) | 0.10 kb -> 0.10 kb
       .     | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-invalidation-flow.m
             |    └ (root, single, manifest) | 0.05 kb
       .     | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-invalidation-flow.m
@@ -375,7 +378,7 @@ describe('sync storage efficiency: document', () => {
       "
       time  |
       1.81s | ✍️ ✅->✅ #1 tsdf.sess1.doc-coalesced-invalidations
-            |    └ (entry) | 0.18 kb -> 0.18 kb
+            |    └ (entry) | 0.10 kb -> 0.11 kb
       .     | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m
             |    └ (root, single, manifest) | 0.05 kb
       .     | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m

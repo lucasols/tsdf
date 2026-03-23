@@ -104,12 +104,12 @@ describe('async storage efficiency: collection', () => {
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.26 kb)
-      ├ sess1 (0.22 kb)
-      │ └ collection-expiration (0.22 kb)
-      │   ├ ci.%22fresh-user.m.json (0.08 kb)
-      │   └ ci.%22fresh-user.p.json (0.14 kb)
-      └ tsdf._am.g* (0.04 kb)"
+      "tsdf (0.43 kb)
+      ├ sess1 (0.36 kb)
+      │ └ collection-expiration (0.35 kb)
+      │   ├ ci.%22fresh-user.m.json (0.13 kb)
+      │   └ ci.%22fresh-user.p.json (0.19 kb)
+      └ tsdf._am.g* (0.06 kb)"
     `);
 
     expect(
@@ -208,14 +208,14 @@ describe('async storage efficiency: collection', () => {
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.38 kb)
-      ├ sess1 (0.33 kb)
-      │ └ col-max-items-metadata (0.33 kb)
-      │   ├ ci.%22b.m.json (0.06 kb)
-      │   ├ ci.%22b.p.json (0.11 kb)
-      │   ├ ci.%22c.m.json (0.06 kb)
-      │   └ ci.%22c.p.json (0.10 kb)
-      └ tsdf._am.g* (0.04 kb)"
+      "tsdf (0.57 kb)
+      ├ sess1 (0.50 kb)
+      │ └ col-max-items-metadata (0.49 kb)
+      │   ├ ci.%22b.m.json (0.09 kb)
+      │   ├ ci.%22b.p.json (0.14 kb)
+      │   ├ ci.%22c.m.json (0.09 kb)
+      │   └ ci.%22c.p.json (0.12 kb)
+      └ tsdf._am.g* (0.06 kb)"
     `);
   });
 

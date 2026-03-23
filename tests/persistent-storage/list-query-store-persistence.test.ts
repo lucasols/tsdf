@@ -16,13 +16,10 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
-import type {
-  PersistedListQueryItemData,
-  PersistentStorageSchema,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -1597,21 +1594,21 @@ describe('localStorage: list query store persistence', () => {
     persistentStore
       .scope('lq-invalid-item-payload', 'sess1')
       .listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
-    const entry =
-      persistentStore.storage.readEntry<
-        StorageCacheEntry<PersistedListQueryItemData<Row>>
-      >(key);
-    if (entry === null) {
-      throw new Error(`Missing seeded entry for ${key}`);
-    }
+    const entry = persistentStore
+      .scope('lq-invalid-item-payload', 'sess1')
+      .listQuery.readItemEntry<Row>('users', 1);
     localStorage.setItem(
       key,
-      JSON.stringify({
-        ...entry,
-        data: { ...entry.data, payload: true },
-      } satisfies StorageCacheEntry<
-        PersistedListQueryItemData<Row> & { payload: boolean }
-      >),
+      JSON.stringify(
+        createCompactLocalStorageEntry(
+          {
+            d: entry.data.data,
+            p: true,
+            ...(entry.data.loadedFields ? { lf: entry.data.loadedFields } : {}),
+          },
+          entry.version,
+        ),
+      ),
     );
 
     const env = createEnv({
