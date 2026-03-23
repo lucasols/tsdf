@@ -9,13 +9,10 @@ import {
 import {
   createPersistentStorageHandle,
   getLocalStorageAdapter,
+  readProtectedStorageKeys,
   type PersistentStorageHandle,
 } from '../persistentStorageManager';
 import type { StorageAdapter } from '../types';
-import {
-  parseProtectedKeys,
-  serializeProtectedKeys,
-} from './protectedKeysPersistence';
 import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
@@ -187,50 +184,19 @@ function sameCanonicalConfig(
   );
 }
 
-function createSessionPersistenceHandles(args: {
+function createSessionPersistenceHandle(args: {
   sessionKey: string;
   adapter: StorageAdapter | null;
   onPersistentStorageError?: (error: unknown) => void;
-}): {
-  sessionHandle: PersistentStorageHandle<GlobalOfflineStatus>;
-  protectedKeysHandle: PersistentStorageHandle<{ keys: string[] }>;
-} {
-  if (args.adapter === null) {
-    return {
-      sessionHandle: createNoopPersistentStorageHandle(),
-      protectedKeysHandle: createNoopPersistentStorageHandle(),
-    };
-  }
+}): PersistentStorageHandle<GlobalOfflineStatus> {
+  if (args.adapter === null) return createNoopPersistentStorageHandle();
 
-  const adapter = args.adapter;
-  const localStorageAdapter = getLocalStorageAdapter(adapter);
-
-  return {
-    sessionHandle: createPersistentStorageHandle<GlobalOfflineStatus>({
-      storeName: '_o_.s',
-      adapter,
-      getSessionKey: () => args.sessionKey,
-      onPersistentStorageError: args.onPersistentStorageError,
-    }),
-    protectedKeysHandle:
-      localStorageAdapter !== null
-        ? createNoopPersistentStorageHandle()
-        : createPersistentStorageHandle<{ keys: string[] }>(
-            {
-              storeName: '_o_.p',
-              adapter,
-              getSessionKey: () => args.sessionKey,
-              onPersistentStorageError: args.onPersistentStorageError,
-            },
-            {
-              getManifestMeta: (data) => ({ keys: data.keys }),
-              asyncValueCodec: {
-                serialize: serializeProtectedKeys,
-                deserialize: parseProtectedKeys,
-              },
-            },
-          ),
-  };
+  return createPersistentStorageHandle<GlobalOfflineStatus>({
+    storeName: '_o_.s',
+    adapter: args.adapter,
+    getSessionKey: () => args.sessionKey,
+    onPersistentStorageError: args.onPersistentStorageError,
+  });
 }
 
 /**
@@ -247,7 +213,6 @@ export class SessionOfflineCoordinator {
   readonly #registrations = new Map<string, SessionRegistration>();
   readonly #storeContributions = new Map<string, SessionStoreContribution>();
   #sessionHandle: PersistentStorageHandle<GlobalOfflineStatus>;
-  #protectedKeysHandle: PersistentStorageHandle<{ keys: string[] }>;
   readonly #browserTabs;
   #canonicalAdapter: StorageAdapter | null;
   #localStorageAdapter: ReturnType<typeof getLocalStorageAdapter>;
@@ -276,13 +241,11 @@ export class SessionOfflineCoordinator {
     this.#localStorageAdapter =
       resolvedAdapter !== null ? getLocalStorageAdapter(resolvedAdapter) : null;
     this.#onPersistentStorageError = onPersistentStorageError;
-    const persistence = createSessionPersistenceHandles({
+    this.#sessionHandle = createSessionPersistenceHandle({
       sessionKey,
       adapter: resolvedAdapter,
       onPersistentStorageError,
     });
-    this.#sessionHandle = persistence.sessionHandle;
-    this.#protectedKeysHandle = persistence.protectedKeysHandle;
     this.#canonicalConfig = toCanonicalConfig(resolvedAdapter, config);
     this.#hasCanonicalConfig = config !== undefined;
     setSessionProtectedKeysSnapshot(this.sessionKey, []);
@@ -324,9 +287,11 @@ export class SessionOfflineCoordinator {
     this.#hydrated = true;
     const hydrationToken = this.#hydrationToken;
 
-    const [persistedStatus, protectedKeysEntry] = await Promise.all([
+    const [persistedStatus, protectedKeys] = await Promise.all([
       this.#sessionHandle.load({ touch: 'never' }),
-      this.#protectedKeysHandle.load({ touch: 'never' }),
+      this.#canonicalAdapter === null
+        ? Promise.resolve(new Set<string>())
+        : readProtectedStorageKeys(this.#canonicalAdapter, this.sessionKey),
     ]);
 
     if (hydrationToken !== this.#hydrationToken) return;
@@ -344,7 +309,7 @@ export class SessionOfflineCoordinator {
       );
     }
 
-    this.#protectedKeys = protectedKeysEntry?.keys ?? [];
+    this.#protectedKeys = [...protectedKeys].sort();
     setSessionProtectedKeysSnapshot(this.sessionKey, this.#protectedKeys);
   }
 
@@ -392,18 +357,15 @@ export class SessionOfflineCoordinator {
     onPersistentStorageError?: (error: unknown) => void;
   }): void {
     this.#sessionHandle.dispose();
-    this.#protectedKeysHandle.dispose();
     this.#canonicalAdapter = args.adapter;
     this.#localStorageAdapter =
       args.adapter !== null ? getLocalStorageAdapter(args.adapter) : null;
     this.#onPersistentStorageError = args.onPersistentStorageError;
-    const persistence = createSessionPersistenceHandles({
+    this.#sessionHandle = createSessionPersistenceHandle({
       sessionKey: this.sessionKey,
       adapter: args.adapter,
       onPersistentStorageError: args.onPersistentStorageError,
     });
-    this.#sessionHandle = persistence.sessionHandle;
-    this.#protectedKeysHandle = persistence.protectedKeysHandle;
     this.#protectedKeys = [];
     setSessionProtectedKeysSnapshot(this.sessionKey, []);
     this.#hydrated = false;
@@ -603,6 +565,7 @@ export class SessionOfflineCoordinator {
       .sort();
 
     if (!arraysEqual(this.#protectedKeys, nextProtectedKeys)) {
+      const previousProtectedKeys = this.#protectedKeys;
       this.#protectedKeys = nextProtectedKeys;
       setSessionProtectedKeysSnapshot(this.sessionKey, nextProtectedKeys);
       if (this.#localStorageAdapter !== null) {
@@ -610,8 +573,20 @@ export class SessionOfflineCoordinator {
           this.sessionKey,
           nextProtectedKeys,
         );
-      } else {
-        void this.#protectedKeysHandle.saveNow({ keys: nextProtectedKeys });
+      } else if (
+        this.#canonicalAdapter !== null &&
+        this.#canonicalAdapter !== 'local-sync'
+      ) {
+        const asyncAdapter = this.#canonicalAdapter;
+        void asyncAdapter
+          .syncSessionProtectedKeys(
+            this.sessionKey,
+            nextProtectedKeys,
+            previousProtectedKeys,
+          )
+          .catch((error: unknown) => {
+            this.#onPersistentStorageError?.(error);
+          });
       }
     }
 
@@ -784,7 +759,6 @@ export class SessionOfflineCoordinator {
     this.#browserTabs.priority.close();
     this.#browserTabs.coordinator.close();
     this.#sessionHandle.dispose();
-    this.#protectedKeysHandle.dispose();
     clearSessionProtectedKeysSnapshot(this.sessionKey);
   }
 }

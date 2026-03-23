@@ -14,6 +14,7 @@ import {
   createCompactListQueryLocalStorageEntry,
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
+import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
@@ -43,7 +44,6 @@ import {
   listAllPersistentStorageNamespaceMetadata,
   mergeLocalStorageOfflineProtection,
   readManifestPayloadMeta,
-  readProtectedStorageNamespaceKeys,
   readStorageEntryFromLocalStorageSync,
   recordLocalStorageTouch,
   refreshLocalStorageTimestamp,
@@ -63,6 +63,7 @@ import type {
   PersistedListQueryItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
+import { getProtectedKeysFromMetadata } from './asyncStorageAdapter';
 
 const DEFAULT_MAX_ITEMS = 500;
 const DEFAULT_MAX_QUERIES = 100;
@@ -1173,35 +1174,11 @@ export function setupListQueryPersistence<
       return { keptQueryKeys, managedQueryEntriesByKey };
     }
 
-    const sessionKey = config.getSessionKey();
-    const queryPrefix =
-      sessionKey === false
-        ? null
-        : getStoragePrefixForStoreNamespace(
-            sessionKey,
-            config.storeName,
-            LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
-          );
-    const protectedQueryKeys = await readProtectedStorageNamespaceKeys(
-      storageAdapter,
-      sessionKey,
-      {
-        localStoragePrefix: queryPrefix,
-        asyncScope:
-          sessionKey === false
-            ? null
-            : {
-                sessionKey,
-                storeName: config.storeName,
-                kind: 'listQuery.query',
-              },
-      },
-    );
-
     const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
       queryNamespace,
       { order: 'lru-desc' },
     );
+    const protectedQueryKeys = getProtectedKeysFromMetadata(metadataEntries);
     const managedAsyncQueryEntriesByKey: ManagedQueryEntriesByKey = new Map();
 
     const invalidEntries = filterAndMap(metadataEntries, (entry) => {
@@ -1298,21 +1275,6 @@ export function setupListQueryPersistence<
             config.storeName,
             LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
           );
-    const protectedItemKeys = await readProtectedStorageNamespaceKeys(
-      storageAdapter,
-      sessionKey,
-      {
-        localStoragePrefix: itemPrefix,
-        asyncScope:
-          sessionKey === false
-            ? null
-            : {
-                sessionKey,
-                storeName: config.storeName,
-                kind: 'listQuery.item',
-              },
-      },
-    );
     const referencedItems = new Set<string>();
     const queryEntries: Array<{ items: string[] }> = managedQueryEntriesByKey
       ? [...managedQueryEntriesByKey.values()]
@@ -1341,6 +1303,13 @@ export function setupListQueryPersistence<
     if (localStorageAdapter !== null && itemPrefix !== null) {
       const metadataEntries =
         localStorageAdapter.listManifestEntries(itemPrefix);
+      const protectedItemKeys = new Set(
+        metadataEntries.flatMap((entry) =>
+          isManagedLocalStorageEntryOfflineProtected(entry.meta)
+            ? [entry.entryKey]
+            : [],
+        ),
+      );
       if (!hasIgnoreItemFilter && metadataEntries.length <= maxItems) return;
 
       const metadataEntriesWithPayload = metadataEntries.map((entry) => ({
@@ -1460,6 +1429,7 @@ export function setupListQueryPersistence<
       itemNamespace,
       { order: 'lru-desc' },
     );
+    const protectedItemKeys = getProtectedKeysFromMetadata(itemMetadataEntries);
     if (
       !hasIgnoreItemFilter &&
       itemMetadataEntries.filter(

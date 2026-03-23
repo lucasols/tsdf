@@ -131,6 +131,7 @@ When adding a new feature, or adjust a existing one:
 - if adding new public exports, update the relevant barrel file (`src/main.ts`)
 - if the feature requires changes to the documentation, update the relevant docs files in `docs/` and public api jsdoc comments in `src/`
 - run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
+- after implementing the changes, check if there are no performance regressions compared to previous implementation that could be avoided with a better implementation
 
 ## Bug fix instructions
 
@@ -141,6 +142,7 @@ When fixing a bug:
 3. check the root cause of the issue and apply the fix, don't apply a superficial fix that only makes the test pass without addressing the underlying problem.
 4. apply the fix and confirm that the test passes after the fix is applied
 5. run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
+6. after fixing the bug, check there are no performance regressions compared to previous implementation that could be avoided with a better fix
 
 ## Useful patterns
 

@@ -30,7 +30,6 @@ import {
   getStoragePrefixForStoreNamespace,
   listAllPersistentStorageNamespaceMetadata,
   readManifestPayloadMeta,
-  readProtectedStorageNamespaceKeys,
   scheduleAsyncStorageMaintenance,
   scheduleLocalStorageRemoval,
   scheduleLocalStorageMaintenance,
@@ -48,6 +47,7 @@ import type {
   PersistedCollectionItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
+import { getProtectedKeysFromMetadata } from './asyncStorageAdapter';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
@@ -559,24 +559,12 @@ export function setupCollectionPersistence<
       return;
     }
 
-    const protectedItemKeys = await readProtectedStorageNamespaceKeys(
-      storageAdapter,
-      sessionKey,
-      {
-        localStoragePrefix: prefix,
-        asyncScope: {
-          sessionKey,
-          storeName: config.storeName,
-          kind: 'collection.item',
-        },
-      },
-    );
-
     const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
       namespace,
       { order: 'lru-desc' },
     );
     if (metadataEntries.length === 0) return;
+    const protectedItemKeys = getProtectedKeysFromMetadata(metadataEntries);
 
     const invalidEntries = filterAndMap(metadataEntries, (entry) => {
       const payload = validateWithSchema(

@@ -175,6 +175,14 @@ export type AsyncStorageAdapter = {
   >(
     scope: AsyncStorageNamespaceScope,
   ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
+  /** Reconstruct offline-protected entry refs for a session from persisted metadata. */
+  readProtectedStorageKeys(sessionKey: string): Promise<Set<string>>;
+  /** Eagerly sync offline protection changes into persisted metadata for already-cached entries. */
+  syncSessionProtectedKeys(
+    sessionKey: string,
+    protectedKeys: Iterable<string>,
+    previousProtectedKeys?: Iterable<string>,
+  ): Promise<void>;
   /** Remove all namespaces for a session key. */
   clearSession(sessionKey: string): Promise<void>;
   /** Test-only reset hook used by TSDF internals. */

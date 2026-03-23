@@ -237,7 +237,7 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.041s | 📖 tsdf/sess1/doc-mutation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.20 kb
       1.093s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.094s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-mutation-flow (store directory)
       1.095s | 📄 file-open-or-create ✅ tsdf/sess1/doc-mutation-flow/d.e.p.json
@@ -247,7 +247,7 @@ describe('async storage efficiency: document', () => {
       1.098s | ✍️ tsdf/sess1/doc-mutation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-mutation-flow (payload)) | 0.10 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/doc-mutation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.23 kb -> 0.23 kb
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.20 kb -> 0.20 kb
       1.1s   | end
       "
     `);
@@ -303,7 +303,7 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.20 kb
       1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-invalidation-flow (store directory)
       1.905s | 📄 file-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/d.e.p.json
@@ -313,7 +313,7 @@ describe('async storage efficiency: document', () => {
       1.908s | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-invalidation-flow (payload)) | 0.10 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.23 kb -> 0.23 kb
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.20 kb -> 0.20 kb
       1.91s  | end
       "
     `);
@@ -390,7 +390,7 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.20 kb
       1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations (store directory)
       1.905s | 📄 file-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
@@ -400,7 +400,7 @@ describe('async storage efficiency: document', () => {
       1.908s | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (payload)) | 0.10 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.23 kb -> 0.23 kb
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.20 kb -> 0.20 kb
       1.91s  | end
       "
     `);

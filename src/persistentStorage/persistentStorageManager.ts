@@ -7,11 +7,6 @@ import {
   setManagedLocalStorageEntryOfflineProtected,
 } from './localStorageMetadata';
 import { serializeProtectedRef } from './asyncStorageAdapter';
-import {
-  getProtectedKeysStorageScope,
-  parseProtectedKeys,
-  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
-} from './offline/protectedKeysPersistence';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {
@@ -23,8 +18,6 @@ import type {
   AsyncStorageAdapter,
   AsyncStorageMetadataOrder,
   AsyncStorageNamespaceKind,
-  AsyncStorageNamespaceScope,
-  AsyncStorageProtectedEntryRef,
   AsyncStorageTouchMode,
   PersistentStorageBaseConfig,
   StorageAdapter,
@@ -1084,97 +1077,11 @@ export async function readProtectedStorageKeys(
   adapter: StorageAdapter,
   sessionKey: string,
 ): Promise<Set<string>> {
-  const protectedKeysSnapshot = getSessionProtectedKeysSnapshot(sessionKey);
-  if (protectedKeysSnapshot !== null) {
-    return new Set(protectedKeysSnapshot);
-  }
-
   if (adapter === 'local-sync') {
     return localPersistentStorage.readProtectedStorageKeys(sessionKey);
   }
 
-  const namespace = adapter.openNamespace<unknown>(
-    getProtectedKeysStorageScope(sessionKey),
-  );
-  const entry = await namespace.get(PROTECTED_KEYS_STORAGE_ENTRY_KEY, {
-    touch: 'never',
-  });
-  return new Set(parseProtectedKeys(entry?.value)?.keys ?? []);
-}
-
-function parseProtectedAsyncStorageKey(
-  protectedStorageKey: string,
-): AsyncStorageProtectedEntryRef | null {
-  try {
-    const parsed = JSON.parse(protectedStorageKey);
-    if (!Array.isArray(parsed) || parsed.length !== 4) {
-      return null;
-    }
-
-    const [sessionKey, storeName, kind, key] = parsed;
-    if (
-      typeof sessionKey !== 'string' ||
-      typeof storeName !== 'string' ||
-      typeof kind !== 'string' ||
-      typeof key !== 'string'
-    ) {
-      return null;
-    }
-
-    return { sessionKey, storeName, kind: ensureAsyncNamespaceKind(kind), key };
-  } catch {
-    return null;
-  }
-}
-
-export async function readProtectedStorageNamespaceKeys(
-  adapter: StorageAdapter,
-  sessionKey: string | false,
-  args: {
-    localStoragePrefix?: string | false | null;
-    asyncScope?: AsyncStorageNamespaceScope | null;
-  },
-): Promise<Set<string>> {
-  if (sessionKey === false) {
-    return new Set<string>();
-  }
-
-  const protectedStorageKeys = await readProtectedStorageKeys(
-    adapter,
-    sessionKey,
-  );
-
-  if (adapter !== 'local-sync') {
-    const scope = args.asyncScope;
-    if (!scope) return new Set<string>();
-
-    const namespaceKeys = new Set<string>();
-
-    for (const protectedStorageKey of protectedStorageKeys) {
-      const ref = parseProtectedAsyncStorageKey(protectedStorageKey);
-      if (
-        ref?.sessionKey === scope.sessionKey &&
-        ref.storeName === scope.storeName &&
-        ref.kind === scope.kind
-      ) {
-        namespaceKeys.add(ref.key);
-      }
-    }
-
-    return namespaceKeys;
-  }
-
-  if (typeof args.localStoragePrefix !== 'string') {
-    return new Set<string>();
-  }
-
-  const localStoragePrefix = args.localStoragePrefix;
-
-  return new Set(
-    [...protectedStorageKeys]
-      .filter((key) => key.startsWith(localStoragePrefix))
-      .map((key) => key.slice(localStoragePrefix.length)),
-  );
+  return adapter.readProtectedStorageKeys(sessionKey);
 }
 
 export function scheduleAsyncStorageMaintenance(

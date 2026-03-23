@@ -1,11 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
 import { runWithNavigatorLock } from './navigatorLocks';
-import {
-  getProtectedKeysStorageScope,
-  parseProtectedKeys,
-  PROTECTED_KEYS_STORAGE_ENTRY_KEY,
-} from './offline/protectedKeysPersistence';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import {
   getMetadataRecordKey,
@@ -29,6 +24,7 @@ import type {
   AsyncStorageProtectedEntryRef,
   AsyncStorageReadOptions,
 } from './types';
+import { parseAsyncStorageNamespaceKind } from './types';
 
 export const ASYNC_STORAGE_COMMIT_DEBOUNCE_MS = 40;
 export const ASYNC_STORAGE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -38,6 +34,7 @@ export const ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY = 'tsdf._am.g';
 const ASYNC_STARTUP_CLEANUP_LOCK_NAME = 'tsdf-async-storage-maintenance';
 const ASYNC_STARTUP_CLEANUP_LOCK_WARNING =
   '[TSDF] navigator.locks is unavailable; async OPFS startup cleanup is using unlocked coordination.';
+
 function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
   return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
 }
@@ -58,6 +55,70 @@ function getRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+}
+
+export function isOfflineProtectedMetadata(
+  customMetadata: Record<string, unknown> | undefined,
+): boolean {
+  return customMetadata?.o === true;
+}
+
+export function getProtectedKeysFromMetadata(
+  entries: ReadonlyArray<{
+    customMetadata?: Record<string, unknown>;
+    key: string;
+  }>,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const entry of entries) {
+    if (isOfflineProtectedMetadata(entry.customMetadata)) {
+      keys.add(entry.key);
+    }
+  }
+  return keys;
+}
+
+function setOfflineProtectionMetadata(
+  customMetadata: Record<string, unknown> | undefined,
+  offlineProtected: boolean,
+): Record<string, unknown> | undefined {
+  if (offlineProtected) {
+    return { ...(customMetadata ?? {}), o: true };
+  }
+
+  const { o: _ignored, ...withoutOfflineMarker } = customMetadata ?? {};
+  return Object.keys(withoutOfflineMarker).length > 0
+    ? withoutOfflineMarker
+    : undefined;
+}
+
+function parseProtectedRef(
+  value: string,
+): AsyncStorageProtectedEntryRef | null {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 4 ||
+    parsed.some((entry) => typeof entry !== 'string')
+  ) {
+    return null;
+  }
+
+  const [sessionKey, storeName, rawKind, key] = __LEGIT_CAST__<
+    [string, string, string, string],
+    unknown
+  >(parsed);
+  const kind = parseAsyncStorageNamespaceKind(rawKind);
+  if (kind === null) return null;
+
+  return { sessionKey, storeName, kind, key };
 }
 
 type InternalManagedMetadataRecord = {
@@ -297,6 +358,153 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     await Promise.all(
       scopesToClear.map((scope) => this.clearManagedNamespace(scope)),
+    );
+  }
+
+  async readProtectedStorageKeys(
+    sessionKey: string,
+    driver: AsyncStorageDriver = this.driver,
+  ): Promise<Set<string>> {
+    const protectedKeysSnapshot = getSessionProtectedKeysSnapshot(sessionKey);
+    if (protectedKeysSnapshot !== null) {
+      return new Set(protectedKeysSnapshot);
+    }
+
+    const discovered = await this.#listDiscoveredCleanupScopes(
+      driver,
+      sessionKey,
+    );
+    const protectedRefSets = await Promise.all(
+      discovered.map(async ({ scope, metadataRecordKeys }) => {
+        const metadataEntries =
+          metadataRecordKeys === null
+            ? await this.#listManagedMetadataUsingDriver(driver, scope, {
+                order: 'key',
+              })
+            : await this.#listManagedMetadataByMetadataKeysUsingDriver(
+                driver,
+                scope,
+                metadataRecordKeys,
+                'key',
+              );
+
+        const refs: string[] = [];
+        for (const entry of metadataEntries) {
+          if (isOfflineProtectedMetadata(entry.customMetadata)) {
+            refs.push(serializeProtectedRef({ ...scope, key: entry.key }));
+          }
+        }
+        return refs;
+      }),
+    );
+
+    return new Set(protectedRefSets.flat());
+  }
+
+  async syncSessionProtectedKeys(
+    sessionKey: string,
+    protectedKeys: Iterable<string>,
+    previousProtectedKeys: Iterable<string> = [],
+  ): Promise<void> {
+    await this.flushAllPendingNamespaceCommits();
+
+    const nextProtectedRefSet = new Set(protectedKeys);
+    const previousProtectedRefSet = new Set(previousProtectedKeys);
+    const changedProtectedRefs = [
+      ...[...nextProtectedRefSet].filter(
+        (entryRef) => !previousProtectedRefSet.has(entryRef),
+      ),
+      ...[...previousProtectedRefSet].filter(
+        (entryRef) => !nextProtectedRefSet.has(entryRef),
+      ),
+    ];
+
+    if (changedProtectedRefs.length === 0) return;
+
+    const updatesByScope = new Map<
+      string,
+      {
+        protectionByKey: Map<string, boolean>;
+        scope: AsyncStorageNamespaceScope;
+      }
+    >();
+
+    for (const entryRef of changedProtectedRefs) {
+      const parsedRef = parseProtectedRef(entryRef);
+      if (parsedRef === null || parsedRef.sessionKey !== sessionKey) continue;
+
+      const scope = {
+        sessionKey: parsedRef.sessionKey,
+        storeName: parsedRef.storeName,
+        kind: parsedRef.kind,
+      } satisfies AsyncStorageNamespaceScope;
+      const namespaceId = getNamespaceId(scope);
+      const existingScopeUpdate = updatesByScope.get(namespaceId);
+
+      if (existingScopeUpdate !== undefined) {
+        existingScopeUpdate.protectionByKey.set(
+          parsedRef.key,
+          nextProtectedRefSet.has(entryRef),
+        );
+        continue;
+      }
+
+      updatesByScope.set(namespaceId, {
+        scope,
+        protectionByKey: new Map([
+          [parsedRef.key, nextProtectedRefSet.has(entryRef)],
+        ]),
+      });
+    }
+
+    await Promise.all(
+      [...updatesByScope.values()].map(async ({ scope, protectionByKey }) => {
+        const keys = [...protectionByKey.keys()];
+        const metadataRecordKeys = keys.map((key) => getMetadataRecordKey(key));
+        const existingMetadataValues = await this.#driverGetManyFrom(
+          this.driver,
+          scope,
+          metadataRecordKeys,
+        );
+        const setEntries: AsyncStorageDriverSetEntry[] = [];
+
+        for (const [index, key] of keys.entries()) {
+          const existingMetadata = parseInternalManagedMetadataRecord(
+            existingMetadataValues[index] ?? null,
+          );
+          if (existingMetadata === null) continue;
+
+          const shouldProtect = protectionByKey.get(key) === true;
+          if (
+            isOfflineProtectedMetadata(existingMetadata.customMetadata) ===
+            shouldProtect
+          ) {
+            continue;
+          }
+
+          const nextCustomMetadata = setOfflineProtectionMetadata(
+            existingMetadata.customMetadata,
+            shouldProtect,
+          );
+          const nextMetadata: InternalManagedMetadataRecord = {
+            ...existingMetadata,
+          };
+          if (nextCustomMetadata !== undefined) {
+            nextMetadata.customMetadata = nextCustomMetadata;
+          } else {
+            delete nextMetadata.customMetadata;
+          }
+
+          setEntries.push({
+            key: getMetadataRecordKey(key),
+            value: nextMetadata,
+          });
+        }
+
+        if (setEntries.length > 0) {
+          await this.#driverSetManyFrom(this.driver, scope, setEntries);
+        }
+      }),
     );
   }
 
@@ -678,11 +886,20 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       removeEntries.push(getPayloadRecordKey(key), getMetadataRecordKey(key));
     }
 
+    const protectedKeysSnapshotSet = getSessionProtectedKeysSnapshot(
+      scope.sessionKey,
+    );
+
     for (const upsert of upserts) {
       const serializedValue = this.#safeSerializeValue(upsert.value);
       const existingMetadata = existingMetadataByKey.get(upsert.key);
-      const customMetadata =
-        upsert.metadata ?? existingMetadata?.customMetadata;
+      const customMetadata = this.#mergeOfflineProtectionMetadata(
+        scope,
+        upsert.key,
+        upsert.metadata,
+        existingMetadata?.customMetadata,
+        protectedKeysSnapshotSet,
+      );
       const nextMetadata: InternalManagedMetadataRecord = {
         key: upsert.key,
         writtenAt: now,
@@ -722,6 +939,34 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     if (setEntries.length > 0) {
       await this.#driverSetManyFrom(this.driver, scope, setEntries);
     }
+  }
+
+  #mergeOfflineProtectionMetadata(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+    nextCustomMetadata: Record<string, unknown> | undefined,
+    currentCustomMetadata: Record<string, unknown> | undefined,
+    protectedKeysSnapshotSet: Set<string> | null,
+  ): Record<string, unknown> | undefined {
+    const merged = {
+      ...(currentCustomMetadata ?? {}),
+      ...(nextCustomMetadata ?? {}),
+    };
+    const mergedCustomMetadata =
+      Object.keys(merged).length > 0 ? merged : undefined;
+
+    if (protectedKeysSnapshotSet !== null) {
+      return setOfflineProtectionMetadata(
+        mergedCustomMetadata,
+        protectedKeysSnapshotSet.has(serializeProtectedRef({ ...scope, key })),
+      );
+    }
+
+    return setOfflineProtectionMetadata(
+      mergedCustomMetadata,
+      isOfflineProtectedMetadata(nextCustomMetadata) ||
+        isOfflineProtectedMetadata(currentCustomMetadata),
+    );
   }
 
   #safeSerializeValue(value: unknown): string | null {
@@ -914,26 +1159,16 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   ): Promise<void> {
     const discoveredScopes = await this.#listDiscoveredCleanupScopes(driver);
     const now = Date.now();
-
-    const sessionKeys = [
-      ...new Set(discoveredScopes.map(({ scope }) => scope.sessionKey)),
-    ];
     const protectedRefsBySession = new Map(
-      await Promise.all(
-        sessionKeys.map(
-          async (sessionKey) =>
-            [
-              sessionKey,
-              await this.#readProtectedRefs(sessionKey, driver),
-            ] as const,
-        ),
+      [...new Set(discoveredScopes.map(({ scope }) => scope.sessionKey))].map(
+        (sessionKey) =>
+          [sessionKey, getSessionProtectedKeysSnapshot(sessionKey)] as const,
       ),
     );
 
     await Promise.all(
       discoveredScopes.map(async ({ scope, metadataRecordKeys }) => {
         const protectedRefs = protectedRefsBySession.get(scope.sessionKey);
-        if (protectedRefs === undefined) return;
 
         const metadataEntries =
           metadataRecordKeys === null
@@ -948,9 +1183,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
               );
         const keysToRemove: string[] = [];
         for (const entry of metadataEntries) {
-          const isProtected = protectedRefs.has(
-            serializeProtectedRef({ ...scope, key: entry.key }),
-          );
+          const isProtected =
+            isOfflineProtectedMetadata(entry.customMetadata) ||
+            protectedRefs?.has(
+              serializeProtectedRef({ ...scope, key: entry.key }),
+            ) === true;
           if (
             !isProtected &&
             now - Math.max(entry.lastAccessAt, entry.writtenAt) >
@@ -969,36 +1206,19 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async #listDiscoveredCleanupScopes(
     driver: AsyncStorageDriver,
+    sessionKey?: string,
   ): Promise<AsyncStorageDiscoveredScope[]> {
-    const discoveredScopes = await driver.listScopesWithMetadataKeys?.();
+    const discoveredScopes =
+      await driver.listScopesWithMetadataKeys?.(sessionKey);
     if (discoveredScopes !== undefined) {
       return discoveredScopes.filter(
         ({ scope }) => scope.kind !== '__internal.protected',
       );
     }
 
-    return (await this.#listDiscoveredScopes(undefined, driver)).map(
+    return (await this.#listDiscoveredScopes(sessionKey, driver)).map(
       (scope) => ({ metadataRecordKeys: null, scope }),
     );
-  }
-
-  async #readProtectedRefs(
-    sessionKey: string,
-    driver: AsyncStorageDriver = this.driver,
-  ): Promise<Set<string>> {
-    const protectedKeysSnapshot = getSessionProtectedKeysSnapshot(sessionKey);
-    if (protectedKeysSnapshot !== null) {
-      return new Set(protectedKeysSnapshot);
-    }
-
-    const protectedScope = getProtectedKeysStorageScope(sessionKey);
-    const entry = (
-      await this.#readManagedEntriesUsingDriver<
-        unknown,
-        Record<string, unknown>
-      >(driver, protectedScope, [PROTECTED_KEYS_STORAGE_ENTRY_KEY])
-    ).get(PROTECTED_KEYS_STORAGE_ENTRY_KEY);
-    return new Set(parseProtectedKeys(entry?.value)?.keys ?? []);
   }
 
   async #withCleanupDriver<T>(
