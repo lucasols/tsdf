@@ -2,6 +2,11 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
   getParsedOpfsFileData,
@@ -15,11 +20,6 @@ import {
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
 } from './shared';
-import {
-  advanceTime,
-  flushAllTimers,
-  resolveAfterAllTimers,
-} from '../../utils/genericTestUtils';
 
 setupAsyncStorageEfficiencyTestSuite();
 
@@ -224,6 +224,11 @@ describe('async storage efficiency: document', () => {
     const documentScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = documentScope.document.storageKey();
 
+    const metadataPath =
+      'tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json';
+    const payloadPath =
+      'tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json';
+
     documentScope.document.seed(
       { value: { name: 'Cached document', value: 8 } },
       { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
@@ -238,13 +243,16 @@ describe('async storage efficiency: document', () => {
 
     // Simulate another tab marking the document as offline-protected before the touch runs.
     markEntryOfflineProtected(mockAdapter, storageKey);
+    expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
+      a: 1735664400000
+      o: '✅'
+      v: 1
+    `);
+
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await advanceTime(40);
     await flushAllTimers();
-
-    const metadataPath =
-      'tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json';
-    const payloadPath =
-      'tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json';
+    const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       a: 1735689604049
@@ -254,6 +262,22 @@ describe('async storage efficiency: document', () => {
     expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
       d:
         value: { name: 'Cached document', value: 8 }
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time   |
+      1ms    | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
+             |    └ (metadata) | 0.07 kb
+      5ms    | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
+             |    └ (metadata) | 0.07 kb -> 0.07 kb
+      1.001s | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
+             |    └ (metadata) | 0.07 kb
+      1.005s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
+             |    └ (payload) | 0.10 kb -> 0.10 kb ⚠️ UNCHANGED
+      .      | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
+             |    └ (metadata) | 0.07 kb -> 0.07 kb
+      1.007s | end
+      "
     `);
   });
 
