@@ -133,6 +133,16 @@ When adding a new feature, or adjust a existing one:
 - run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
 - after implementing the changes, check if there are no performance regressions compared to previous implementation that could be avoided with a better implementation
 
+## Optimization instructions
+
+When applying an optimization:
+
+1. confirm what the optimization is improving and which concrete paths are affected, so the change is grounded in real behavior rather than guesswork.
+2. be proactive about expanding the optimization to the full affected surface area when the same performance pattern is clearly present elsewhere. In this repo, do not stop at a single store or code path if the same optimization obviously also applies to `DocumentStore`, `CollectionStore`, `ListQueryStore`, sync/async variants, or closely related persistence flows.
+3. after optimizing one concrete case, actively inspect sibling implementations for the same opportunity instead of waiting for the user to ask.
+4. if applying the optimization more broadly has non-obvious tradeoffs, risks changing intended behavior, or could make one path less clear or maintainable, pause and surface those tradeoffs explicitly before proceeding.
+5. verify that the optimization does not introduce behavioral regressions, and check whether the broader version of the optimization is still simple, direct, and worth keeping.
+
 ## Bug fix instructions
 
 When fixing a bug:
@@ -140,9 +150,11 @@ When fixing a bug:
 1. add a test that asserts the correct behavior and reproduces the issue, if possible. Only create a test if the test simulates a realistic scenario that could happen in real usage.
 2. confirm that the test fails before applying the fix, to ensure the test is valid
 3. check the root cause of the issue and apply the fix, don't apply a superficial fix that only makes the test pass without addressing the underlying problem.
-4. apply the fix and confirm that the test passes after the fix is applied
-5. run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
-6. after fixing the bug, check there are no performance regressions compared to previous implementation that could be avoided with a better fix
+4. be proactive about expanding the fix to the full affected surface area when the same root cause or pattern is clearly present elsewhere. In this repo, do not stop at a single store or code path if the same bug obviously also affects `DocumentStore`, `CollectionStore`, `ListQueryStore`, sync/async variants, or closely related persistence flows.
+5. after fixing one concrete case, actively check the sibling implementations for the same issue instead of waiting for the user to ask. If the broader fix has non-obvious tradeoffs or a meaningful risk of changing intended behavior, pause and surface those tradeoffs explicitly before proceeding.
+6. apply the fix and confirm that the test passes after the fix is applied
+7. run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
+8. after fixing the bug, check there are no performance regressions compared to previous implementation that could be avoided with a better fix
 
 ## Useful patterns
 
