@@ -58,6 +58,7 @@ describe('sync storage efficiency: document', () => {
       0    | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
            |    └ (root, single, manifest) | 0.05 kb
       .    | 📖 ✅ #2 tsdf.sess1.doc-remount-flow (entry) | 0.10 kb
+           |
       2s   | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
            |    └ (root, single, manifest) | 0.05 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
@@ -118,6 +119,7 @@ describe('sync storage efficiency: document', () => {
       time  |
       0     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
             |    └ (root, single, manifest)
+            |
       1.81s | ✍️ ❌->✅ #2 tsdf.sess1.doc-remount-no-cache (entry) | ❌ -> 0.08 kb
       .     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
             |    └ (root, single, manifest)

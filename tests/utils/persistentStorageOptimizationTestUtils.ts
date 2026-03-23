@@ -317,6 +317,7 @@ export function getPersistentStorageOperationTimelineString(
 
 const PERSISTENT_TIMELINE_WRAP_AT = 68;
 const PERSISTENT_TIMELINE_DETAIL_PREFIX = '   └ ';
+const TIMELINE_GAP_THRESHOLD_MS = 20;
 
 function formatWrappedPersistentStorageOperationLabel(
   prefix: string,
@@ -765,6 +766,13 @@ function formatTimelineTable(
   let previousTime: number | undefined;
 
   for (const operation of operations) {
+    if (
+      previousTime !== undefined &&
+      operation.time - previousTime > TIMELINE_GAP_THRESHOLD_MS
+    ) {
+      rows.push({ cols: ['', ''] });
+    }
+
     const [firstLine = '', ...extraLines] = operation.label.split('\n');
     rows.push({
       cols: [formatRelativeTime(operation.time, previousTime), firstLine],
@@ -776,14 +784,18 @@ function formatTimelineTable(
   }
 
   if (options.showEndMarker) {
-    rows.push({
-      cols: [
-        formatTimeMs(
-          Math.max(...operations.map((operation) => operation.endTime)),
-        ),
-        'end',
-      ],
-    });
+    const endTime = Math.max(
+      ...operations.map((operation) => operation.endTime),
+    );
+
+    if (
+      previousTime !== undefined &&
+      endTime - previousTime > TIMELINE_GAP_THRESHOLD_MS
+    ) {
+      rows.push({ cols: ['', ''] });
+    }
+
+    rows.push({ cols: [formatTimeMs(endTime), 'end'] });
   }
 
   return formatTableString(rows);

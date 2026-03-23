@@ -148,6 +148,7 @@ describe('async storage efficiency: document', () => {
            |    └ (entry data)
       7ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (entry data) | 0.10 kb
+           |
       50ms | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.07 kb
       55ms | ✍️ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
@@ -188,6 +189,7 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
+             |
       1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
              |    └ (store directory)
@@ -295,6 +297,7 @@ describe('async storage efficiency: document', () => {
              |    └ (namespace index) | 0.09 kb
       45ms   | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb -> 0.09 kb
+             |
       1.04s  | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json

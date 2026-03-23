@@ -172,6 +172,7 @@ describe('sync storage efficiency: collection', () => {
            |    └ (collection entry) | ❌ -> 0.10 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb -> 0.24 kb
+           |
       3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (root, namespace, manifest) | 0.24 kb
       .    | 🗑️ ✅->❌ #3 tsdf.sess1.col-max-items-metadata.ci."a
@@ -246,12 +247,14 @@ describe('sync storage efficiency: collection', () => {
            |    └ (collection entry) | ❌ -> 0.10 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb -> 0.24 kb
+           |
       2.1s | ✍️ ❌->✅ #3 tsdf.sess1.col-coalesced-maintenance.ci."d
            |    └ (collection entry) | ❌ -> 0.10 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (root, namespace, manifest) | 0.24 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (root, namespace, manifest) | 0.24 kb -> 0.31 kb
+           |
       3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (root, namespace, manifest) | 0.31 kb
       .    | 🗑️ ✅->❌ #4 tsdf.sess1.col-coalesced-maintenance.ci."b
@@ -303,6 +306,7 @@ describe('sync storage efficiency: collection', () => {
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | 📖 ✅ #2 tsdf.sess1.col-direct-get-item-state.ci."1
            |    └ (collection entry) | 0.11 kb
+           |
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
@@ -686,6 +690,7 @@ describe('sync storage efficiency: collection', () => {
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | 📖 ✅ #2 tsdf.sess1.col-remount-flow.ci."1
            |    └ (collection entry) | 0.11 kb
+           |
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
            |    └ (root, namespace, manifest) | 0.09 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
@@ -726,6 +731,7 @@ describe('sync storage efficiency: collection', () => {
       time  |
       0     | 📖 ❌ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (root, namespace, manifest)
+            |
       1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #2 tsdf.sess1.col-remount-no-cache.ci."1
@@ -778,6 +784,7 @@ describe('sync storage efficiency: collection', () => {
            |    └ (root, namespace, manifest) | 0.16 kb
       .    | 📖 ✅ #3 tsdf.sess1.col-multi-remount-flow.ci."2
            |    └ (collection entry) | 0.11 kb
+           |
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (root, namespace, manifest) | 0.16 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
