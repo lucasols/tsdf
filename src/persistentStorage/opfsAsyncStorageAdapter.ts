@@ -258,32 +258,10 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
   ): Promise<void> {
     if (entries.length === 0) return;
 
-    const storeDir = await this.#getStoreDir(scope, {
-      create: true,
-      cacheContext,
-    });
-    if (storeDir === null) {
-      throw new Error('[TSDF] Failed to open OPFS store directory.');
-    }
-
     await Promise.all(
-      entries.map(async (entry) => {
-        const fileHandle = await this.#getFileHandle(scope, entry.key, {
-          create: true,
-          cacheContext,
-          storeDir,
-        });
-        if (fileHandle === null) {
-          throw new Error('[TSDF] Failed to open OPFS file handle.');
-        }
-        const writable = await fileHandle.createWritable();
-
-        try {
-          await writable.write(JSON.stringify(entry.value));
-        } finally {
-          await writable.close();
-        }
-      }),
+      entries.map((entry) =>
+        this.#writeEntryWithRetry(scope, entry, cacheContext),
+      ),
     );
   }
 
@@ -642,12 +620,17 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const encodedSessionKey = encodePathSegment(sessionKey);
 
     if (options.create) {
-      options.cacheContext.dirCache.delete(sessionDirPath);
-      const sessionDir = await root.getDirectoryHandle(encodedSessionKey, {
-        create: true,
-      });
-      options.cacheContext.dirCache.set(sessionDirPath, sessionDir);
-      return sessionDir;
+      const cachedSessionDir = await this.#getCachedHandleForCreate(
+        options.cacheContext.dirCache,
+        sessionDirPath,
+      );
+      if (cachedSessionDir !== undefined) return cachedSessionDir;
+
+      return options.cacheContext.dirCache.getOrInsertAsync(
+        sessionDirPath,
+        async () =>
+          root.getDirectoryHandle(encodedSessionKey, { create: true }),
+      );
     }
 
     return options.cacheContext.dirCache.getOrInsertAsync(
@@ -673,12 +656,17 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const encodedStoreName = encodePathSegment(scope.storeName);
 
     if (options.create) {
-      options.cacheContext.dirCache.delete(storeDirPath);
-      const storeDir = await sessionDir.getDirectoryHandle(encodedStoreName, {
-        create: true,
-      });
-      options.cacheContext.dirCache.set(storeDirPath, storeDir);
-      return storeDir;
+      const cachedStoreDir = await this.#getCachedHandleForCreate(
+        options.cacheContext.dirCache,
+        storeDirPath,
+      );
+      if (cachedStoreDir !== undefined) return cachedStoreDir;
+
+      return options.cacheContext.dirCache.getOrInsertAsync(
+        storeDirPath,
+        async () =>
+          sessionDir.getDirectoryHandle(encodedStoreName, { create: true }),
+      );
     }
 
     return options.cacheContext.dirCache.getOrInsertAsync(
@@ -706,12 +694,16 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const filePath = joinPath(this.#getStoreDirPath(scope), fileName);
 
     if (options.create) {
-      options.cacheContext.fileCache.delete(filePath);
-      const fileHandle = await options.storeDir.getFileHandle(fileName, {
-        create: true,
-      });
-      options.cacheContext.fileCache.set(filePath, fileHandle);
-      return fileHandle;
+      const cachedFileHandle = await this.#getCachedHandleForCreate(
+        options.cacheContext.fileCache,
+        filePath,
+      );
+      if (cachedFileHandle !== undefined) return cachedFileHandle;
+
+      return options.cacheContext.fileCache.getOrInsertAsync(
+        filePath,
+        async () => options.storeDir.getFileHandle(fileName, { create: true }),
+      );
     }
 
     return options.cacheContext.fileCache.getOrInsertAsync(
@@ -759,6 +751,72 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     return scopedEntries.sort((left, right) =>
       left.key.localeCompare(right.key),
     );
+  }
+
+  async #getCachedHandleForCreate<THandle extends FileSystemHandle>(
+    cache: Cache<THandle | null>,
+    path: string,
+  ): Promise<THandle | undefined> {
+    const cachedHandle = await cache.getAsync(path);
+    if (cachedHandle === undefined) return undefined;
+    // A cached null means a prior read (create: false) cached a "not found" result.
+    // Evict it so the subsequent getOrInsertAsync will create the handle.
+    if (cachedHandle === null) {
+      cache.delete(path);
+      return undefined;
+    }
+
+    return cachedHandle;
+  }
+
+  async #writeEntryWithRetry(
+    scope: AsyncStorageNamespaceScope,
+    entry: AsyncStorageDriverSetEntry,
+    cacheContext: OpfsCacheContext,
+  ): Promise<void> {
+    let firstError: unknown;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const storeDir = await this.#getStoreDir(scope, {
+          create: true,
+          cacheContext,
+        });
+        if (storeDir === null) {
+          throw new Error('[TSDF] Failed to open OPFS store directory.');
+        }
+
+        const fileHandle = await this.#getFileHandle(scope, entry.key, {
+          create: true,
+          cacheContext,
+          storeDir,
+        });
+        if (fileHandle === null) {
+          throw new Error('[TSDF] Failed to open OPFS file handle.');
+        }
+
+        const writable = await fileHandle.createWritable();
+
+        try {
+          await writable.write(JSON.stringify(entry.value));
+        } finally {
+          await writable.close();
+        }
+        return;
+      } catch (error) {
+        if (attempt > 0) {
+          throw firstError;
+        }
+
+        firstError = error;
+        this.#invalidateFileHandle(scope, entry.key, cacheContext);
+        this.#invalidateDirectory(this.#getStoreDirPath(scope), cacheContext);
+        this.#invalidateDirectory(
+          this.#getSessionDirPath(scope.sessionKey),
+          cacheContext,
+        );
+      }
+    }
   }
 
   #invalidateFileHandle(

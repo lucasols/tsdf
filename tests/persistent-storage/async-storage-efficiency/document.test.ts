@@ -124,13 +124,9 @@ describe('async storage efficiency: document', () => {
       4ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json (payload) | 0.10 kb
       .    | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata) | 0.05 kb
       47ms | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata) | 0.05 kb
-      49ms | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      50ms | 📁 dir-open-or-create ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
-      51ms | 📄 file-open-or-create ✅ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
-           |    └ (metadata)
-      54ms | ✍️ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
+      51ms | ✍️ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
            |    └ (metadata) | 0.05 kb -> 0.05 kb
-      56ms | end
+      53ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -308,22 +304,18 @@ describe('async storage efficiency: document', () => {
       customMetadata: {}
 
       key: 'document'
-      lastAccessAt: 1735689605249
+      lastAccessAt: 1735689605246
       payloadRef: '__tsdf_payload__:document'
       version: 1
-      writtenAt: 1735689605249
+      writtenAt: 1735689605246
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.041s | 📖 #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.05 kb
-      1.093s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      1.094s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-mutation-flow (store directory)
-      1.095s | 📄 file-open-or-create ✅ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json (payload)
-      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata)
-      1.098s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
+      1.095s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
       .      | ✍️ #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.05 kb -> 0.05 kb
-      1.1s   | end
+      1.097s | end
       "
     `);
   });
@@ -378,16 +370,10 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json (metadata) | 0.05 kb
-      1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-invalidation-flow (store directory)
-      1.905s | 📄 file-open-or-create ✅ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
-             |    └ (payload)
-      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (metadata)
-      1.908s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
+      1.905s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
       .      | ✍️ #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json
              |    └ (metadata) | 0.05 kb -> 0.05 kb
-      1.91s  | end
+      1.907s | end
       "
     `);
   });
@@ -463,17 +449,11 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json (metadata) | 0.05 kb
-      1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations (store directory)
-      1.905s | 📄 file-open-or-create ✅ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
-             |    └ (payload)
-      .      | 📄 file-open-or-create ✅ #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (metadata)
-      1.908s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
+      1.905s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (payload) | 0.10 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
              |    └ (metadata) | 0.05 kb -> 0.05 kb
-      1.91s  | end
+      1.907s | end
       "
     `);
   });
@@ -523,15 +503,15 @@ describe('async storage efficiency: document', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { o: '✅' }
       key: 'document'
-      lastAccessAt: 1735689606059
+      lastAccessAt: 1735689606056
       payloadRef: '__tsdf_payload__:document'
       version: 1
-      writtenAt: 1735689606059
+      writtenAt: 1735689606056
     `);
     expect(
       getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689606059, o: '✅', v: 1 }
+      metadata: { a: 1735689606056, o: '✅', v: 1 }
       payload:
         d:
           value: { name: 'Fresh document', value: 42 }
@@ -624,6 +604,51 @@ describe('async storage efficiency: document', () => {
       - key: '__tsdf_meta__:document'
         kind: 'metadata'
         scope: { kind: 'document', sessionKey: 'sess1', storeName: 'touch-guard-opfs' }
+    `);
+  });
+
+  test('stale coarse-touch writes reuse warm OPFS handles instead of reopening them', async () => {
+    const storeName = 'touch-reuse-opfs';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
+    const namespace = opfsPersistentStorage.openNamespace<
+      { d: { value: { name: string; value: number } } },
+      Record<string, never>
+    >({ sessionKey, storeName, kind: 'document' });
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 3 },
+    });
+
+    // Warm the cached directory and file handles without scheduling a touch.
+    await resolveAfterAllTimers(namespace.get('document', { touch: 'never' }));
+
+    await advanceTime(6 * 60 * 60 * 1000);
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter, {
+      storeName,
+      sessionKey,
+    });
+    const entry = await resolveAfterAllTimers(
+      namespace.get('document', { touch: 'coarse' }),
+    );
+    await flushAllTimers();
+    const operations = capture.finish().timelineString;
+
+    expect(entry?.value).toMatchInlineSnapshot(`
+      d:
+        value: { name: 'Cached document', value: 3 }
+    `);
+    expect(operations).toMatchInlineSnapshot(`
+      "
+      time |
+      1ms  | 📖 #1 tsdf/sess1/touch-reuse-opfs/d.e.p.json (payload) | 0.10 kb
+      .    | 📖 #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb
+      44ms | 📖 #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb
+      48ms | ✍️ #2 tsdf/sess1/touch-reuse-opfs/d.e.m.json (metadata) | 0.05 kb -> 0.05 kb
+      50ms | end
+      "
     `);
   });
 

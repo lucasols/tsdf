@@ -104,18 +104,24 @@ describe('async storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`lca: 1735689602011`);
   });
 
-  test('malformed persisted records are tolerated and handled predictably', async () => {
+  test('startup cleanup removes malformed metadata entries together with their payload files', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const corruptedDoc = mockAdapter.scope('corrupted', 'sess1');
     const triggerDoc = mockAdapter.scope('trigger', 'sess1');
     const corruptedKey = corruptedDoc.document.storageKey();
     const triggerKey = triggerDoc.document.storageKey();
+    const corruptedMetadataPath = 'tsdf/sess1/corrupted/d.e.m.json';
+    const corruptedPayloadPath = 'tsdf/sess1/corrupted/d.e.p.json';
 
-    // Seed malformed metadata plus a valid trigger entry so cleanup can see the namespace.
+    // Seed a broken metadata record and its payload. Cleanup should treat the
+    // pair as orphaned data and delete both files in one pass.
     corruptedDoc.document.setPayload({
       d: { value: { name: 'bad', value: 1 } },
     });
     corruptedDoc.document.setMetadata('{invalid');
+
+    // Seed a valid store in the same session so startup cleanup discovers the
+    // namespace and we can verify healthy entries are preserved.
     triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
     createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
 
@@ -125,13 +131,16 @@ describe('async storage efficiency: maintenance', () => {
 
     expect({
       corruptedExists: mockAdapter.has(corruptedKey),
-      corruptedPayload:
-        mockAdapter.getRaw(corruptedKey) ??
-        mockAdapter.readMetadata(corruptedKey),
+      corruptedMetadataFileExists: mockAdapter.mockBrowserOpfs.fileExists(
+        corruptedMetadataPath,
+      ),
+      corruptedPayloadFileExists:
+        mockAdapter.mockBrowserOpfs.fileExists(corruptedPayloadPath),
       triggerExists: mockAdapter.has(triggerKey),
     }).toMatchInlineSnapshot(`
       corruptedExists: '❌'
-      corruptedPayload: null
+      corruptedMetadataFileExists: '❌'
+      corruptedPayloadFileExists: '❌'
       triggerExists: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
@@ -588,7 +597,7 @@ describe('async storage efficiency: maintenance', () => {
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1736985605680`);
+    ).toMatchInlineSnapshot(`lca: 1736985605678`);
     expect(
       getParsedJsonFileData('tsdf/user%40example.com/protected-doc/d.e.m.json'),
     ).toMatchInlineSnapshot(`

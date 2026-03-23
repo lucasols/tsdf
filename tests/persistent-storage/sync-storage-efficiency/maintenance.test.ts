@@ -3,10 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
-import {
-  getManagedLocalStorageManifestKeyForSingle,
-  upsertManagedLocalStorageSingleEntry,
-} from '../../../src/persistentStorage/localStorageMetadata';
+import { getManagedLocalStorageManifestKeyForSingle } from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { advanceTime } from '../../utils/genericTestUtils';
@@ -93,17 +90,22 @@ describe('sync storage efficiency: maintenance', () => {
     );
   });
 
-  test('expiration cleanup leaves malformed payload blobs untouched and still snapshots the full manifest scan history', async () => {
+  test('startup cleanup removes malformed manifest entries together with their payload keys', async () => {
     const triggerDoc = persistentStore.scope('trigger', 'sess1');
+    const corruptedKey = 'tsdf.sess1.corrupted';
+    const corruptedManifestKey =
+      getManagedLocalStorageManifestKeyForSingle(corruptedKey);
 
-    // Seed malformed payload data plus managed metadata so cleanup can see the entry without parsing the blob.
+    // Seed a broken manifest together with its payload. Startup cleanup should
+    // drop both keys once the manifest fails to parse.
     localStorage.setItem(
-      'tsdf.sess1.corrupted',
+      corruptedKey,
       JSON.stringify({ data: 'bad', version: 1 }),
     );
-    upsertManagedLocalStorageSingleEntry({
-      storageKey: 'tsdf.sess1.corrupted',
-    });
+    localStorage.setItem(corruptedManifestKey, '{invalid');
+
+    // Seed a valid store in the same session so cleanup discovers the session
+    // and we can verify healthy manifest-backed entries are preserved.
     triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
 
     createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
@@ -112,7 +114,17 @@ describe('sync storage efficiency: maintenance', () => {
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
-    expect(localStorage.getItem('tsdf.sess1.corrupted')).not.toBeNull();
+    expect({
+      corruptedPayloadExists: localStorage.getItem(corruptedKey) !== null,
+      corruptedManifestExists:
+        localStorage.getItem(corruptedManifestKey) !== null,
+      triggerExists:
+        localStorage.getItem(triggerDoc.document.storageKey()) !== null,
+    }).toMatchInlineSnapshot(`
+      corruptedManifestExists: '❌'
+      corruptedPayloadExists: '❌'
+      triggerExists: '✅'
+    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
@@ -122,9 +134,11 @@ describe('sync storage efficiency: maintenance', () => {
       .    | 🔑[2] ✅ #4 tsdf.sess1.trigger (entry)
       .    | 🔑[3] ✅ #5 tsdf._m.r.s:sess1.trigger.m (root, single, manifest)
       .    | 📖 ✅ #3 tsdf._m.r.s:sess1.corrupted.m
-           |    └ (root, single, manifest) | 0.05 kb
+           |    └ (root, single, manifest) | 0.02 kb
+      .    | 🗑️ ✅->❌ #3 tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)
       .    | 📖 ✅ #5 tsdf._m.r.s:sess1.trigger.m
            |    └ (root, single, manifest) | 0.05 kb
+      .    | 🗑️ ✅->❌ #2 tsdf.sess1.corrupted (entry)
       .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
