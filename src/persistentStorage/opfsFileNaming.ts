@@ -1,3 +1,6 @@
+import { murmur3 } from '@ls-stack/utils/hash';
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { AsyncStorageNamespaceScope } from './types';
 
 export const OPFS_ROOT_DIR = 'tsdf';
@@ -11,6 +14,20 @@ export const METADATA_RECORD_PREFIX = '__tsdf_meta__:';
 export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
 
 const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
+const HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX = 'h~';
+
+function shouldHashPayloadRecordForKind(
+  kind: AsyncStorageNamespaceScope['kind'],
+): boolean {
+  switch (kind) {
+    case 'collection.item':
+    case 'listQuery.item':
+    case 'listQuery.query':
+      return true;
+    default:
+      return false;
+  }
+}
 
 export function encodePathSegment(value: string): string {
   return encodeURIComponent(value);
@@ -185,18 +202,51 @@ export function buildFileName(
     );
   }
 
+  const entryToken =
+    parsedRecordKey.recordKind === 'payload' &&
+    shouldHashPayloadRecordForKind(scope.kind)
+      ? `${HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX}${murmur3(key, 'uint32')}`
+      : getEntryToken(scope, parsedRecordKey.userKey);
+
   return (
     [
       kindAlias,
-      getEntryToken(scope, parsedRecordKey.userKey),
+      entryToken,
       getRecordKindAlias(parsedRecordKey.recordKind),
     ].join('.') + JSON_FILE_EXTENSION
   );
 }
 
-export function parseFileName(
-  fileName: string,
-): { key: string; kind: AsyncStorageNamespaceScope['kind'] } | null {
+export function resolveHashedPayloadRecordKeyFromValue(
+  scope: AsyncStorageNamespaceScope,
+  value: unknown,
+): string | null {
+  if (!shouldHashPayloadRecordForKind(scope.kind)) return null;
+
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+  if (!('p' in record)) return null;
+
+  switch (scope.kind) {
+    case 'collection.item':
+    case 'listQuery.item':
+    case 'listQuery.query':
+      return getPayloadRecordKey(getCompositeKey(record.p));
+    default:
+      return null;
+  }
+}
+
+export type ParsedOpfsFileName = {
+  isHashedPayload: boolean;
+  key: string | null;
+  kind: AsyncStorageNamespaceScope['kind'];
+};
+
+export function parseFileNameInfo(fileName: string): ParsedOpfsFileName | null {
   if (!fileName.endsWith(JSON_FILE_EXTENSION)) return null;
 
   const encoded = fileName.slice(0, -JSON_FILE_EXTENSION.length);
@@ -213,11 +263,29 @@ export function parseFileName(
   const recordKind = parseRecordKindAlias(recordPart);
   if (recordKind === null) return null;
 
+  if (
+    recordKind === 'payload' &&
+    shouldHashPayloadRecordForKind(kind) &&
+    entryPart.startsWith(HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX)
+  ) {
+    return { kind, key: null, isHashedPayload: true };
+  }
+
   return {
     kind,
     key:
       recordKind === 'raw'
         ? decodePathSegment(entryPart)
         : toRecordKey(recordKind, parseEntryToken(kind, entryPart)),
+    isHashedPayload: false,
   };
+}
+
+export function parseFileName(
+  fileName: string,
+): { key: string; kind: AsyncStorageNamespaceScope['kind'] } | null {
+  const parsed = parseFileNameInfo(fileName);
+  if (parsed === null || parsed.key === null) return null;
+
+  return { kind: parsed.kind, key: parsed.key };
 }

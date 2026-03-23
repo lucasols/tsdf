@@ -24,6 +24,7 @@ import type {
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createListQueryStoreTestEnv,
+  type ListQueryParams,
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
@@ -261,6 +262,147 @@ describe('opfs: list query store persistence', () => {
       -> status: success ⋅ names: [Cached]
       -> status: refetching ⋅ names: [Cached]
       -> status: success ⋅ names: [Fresh]
+      "
+    `);
+  });
+
+  test('large list item keys use hashed OPFS filenames and still hydrate correctly', async () => {
+    const storeName = 'lq-opfs-large-item-key';
+    const sessionKey = 'sess1';
+    const longTableId = `users-${'x'.repeat(320)}`;
+    const { mockAdapter } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+      initialState: {
+        items: [
+          { tableId: longTableId, id: 1, data: { id: 1, name: 'Cached' } },
+        ],
+      },
+    });
+
+    // The physical OPFS filename should stay short even when the logical item key is huge.
+    const storeEntries = mockAdapter.mockBrowserOpfs
+      .listEntries(`tsdf/${sessionKey}/${storeName}`)
+      .sort();
+    expect({
+      payloadFileLengths: storeEntries
+        .filter((entry) => entry.endsWith('.p.json'))
+        .map((entry) => entry.length),
+      storeEntries,
+    }).toMatchInlineSnapshot(`
+      payloadFileLengths: [27]
+      storeEntries: ['file:li._i.r.json', 'file:li.h~2529159976.p.json']
+    `);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { [longTableId]: [{ id: 1, name: 'Fresh' }] },
+    });
+
+    // Item hydration should keep using the raw logical key even though the OPFS file is hashed.
+    const preloadPromise = env.apiStore.preloadItemFromStorage(
+      `${longTableId}||1`,
+    );
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - payload: 'users-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx||1'
+        preloaded: '✅'
+    `);
+
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem(`${longTableId}||1`, {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      -> status: refetching ⋅ name: Cached
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+  });
+
+  test('large list query payloads use hashed OPFS filenames and still hydrate correctly', async () => {
+    const storeName = 'lq-opfs-large-query-key';
+    const sessionKey = 'sess1';
+    const longSearch = `user-${'x'.repeat(320)}`;
+    const query: ListQueryParams = {
+      filters: [{ field: 'name', op: 'eq', value: longSearch }],
+      tableId: 'users',
+    };
+    const { mockAdapter } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+      initialState: {
+        items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } }],
+        queries: [{ params: query, items: [{ tableId: 'users', id: 1 }] }],
+      },
+    });
+
+    // Large serialized query payloads should also map to short OPFS payload filenames.
+    const storeEntries = mockAdapter.mockBrowserOpfs
+      .listEntries(`tsdf/${sessionKey}/${storeName}`)
+      .sort();
+    expect({
+      payloadFileLengths: storeEntries
+        .filter((entry) => entry.endsWith('.p.json'))
+        .map((entry) => entry.length)
+        .sort((left, right) => left - right),
+      storeEntries,
+    }).toMatchInlineSnapshot(`
+      payloadFileLengths: [26, 27]
+      storeEntries:
+        - 'file:li._i.r.json'
+        - 'file:li.h~228010772.p.json'
+        - 'file:lq._i.r.json'
+        - 'file:lq.h~2854012034.p.json'
+    `);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+    });
+
+    // Query hydration should still find the large logical query payload through the hashed file.
+    const preloadPromise = env.apiStore.preloadQueryFromStorage(query);
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - payload:
+          filters:
+            - field: 'name'
+              op: 'eq'
+              value: 'user-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+          tableId: 'users'
+        preloaded: '✅'
+    `);
+
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    renderHook(() => {
+      const { items, status } = env.apiStore.useListQuery(query, {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: success ⋅ names: []
       "
     `);
   });

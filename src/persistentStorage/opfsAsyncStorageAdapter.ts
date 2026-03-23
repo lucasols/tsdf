@@ -5,10 +5,12 @@ import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
+  getPayloadRecordKey,
   getNamespaceId,
+  parseFileNameInfo,
+  resolveHashedPayloadRecordKeyFromValue,
   joinPath,
   OPFS_ROOT_DIR,
-  parseFileName,
 } from './opfsFileNaming';
 import type {
   AsyncStorageDiscoveredScope,
@@ -68,6 +70,7 @@ type OpfsCacheContext = {
   cleanupKnowledge: OpfsCleanupKnowledge | null;
   dirCache: OpfsDirectoryCache;
   fileCache: OpfsFileCache;
+  readValueCache: Map<string, unknown> | null;
 };
 
 type ScopedDirectoryEntry = { fileName: string; key: string };
@@ -75,6 +78,14 @@ type ScopedDirectoryEntry = { fileName: string; key: string };
 type DiscoveredScopeEntry = {
   knownRecordKeys: string[];
   scope: AsyncStorageNamespaceScope;
+};
+
+type ParsedScopedFileInfo = {
+  fileHandle: FileSystemFileHandle;
+  fileName: string;
+  filePath: string;
+  isHashedPayload: boolean;
+  key: string | null;
 };
 
 type CacheUtilsWithExpiration<T> = {
@@ -102,6 +113,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     fileCache: createCache<FileSystemFileHandle | null>({
       maxCacheSize: OPFS_FILE_HANDLE_CACHE_MAX_SIZE,
     }),
+    readValueCache: null,
   };
 
   async get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown> {
@@ -173,6 +185,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       },
       dirCache: this.#mainCacheContext.dirCache.clone(),
       fileCache: this.#mainCacheContext.fileCache.clone(),
+      readValueCache: new Map(),
     };
 
     return callback(this.#createScopedDriver(cleanupCacheContext));
@@ -330,14 +343,11 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
           storeDir,
         });
         if (fileHandle === null) return null;
-
-        try {
-          const file = await fileHandle.getFile();
-          const parsed: unknown = JSON.parse(await file.text());
-          return parsed;
-        } catch {
-          return null;
-        }
+        return this.#readJsonFile(
+          this.#getFilePath(scope, key),
+          fileHandle,
+          cacheContext,
+        );
       }),
     );
   }
@@ -411,8 +421,11 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     scope: AsyncStorageNamespaceScope,
     cacheContext: OpfsCacheContext,
   ): Promise<string[]> {
-    const entries = await this.#listScopedFiles(scope, cacheContext);
-    return entries
+    const { resolvedEntries } = await this.#listScopedFiles(
+      scope,
+      cacheContext,
+    );
+    return resolvedEntries
       .map((entry) => entry.key)
       .sort((left, right) => left.localeCompare(right));
   }
@@ -427,34 +440,42 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     });
     if (storeDir === null) return;
 
-    const scopedEntries = await this.#listScopedFiles(scope, cacheContext);
-    const keys = scopedEntries.map((entry) => entry.key);
+    const { allFileNames, resolvedEntries } = await this.#listScopedFiles(
+      scope,
+      cacheContext,
+    );
+    const keys = resolvedEntries.map((entry) => entry.key);
 
     if (
-      await this.#removeWholeStoreDirIfAllKnownEntriesAreBeingRemoved(
+      allFileNames.length === keys.length &&
+      (await this.#removeWholeStoreDirIfAllKnownEntriesAreBeingRemoved(
         scope,
         keys,
         cacheContext,
-      )
+      ))
     ) {
       return;
     }
 
+    const storeDirPath = this.#getStoreDirPath(scope);
     const removeResults = await Promise.all(
-      scopedEntries.map(async (entry) => {
+      allFileNames.map(async (fileName) => {
         try {
-          await storeDir.removeEntry(entry.fileName);
+          await storeDir.removeEntry(fileName);
           return true;
         } catch {
           // Ignore missing records.
           return false;
         } finally {
-          this.#invalidateFileHandle(scope, entry.key, cacheContext);
+          this.#invalidateFilePath(
+            joinPath(storeDirPath, fileName),
+            cacheContext,
+          );
         }
       }),
     );
     this.#decrementKnownStoreEntryCount(
-      this.#getStoreDirPath(scope),
+      storeDirPath,
       cacheContext,
       removeResults.filter(Boolean).length,
     );
@@ -466,53 +487,9 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     sessionKey: string | undefined,
     cacheContext: OpfsCacheContext,
   ): Promise<AsyncStorageNamespaceScope[]> {
-    const sessionEntries = await this.#getSessionEntries(
-      sessionKey,
-      cacheContext,
-    );
-    const discoveredScopes = new Map<string, AsyncStorageNamespaceScope>();
-
-    for (const sessionEntry of sessionEntries) {
-      if (sessionEntry.handle === null) continue;
-
-      this.#setKnownSessionStorePaths(
-        sessionEntry.path,
-        cacheContext,
-        new Set(),
-      );
-
-      const decodedSessionKey = decodePathSegment(sessionEntry.name);
-      const storeEntries = await this.#listDirectoryEntries(
-        sessionEntry.handle,
-        sessionEntry.path,
-        cacheContext,
-      );
-      this.#setKnownSessionStorePaths(
-        sessionEntry.path,
-        cacheContext,
-        new Set(storeEntries.map((storeEntry) => storeEntry.path)),
-      );
-
-      for (const storeEntry of storeEntries) {
-        const decodedStoreName = decodePathSegment(storeEntry.name);
-        const seenKinds = new Set<AsyncStorageNamespaceScope['kind']>();
-
-        for await (const fileName of storeEntry.handle.keys()) {
-          const parsed = parseFileName(fileName);
-          if (parsed === null || seenKinds.has(parsed.kind)) continue;
-
-          seenKinds.add(parsed.kind);
-          const scope = {
-            sessionKey: decodedSessionKey,
-            storeName: decodedStoreName,
-            kind: parsed.kind,
-          } satisfies AsyncStorageNamespaceScope;
-          discoveredScopes.set(getNamespaceId(scope), scope);
-        }
-      }
-    }
-
-    return [...discoveredScopes.values()];
+    return (
+      await this.#listDiscoveredScopesWithContext(sessionKey, cacheContext)
+    ).map(({ scope }) => scope);
   }
 
   async #listDiscoveredScopesWithContext(
@@ -543,54 +520,13 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       const storeScanResults = await Promise.all(
         storeEntries.map(async (storeEntry) => {
           const decodedStoreName = decodePathSegment(storeEntry.name);
-          const invalidEntryNames: string[] = [];
-          let knownEntryCount = 0;
-          const discoveredStoreScopes = new Map<string, DiscoveredScopeEntry>();
-
-          for await (const [
-            fileName,
-            entryHandle,
-          ] of storeEntry.handle.entries()) {
-            if (entryHandle.kind !== 'file') {
-              invalidEntryNames.push(fileName);
-              continue;
-            }
-
-            const parsed = parseFileName(fileName);
-            if (parsed === null) {
-              invalidEntryNames.push(fileName);
-              continue;
-            }
-            knownEntryCount += 1;
-
-            const scope = {
-              sessionKey: decodedSessionKey,
-              storeName: decodedStoreName,
-              kind: parsed.kind,
-            } satisfies AsyncStorageNamespaceScope;
-            if (parsed.key === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
-              cacheContext.fileCache.set(
-                this.#getFilePath(scope, parsed.key),
-                entryHandle,
-              );
-            }
-            const scopeId = getNamespaceId(scope);
-            const existing = discoveredStoreScopes.get(scopeId);
-            if (existing !== undefined) {
-              existing.knownRecordKeys.push(parsed.key);
-              continue;
-            }
-
-            discoveredStoreScopes.set(scopeId, {
-              knownRecordKeys: [parsed.key],
-              scope,
-            });
-          }
-
           return {
-            scopeEntries: [...discoveredStoreScopes.values()],
-            invalidEntryNames,
-            knownEntryCount,
+            ...(await this.#scanStoreScopeEntries(
+              storeEntry.handle,
+              decodedSessionKey,
+              decodedStoreName,
+              cacheContext,
+            )),
             storeEntry,
           };
         }),
@@ -677,6 +613,148 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
 
       return left.scope.kind.localeCompare(right.scope.kind);
     });
+  }
+
+  async #scanStoreScopeEntries(
+    storeDir: FileSystemDirectoryHandle,
+    sessionKey: string,
+    storeName: string,
+    cacheContext: OpfsCacheContext,
+  ): Promise<{
+    invalidEntryNames: string[];
+    knownEntryCount: number;
+    scopeEntries: DiscoveredScopeEntry[];
+  }> {
+    const invalidEntryNames: string[] = [];
+    const storeDirPath = this.#getStoreDirPath({ sessionKey, storeName });
+    const filesByKind = new Map<
+      AsyncStorageNamespaceScope['kind'],
+      ParsedScopedFileInfo[]
+    >();
+
+    for await (const [fileName, entryHandle] of storeDir.entries()) {
+      if (entryHandle.kind !== 'file') {
+        invalidEntryNames.push(fileName);
+        continue;
+      }
+
+      const parsed = parseFileNameInfo(fileName);
+      if (parsed === null) {
+        invalidEntryNames.push(fileName);
+        continue;
+      }
+
+      const fileHandle = __LEGIT_CAST__<FileSystemFileHandle, FileSystemHandle>(
+        entryHandle,
+      );
+      const nextEntries = filesByKind.get(parsed.kind) ?? [];
+      nextEntries.push({
+        fileHandle,
+        fileName,
+        filePath: joinPath(storeDirPath, fileName),
+        isHashedPayload: parsed.isHashedPayload,
+        key: parsed.key,
+      });
+      filesByKind.set(parsed.kind, nextEntries);
+    }
+
+    const scopeEntries: DiscoveredScopeEntry[] = [];
+    let knownEntryCount = 0;
+
+    for (const [kind, files] of filesByKind) {
+      const scope = {
+        sessionKey,
+        storeName,
+        kind,
+      } satisfies AsyncStorageNamespaceScope;
+      const knownRecordKeys: string[] = [];
+      const hashedPayloadFiles = files.filter((file) => file.isHashedPayload);
+      let scopeKnownEntryCount = 0;
+      let indexFilePath: string | null = null;
+      let indexHandle: FileSystemFileHandle | null = null;
+
+      for (const file of files) {
+        if (file.isHashedPayload || file.key === null) continue;
+
+        knownRecordKeys.push(file.key);
+        scopeKnownEntryCount += 1;
+
+        if (file.key === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+          indexHandle = file.fileHandle;
+          indexFilePath = file.filePath;
+          cacheContext.fileCache.set(
+            this.#getFilePath(scope, file.key),
+            file.fileHandle,
+          );
+        }
+      }
+
+      if (hashedPayloadFiles.length > 0) {
+        const resolvedHashedFiles = await this.#resolveHashedScopedFiles(
+          scope,
+          hashedPayloadFiles,
+          indexHandle,
+          indexFilePath,
+          cacheContext,
+        );
+        knownRecordKeys.push(
+          ...resolvedHashedFiles.resolvedEntries.map((entry) => entry.key),
+        );
+        scopeKnownEntryCount += resolvedHashedFiles.resolvedEntries.length;
+        invalidEntryNames.push(...resolvedHashedFiles.invalidEntryNames);
+      }
+
+      if (scopeKnownEntryCount === 0) continue;
+
+      knownEntryCount += scopeKnownEntryCount;
+      knownRecordKeys.sort((left, right) => left.localeCompare(right));
+      scopeEntries.push({ knownRecordKeys, scope });
+    }
+
+    return { invalidEntryNames, knownEntryCount, scopeEntries };
+  }
+
+  async #readHashedPayloadRecordKeyFromHandle(
+    scope: AsyncStorageNamespaceScope,
+    filePath: string,
+    fileName: string,
+    fileHandle: FileSystemFileHandle,
+    cacheContext: OpfsCacheContext,
+  ): Promise<string | null> {
+    const value = await this.#readJsonFile(filePath, fileHandle, cacheContext);
+    const resolvedKey =
+      value === null
+        ? null
+        : resolveHashedPayloadRecordKeyFromValue(scope, value);
+    return resolvedKey !== null &&
+      buildFileName(scope, resolvedKey) === fileName
+      ? resolvedKey
+      : null;
+  }
+
+  async #readIndexedHashedPayloadRecordKeys(
+    filePath: string | null,
+    indexHandle: FileSystemFileHandle | null,
+    cacheContext: OpfsCacheContext,
+  ): Promise<string[] | null> {
+    if (indexHandle === null || filePath === null) return null;
+
+    const value = await this.#readJsonFile(filePath, indexHandle, cacheContext);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return null;
+    }
+
+    const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+    const rawEntries = record.e;
+    if (
+      typeof rawEntries !== 'object' ||
+      rawEntries === null ||
+      Array.isArray(rawEntries)
+    ) {
+      return null;
+    }
+
+    return Object.keys(rawEntries).map((key) => getPayloadRecordKey(key));
   }
 
   async #getSessionEntries(
@@ -844,25 +922,169 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
   async #listScopedFiles(
     scope: AsyncStorageNamespaceScope,
     cacheContext: OpfsCacheContext,
-  ): Promise<ScopedDirectoryEntry[]> {
+  ): Promise<{
+    allFileNames: string[];
+    resolvedEntries: ScopedDirectoryEntry[];
+  }> {
     const storeDir = await this.#getStoreDir(scope, {
       create: false,
       cacheContext,
     });
-    if (storeDir === null) return [];
-
-    const scopedEntries: ScopedDirectoryEntry[] = [];
-    for await (const entry of storeDir.values()) {
-      if (entry.kind !== 'file') continue;
-      const parsed = parseFileName(entry.name);
-      if (parsed === null || parsed.kind !== scope.kind) continue;
-
-      scopedEntries.push({ fileName: entry.name, key: parsed.key });
+    if (storeDir === null) {
+      return { allFileNames: [], resolvedEntries: [] };
     }
 
-    return scopedEntries.sort((left, right) =>
-      left.key.localeCompare(right.key),
+    const allFileNames: string[] = [];
+    const resolvedEntries: ScopedDirectoryEntry[] = [];
+    const hashedFiles: ParsedScopedFileInfo[] = [];
+    let indexFilePath: string | null = null;
+    let indexHandle: FileSystemFileHandle | null = null;
+    const storeDirPath = this.#getStoreDirPath(scope);
+
+    for await (const [fileName, entryHandle] of storeDir.entries()) {
+      if (entryHandle.kind !== 'file') continue;
+
+      const parsed = parseFileNameInfo(fileName);
+      if (parsed === null || parsed.kind !== scope.kind) continue;
+
+      allFileNames.push(fileName);
+      const filePath = joinPath(storeDirPath, fileName);
+      const fileHandle = __LEGIT_CAST__<FileSystemFileHandle, FileSystemHandle>(
+        entryHandle,
+      );
+
+      if (parsed.isHashedPayload) {
+        hashedFiles.push({
+          fileHandle,
+          fileName,
+          filePath,
+          isHashedPayload: true,
+          key: null,
+        });
+        continue;
+      }
+
+      if (parsed.key !== null) {
+        resolvedEntries.push({ fileName, key: parsed.key });
+        if (parsed.key === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+          indexHandle = fileHandle;
+          indexFilePath = filePath;
+        }
+      }
+    }
+
+    if (hashedFiles.length > 0) {
+      resolvedEntries.push(
+        ...(
+          await this.#resolveHashedScopedFiles(
+            scope,
+            hashedFiles,
+            indexHandle,
+            indexFilePath,
+            cacheContext,
+          )
+        ).resolvedEntries,
+      );
+    }
+
+    resolvedEntries.sort((left, right) => left.key.localeCompare(right.key));
+
+    return { allFileNames, resolvedEntries };
+  }
+
+  async #resolveHashedScopedFiles(
+    scope: AsyncStorageNamespaceScope,
+    hashedFiles: ParsedScopedFileInfo[],
+    indexHandle: FileSystemFileHandle | null,
+    indexFilePath: string | null,
+    cacheContext: OpfsCacheContext,
+  ): Promise<{
+    invalidEntryNames: string[];
+    resolvedEntries: ScopedDirectoryEntry[];
+  }> {
+    const hashedFilesByName = new Map(
+      hashedFiles.map((file) => [file.fileName, file] as const),
     );
+    const resolvedEntries: ScopedDirectoryEntry[] = [];
+    const invalidEntryNames: string[] = [];
+    const indexedPayloadRecordKeys =
+      await this.#readIndexedHashedPayloadRecordKeys(
+        indexFilePath,
+        indexHandle,
+        cacheContext,
+      );
+
+    if (indexedPayloadRecordKeys !== null) {
+      const matchedFileNames = new Set<string>();
+
+      const storeDirPath = this.#getStoreDirPath(scope);
+
+      for (const key of indexedPayloadRecordKeys) {
+        const expectedFileName = buildFileName(scope, key);
+        const matchedFile = hashedFilesByName.get(expectedFileName);
+        if (matchedFile === undefined) continue;
+
+        matchedFileNames.add(expectedFileName);
+        resolvedEntries.push({ fileName: matchedFile.fileName, key });
+        cacheContext.fileCache.set(
+          joinPath(storeDirPath, expectedFileName),
+          matchedFile.fileHandle,
+        );
+      }
+
+      invalidEntryNames.push(
+        ...hashedFiles.flatMap((file) =>
+          matchedFileNames.has(file.fileName) ? [] : [file.fileName],
+        ),
+      );
+      return { invalidEntryNames, resolvedEntries };
+    }
+
+    const resolvedHashedEntries = await Promise.all(
+      hashedFiles.map(async (file) => ({
+        file,
+        key: await this.#readHashedPayloadRecordKeyFromHandle(
+          scope,
+          file.filePath,
+          file.fileName,
+          file.fileHandle,
+          cacheContext,
+        ),
+      })),
+    );
+
+    for (const { file, key } of resolvedHashedEntries) {
+      if (key === null) {
+        invalidEntryNames.push(file.fileName);
+        continue;
+      }
+
+      resolvedEntries.push({ fileName: file.fileName, key });
+      cacheContext.fileCache.set(file.filePath, file.fileHandle);
+    }
+
+    return { invalidEntryNames, resolvedEntries };
+  }
+
+  async #readJsonFile(
+    filePath: string,
+    fileHandle: FileSystemFileHandle,
+    cacheContext: OpfsCacheContext,
+  ): Promise<unknown> {
+    const valueCache = cacheContext.readValueCache;
+    if (valueCache?.has(filePath) === true) {
+      return valueCache.get(filePath) ?? null;
+    }
+
+    try {
+      const file = await fileHandle.getFile();
+      const parsed: unknown = JSON.parse(await file.text());
+      valueCache?.set(filePath, parsed);
+      return parsed;
+    } catch {
+      valueCache?.set(filePath, null);
+      return null;
+    }
   }
 
   async #getCachedHandleForCreate<THandle extends FileSystemHandle>(
@@ -914,6 +1136,10 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         } finally {
           await writable.close();
         }
+        cacheContext.readValueCache?.set(
+          this.#getFilePath(scope, entry.key),
+          entry.value,
+        );
         return;
       } catch (error) {
         if (attempt > 0) {
@@ -1091,9 +1317,14 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     cacheContext: OpfsCacheContext,
   ): void {
     const filePath = this.#getFilePath(scope, key);
-    cacheContext.fileCache.delete(filePath);
+    this.#invalidateFilePath(filePath, cacheContext);
+  }
+
+  #invalidateFilePath(path: string, cacheContext: OpfsCacheContext): void {
+    cacheContext.fileCache.delete(path);
+    cacheContext.readValueCache?.delete(path);
     if (cacheContext !== this.#mainCacheContext) {
-      this.#mainCacheContext.fileCache.delete(filePath);
+      this.#mainCacheContext.fileCache.delete(path);
     }
   }
 

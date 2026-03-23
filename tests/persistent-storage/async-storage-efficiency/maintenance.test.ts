@@ -103,7 +103,7 @@ describe('async storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`lca: 1735689602009`);
   });
 
-  test('startup cleanup removes malformed metadata entries together with their payload files', async () => {
+  test('startup cleanup removes malformed metadata entries together with their entry data files', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const corruptedDoc = mockAdapter.scope('corrupted', 'sess1');
     const triggerDoc = mockAdapter.scope('trigger', 'sess1');
@@ -112,7 +112,7 @@ describe('async storage efficiency: maintenance', () => {
     const corruptedMetadataPath = 'tsdf/sess1/corrupted/d.e.m.json';
     const corruptedPayloadPath = 'tsdf/sess1/corrupted/d.e.p.json';
 
-    // Seed a broken metadata record and its payload. Cleanup should treat the
+    // Seed a broken metadata record and its entry data. Cleanup should treat the
     // pair as orphaned data and delete both files in one pass.
     corruptedDoc.document.setPayload({
       d: { value: { name: 'bad', value: 1 } },
@@ -486,7 +486,7 @@ describe('async storage efficiency: maintenance', () => {
     `);
   });
 
-  test('startup cleanup removes collection payload files that are no longer referenced by the namespace index', async () => {
+  test('startup cleanup removes collection entry data files that are no longer referenced by the namespace index', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope('orphan-collection', 'sess1');
     const keptItemKey = collectionScope.collection.seedItem('kept-user', {
@@ -496,7 +496,7 @@ describe('async storage efficiency: maintenance', () => {
       value: { id: 'orphan-user', name: 'Orphan User' },
     });
 
-    // Drop one item from the namespace index while leaving its payload file
+    // Drop one item from the namespace index while leaving its entry data file
     // behind so startup cleanup has to prune the orphaned record.
     mockAdapter.removeMetadata(orphanedItemKey);
 
@@ -530,11 +530,11 @@ describe('async storage efficiency: maintenance', () => {
       2.003s | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:orphan-collection"]
       2.004s | 🗂️ list-dir tsdf/sess1/orphan-collection
-             |    └ (store directory) entries=["file:ci._i.r.json","file:ci.%22kept-user.p.json","file:ci.%22orphan-user.p.json"]
+             |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1706329294.p.json","file:ci.h~2293725328.p.json"]
       2.005s | 📖 #1 tsdf/sess1/orphan-collection/ci._i.r.json
              |    └ (namespace index) | 0.11 kb
-      2.008s | 🗑️ ✅ #2 tsdf/sess1/orphan-collection/ci.%22orphan-user.p.json
-             |    └ ([itemKey: "orphan-user], payload)
+      2.008s | 🗑️ ✅ #2 tsdf/sess1/orphan-collection/ci.h~2293725328.p.json
+             |    └ ([itemKey: "orphan-user], entry data)
       2.009s | end
       "
     `);
@@ -544,14 +544,14 @@ describe('async storage efficiency: maintenance', () => {
       ├ sess1 (0.36 kb)
       │ └ orphan-collection (0.35 kb)
       │   ├ ci._i.r.json (0.13 kb)
-      │   └ ci.%22kept-user.p.json (0.18 kb)
+      │   └ ci.h~1706329294.p.json (0.18 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
     expect(getParsedOpfsFileData('tsdf/sess1/orphan-collection/ci._i.r.json'))
       .toMatchInlineSnapshot(`
-      e:
-        "kept-user: { a: 1735689600000, p: 'kept-user' }
-    `);
+        e:
+          "kept-user: { a: 1735689600000, p: 'kept-user' }
+      `);
   });
 
   test('protected dotted-session cleanup keeps the protected entry and snapshots the full metadata scan history', async () => {

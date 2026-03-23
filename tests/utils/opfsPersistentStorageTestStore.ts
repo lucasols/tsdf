@@ -10,8 +10,9 @@ import {
   joinPath,
   METADATA_RECORD_PREFIX,
   OPFS_ROOT_DIR,
-  parseFileName,
+  parseFileNameInfo,
   PAYLOAD_RECORD_PREFIX,
+  resolveHashedPayloadRecordKeyFromValue,
 } from '../../src/persistentStorage/opfsFileNaming';
 import type {
   AsyncStorageNamespaceScope,
@@ -445,9 +446,19 @@ function listRawKeys(
     .flatMap((entry) => {
       if (!entry.startsWith('file:')) return [];
       const fileName = entry.slice('file:'.length);
-      const parsed = parseFileName(fileName);
+      const parsed = parseFileNameInfo(fileName);
       if (parsed === null || parsed.kind !== scope.kind) return [];
-      return [parsed.key];
+
+      const key = resolveParsedRecordKey(
+        mockBrowserOpfs,
+        joinPath(storeDirPath(scope), fileName),
+        new Map(),
+        new Map(),
+        scope,
+        fileName,
+        parsed.key,
+      );
+      return key === null ? [] : [key];
     })
     .sort((left, right) => left.localeCompare(right));
 }
@@ -624,8 +635,13 @@ type InstrumentedRecord = {
 
 function getInstrumentedRecord(
   scope: AsyncStorageNamespaceScope,
-  key: string,
+  key: string | null,
+  defaultRecordKind: Exclude<RecordKind, 'internal'> = 'payload',
 ): InstrumentedRecord {
+  if (key === null) {
+    return { key: '', logicalKey: null, recordKind: defaultRecordKind };
+  }
+
   if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
     const userKey = key.slice(PAYLOAD_RECORD_PREFIX.length);
     return {
@@ -656,7 +672,10 @@ function getInstrumentedRecord(
 }
 
 function parseFileContext(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
   path: string,
+  fileContentsByPath: ReadonlyMap<string, string>,
+  resolvedRecordKeysByPath: Map<string, string>,
 ): {
   path: string;
   record: InstrumentedRecord;
@@ -667,7 +686,7 @@ function parseFileContext(
   if (fileName === undefined) return null;
 
   const store = parseStoreFromDirPath(pathSegments.join('/'));
-  const parsedRecord = parseFileName(fileName);
+  const parsedRecord = parseFileNameInfo(fileName);
   if (store === null || parsedRecord === null) {
     return null;
   }
@@ -676,10 +695,26 @@ function parseFileContext(
     ...store,
     kind: parsedRecord.kind,
   } satisfies AsyncStorageNamespaceScope;
+  const key = resolveParsedRecordKey(
+    mockBrowserOpfs,
+    path,
+    fileContentsByPath,
+    resolvedRecordKeysByPath,
+    scope,
+    fileName,
+    parsedRecord.key,
+  );
+  if (key !== null) {
+    resolvedRecordKeysByPath.set(path, key);
+  }
   return {
     path,
     scope,
-    record: getInstrumentedRecord(scope, parsedRecord.key),
+    record: getInstrumentedRecord(
+      scope,
+      key,
+      parsedRecord.isHashedPayload ? 'payload' : 'metadata',
+    ),
   };
 }
 
@@ -751,7 +786,10 @@ export type MockOpfsOperation =
     });
 
 function enrichRawOperation(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
   operation: RawMockBrowserOpfsOperation,
+  fileContentsByPath: Map<string, string>,
+  resolvedRecordKeysByPath: Map<string, string>,
 ): MockOpfsOperation | null {
   switch (operation.type) {
     case 'openDir':
@@ -770,7 +808,22 @@ function enrichRawOperation(
     case 'readFile':
     case 'writeFile':
     case 'deleteFile': {
-      const fileContext = parseFileContext(operation.path);
+      if (operation.type === 'writeFile' || operation.type === 'ensureFile') {
+        const nextRaw = mockBrowserOpfs.readFile(operation.path);
+        if (nextRaw !== null) {
+          fileContentsByPath.set(operation.path, nextRaw);
+        }
+      }
+
+      const fileContext = parseFileContext(
+        mockBrowserOpfs,
+        operation.path,
+        fileContentsByPath,
+        resolvedRecordKeysByPath,
+      );
+      if (operation.type === 'deleteFile') {
+        fileContentsByPath.delete(operation.path);
+      }
       if (fileContext !== null) {
         return { ...operation, ...fileContext };
       }
@@ -849,7 +902,7 @@ function getListKeysRequests(
 
     for (const entry of operation.entries) {
       if (!entry.startsWith('file:')) continue;
-      const parsedRecord = parseFileName(entry.slice('file:'.length));
+      const parsedRecord = parseFileNameInfo(entry.slice('file:'.length));
       if (parsedRecord === null || seenKinds.has(parsedRecord.kind)) continue;
 
       seenKinds.add(parsedRecord.kind);
@@ -858,6 +911,67 @@ function getListKeysRequests(
 
     return scopes;
   });
+}
+
+function resolveParsedRecordKey(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+  path: string,
+  fileContentsByPath: ReadonlyMap<string, string>,
+  resolvedRecordKeysByPath: Map<string, string>,
+  scope: AsyncStorageNamespaceScope,
+  fileName: string,
+  key: string | null,
+): string | null {
+  if (key !== null) return key;
+
+  const raw = fileContentsByPath.get(path) ?? mockBrowserOpfs.readFile(path);
+  if (raw !== null) {
+    const resolvedKey = resolveHashedPayloadRecordKeyFromValue(
+      scope,
+      safeJsonParse(raw),
+    );
+    if (
+      resolvedKey !== null &&
+      buildFileName(scope, resolvedKey) === fileName
+    ) {
+      return resolvedKey;
+    }
+  }
+
+  return resolvedRecordKeysByPath.get(path) ?? null;
+}
+
+function snapshotDirectoryFiles(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+  dirPath: string,
+  filesByPath: Map<string, string>,
+): void {
+  for (const entry of mockBrowserOpfs.listEntries(dirPath)) {
+    if (entry.startsWith('dir:')) {
+      snapshotDirectoryFiles(
+        mockBrowserOpfs,
+        joinPath(dirPath, entry.slice('dir:'.length)),
+        filesByPath,
+      );
+      continue;
+    }
+
+    if (!entry.startsWith('file:')) continue;
+
+    const filePath = joinPath(dirPath, entry.slice('file:'.length));
+    const raw = mockBrowserOpfs.readFile(filePath);
+    if (raw !== null) {
+      filesByPath.set(filePath, raw);
+    }
+  }
+}
+
+function snapshotOpfsFiles(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+): Map<string, string> {
+  const filesByPath = new Map<string, string>();
+  snapshotDirectoryFiles(mockBrowserOpfs, OPFS_ROOT_DIR, filesByPath);
+  return filesByPath;
 }
 
 export type OpfsPersistentStorageTestStore = ReturnType<
@@ -1260,21 +1374,37 @@ export function createOpfsPersistentStorageTestStore(
 
   let instrumentationStartIndex = mockBrowserOpfs.operations.length;
   let readStartIndex = mockBrowserOpfs.operations.length;
+  let instrumentationFileSnapshot = snapshotOpfsFiles(mockBrowserOpfs);
+  let readFileSnapshot = snapshotOpfsFiles(mockBrowserOpfs);
 
   function getCurrentOperations(): MockOpfsOperation[] {
+    const fileContentsByPath = new Map(instrumentationFileSnapshot);
+    const resolvedRecordKeysByPath = new Map<string, string>();
     return mockBrowserOpfs.operations
       .slice(instrumentationStartIndex)
       .flatMap((operation) => {
-        const enriched = enrichRawOperation(operation);
+        const enriched = enrichRawOperation(
+          mockBrowserOpfs,
+          operation,
+          fileContentsByPath,
+          resolvedRecordKeysByPath,
+        );
         return enriched === null ? [] : [enriched];
       });
   }
 
   function getCurrentReadOperations(): MockOpfsOperation[] {
+    const fileContentsByPath = new Map(readFileSnapshot);
+    const resolvedRecordKeysByPath = new Map<string, string>();
     return mockBrowserOpfs.operations
       .slice(readStartIndex)
       .flatMap((operation) => {
-        const enriched = enrichRawOperation(operation);
+        const enriched = enrichRawOperation(
+          mockBrowserOpfs,
+          operation,
+          fileContentsByPath,
+          resolvedRecordKeysByPath,
+        );
         return enriched === null ? [] : [enriched];
       });
   }
@@ -1320,10 +1450,13 @@ export function createOpfsPersistentStorageTestStore(
     },
     clearReadRequests() {
       readStartIndex = mockBrowserOpfs.operations.length;
+      readFileSnapshot = snapshotOpfsFiles(mockBrowserOpfs);
     },
     clearInstrumentation() {
       instrumentationStartIndex = mockBrowserOpfs.operations.length;
       readStartIndex = mockBrowserOpfs.operations.length;
+      instrumentationFileSnapshot = snapshotOpfsFiles(mockBrowserOpfs);
+      readFileSnapshot = instrumentationFileSnapshot;
     },
     getRaw,
     has: hasLogicalStorageEntry,

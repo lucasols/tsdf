@@ -156,6 +156,22 @@ When fixing a bug:
 7. run `pnpm test` and `pnpm lint` — fix any issues until all pass with no errors
 8. after fixing the bug, check there are no performance regressions compared to previous implementation that could be avoided with a better fix
 
+## Self-review of test changes (MANDATORY)
+
+**CRITICAL: This section is non-optional. You MUST follow these steps after ANY task that introduces or modifies tests, before considering the task complete.**
+
+After completing any task that adds, modifies, or removes test code:
+
+1. **Review every test diff you introduced.** Re-read the full diff of all test files you changed. Do not skip this step — it catches issues that are invisible during writing but obvious on review.
+2. **Check for behavior regressions.** Compare your test changes against the previous test expectations. If you weakened an assertion, removed a test case, loosened a snapshot, or changed expected values, confirm the change is intentional and correct — not a side effect of making tests pass. If you cannot justify the change, revert it and fix the underlying issue instead.
+3. **Check for performance regressions.** If your changes altered how data is fetched, stored, serialized, or compared, verify the new approach is not doing unnecessary work compared to the previous implementation. Look for: redundant iterations, unnecessary re-renders, extra serialization/deserialization cycles, duplicate storage reads/writes, or O(n²) patterns where O(n) is possible.
+4. **Check for test quality regressions.** Ensure your tests are not:
+   - Testing implementation details instead of behavior
+   - Using overly broad assertions that would pass even with broken code
+   - Missing edge cases that the previous tests covered
+   - Adding unnecessary complexity or boilerplate
+5. **Fix or report.** If you find a regression that has a better implementation, fix it immediately. If the regression is inherent to the approach and cannot be avoided without a fundamentally different design, report it to the user explicitly with a clear explanation of the tradeoff before proceeding.
+
 ## Useful patterns
 
 - For unsafe data parsing, use `runcheck` lib

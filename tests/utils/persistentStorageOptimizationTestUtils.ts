@@ -4,8 +4,11 @@ import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  buildFileName,
   decodePathSegment,
+  encodePathSegment,
   OPFS_ROOT_DIR,
+  parseFileName,
   parseRecordKey,
 } from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
@@ -451,12 +454,47 @@ function compactDocumentOpfsIndexSnapshotValue(
 }
 
 export function getParsedOpfsFileData<T = unknown>(filePath: string): T | null {
-  const raw = readMockBrowserOpfsFileForTests(filePath);
+  const raw =
+    readMockBrowserOpfsFileForTests(filePath) ??
+    readMockBrowserOpfsFileForTests(resolveHashedOpfsFilePath(filePath));
   if (raw === null) return null;
 
   return __LEGIT_CAST__<T | null, unknown>(
     compactDocumentOpfsIndexSnapshotValue(filePath, safeJsonParse(raw) ?? raw),
   );
+}
+
+function resolveHashedOpfsFilePath(filePath: string): string {
+  const pathSegments = filePath.split('/');
+  const fileName = pathSegments.pop();
+  const storeName = pathSegments.pop();
+  const sessionKey = pathSegments.pop();
+  const rootDir = pathSegments.pop();
+  if (
+    fileName === undefined ||
+    storeName === undefined ||
+    sessionKey === undefined ||
+    rootDir !== OPFS_ROOT_DIR
+  ) {
+    return filePath;
+  }
+
+  const parsed = parseFileName(fileName);
+  if (parsed === null) return filePath;
+
+  return [
+    OPFS_ROOT_DIR,
+    encodePathSegment(decodePathSegment(sessionKey)),
+    encodePathSegment(decodePathSegment(storeName)),
+    buildFileName(
+      {
+        sessionKey: decodePathSegment(sessionKey),
+        storeName: decodePathSegment(storeName),
+        kind: parsed.kind,
+      },
+      parsed.key,
+    ),
+  ].join('/');
 }
 
 export function getParsedOpfsNamespaceValue<T = unknown>(
@@ -827,9 +865,10 @@ function formatGlobalRecordKey(
   key: string,
   kind: 'payload' | 'metadata',
 ): string {
+  const kindLabel = kind === 'payload' ? 'entry data' : kind;
   return key.includes('._o_.p')
-    ? `${key} (protected registry ${kind})`
-    : `${key} (${kind})`;
+    ? `${key} (protected registry ${kindLabel})`
+    : `${key} (${kindLabel})`;
 }
 
 function isPlainDocumentLogicalKey(
@@ -868,13 +907,15 @@ function formatRecordLabel(
     record.logicalKey !== null &&
     isPlainDocumentLogicalKey(scope, record.logicalKey)
   ) {
-    return record.recordKind;
+    return record.recordKind === 'payload' ? 'entry data' : record.recordKind;
   }
 
   if (scope !== null) {
     const compactRecordKeyLabel = formatScopedRecordKeyLabel(scope, record.key);
     if (compactRecordKeyLabel !== null) {
-      return `${compactRecordKeyLabel}, ${record.recordKind}`;
+      return `${compactRecordKeyLabel}, ${
+        record.recordKind === 'payload' ? 'entry data' : record.recordKind
+      }`;
     }
   }
 

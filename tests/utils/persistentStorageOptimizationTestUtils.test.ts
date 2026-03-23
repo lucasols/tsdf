@@ -51,7 +51,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       sessionDir.getDirectoryHandle('docs'),
     );
 
-    // Trigger a list scan, a payload read, a namespace index write, and a payload delete.
+    // Trigger a list scan, an entry data read, a namespace index write, and an entry data delete.
     await resolveAfterAllTimers(storeDir.values().next());
     const payloadFile = await resolveAfterAllTimers(
       storeDir.getFileHandle('d.e.p.json'),
@@ -78,12 +78,12 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | 🗂️ list-dir tsdf/sess1/docs
            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      5ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
+      5ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (entry data)
       6ms  | 📄 file-open ✅ #2 tsdf/sess1/docs/d._i.r.json (namespace index)
-      7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
+      7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.10 kb
       12ms | ✍️ #2 tsdf/sess1/docs/d._i.r.json
            |    └ (namespace index) | 0.05 kb -> 0.05 kb
-      14ms | 🗑️ ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
+      14ms | 🗑️ ✅ #1 tsdf/sess1/docs/d.e.p.json (entry data)
       15ms | end
       "
     `);
@@ -121,8 +121,8 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
       2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
-      4ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
-      5ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
+      4ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (entry data)
+      5ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.10 kb
       8ms  | end
       "
     `);

@@ -119,6 +119,10 @@ describe('opfs: collection store persistence', () => {
     await advanceTime(2100);
     await flushAllTimers();
 
+    // Startup cleanup may scan persisted payloads to resolve hashed OPFS files.
+    // Reset the capture so the assertions below only reflect hook-triggered hydration.
+    mockAdapter.clearReadRequests();
+
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getItemState('1')).toBeUndefined();
     expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
@@ -179,6 +183,64 @@ describe('opfs: collection store persistence', () => {
 
     renderHook(() => {
       const { data, status } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Cached}
+      -> status: refetching ⋅ data: {id:1, name:Cached}
+      -> status: success ⋅ data: {id:1, name:Fresh}
+      "
+    `);
+  });
+
+  test('large collection payloads use hashed OPFS filenames and still hydrate correctly', async () => {
+    const storeName = 'col-opfs-large-payload';
+    const sessionKey = 'sess1';
+    const longPayload = `payload-${'x'.repeat(320)}`;
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    setCachedCollectionItem(mockAdapter, storeName, sessionKey, longPayload, {
+      value: { id: '1', name: 'Cached' },
+    });
+
+    // The physical OPFS file should stay short even when the logical payload is huge.
+    const storeEntries = mockAdapter.mockBrowserOpfs
+      .listEntries(`tsdf/${sessionKey}/${storeName}`)
+      .sort();
+    expect({
+      payloadFileLengths: storeEntries
+        .filter((entry) => entry.endsWith('.p.json'))
+        .map((entry) => entry.length),
+      storeEntries,
+    }).toMatchInlineSnapshot(`
+      payloadFileLengths: [27]
+      storeEntries: ['file:ci._i.r.json', 'file:ci.h~4228899405.p.json']
+    `);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { [longPayload]: { id: '1', name: 'Fresh' } },
+    });
+
+    // Preload should still resolve the logical payload key and hydrate normally.
+    const preloadPromise = env.apiStore.preloadItemFromStorage(longPayload);
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - payload: 'payload-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+        preloaded: '✅'
+    `);
+
+    const renders = createLoggerStore();
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem(longPayload, {
         returnRefetchingStatus: true,
       });
 

@@ -63,7 +63,7 @@ describe('async storage efficiency: document', () => {
     expect(secondHook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Cached document', value: 7 }`,
     );
-    // The snapshot ends after the initial payload+metadata reads, which makes the
+    // The snapshot ends after the initial entry data+metadata reads, which makes the
     // skipped touch explicit.
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
@@ -74,8 +74,9 @@ describe('async storage efficiency: document', () => {
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/doc-remount-flow/d._i.r.json
            |    └ (namespace index) | 0.07 kb
-      6ms  | 📄 file-open ✅ #2 tsdf/sess1/doc-remount-flow/d.e.p.json (payload)
-      7ms  | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.p.json (payload) | 0.10 kb
+      6ms  | 📄 file-open ✅ #2 tsdf/sess1/doc-remount-flow/d.e.p.json
+           |    └ (entry data)
+      7ms  | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.p.json (entry data) | 0.10 kb
       10ms | end
       "
     `);
@@ -144,9 +145,9 @@ describe('async storage efficiency: document', () => {
       3ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.07 kb
       6ms  | 📄 file-open ✅ #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
-           |    └ (payload)
+           |    └ (entry data)
       7ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
-           |    └ (payload) | 0.10 kb
+           |    └ (entry data) | 0.10 kb
       50ms | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.07 kb
       55ms | ✍️ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
@@ -191,9 +192,9 @@ describe('async storage efficiency: document', () => {
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
              |    └ (store directory)
       1.853s | 📄 file-open-or-create 🆕 #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
-             |    └ (payload)
+             |    └ (entry data)
       1.856s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
-             |    └ (payload) | 0.00 kb -> 0.08 kb
+             |    └ (entry data) | 0.00 kb -> 0.08 kb
       1.858s | 📄 file-open-or-create 🆕 #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index)
       1.861s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
@@ -297,7 +298,7 @@ describe('async storage efficiency: document', () => {
       1.04s  | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
-             |    └ (payload) | 0.10 kb -> 0.10 kb ⚠️ UNCHANGED
+             |    └ (entry data) | 0.10 kb -> 0.10 kb ⚠️ UNCHANGED
       1.049s | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
              |    └ (namespace index) | 0.09 kb -> 0.09 kb
       1.051s | end
@@ -349,7 +350,7 @@ describe('async storage efficiency: document', () => {
       1.04s  | 📖 #1 tsdf/sess1/doc-mutation-flow/d._i.r.json
              |    └ (namespace index) | 0.07 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json
-             |    └ (payload) | 0.10 kb -> 0.10 kb
+             |    └ (entry data) | 0.10 kb -> 0.10 kb
       1.049s | ✍️ #1 tsdf/sess1/doc-mutation-flow/d._i.r.json
              |    └ (namespace index) | 0.07 kb -> 0.07 kb
       1.051s | end
@@ -403,7 +404,7 @@ describe('async storage efficiency: document', () => {
       1.85s  | 📖 #1 tsdf/sess1/doc-invalidation-flow/d._i.r.json
              |    └ (namespace index) | 0.07 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
-             |    └ (payload) | 0.10 kb -> 0.10 kb
+             |    └ (entry data) | 0.10 kb -> 0.10 kb
       1.859s | ✍️ #1 tsdf/sess1/doc-invalidation-flow/d._i.r.json
              |    └ (namespace index) | 0.07 kb -> 0.07 kb
       1.861s | end
@@ -478,7 +479,7 @@ describe('async storage efficiency: document', () => {
       1.85s  | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
              |    └ (namespace index) | 0.07 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
-             |    └ (payload) | 0.10 kb -> 0.11 kb
+             |    └ (entry data) | 0.10 kb -> 0.11 kb
       1.859s | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
              |    └ (namespace index) | 0.07 kb -> 0.07 kb
       1.861s | end
