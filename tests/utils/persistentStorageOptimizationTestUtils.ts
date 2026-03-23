@@ -2,15 +2,6 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
-import {
-  buildFileName,
-  encodePathSegment,
-  getMetadataRecordKey,
-  getPayloadRecordKey,
-  joinPath,
-  OPFS_ROOT_DIR,
-  type OpfsRecordKind,
-} from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { readMockBrowserOpfsFileForTests } from '../mocks/mockBrowserOpfs';
 import {
@@ -417,48 +408,14 @@ export function getParsedLocalStorageValue<T = unknown>(key: string): T | null {
   const value = localStorage.getItem(key);
   if (value === null) return null;
 
-  return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(value));
+  return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(value) ?? value);
 }
 
-export function getParsedJsonFileData<T = unknown>(filePath: string): T | null {
+export function getParsedOpfsFileData<T = unknown>(filePath: string): T | null {
   const raw = readMockBrowserOpfsFileForTests(filePath);
   if (raw === null) return null;
 
-  return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(raw));
-}
-
-export function getOpfsJsonFilePath(
-  scope: AsyncStorageNamespaceScope,
-  userKey: string,
-  recordKind: OpfsRecordKind,
-): string {
-  const recordKey =
-    recordKind === 'metadata'
-      ? getMetadataRecordKey(userKey)
-      : recordKind === 'payload'
-        ? getPayloadRecordKey(userKey)
-        : userKey;
-
-  return joinPath(
-    OPFS_ROOT_DIR,
-    encodePathSegment(scope.sessionKey),
-    encodePathSegment(scope.storeName),
-    buildFileName(scope, recordKey),
-  );
-}
-
-export function getParsedOpfsEntryFiles(
-  scope: AsyncStorageNamespaceScope,
-  userKey: string,
-): { metadata: unknown; payload: unknown } {
-  return {
-    metadata: getParsedJsonFileData(
-      getOpfsJsonFilePath(scope, userKey, 'metadata'),
-    ),
-    payload: getParsedJsonFileData(
-      getOpfsJsonFilePath(scope, userKey, 'payload'),
-    ),
-  };
+  return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(raw) ?? raw);
 }
 
 export function getParsedOpfsNamespaceValue<T = unknown>(

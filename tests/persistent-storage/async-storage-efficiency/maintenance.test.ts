@@ -13,8 +13,8 @@ import {
 import { createOfflineNetworkMock } from '../../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
-  getParsedJsonFileData,
   getParsedLocalStorageValue,
+  getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -599,14 +599,14 @@ describe('async storage efficiency: maintenance', () => {
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
     ).toMatchInlineSnapshot(`lca: 1736985605678`);
     expect(
-      getParsedJsonFileData('tsdf/user%40example.com/protected-doc/d.e.m.json'),
+      getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.m.json'),
     ).toMatchInlineSnapshot(`
       a: 1735689601853
       o: '✅'
       v: 1
     `);
     expect(
-      getParsedJsonFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),
+      getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),
     ).toMatchInlineSnapshot(`
       d:
         value: { name: 'protected', value: 1 }
