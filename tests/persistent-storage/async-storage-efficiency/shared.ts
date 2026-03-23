@@ -5,13 +5,12 @@ import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
-import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
-import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
-import type { BrowserTabsTransportFactory } from '../../../src/utils/browserTabsSync';
 import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
 } from '../../../src/persistentStorage/offline/sessionProtectionRegistry';
+import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
+import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../../mocks/collectionStoreTestEnv';
 import {
   createDocumentStoreTestEnv,
@@ -121,7 +120,6 @@ export async function captureHookRemount<Result>(args: {
 export type DocumentState = { name: string; value: number };
 
 export function createDocumentEnv(options: {
-  browserTabsTransportFactory?: BrowserTabsTransportFactory;
   serverData?: DocumentState;
   sessionKey?: string;
   storeName: string;
@@ -130,7 +128,6 @@ export function createDocumentEnv(options: {
   return createDocumentStoreTestEnv(
     options.serverData ?? { name: 'test', value: 42 },
     {
-      browserTabsTransportFactory: options.browserTabsTransportFactory,
       getSessionKey: () => options.sessionKey ?? 'session1',
       testScenario: options.testScenario,
       persistentStorage: {
