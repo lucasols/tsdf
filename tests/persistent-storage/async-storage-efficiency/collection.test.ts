@@ -3,7 +3,7 @@ import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
-  getParsedOpfsEntryFiles,
+  getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
@@ -11,7 +11,6 @@ import {
   createCollectionEnv,
   flushInvalidationPersistence,
   markEntryOfflineProtected,
-  readEntryMetadata,
   setProtectedKeysSnapshot,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
@@ -108,16 +107,22 @@ describe('async storage efficiency: collection', () => {
       "
     `);
     expect(
-      getParsedOpfsEntryFiles(
-        collectionScope.collection.namespace,
-        collectionScope.collection.itemKey('fresh-user'),
+      getParsedOpfsFileData(
+        'tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689600000, p: 'fresh-user', v: 1 }
-      payload:
-        d:
-          value: { id: 'fresh-user', name: 'Fresh User' }
-        p: 'fresh-user'
+      a: 1735689600000
+      p: 'fresh-user'
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/collection-expiration/ci.%22fresh-user.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d:
+        value: { id: 'fresh-user', name: 'Fresh User' }
+      p: 'fresh-user'
     `);
   });
 
@@ -367,25 +372,21 @@ describe('async storage efficiency: collection', () => {
     await advanceTime(40);
     await flushAllTimers();
 
-    expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: { o: '✅', p: '1' }
-      key: '"1'
-      lastAccessAt: 1735664400000
-      payloadRef: '__tsdf_payload__:"1'
-      version: 1
-      writtenAt: 1735664400000
+    const metadataPath =
+      'tsdf/sess1/col-direct-touch-offline-marker/ci.%221.m.json';
+    const payloadPath =
+      'tsdf/sess1/col-direct-touch-offline-marker/ci.%221.p.json';
+
+    expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
+      a: 1735664400000
+      o: '✅'
+      p: '1'
+      v: 1
     `);
-    expect(
-      getParsedOpfsEntryFiles(
-        collectionScope.collection.namespace,
-        collectionScope.collection.itemKey('1'),
-      ),
-    ).toMatchInlineSnapshot(`
-      metadata: { a: 1735664400000, o: '✅', p: '1', v: 1 }
-      payload:
-        d:
-          value: { id: '1', name: 'Cached user' }
-        p: '1'
+    expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
+      d:
+        value: { id: '1', name: 'Cached user' }
+      p: '1'
     `);
   });
 
@@ -394,7 +395,6 @@ describe('async storage efficiency: collection', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
-    const storageKey = collectionScope.collection.itemStorageKey('1');
 
     collectionScope.collection.seedItem('1', {
       value: { id: '1', name: 'Cached user' },
@@ -425,13 +425,11 @@ describe('async storage efficiency: collection', () => {
     expect(collectionScope.collection.readItemData('1')).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Edited user' }`,
     );
-    expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: { p: '1' }
-      key: '"1'
-      lastAccessAt: 1735689604050
-      payloadRef: '__tsdf_payload__:"1'
-      version: 1
-      writtenAt: 1735689604050
+    expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.%221.m.json'))
+      .toMatchInlineSnapshot(`
+      a: 1735689604050
+      p: '1'
+      v: 1
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -591,25 +589,24 @@ describe('async storage efficiency: collection', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user' }`,
     );
-    expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: { o: '✅', p: '1' }
-      key: '"1'
-      lastAccessAt: 1735689604860
-      payloadRef: '__tsdf_payload__:"1'
-      version: 1
-      writtenAt: 1735689604860
-    `);
     expect(
-      getParsedOpfsEntryFiles(
-        collectionScope.collection.namespace,
-        collectionScope.collection.itemKey('1'),
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-offline-marker-flow/ci.%221.m.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689604860, o: '✅', p: '1', v: 1 }
-      payload:
-        d:
-          value: { id: '1', name: 'Fresh user' }
-        p: '1'
+      a: 1735689604860
+      o: '✅'
+      p: '1'
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-offline-marker-flow/ci.%221.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d:
+        value: { id: '1', name: 'Fresh user' }
+      p: '1'
     `);
   });
 

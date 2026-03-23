@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
-  getParsedOpfsEntryFiles,
+  getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
@@ -12,7 +12,6 @@ import {
   createDocumentEnv,
   flushInvalidationPersistence,
   markEntryOfflineProtected,
-  readEntryMetadata,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
 } from './shared';
@@ -242,21 +241,19 @@ describe('async storage efficiency: document', () => {
     await advanceTime(40);
     await flushAllTimers();
 
-    expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: { o: '✅' }
-      key: 'document'
-      lastAccessAt: 1735689604049
-      payloadRef: '__tsdf_payload__:document'
-      version: 1
-      writtenAt: 1735689604049
+    const metadataPath =
+      'tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json';
+    const payloadPath =
+      'tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json';
+
+    expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
+      a: 1735689604049
+      o: '✅'
+      v: 1
     `);
-    expect(
-      getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
-    ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689604049, o: '✅', v: 1 }
-      payload:
-        d:
-          value: { name: 'Cached document', value: 8 }
+    expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
+      d:
+        value: { name: 'Cached document', value: 8 }
     `);
   });
 
@@ -265,7 +262,6 @@ describe('async storage efficiency: document', () => {
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
-    const storageKey = documentScope.document.storageKey();
 
     documentScope.document.seed({
       value: { name: 'Cached document', value: 8 },
@@ -294,14 +290,10 @@ describe('async storage efficiency: document', () => {
     expect(documentScope.document.readData()).toMatchInlineSnapshot(
       `value: { name: 'Edited document', value: 99 }`,
     );
-    expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: {}
-
-      key: 'document'
-      lastAccessAt: 1735689605096
-      payloadRef: '__tsdf_payload__:document'
-      version: 1
-      writtenAt: 1735689605096
+    expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.m.json'))
+      .toMatchInlineSnapshot(`
+      a: 1735689605096
+      v: 1
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -488,21 +480,18 @@ describe('async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
-      customMetadata: { o: '✅' }
-      key: 'document'
-      lastAccessAt: 1735689605906
-      payloadRef: '__tsdf_payload__:document'
-      version: 1
-      writtenAt: 1735689605906
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d.e.m.json'),
+    ).toMatchInlineSnapshot(`
+      a: 1735689605906
+      o: '✅'
+      v: 1
     `);
     expect(
-      getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
+      getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d.e.p.json'),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689605906, o: '✅', v: 1 }
-      payload:
-        d:
-          value: { name: 'Fresh document', value: 42 }
+      d:
+        value: { name: 'Fresh document', value: 42 }
     `);
   });
 

@@ -4,7 +4,7 @@ import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { resolveAfterAllTimers } from './genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from './opfsPersistentStorageTestStore';
 import {
-  getParsedOpfsEntryFiles,
+  getParsedOpfsFileData,
   getParsedOpfsNamespaceValue,
   startPersistentStorageOperationCapture,
   startOpfsPersistentStorageOperationCapture,
@@ -179,14 +179,16 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       startupCleanupLease: null,
     });
 
-    expect(
-      getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
-    ).toMatchInlineSnapshot(`
-      metadata: { a: 0, v: 1 }
-      payload:
+    expect(getParsedOpfsFileData('tsdf/sess1/docs/d.e.m.json'))
+      .toMatchInlineSnapshot(`
+        a: 0
+        v: 1
+      `);
+    expect(getParsedOpfsFileData('tsdf/sess1/docs/d.e.p.json'))
+      .toMatchInlineSnapshot(`
         d:
           value: { name: 'Cached document', value: 1 }
-    `);
+      `);
     expect(
       getParsedOpfsNamespaceValue(
         mockAdapter,

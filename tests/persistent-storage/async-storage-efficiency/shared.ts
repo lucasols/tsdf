@@ -6,10 +6,7 @@ import { afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import type { OffsetPaginationConfig } from '../../../src/listQueryStore/types';
 import { serializeProtectedRef } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { opfsPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
-import type {
-  AsyncStorageEntryMetadata,
-  PersistentStorageSchema,
-} from '../../../src/persistentStorage/types';
+import type { PersistentStorageSchema } from '../../../src/persistentStorage/types';
 import {
   clearSessionProtectedKeysSnapshot,
   setSessionProtectedKeysSnapshot,
@@ -191,23 +188,6 @@ export function createListQueryEnv(options: {
       maxQuerySize: options.maxQuerySize,
     },
   });
-}
-
-export function readEntryMetadata(
-  mockAdapter: MockOpfsAdapter,
-  key: string,
-): AsyncStorageEntryMetadata<Record<string, unknown>> | null {
-  const metadata = mockAdapter.readMetadata(key);
-  if (metadata === null) return null;
-
-  return {
-    key: metadata.key,
-    payloadRef: `__tsdf_payload__:${metadata.key}`,
-    writtenAt: metadata.writtenAt,
-    lastAccessAt: metadata.lastAccessAt,
-    version: metadata.version,
-    customMetadata: metadata.customMetadata,
-  };
 }
 
 export function updateEntryCustomMetadata(

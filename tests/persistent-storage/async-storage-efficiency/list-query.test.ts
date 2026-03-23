@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
-  getParsedOpfsEntryFiles,
+  getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
@@ -13,7 +13,6 @@ import {
   flushInvalidationPersistence,
   markEntryOfflineProtected,
   rawItemPayload,
-  readEntryMetadata,
   settleStartupBackgroundScan,
   setupAsyncStorageEfficiencyTestSuite,
   storeItemKey,
@@ -219,31 +218,39 @@ describe('async storage efficiency: list-query', () => {
       "
     `);
     expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.itemNamespace,
-        listQueryScope.listQuery.itemKey('third', 1),
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.m.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689604959, p: 'third||1', v: 1 }
-      payload:
-        d: { id: 1, name: 'Third' }
-        p: 'third||1'
+      a: 1735689604959
+      p: 'third||1'
+      v: 1
     `);
     expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.queryNamespace,
-        listQueryScope.listQuery.queryKey(thirdQuery),
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata:
-        a: 1735689604959
-        i: ['"third||1']
-        p: { tableId: 'third' }
-        v: 1
-
-      payload:
-        i: ['"third||1']
-        p: { tableId: 'third' }
+      d: { id: 1, name: 'Third' }
+      p: 'third||1'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604959
+      i: ['"third||1']
+      p: { tableId: 'third' }
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"third||1']
+      p: { tableId: 'third' }
     `);
   });
 
@@ -441,26 +448,28 @@ describe('async storage efficiency: list-query', () => {
       "
     `);
     expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.queryNamespace,
-        listQueryScope.listQuery.queryKey(usersQuery),
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.m.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata:
-        a: 1735689604851
-        i: []
-        p:
-          filters:
-            - { field: 'name', op: 'eq', value: 'Missing user' }
-          tableId: 'users'
-        v: 1
-
-      payload:
-        i: []
-        p:
-          filters:
-            - { field: 'name', op: 'eq', value: 'Missing user' }
-          tableId: 'users'
+      a: 1735689604851
+      i: []
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Missing user' }
+        tableId: 'users'
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-empty-query-manifest/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Missing%20user%22%7D%5D%2CtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: []
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Missing user' }
+        tableId: 'users'
     `);
   });
 
@@ -550,32 +559,40 @@ describe('async storage efficiency: list-query', () => {
       "
     `);
     expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.itemNamespace,
-        listQueryScope.listQuery.itemKey('users', 1),
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689604865, p: 'users||1', v: 1 }
-      payload:
-        d: { id: 1, name: 'Cached user' }
-        lf: ['age', 'email', 'id', 'name']
-        p: 'users||1'
+      a: 1735689604865
+      p: 'users||1'
+      v: 1
     `);
     expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.queryNamespace,
-        listQueryScope.listQuery.queryKey(usersQuery),
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata:
-        a: 1735689604865
-        i: []
-        p: { tableId: 'users' }
-        v: 1
-
-      payload:
-        i: []
-        p: { tableId: 'users' }
+      d: { id: 1, name: 'Cached user' }
+      lf: ['age', 'email', 'id', 'name']
+      p: 'users||1'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604865
+      i: []
+      p: { tableId: 'users' }
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: []
+      p: { tableId: 'users' }
     `);
   });
 
@@ -984,55 +1001,35 @@ describe('async storage efficiency: list-query', () => {
     await advanceTime(40);
     await flushAllTimers();
 
-    expect(readEntryMetadata(mockAdapter, itemStorageKey))
-      .toMatchInlineSnapshot(`
-        customMetadata: { o: '✅', p: 'users||1' }
-        key: '"users||1'
-        lastAccessAt: 1735664400000
-        payloadRef: '__tsdf_payload__:"users||1'
-        version: 1
-        writtenAt: 1735664400000
-      `);
-    expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.itemNamespace,
-        listQueryScope.listQuery.itemKey('users', 1),
-      ),
-    ).toMatchInlineSnapshot(`
-      metadata: { a: 1735664400000, o: '✅', p: 'users||1', v: 1 }
-      payload:
-        d: { id: 1, name: 'Cached user' }
-        p: 'users||1'
+    const itemMetadataPath =
+      'tsdf/sess1/lq-direct-touch-offline-marker/li.%22users%7C%7C1.m.json';
+    const itemPayloadPath =
+      'tsdf/sess1/lq-direct-touch-offline-marker/li.%22users%7C%7C1.p.json';
+    const queryMetadataPath =
+      'tsdf/sess1/lq-direct-touch-offline-marker/lq.%7BtableId%3A%22users%22%7D.m.json';
+    const queryPayloadPath =
+      'tsdf/sess1/lq-direct-touch-offline-marker/lq.%7BtableId%3A%22users%22%7D.p.json';
+
+    expect(getParsedOpfsFileData(itemMetadataPath)).toMatchInlineSnapshot(`
+      a: 1735664400000
+      o: '✅'
+      p: 'users||1'
+      v: 1
     `);
-    expect(readEntryMetadata(mockAdapter, queryStorageKey))
-      .toMatchInlineSnapshot(`
-        customMetadata:
-          i: ['"users||1']
-          o: '✅'
-          p: { tableId: 'users' }
-
-        key: '{tableId:"users"}'
-        lastAccessAt: 1735664400000
-        payloadRef: '__tsdf_payload__:{tableId:"users"}'
-        version: 1
-        writtenAt: 1735664400000
-      `);
-    expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.queryNamespace,
-        listQueryScope.listQuery.queryKey(usersQuery),
-      ),
-    ).toMatchInlineSnapshot(`
-      metadata:
-        a: 1735664400000
-        i: ['"users||1']
-        o: '✅'
-        p: { tableId: 'users' }
-        v: 1
-
-      payload:
-        i: ['"users||1']
-        p: { tableId: 'users' }
+    expect(getParsedOpfsFileData(itemPayloadPath)).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Cached user' }
+      p: 'users||1'
+    `);
+    expect(getParsedOpfsFileData(queryMetadataPath)).toMatchInlineSnapshot(`
+      a: 1735664400000
+      i: ['"users||1']
+      o: '✅'
+      p: { tableId: 'users' }
+      v: 1
+    `);
+    expect(getParsedOpfsFileData(queryPayloadPath)).toMatchInlineSnapshot(`
+      i: ['"users||1']
+      p: { tableId: 'users' }
     `);
   });
 
@@ -1259,56 +1256,43 @@ describe('async storage efficiency: list-query', () => {
       - { id: 1, name: 'Fresh user' }
       - { id: 2, name: 'Second user' }
     `);
-    expect(readEntryMetadata(mockAdapter, itemStorageKey))
-      .toMatchInlineSnapshot(`
-        customMetadata: { o: '✅', p: 'users||1' }
-        key: '"users||1'
-        lastAccessAt: 1735689604865
-        payloadRef: '__tsdf_payload__:"users||1'
-        version: 1
-        writtenAt: 1735689604865
-      `);
     expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.itemNamespace,
-        listQueryScope.listQuery.itemKey('users', 1),
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-offline-marker-flow/li.%22users%7C%7C1.m.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689604865, o: '✅', p: 'users||1', v: 1 }
-      payload:
-        d: { id: 1, name: 'Fresh user' }
-        lf: ['age', 'email', 'id', 'name']
-        p: 'users||1'
+      a: 1735689604865
+      o: '✅'
+      p: 'users||1'
+      v: 1
     `);
-    expect(readEntryMetadata(mockAdapter, queryStorageKey))
-      .toMatchInlineSnapshot(`
-        customMetadata:
-          i: ['"users||1', '"users||2']
-          o: '✅'
-          p: { tableId: 'users' }
-
-        key: '{tableId:"users"}'
-        lastAccessAt: 1735689604865
-        payloadRef: '__tsdf_payload__:{tableId:"users"}'
-        version: 1
-        writtenAt: 1735689604865
-      `);
     expect(
-      getParsedOpfsEntryFiles(
-        listQueryScope.listQuery.queryNamespace,
-        listQueryScope.listQuery.queryKey(usersQuery),
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-offline-marker-flow/li.%22users%7C%7C1.p.json',
       ),
     ).toMatchInlineSnapshot(`
-      metadata:
-        a: 1735689604865
-        i: ['"users||1', '"users||2']
-        o: '✅'
-        p: { tableId: 'users' }
-        v: 1
-
-      payload:
-        i: ['"users||1', '"users||2']
-        p: { tableId: 'users' }
+      d: { id: 1, name: 'Fresh user' }
+      lf: ['age', 'email', 'id', 'name']
+      p: 'users||1'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-offline-marker-flow/lq.%7BtableId%3A%22users%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604865
+      i: ['"users||1', '"users||2']
+      o: '✅'
+      p: { tableId: 'users' }
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-offline-marker-flow/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"users||1', '"users||2']
+      p: { tableId: 'users' }
     `);
   });
 
@@ -1814,15 +1798,15 @@ describe('async storage efficiency: list-query', () => {
         id: 1
         name: 'Edited user'
       `);
-    expect(readEntryMetadata(mockAdapter, itemStorageKey))
-      .toMatchInlineSnapshot(`
-        customMetadata: { p: 'users||1' }
-        key: '"users||1'
-        lastAccessAt: 1735689604055
-        payloadRef: '__tsdf_payload__:"users||1'
-        version: 1
-        writtenAt: 1735689604055
-      `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604055
+      p: 'users||1'
+      v: 1
+    `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
