@@ -57,36 +57,37 @@ describe('async storage efficiency: document', () => {
             disableRefetchOnMount: true,
             returnRefetchingStatus: true,
           }),
-        sessionKey,
-        storeName,
       });
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Cached document', value: 7 }`,
     );
-    expect(firstMountOperations).toMatchInlineSnapshot(`
+    expect(
+      firstMountOperations.replaceAll('(tsdf.sess1.doc-remount-flow ', '('),
+    ).toMatchInlineSnapshot(`
       "
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
       2ms  | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.p.json
-           |    └ (tsdf.sess1.doc-remount-flow (payload))
+           |    └ (payload)
       .    | 📄 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.m.json
-           |    └ (tsdf.sess1.doc-remount-flow (metadata))
+           |    └ (metadata)
       4ms  | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
-           |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+           |    └ (payload) | 0.10 kb
       .    | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.05 kb
+           |    └ (metadata) | 0.05 kb
       6ms  | end
       "
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`
+    expect(remountOperations.replaceAll('(tsdf.sess1.doc-remount-flow ', '('))
+      .toMatchInlineSnapshot(`
       "
       time |
       1ms  | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
-           |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
+           |    └ (payload) | 0.10 kb
       .    | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.05 kb
+           |    └ (metadata) | 0.05 kb
       3ms  | end
       "
     `);

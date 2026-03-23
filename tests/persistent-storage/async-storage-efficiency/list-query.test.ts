@@ -1457,8 +1457,6 @@ describe('async storage efficiency: list-query', () => {
             disableRefetchOnMount: true,
             returnRefetchingStatus: true,
           }),
-        sessionKey,
-        storeName,
       });
 
     expect(secondHook.result.current.items).toMatchInlineSnapshot(
@@ -1599,8 +1597,6 @@ describe('async storage efficiency: list-query', () => {
             disableRefetchOnMount: true,
             returnRefetchingStatus: true,
           }),
-        sessionKey,
-        storeName,
       });
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(`
@@ -1660,8 +1656,6 @@ describe('async storage efficiency: list-query', () => {
             ],
             { disableRefetchOnMount: true, returnRefetchingStatus: true },
           ),
-        sessionKey,
-        storeName,
       });
 
     expect(secondHook.result.current.map((item) => item.data))
@@ -1733,8 +1727,6 @@ describe('async storage efficiency: list-query', () => {
             [{ payload: usersQuery }, { payload: projectsQuery }],
             { disableRefetchOnMount: true, returnRefetchingStatus: true },
           ),
-        sessionKey,
-        storeName,
       });
 
     expect(

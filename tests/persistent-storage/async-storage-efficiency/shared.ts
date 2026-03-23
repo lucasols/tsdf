@@ -96,13 +96,10 @@ export async function flushInvalidationPersistence(
 export async function captureHookRemount<Result>(args: {
   mockAdapter: MockOpfsAdapter;
   render: () => Result;
-  sessionKey: string;
   settleTimeMs?: number;
-  storeName: string;
 }) {
   const firstMountCapture = startOpfsPersistentStorageOperationCapture(
     args.mockAdapter,
-    { sessionKey: args.sessionKey, storeName: args.storeName },
   );
   const firstHook = renderHook(args.render);
   await advanceTime(args.settleTimeMs ?? 250);
@@ -112,7 +109,6 @@ export async function captureHookRemount<Result>(args: {
 
   const remountCapture = startOpfsPersistentStorageOperationCapture(
     args.mockAdapter,
-    { sessionKey: args.sessionKey, storeName: args.storeName },
   );
   const secondHook = renderHook(args.render);
   await advanceTime(args.settleTimeMs ?? 250);

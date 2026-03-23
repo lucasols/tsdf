@@ -772,8 +772,6 @@ describe('async storage efficiency: collection', () => {
             disableRefetchOnMount: true,
             returnRefetchingStatus: true,
           }),
-        sessionKey,
-        storeName,
       });
 
     expect(secondHook.result.current.data).toMatchInlineSnapshot(
@@ -827,8 +825,6 @@ describe('async storage efficiency: collection', () => {
             disableRefetchOnMount: true,
             returnRefetchingStatus: true,
           }),
-        sessionKey,
-        storeName,
       });
 
     expect(secondHook.result.current.map((item) => item.data?.value))
