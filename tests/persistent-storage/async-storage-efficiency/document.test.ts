@@ -37,10 +37,8 @@ describe('async storage efficiency: document', () => {
     });
 
     // Store creation should only queue the startup maintenance pass.
-    const startupCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const startupCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     const env = createDocumentEnv({ storeName, sessionKey });
     const startupOperations = startupCapture.finish().timelineString;
 
@@ -195,10 +193,7 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
     hook.unmount();
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
     // Repeated direct reads with small gaps should stay fully in memory.
     expect(env.apiStore.store.state.data).toMatchInlineSnapshot(
@@ -299,10 +294,8 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
 
     // Mutating the already-hydrated document should only need writes.
-    const mutationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const mutationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.apiStore.updateState((draft) => {
         draft.value = { name: 'Edited document', value: 99 };
@@ -357,10 +350,8 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
 
     // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const invalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document', value: 42 });
       env.apiStore.invalidateData('highPriority');
@@ -413,10 +404,8 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const firstInvalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document 1', value: 41 });
       env.apiStore.invalidateData('highPriority');
@@ -432,10 +421,7 @@ describe('async storage efficiency: document', () => {
 
     // A second invalidation before the first debounce flush should replace the pending save.
     const secondInvalidationCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter, {
-        storeName,
-        sessionKey,
-      });
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.setServerData({ name: 'Fresh document 2', value: 42 });
       env.apiStore.invalidateData('highPriority');
@@ -627,10 +613,7 @@ describe('async storage efficiency: document', () => {
 
     await advanceTime(6 * 60 * 60 * 1000);
 
-    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter, {
-      storeName,
-      sessionKey,
-    });
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     const entry = await resolveAfterAllTimers(
       namespace.get('document', { touch: 'coarse' }),
     );
@@ -667,10 +650,7 @@ describe('async storage efficiency: document', () => {
     const env = createDocumentEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
     await resolveAfterAllTimers(preloadPromise);

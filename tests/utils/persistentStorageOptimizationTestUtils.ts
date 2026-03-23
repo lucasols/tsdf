@@ -428,18 +428,6 @@ export function getParsedOpfsNamespaceValue<T = unknown>(
   );
 }
 
-function stripScopePrefix(
-  storeName: string,
-  sessionKey: string,
-  key: string,
-): string {
-  const documentKey = `tsdf.${sessionKey}.${storeName}`;
-  if (key === documentKey) return storeName;
-
-  const prefix = `${documentKey}.`;
-  return key.startsWith(prefix) ? key.slice(prefix.length) : key;
-}
-
 type TimelineLabel = { endTime: number; label: string; time: number };
 
 function sortTimedLabels(
@@ -529,14 +517,6 @@ function formatOpfsOperationPath(
   return pathId === undefined ? normalizedPath : `#${pathId} ${normalizedPath}`;
 }
 
-function formatOpfsPath(scope: {
-  sessionKey: string;
-  storeName: string;
-  kind: string;
-}): string {
-  return `${scope.sessionKey}/${scope.storeName}/${scope.kind}`;
-}
-
 function stripOpfsRootPrefix(path: string): string {
   return path.replace(LEADING_SLASHES_REGEX, '');
 }
@@ -586,26 +566,6 @@ function isPlainDocumentLogicalKey(
     scope.kind === 'document' &&
     logicalKey === `tsdf.${scope.sessionKey}.${scope.storeName}`
   );
-}
-
-export type PersistentStorageReadBreakdown = {
-  metadataReads: string[];
-  scopedPayloadReads: string[];
-  externalPayloadReads: string[];
-  payloadBatchReads: string[][];
-  metadataBatchReads: string[][];
-  listKeyScans: string[];
-};
-
-function createEmptyPersistentStorageReadBreakdown(): PersistentStorageReadBreakdown {
-  return {
-    metadataReads: [],
-    scopedPayloadReads: [],
-    externalPayloadReads: [],
-    payloadBatchReads: [],
-    metadataBatchReads: [],
-    listKeyScans: [],
-  };
 }
 
 function formatRecordLabel(
@@ -761,132 +721,15 @@ function buildOpfsOperationCaptureResult(
   return { operations, timelineString };
 }
 
-type OpfsCaptureArgs = { storeName: string; sessionKey: string };
-
-function buildScopedOpfsReadBreakdown(
-  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
-  args: OpfsCaptureArgs,
-): PersistentStorageReadBreakdown {
-  const scopedPrefix = `tsdf.${args.sessionKey}.${args.storeName}.`;
-  const protectedRegistryKey = `tsdf.${args.sessionKey}._o_.p`;
-
-  function formatPayloadKey(key: string): {
-    scope: 'scoped' | 'external';
-    value: string;
-  } {
-    if (key === protectedRegistryKey) {
-      return {
-        scope: 'external',
-        value: `${key} (protected registry payload)`,
-      };
-    }
-
-    if (key === `tsdf.${args.sessionKey}.${args.storeName}`) {
-      return { scope: 'scoped', value: 'document payload' };
-    }
-
-    if (key.startsWith(scopedPrefix)) {
-      return {
-        scope: 'scoped',
-        value: `${stripScopePrefix(args.storeName, args.sessionKey, key)} (payload)`,
-      };
-    }
-
-    return { scope: 'external', value: `${key} (payload)` };
-  }
-
-  function formatMetadataLogicalKey(key: string): string {
-    if (key === protectedRegistryKey) {
-      return `${key} (protected registry metadata)`;
-    }
-
-    if (key === `tsdf.${args.sessionKey}.${args.storeName}`) {
-      return 'document metadata';
-    }
-
-    if (key.startsWith(scopedPrefix)) {
-      return `${stripScopePrefix(args.storeName, args.sessionKey, key)} (metadata)`;
-    }
-
-    return `${key} (metadata)`;
-  }
-
-  const payloadReads = mockAdapter.payloadGetRequests.map(formatPayloadKey);
-  const metadataReads = mockAdapter.operations.flatMap((operation) =>
-    operation.type === 'readFile' &&
-    'record' in operation &&
-    operation.record.recordKind === 'metadata' &&
-    operation.record.logicalKey !== null
-      ? [formatMetadataLogicalKey(operation.record.logicalKey)]
-      : [],
-  );
-  const metadataBatchReads: string[][] = [];
-  let currentMetadataBatch: string[] = [];
-
-  for (const operation of mockAdapter.operations) {
-    if (
-      operation.type === 'readFile' &&
-      'record' in operation &&
-      operation.record.recordKind === 'metadata' &&
-      operation.record.logicalKey !== null
-    ) {
-      currentMetadataBatch.push(
-        formatMetadataLogicalKey(operation.record.logicalKey),
-      );
-      continue;
-    }
-
-    if (currentMetadataBatch.length > 0) {
-      metadataBatchReads.push(currentMetadataBatch);
-      currentMetadataBatch = [];
-    }
-  }
-
-  if (currentMetadataBatch.length > 0) {
-    metadataBatchReads.push(currentMetadataBatch);
-  }
-
-  return {
-    metadataReads,
-    scopedPayloadReads: payloadReads
-      .filter((entry) => entry.scope === 'scoped')
-      .map((entry) => entry.value),
-    externalPayloadReads: payloadReads
-      .filter((entry) => entry.scope === 'external')
-      .map((entry) => entry.value),
-    payloadBatchReads: mockAdapter.payloadGetManyRequests.map((keys) =>
-      keys.map((key) => formatPayloadKey(key).value),
-    ),
-    metadataBatchReads,
-    listKeyScans: mockAdapter.listKeysRequests.map((scope) =>
-      formatOpfsPath(scope),
-    ),
-  };
-}
-
-export type PersistentStorageOperationSummary =
-  OpfsPersistentStorageOperationCaptureResult & {
-    breakdown: PersistentStorageReadBreakdown;
-  };
-
 export function startOpfsPersistentStorageOperationCapture(
   mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
-  args?: OpfsCaptureArgs,
-): { finish: () => PersistentStorageOperationSummary } {
+): { finish: () => OpfsPersistentStorageOperationCaptureResult } {
   mockAdapter.clearInstrumentation();
   const captureStartedAt = mockAdapter.mockBrowserOpfs.getElapsedTime();
 
   return {
     finish() {
-      const summary: PersistentStorageOperationSummary = {
-        ...buildOpfsOperationCaptureResult(mockAdapter, captureStartedAt),
-        breakdown:
-          args === undefined
-            ? createEmptyPersistentStorageReadBreakdown()
-            : buildScopedOpfsReadBreakdown(mockAdapter, args),
-      };
-
-      return summary;
+      return buildOpfsOperationCaptureResult(mockAdapter, captureStartedAt);
     },
   };
 }

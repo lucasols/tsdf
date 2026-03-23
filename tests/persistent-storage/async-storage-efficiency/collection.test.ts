@@ -47,10 +47,8 @@ describe('async storage efficiency: collection', () => {
       value: { id: 'fresh-user', name: 'Fresh User' },
     });
     // Startup should only queue the background scan.
-    const startupOperationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const startupOperationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     createCollectionEnv({ storeName, sessionKey });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
@@ -58,10 +56,7 @@ describe('async storage efficiency: collection', () => {
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     // Once the scan runs, capture the full metadata cleanup history.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
@@ -142,10 +137,8 @@ describe('async storage efficiency: collection', () => {
     });
 
     // Startup should only queue the background scan.
-    const startupOperationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const startupOperationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
@@ -156,10 +149,7 @@ describe('async storage efficiency: collection', () => {
     await settleStartupBackgroundScan(mockAdapter);
 
     // Adding a third item should capture the write path plus the cleanup sequence.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Fresh' } });
     await advanceTime(1100);
     await flushAllTimers();
@@ -230,10 +220,7 @@ describe('async storage efficiency: collection', () => {
     // Drain the startup maintenance so the capture only covers the coalesced overflow path.
     await settleStartupBackgroundScan(mockAdapter);
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
     // First overflow schedules maintenance, but does not run it yet.
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Third' } });
@@ -323,10 +310,7 @@ describe('async storage efficiency: collection', () => {
     await settleStartupBackgroundScan(mockAdapter);
 
     // Repeated direct reads with short gaps should hydrate once, then reuse in-memory state.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `undefined`,
     );
@@ -412,10 +396,8 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence(0);
 
     // Mutating the already-hydrated item should only need writes.
-    const mutationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const mutationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.apiStore.updateItemState('1', (draft) => {
         draft.value.name = 'Edited user';
@@ -465,10 +447,8 @@ describe('async storage efficiency: collection', () => {
     await flushAllTimers();
 
     // The delete capture should only include the debounced storage cleanup path.
-    const deleteCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const deleteCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.deleteItemState('1');
     await advanceTime(1100);
     await flushAllTimers();
@@ -518,10 +498,8 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence(0);
 
     // Update the server copy, invalidate the mounted hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const invalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user' });
       env.apiStore.invalidateItem('1');
@@ -640,10 +618,8 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const firstInvalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 1' });
       env.apiStore.invalidateItem('1');
@@ -659,10 +635,7 @@ describe('async storage efficiency: collection', () => {
 
     // A second invalidation before the first debounce flush should replace the pending save.
     const secondInvalidationCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter, {
-        storeName,
-        sessionKey,
-      });
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.setItem('1', { id: '1', name: 'Fresh user 2' });
       env.apiStore.invalidateItem('1');
@@ -935,10 +908,8 @@ describe('async storage efficiency: collection', () => {
     hook.unmount();
 
     // Direct imperative reads should now hit the materialized store state only.
-    const getItemStateCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const getItemStateCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Cached user' }`,
     );
@@ -977,10 +948,7 @@ describe('async storage efficiency: collection', () => {
     const env = createCollectionEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
     const preloadPromise = env.apiStore.preloadItemFromStorage(hotPayload);
     await resolveAfterAllTimers(preloadPromise);

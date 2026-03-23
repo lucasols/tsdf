@@ -56,10 +56,8 @@ describe('async storage efficiency: list-query', () => {
       storeItemKey('fresh-users', 2),
     ]);
     // Startup should only queue the background scan.
-    const startupOperationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const startupOperationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     createListQueryEnv({ storeName, sessionKey });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
@@ -67,10 +65,7 @@ describe('async storage efficiency: list-query', () => {
     expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
 
     // Once the scan runs, capture the complete query and item cleanup sequence.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
@@ -147,10 +142,7 @@ describe('async storage efficiency: list-query', () => {
     await settleStartupBackgroundScan(mockAdapter);
 
     // Fetching a third query should show the write path plus the query eviction path.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.scheduleFetch('highPriority', thirdQuery);
     await flushAllTimers();
     await advanceTime(1100);
@@ -281,10 +273,7 @@ describe('async storage efficiency: list-query', () => {
     // Drain the startup maintenance so the capture only covers coalesced query eviction.
     await settleStartupBackgroundScan(mockAdapter);
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
     // The third query persists and schedules maintenance.
     env.scheduleFetch('highPriority', thirdQuery);
@@ -412,10 +401,7 @@ describe('async storage efficiency: list-query', () => {
 
     await settleStartupBackgroundScan(mockAdapter);
 
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.scheduleFetch('highPriority', usersQuery);
     await flushAllTimers();
     await advanceTime(1100);
@@ -510,10 +496,8 @@ describe('async storage efficiency: list-query', () => {
     env.serverTable.removeItem('users||1');
 
     // Invalidate the mounted query, then capture the persistence operations.
-    const invalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const invalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.apiStore.invalidateQueryAndItems({
         queryPayload: usersQuery,
@@ -625,10 +609,7 @@ describe('async storage efficiency: list-query', () => {
     await settleStartupBackgroundScan(mockAdapter);
 
     // Adding a third item should snapshot the write plus eviction sequence end-to-end.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.addItemToState(rawItemPayload('users', 3), {
       id: 3,
       name: 'Fresh',
@@ -738,10 +719,8 @@ describe('async storage efficiency: list-query', () => {
     createListQueryEnv({ storeName, sessionKey, maxItems: 3 });
 
     // Let the startup-scheduled maintenance enforce maxItems against the preloaded cache.
-    const cleanupCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const cleanupCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     await waitForScheduledCleanup();
     const cleanupOperations = cleanupCapture.finish().timelineString;
 
@@ -847,10 +826,8 @@ describe('async storage efficiency: list-query', () => {
     await flushAllTimers();
 
     // Capture the explicit delete path after the initial query+item persistence has settled.
-    const deleteCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const deleteCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.deleteItemState('users||1');
     await advanceTime(1100);
     await flushAllTimers();
@@ -933,10 +910,7 @@ describe('async storage efficiency: list-query', () => {
     await settleStartupBackgroundScan(mockAdapter);
 
     // Repeated direct reads with short gaps should hydrate once, then reuse in-memory query and item state.
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(
       `undefined`,
     );
@@ -1066,10 +1040,8 @@ describe('async storage efficiency: list-query', () => {
     await flushInvalidationPersistence(0);
 
     // Update the server copy, invalidate the mounted query, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const invalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
       env.apiStore.invalidateQueryAndItems({
@@ -1141,10 +1113,8 @@ describe('async storage efficiency: list-query', () => {
     await flushInvalidationPersistence(0);
 
     // Let the first refetch finish, but stay inside the debounced persistence window.
-    const firstInvalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const firstInvalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 1' });
       env.apiStore.invalidateQueryAndItems({
@@ -1163,10 +1133,7 @@ describe('async storage efficiency: list-query', () => {
 
     // A second invalidation before the first debounce flush should replace the pending save.
     const secondInvalidationCapture =
-      startOpfsPersistentStorageOperationCapture(mockAdapter, {
-        storeName,
-        sessionKey,
-      });
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user 2' });
       env.apiStore.invalidateQueryAndItems({
@@ -1511,10 +1478,8 @@ describe('async storage efficiency: list-query', () => {
     await flushInvalidationPersistence(0);
 
     // Update the server copy, invalidate the mounted item hook, then capture fetch completion plus the debounced save.
-    const invalidationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const invalidationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.serverTable.updateItem('users||1', { name: 'Fresh user' });
       env.apiStore.invalidateItem(itemPayload);
@@ -1782,10 +1747,8 @@ describe('async storage efficiency: list-query', () => {
     await flushAllTimers();
 
     // Mutating the already-hydrated item should only need writes.
-    const mutationCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const mutationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     act(() => {
       env.apiStore.updateItemState(rawItemPayload('users', 1), (draft) => {
         draft.name = 'Edited user';
@@ -1860,10 +1823,7 @@ describe('async storage efficiency: list-query', () => {
     const env = createListQueryEnv({ storeName, sessionKey });
 
     await settleStartupBackgroundScan(mockAdapter);
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
     await resolveAfterAllTimers(preloadPromise);
@@ -1933,10 +1893,7 @@ describe('async storage efficiency: list-query', () => {
     await flushAllTimers();
     await advanceTime(1100);
     await flushAllTimers();
-    const readCapture = startOpfsPersistentStorageOperationCapture(
-      mockAdapter,
-      { storeName, sessionKey },
-    );
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
     env.scheduleFetch('highPriority', tasksQuery);
     await flushAllTimers();
