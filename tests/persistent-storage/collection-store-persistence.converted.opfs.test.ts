@@ -245,7 +245,8 @@ describe('opfs: converted collection store persistence', () => {
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('1');
     await resolveAfterAllTimers(preloadPromise);
-    await advanceTime(2100);
+    await advanceTime(4300);
+    await flushAllTimers();
 
     expect(mockAdapter.has(persistedCollection.itemStorageKey('1'))).toBe(
       false,

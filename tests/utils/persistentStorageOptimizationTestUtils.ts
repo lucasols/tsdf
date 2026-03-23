@@ -3,6 +3,7 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
 import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   decodePathSegment,
   OPFS_ROOT_DIR,
   parseRecordKey,
@@ -781,6 +782,8 @@ function describeOpfsDirectoryPath(path: string): string {
 
 function describeOpfsInternalRecord(key: string): string {
   switch (key) {
+    case ASYNC_NAMESPACE_INDEX_RECORD_KEY:
+      return 'namespace index';
     case 'maintenance':
       return 'global maintenance';
     case 'registry':
@@ -932,7 +935,7 @@ function formatOpfsOperationLabel(
       );
     case 'deleteDir':
       return formatWrappedOpfsOperationLabel(
-        `🧹 del-dir ${operation.deleted ? '✅' : '❌'}`,
+        `🧹 del-dir${operation.recursive ? ' recursive' : ''} ${operation.deleted ? '✅' : '❌'}`,
         formatOpfsOperationPath(operation.path),
         `(${describeOpfsDirectoryPath(operation.path)})`,
       );

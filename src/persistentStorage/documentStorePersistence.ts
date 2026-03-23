@@ -212,7 +212,7 @@ export function setupDocumentPersistence<
 
         const validated = parsePersistedStoreData(cached.data, dataSchema);
         if (validated === null) {
-          scheduleIdleCleanup(() => void handle.clear());
+          void handle.clear().catch(() => {});
           return;
         }
 

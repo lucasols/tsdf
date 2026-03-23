@@ -2,10 +2,10 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getMetadataRecordKey,
   getPayloadRecordKey,
   joinPath,
   METADATA_RECORD_PREFIX,
@@ -159,7 +159,6 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
 
 type LogicalRecordLocation = {
   key: string;
-  metadataRecordKey: string;
   payloadRecordKey: string;
   scope: AsyncStorageNamespaceScope;
 };
@@ -172,7 +171,6 @@ function getLogicalRecordLocation(key: string): LogicalRecordLocation | null {
     key: parsed.key,
     scope: parsed.scope,
     payloadRecordKey: getPayloadRecordKey(parsed.key),
-    metadataRecordKey: getMetadataRecordKey(parsed.key),
   };
 }
 
@@ -211,6 +209,11 @@ function buildCustomMetadata(
   }
 }
 
+type RawManagedMetadataRecord = { a: number; v?: number } & Record<
+  string,
+  unknown
+>;
+
 type ManagedMetadataRecord = {
   customMetadata: Record<string, unknown>;
   key: string;
@@ -218,11 +221,6 @@ type ManagedMetadataRecord = {
   version: number;
   writtenAt: number;
 };
-
-type RawManagedMetadataRecord = { a: number; v?: number } & Record<
-  string,
-  unknown
->;
 
 function serializeManagedMetadataRecord(
   metadata: ManagedMetadataRecord,
@@ -237,20 +235,6 @@ function serializeManagedMetadataRecord(
     a: metadata.lastAccessAt,
     ...(metadata.version !== 1 ? { v: metadata.version } : {}),
     ...metadata.customMetadata,
-  };
-}
-
-function createManagedMetadataRecord(
-  scope: AsyncStorageNamespaceScope,
-  key: string,
-  entry: StorageCacheEntry<unknown>,
-): RawManagedMetadataRecord {
-  return {
-    a: entry.timestamp,
-    ...(entry.version !== undefined && entry.version !== 1
-      ? { v: entry.version }
-      : {}),
-    ...buildCustomMetadata(scope, entry.data),
   };
 }
 
@@ -279,6 +263,38 @@ function parseManagedMetadataRecord(
     lastAccessAt: record.a,
     version: typeof record.v === 'number' ? record.v : 1,
     customMetadata,
+  };
+}
+
+function parseManagedIndexRecord(
+  value: unknown,
+): Map<string, ManagedMetadataRecord> | null {
+  const record = getRecord(value);
+  const rawEntries = getRecord(record?.e);
+  if (rawEntries === null) return null;
+
+  const entries = new Map<string, ManagedMetadataRecord>();
+  for (const [key, rawEntry] of Object.entries(rawEntries)) {
+    const parsed = parseManagedMetadataRecord(rawEntry, key);
+    if (parsed === null) return null;
+    entries.set(key, parsed);
+  }
+
+  return entries;
+}
+
+type RawManagedIndexRecord = { e: Record<string, RawManagedMetadataRecord> };
+
+function serializeManagedIndexRecord(
+  entries: ReadonlyMap<string, ManagedMetadataRecord>,
+): RawManagedIndexRecord {
+  return {
+    e: Object.fromEntries(
+      [...entries.entries()].map(([key, metadata]) => [
+        key,
+        serializeManagedMetadataRecord(metadata),
+      ]),
+    ),
   };
 }
 
@@ -384,6 +400,42 @@ function removeRawRecord(
   mockBrowserOpfs.removeFile(filePathForRecord(scope, key));
 }
 
+function readNamespaceIndex(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+  scope: AsyncStorageNamespaceScope,
+): Map<string, ManagedMetadataRecord> {
+  const raw = readRawRecord(
+    mockBrowserOpfs,
+    scope,
+    ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  );
+  if (raw === null) return new Map<string, ManagedMetadataRecord>();
+
+  return (
+    __LEGIT_CAST__<Map<string, ManagedMetadataRecord> | null, unknown>(
+      parseManagedIndexRecord(safeJsonParse(raw)),
+    ) ?? new Map<string, ManagedMetadataRecord>()
+  );
+}
+
+function writeNamespaceIndex(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+  scope: AsyncStorageNamespaceScope,
+  entries: ReadonlyMap<string, ManagedMetadataRecord>,
+): void {
+  if (entries.size === 0) {
+    removeRawRecord(mockBrowserOpfs, scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+    return;
+  }
+
+  writeRawRecord(
+    mockBrowserOpfs,
+    scope,
+    ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+    JSON.stringify(serializeManagedIndexRecord(entries)),
+  );
+}
+
 function listRawKeys(
   mockBrowserOpfs: MockBrowserOpfsEnvironment,
   scope: AsyncStorageNamespaceScope,
@@ -415,14 +467,15 @@ function writeLogicalStorageEntry(
     getPayloadRecordKey(parsed.key),
     JSON.stringify(entry.data),
   );
-  writeRawRecord(
-    mockBrowserOpfs,
-    parsed.scope,
-    getMetadataRecordKey(parsed.key),
-    JSON.stringify(
-      createManagedMetadataRecord(parsed.scope, parsed.key, entry),
-    ),
-  );
+  const nextEntries = readNamespaceIndex(mockBrowserOpfs, parsed.scope);
+  nextEntries.set(parsed.key, {
+    key: parsed.key,
+    writtenAt: entry.timestamp,
+    lastAccessAt: entry.timestamp,
+    version: entry.version ?? 1,
+    customMetadata: buildCustomMetadata(parsed.scope, entry.data),
+  });
+  writeNamespaceIndex(mockBrowserOpfs, parsed.scope, nextEntries);
 }
 
 function readLogicalStorageEntry<T>(
@@ -437,21 +490,13 @@ function readLogicalStorageEntry<T>(
     parsed.scope,
     getPayloadRecordKey(parsed.key),
   );
-  const metadataRaw = readRawRecord(
-    mockBrowserOpfs,
-    parsed.scope,
-    getMetadataRecordKey(parsed.key),
-  );
-  if (payloadRaw === null || metadataRaw === null) return null;
-
-  const payload = safeJsonParse(payloadRaw);
-  const metadata = parseManagedMetadataRecord(
-    safeJsonParse(metadataRaw),
+  const metadata = readNamespaceIndex(mockBrowserOpfs, parsed.scope).get(
     parsed.key,
   );
-  if (payload === null || metadata === null) {
-    return null;
-  }
+  if (payloadRaw === null || metadata === undefined) return null;
+
+  const payload = safeJsonParse(payloadRaw);
+  if (payload === null) return null;
 
   return {
     data: __LEGIT_CAST__<T, unknown>(
@@ -472,11 +517,11 @@ function readLogicalMetadata(
   const raw = readRawRecord(
     mockBrowserOpfs,
     location.scope,
-    location.metadataRecordKey,
+    ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   );
   if (raw === null) return null;
 
-  return parseManagedMetadataRecord(safeJsonParse(raw), location.key);
+  return parseManagedIndexRecord(safeJsonParse(raw))?.get(location.key) ?? null;
 }
 
 function setPayloadValue(
@@ -502,15 +547,22 @@ function setMetadataValue(
 ): void {
   const location = getLogicalRecordLocation(key);
   if (location === null) return;
+  const nextEntries = readNamespaceIndex(mockBrowserOpfs, location.scope);
+  if (typeof value === 'string') {
+    writeRawRecord(
+      mockBrowserOpfs,
+      location.scope,
+      ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+      value,
+    );
+    return;
+  }
 
-  writeRawRecord(
-    mockBrowserOpfs,
-    location.scope,
-    location.metadataRecordKey,
-    typeof value === 'string'
-      ? value
-      : JSON.stringify(normalizeMetadataValue(location.key, value)),
-  );
+  const normalized = normalizeMetadataValue(location.key, value);
+  const parsed = parseManagedMetadataRecord(normalized, location.key);
+  if (parsed === null) return;
+  nextEntries.set(location.key, parsed);
+  writeNamespaceIndex(mockBrowserOpfs, location.scope, nextEntries);
 }
 
 function removePayloadValue(
@@ -528,7 +580,9 @@ function removeMetadataValue(
 ): void {
   const location = getLogicalRecordLocation(key);
   if (location === null) return;
-  removeRawRecord(mockBrowserOpfs, location.scope, location.metadataRecordKey);
+  const nextEntries = readNamespaceIndex(mockBrowserOpfs, location.scope);
+  nextEntries.delete(location.key);
+  writeNamespaceIndex(mockBrowserOpfs, location.scope, nextEntries);
 }
 
 function parseStoreFromDirPath(
@@ -587,6 +641,14 @@ function getInstrumentedRecord(
       key,
       logicalKey: getLogicalStorageKey(scope, userKey),
       recordKind: 'metadata',
+    };
+  }
+
+  if (key === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+    return {
+      key,
+      logicalKey: `tsdf.${scope.sessionKey}.${scope.storeName}.${scope.kind}.index`,
+      recordKind: 'internal',
     };
   }
 
@@ -683,6 +745,7 @@ export type MockOpfsOperation =
   | (MockOpfsBaseOperation & {
       deleted: boolean;
       exists: boolean;
+      recursive: boolean;
       scope: AsyncStorageNamespaceScope | null;
       type: 'deleteDir';
     });
@@ -1011,9 +1074,9 @@ export function createOpfsPersistentStorageTestStore(
     function listStoredKeysForNamespace(
       namespace: AsyncStorageNamespaceScope,
     ): string[] {
-      return listRawKeys(mockBrowserOpfs, namespace)
-        .filter((key) => key.startsWith(METADATA_RECORD_PREFIX))
-        .map((key) => key.slice(METADATA_RECORD_PREFIX.length));
+      return [...readNamespaceIndex(mockBrowserOpfs, namespace).keys()].sort(
+        (left, right) => left.localeCompare(right),
+      );
     }
 
     return {

@@ -1,9 +1,14 @@
 import type { AsyncStorageNamespaceScope } from './types';
 
 export const OPFS_ROOT_DIR = 'tsdf';
+
+export function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
+  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
+}
 export const JSON_FILE_EXTENSION = '.json';
 export const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
 export const METADATA_RECORD_PREFIX = '__tsdf_meta__:';
+export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
 
 const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
 

@@ -3,9 +3,11 @@ import { sleep } from '@ls-stack/utils/sleep';
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import {
-  getMetadataRecordKey,
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getNamespaceId,
   getPayloadRecordKey,
   METADATA_RECORD_PREFIX,
+  PAYLOAD_RECORD_PREFIX,
 } from './opfsFileNaming';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
@@ -35,18 +37,8 @@ const ASYNC_STARTUP_CLEANUP_LOCK_NAME = 'tsdf-async-storage-maintenance';
 const ASYNC_STARTUP_CLEANUP_LOCK_WARNING =
   '[TSDF] navigator.locks is unavailable; async OPFS startup cleanup is using unlocked coordination.';
 
-function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
-  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
-}
-
 function getBucketId(timestamp: number): string {
   return String(Math.floor(timestamp / ASYNC_STORAGE_RECENCY_BUCKET_MS));
-}
-
-function getUserKeyFromMetadataRecord(recordKey: string): string | null {
-  return recordKey.startsWith(METADATA_RECORD_PREFIX)
-    ? recordKey.slice(METADATA_RECORD_PREFIX.length)
-    : null;
 }
 
 function getRecord(value: unknown): Record<string, unknown> | null {
@@ -187,6 +179,41 @@ function serializeInternalManagedMetadataRecord(
   }
 
   return { ...serialized, ...customMetadata };
+}
+
+function parseIndexEntries(
+  value: unknown,
+): Map<string, InternalManagedMetadataRecord> | null {
+  const record = getRecord(value);
+  const rawEntries = record?.e;
+  if (rawEntries === undefined) {
+    return value === null ? new Map() : null;
+  }
+
+  const entriesRecord = getRecord(rawEntries);
+  if (entriesRecord === null) return null;
+
+  const entries = new Map<string, InternalManagedMetadataRecord>();
+  for (const [key, rawEntry] of Object.entries(entriesRecord)) {
+    const parsed = parseInternalManagedMetadataRecord(rawEntry);
+    if (parsed === null) return null;
+    entries.set(key, parsed);
+  }
+
+  return entries;
+}
+
+function serializeIndexEntries(
+  entries: Map<string, InternalManagedMetadataRecord>,
+): Record<string, unknown> {
+  return {
+    e: Object.fromEntries(
+      [...entries.entries()].map(([key, metadata]) => [
+        key,
+        serializeInternalManagedMetadataRecord(metadata),
+      ]),
+    ),
+  };
 }
 
 function parseMaintenanceState(
@@ -360,9 +387,20 @@ type PendingNamespaceCommit = {
   waiters: Array<{ reject: (error: unknown) => void; resolve: () => void }>;
 };
 
+type NamespaceIndexCache = {
+  cancelFlush: (() => void) | null;
+  dirty: boolean;
+  entries: Map<string, InternalManagedMetadataRecord>;
+  flushPromise: Promise<void> | null;
+  loaded: boolean;
+  loadPromise: Promise<void> | null;
+  scope: AsyncStorageNamespaceScope;
+};
+
 class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
+  #namespaceIndexes = new Map<string, NamespaceIndexCache>();
   #observedScopes = new Map<string, AsyncStorageNamespaceScope>();
   #pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
   #recentTouchedBuckets = new Map<string, string>();
@@ -407,18 +445,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       sessionKey,
     );
     const protectedRefSets = await Promise.all(
-      discovered.map(async ({ scope, metadataRecordKeys }) => {
-        const metadataEntries =
-          metadataRecordKeys === null
-            ? await this.#listManagedMetadataUsingDriver(driver, scope, {
-                order: 'key',
-              })
-            : await this.#listManagedMetadataByMetadataKeysUsingDriver(
-                driver,
-                scope,
-                metadataRecordKeys,
-                'key',
-              );
+      discovered.map(async ({ knownRecordKeys, scope }) => {
+        const metadataEntries = await this.#listManagedMetadataUsingDriver(
+          driver,
+          scope,
+          { knownRecordKeys, order: 'key' },
+        );
 
         const refs: string[] = [];
         for (const entry of metadataEntries) {
@@ -491,22 +523,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     await Promise.all(
       [...updatesByScope.values()].map(async ({ scope, protectionByKey }) => {
-        const keys = [...protectionByKey.keys()];
-        const metadataRecordKeys = keys.map((key) => getMetadataRecordKey(key));
-        const existingMetadataValues = await this.#driverGetManyFrom(
-          this.driver,
-          scope,
-          metadataRecordKeys,
-        );
-        const setEntries: AsyncStorageDriverSetEntry[] = [];
+        const indexCache = await this.#refreshNamespaceIndexCache(scope);
+        let changed = false;
 
-        for (const [index, key] of keys.entries()) {
-          const existingMetadata = parseInternalManagedMetadataRecord(
-            existingMetadataValues[index] ?? null,
-          );
-          if (existingMetadata === null) continue;
-
-          const shouldProtect = protectionByKey.get(key) === true;
+        for (const [key, shouldProtect] of protectionByKey.entries()) {
+          const existingMetadata = indexCache.entries.get(key);
+          if (existingMetadata === undefined) continue;
           if (
             isOfflineProtectedMetadata(existingMetadata.customMetadata) ===
             shouldProtect
@@ -527,14 +549,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             delete nextMetadata.customMetadata;
           }
 
-          setEntries.push({
-            key: getMetadataRecordKey(key),
-            value: serializeInternalManagedMetadataRecord(nextMetadata),
-          });
+          indexCache.entries.set(key, nextMetadata);
+          changed = true;
         }
 
-        if (setEntries.length > 0) {
-          await this.#driverSetManyFrom(this.driver, scope, setEntries);
+        if (changed) {
+          indexCache.dirty = true;
+          await this.#flushNamespaceIndex(scope);
         }
       }),
     );
@@ -544,6 +565,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     for (const pending of this.#pendingNamespaceCommits.values()) {
       pending.cancelFlush?.();
     }
+    for (const index of this.#namespaceIndexes.values()) {
+      index.cancelFlush?.();
+    }
+    this.#namespaceIndexes.clear();
     this.#observedScopes.clear();
     this.#pendingNamespaceCommits.clear();
     this.#recentTouchedBuckets.clear();
@@ -710,6 +735,201 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
   }
 
+  async #ensureNamespaceIndexLoaded(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<NamespaceIndexCache> {
+    const namespaceKey = getNamespaceId(scope);
+    let cache = this.#namespaceIndexes.get(namespaceKey);
+    if (cache === undefined) {
+      cache = {
+        cancelFlush: null,
+        dirty: false,
+        entries: new Map(),
+        flushPromise: null,
+        loaded: false,
+        loadPromise: null,
+        scope,
+      };
+      this.#namespaceIndexes.set(namespaceKey, cache);
+    }
+
+    if (cache.loaded) return cache;
+    if (cache.loadPromise !== null) {
+      await cache.loadPromise;
+      return cache;
+    }
+
+    cache.loadPromise = this.#readNamespaceIndexStateUsingDriver(
+      this.driver,
+      scope,
+    )
+      .then(({ entries, valid }) => {
+        cache.loaded = true;
+        cache.entries = valid && entries !== null ? entries : new Map();
+      })
+      .finally(() => {
+        cache.loadPromise = null;
+      });
+
+    await cache.loadPromise;
+    return cache;
+  }
+
+  async #refreshNamespaceIndexCache(
+    scope: AsyncStorageNamespaceScope,
+  ): Promise<NamespaceIndexCache> {
+    const namespaceKey = getNamespaceId(scope);
+    let cache = this.#namespaceIndexes.get(namespaceKey);
+    if (cache === undefined) {
+      cache = {
+        cancelFlush: null,
+        dirty: false,
+        entries: new Map(),
+        flushPromise: null,
+        loaded: false,
+        loadPromise: null,
+        scope,
+      };
+      this.#namespaceIndexes.set(namespaceKey, cache);
+    } else if (cache.loadPromise !== null) {
+      await cache.loadPromise;
+    }
+
+    const state = await this.#readNamespaceIndexStateUsingDriver(
+      this.driver,
+      scope,
+    );
+    cache.entries =
+      state.valid && state.entries !== null ? state.entries : new Map();
+    cache.loaded = true;
+    return cache;
+  }
+
+  #scheduleNamespaceIndexFlush(indexCache: NamespaceIndexCache): void {
+    if (indexCache.cancelFlush !== null || indexCache.flushPromise !== null) {
+      return;
+    }
+
+    indexCache.cancelFlush = scheduleIdleCleanup(() => {
+      indexCache.cancelFlush = null;
+      void this.#flushNamespaceIndex(indexCache.scope).catch(() => {});
+    });
+  }
+
+  async #flushNamespaceIndex(scope: AsyncStorageNamespaceScope): Promise<void> {
+    const indexCache = await this.#ensureNamespaceIndexLoaded(scope);
+    if (indexCache.flushPromise !== null) {
+      await indexCache.flushPromise;
+      return;
+    }
+
+    indexCache.cancelFlush?.();
+    indexCache.cancelFlush = null;
+
+    if (!indexCache.dirty) return;
+
+    const snapshot = new Map(indexCache.entries);
+    indexCache.dirty = false;
+    indexCache.flushPromise = this.#persistNamespaceIndexUsingDriver(
+      this.driver,
+      scope,
+      snapshot,
+    )
+      .catch((error: unknown) => {
+        indexCache.dirty = true;
+        throw error;
+      })
+      .finally(() => {
+        indexCache.flushPromise = null;
+        if (indexCache.dirty) {
+          this.#scheduleNamespaceIndexFlush(indexCache);
+        }
+      });
+
+    await indexCache.flushPromise;
+  }
+
+  async #flushAllPendingNamespaceIndexes(): Promise<void> {
+    await Promise.all(
+      [...this.#namespaceIndexes.values()].map((indexCache) =>
+        this.#flushNamespaceIndex(indexCache.scope),
+      ),
+    );
+  }
+
+  async #readNamespaceIndexStateUsingDriver(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    knownRecordKeys?: string[] | null,
+  ): Promise<{
+    entries: Map<string, InternalManagedMetadataRecord> | null;
+    exists: boolean;
+    valid: boolean;
+  }> {
+    if (
+      knownRecordKeys !== undefined &&
+      knownRecordKeys !== null &&
+      !knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)
+    ) {
+      return { entries: null, exists: false, valid: true };
+    }
+    const indexKnownToExist =
+      knownRecordKeys !== undefined &&
+      knownRecordKeys !== null &&
+      knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+
+    const rawIndex = await driver.get(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+    if (rawIndex === null) {
+      return indexKnownToExist
+        ? { entries: null, exists: true, valid: false }
+        : { entries: null, exists: false, valid: true };
+    }
+
+    const parsed = parseIndexEntries(rawIndex);
+    if (parsed === null) {
+      return { entries: null, exists: true, valid: false };
+    }
+
+    return { entries: parsed, exists: true, valid: true };
+  }
+
+  async #getNamespaceIndexEntriesUsingDriver(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    knownRecordKeys?: string[] | null,
+  ): Promise<Map<string, InternalManagedMetadataRecord>> {
+    if (driver === this.driver) {
+      return (await this.#ensureNamespaceIndexLoaded(scope)).entries;
+    }
+
+    const state = await this.#readNamespaceIndexStateUsingDriver(
+      driver,
+      scope,
+      knownRecordKeys,
+    );
+    return state.valid && state.entries !== null ? state.entries : new Map();
+  }
+
+  async #persistNamespaceIndexUsingDriver(
+    driver: AsyncStorageDriver,
+    scope: AsyncStorageNamespaceScope,
+    entries: Map<string, InternalManagedMetadataRecord>,
+  ): Promise<void> {
+    if (entries.size === 0) {
+      await this.#driverRemoveManyFrom(driver, scope, [
+        ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+      ]);
+      return;
+    }
+
+    await this.#driverSetManyFrom(driver, scope, [
+      {
+        key: ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+        value: serializeIndexEntries(entries),
+      },
+    ]);
+  }
+
   async readManagedEntries<
     TValue,
     TCustomMetadata extends Record<string, unknown>,
@@ -719,27 +939,19 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   ): Promise<
     Map<string, AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
   > {
-    return this.#readManagedEntriesUsingDriver(this.driver, scope, keys);
-  }
-
-  async #readManagedEntriesUsingDriver<
-    TValue,
-    TCustomMetadata extends Record<string, unknown>,
-  >(
-    driver: AsyncStorageDriver,
-    scope: AsyncStorageNamespaceScope,
-    keys: string[],
-  ): Promise<
-    Map<string, AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
-  > {
-    const rawKeys = keys.flatMap((key) => [
-      getPayloadRecordKey(key),
-      getMetadataRecordKey(key),
-    ]);
-    const rawValues = await this.#driverGetManyFrom(driver, scope, rawKeys);
-    const valueByRawKey = new Map<string, unknown>();
-    for (const [index, rawKey] of rawKeys.entries()) {
-      valueByRawKey.set(rawKey, rawValues[index] ?? null);
+    const metadataByKey = await this.#getNamespaceIndexEntriesUsingDriver(
+      this.driver,
+      scope,
+    );
+    const payloadKeys = keys.filter((key) => metadataByKey.has(key));
+    const payloadValues = await this.#driverGetManyFrom(
+      this.driver,
+      scope,
+      payloadKeys.map((key) => getPayloadRecordKey(key)),
+    );
+    const payloadByKey = new Map<string, unknown>();
+    for (const [index, key] of payloadKeys.entries()) {
+      payloadByKey.set(key, payloadValues[index] ?? null);
     }
 
     const result = new Map<
@@ -749,16 +961,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const orphanedKeys: string[] = [];
 
     for (const key of keys) {
-      const rawPayload = valueByRawKey.get(getPayloadRecordKey(key)) ?? null;
-      const rawMetadata = valueByRawKey.get(getMetadataRecordKey(key)) ?? null;
-      const metadata = parseInternalManagedMetadataRecord(rawMetadata);
-
-      if (rawPayload === null && metadata === null) {
+      const metadata = metadataByKey.get(key);
+      if (metadata === undefined) {
         result.set(key, null);
         continue;
       }
 
-      if (rawPayload === null || metadata === null) {
+      const rawPayload = payloadByKey.get(key) ?? null;
+      if (rawPayload === null) {
         orphanedKeys.push(key);
         result.set(key, null);
         continue;
@@ -774,7 +984,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     if (orphanedKeys.length > 0) {
-      await this.#removeManagedKeysUsingDriver(driver, scope, orphanedKeys);
+      await this.#removeManagedKeysUsingDriver(
+        this.driver,
+        scope,
+        orphanedKeys,
+      );
     }
 
     return result;
@@ -782,7 +996,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async listManagedMetadata<TCustomMetadata extends Record<string, unknown>>(
     scope: AsyncStorageNamespaceScope,
-    args: { order?: AsyncStorageMetadataOrder },
+    args: { order?: AsyncStorageMetadataOrder } = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
     return this.#listManagedMetadataUsingDriver(this.driver, scope, args);
   }
@@ -792,53 +1006,25 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   >(
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
-    args: { order?: AsyncStorageMetadataOrder } = {},
+    args: {
+      knownRecordKeys?: string[] | null;
+      order?: AsyncStorageMetadataOrder;
+    } = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
-    const metadataKeys = (await driver.listKeys(scope)).filter((key) =>
-      key.startsWith(METADATA_RECORD_PREFIX),
-    );
-    return this.#listManagedMetadataByMetadataKeysUsingDriver(
+    const metadataEntries = await this.#getNamespaceIndexEntriesUsingDriver(
       driver,
       scope,
-      metadataKeys,
-      args.order ?? 'key',
-    );
-  }
-
-  async #listManagedMetadataByMetadataKeysUsingDriver<
-    TCustomMetadata extends Record<string, unknown>,
-  >(
-    driver: AsyncStorageDriver,
-    scope: AsyncStorageNamespaceScope,
-    metadataKeys: string[],
-    order: AsyncStorageMetadataOrder = 'key',
-  ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
-    const metadataValues = await this.#driverGetManyFrom(
-      driver,
-      scope,
-      metadataKeys,
+      args.knownRecordKeys,
     );
     const validEntries: AsyncStorageEntryMetadata<Record<string, unknown>>[] =
       [];
-    const orphanedUserKeys: string[] = [];
-
-    for (const [index, metadataKey] of metadataKeys.entries()) {
-      const metadata = parseInternalManagedMetadataRecord(
-        metadataValues[index],
-      );
-      const userKey = getUserKeyFromMetadataRecord(metadataKey);
-      if (metadata !== null && userKey !== null) {
-        validEntries.push(this.#toPublicMetadata(userKey, metadata));
-      } else if (userKey !== null) {
-        orphanedUserKeys.push(userKey);
-      }
+    for (const [key, metadata] of metadataEntries.entries()) {
+      validEntries.push(this.#toPublicMetadata(key, metadata));
     }
 
-    if (orphanedUserKeys.length > 0) {
-      await this.#removeManagedKeysUsingDriver(driver, scope, orphanedUserKeys);
-    }
-
-    validEntries.sort((left, right) => compareMetadata(left, right, order));
+    validEntries.sort((left, right) =>
+      compareMetadata(left, right, args.order ?? 'key'),
+    );
 
     return __LEGIT_CAST__<
       AsyncStorageEntryMetadata<TCustomMetadata>[],
@@ -847,18 +1033,21 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   async listManagedKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
-    return (await this.driver.listKeys(scope)).flatMap((key) => {
-      const userKey = getUserKeyFromMetadataRecord(key);
-      return userKey === null ? [] : [userKey];
-    });
+    return [
+      ...(await this.#ensureNamespaceIndexLoaded(scope)).entries.keys(),
+    ].sort((left, right) => left.localeCompare(right));
   }
 
   async clearManagedNamespace(
     scope: AsyncStorageNamespaceScope,
   ): Promise<void> {
     await this.driver.clear(scope);
-    this.#observedScopes.delete(getNamespaceId(scope));
-    this.#pendingNamespaceCommits.delete(getNamespaceId(scope));
+    const namespaceKey = getNamespaceId(scope);
+    const indexCache = this.#namespaceIndexes.get(namespaceKey);
+    indexCache?.cancelFlush?.();
+    this.#namespaceIndexes.delete(namespaceKey);
+    this.#observedScopes.delete(namespaceKey);
+    this.#pendingNamespaceCommits.delete(namespaceKey);
     this.clearRecentTouchedBucketsForNamespace(scope);
   }
 
@@ -880,40 +1069,21 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
     args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
   ): Promise<void> {
+    const indexCache = await this.#refreshNamespaceIndexCache(scope);
     const upserts = args.upserts ?? [];
     const removes = [...new Set(args.removes ?? [])];
     const touches = args.touches ?? [];
     const touchedKeys = [...new Set(touches.map((touch) => touch.key))];
-    const keysNeedingMetadata = [
-      ...new Set([...upserts.map((upsert) => upsert.key), ...touchedKeys]),
-    ];
-    const existingMetadataValues = await this.#driverGetManyFrom(
-      this.driver,
-      scope,
-      keysNeedingMetadata.map((key) => getMetadataRecordKey(key)),
-    );
-    const existingMetadataByKey = new Map<
-      string,
-      InternalManagedMetadataRecord
-    >();
-    for (const [index, key] of keysNeedingMetadata.entries()) {
-      const metadata = parseInternalManagedMetadataRecord(
-        existingMetadataValues[index] ?? null,
-      );
-      if (metadata !== null) {
-        existingMetadataByKey.set(key, metadata);
-      }
-    }
 
     const now = Date.now();
     const touchesByKey = new Map(
       touches.map((touch) => [touch.key, touch.lastAccessAt ?? now]),
     );
     const setEntries: AsyncStorageDriverSetEntry[] = [];
-    const removeEntries: string[] = [];
+    const removeEntries = removes.map((key) => getPayloadRecordKey(key));
 
     for (const key of removes) {
-      removeEntries.push(getPayloadRecordKey(key), getMetadataRecordKey(key));
+      indexCache.entries.delete(key);
     }
 
     const protectedKeysSnapshotSet = getSessionProtectedKeysSnapshot(
@@ -921,7 +1091,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
 
     for (const upsert of upserts) {
-      const existingMetadata = existingMetadataByKey.get(upsert.key);
+      const existingMetadata = indexCache.entries.get(upsert.key);
       const customMetadata = this.#mergeOfflineProtectionMetadata(
         scope,
         upsert.key,
@@ -939,24 +1109,20 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         key: getPayloadRecordKey(upsert.key),
         value: upsert.value,
       });
-      setEntries.push({
-        key: getMetadataRecordKey(upsert.key),
-        value: serializeInternalManagedMetadataRecord(nextMetadata),
-      });
+      indexCache.entries.set(upsert.key, nextMetadata);
     }
 
+    let touchesApplied = false;
     const upsertKeySet = new Set(upserts.map((upsert) => upsert.key));
     for (const key of touchedKeys) {
       if (upsertKeySet.has(key)) continue;
-      const metadata = existingMetadataByKey.get(key);
+      const metadata = indexCache.entries.get(key);
       if (!metadata) continue;
-      setEntries.push({
-        key: getMetadataRecordKey(key),
-        value: serializeInternalManagedMetadataRecord({
-          ...metadata,
-          lastAccessAt: touchesByKey.get(key) ?? now,
-        }),
+      indexCache.entries.set(key, {
+        ...metadata,
+        lastAccessAt: touchesByKey.get(key) ?? now,
       });
+      touchesApplied = true;
     }
 
     if (removeEntries.length > 0) {
@@ -964,6 +1130,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
     if (setEntries.length > 0) {
       await this.#driverSetManyFrom(this.driver, scope, setEntries);
+    }
+
+    const indexChanged =
+      removes.length > 0 || upserts.length > 0 || touchesApplied;
+    if (indexChanged) {
+      indexCache.dirty = true;
+      await this.#flushNamespaceIndex(scope);
     }
   }
 
@@ -1006,11 +1179,39 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     await this.#driverRemoveManyFrom(
       driver,
       scope,
-      uniqueKeys.flatMap((key) => [
-        getPayloadRecordKey(key),
-        getMetadataRecordKey(key),
-      ]),
+      uniqueKeys.map((key) => getPayloadRecordKey(key)),
     );
+
+    if (driver === this.driver) {
+      const indexCache = await this.#refreshNamespaceIndexCache(scope);
+      let changed = false;
+      for (const key of uniqueKeys) {
+        changed = indexCache.entries.delete(key) || changed;
+      }
+      if (changed) {
+        indexCache.dirty = true;
+        await this.#flushNamespaceIndex(scope);
+      }
+      return;
+    }
+
+    const indexState = await this.#readNamespaceIndexStateUsingDriver(
+      driver,
+      scope,
+    );
+    if (!indexState.valid || indexState.entries === null) return;
+
+    let changed = false;
+    for (const key of uniqueKeys) {
+      changed = indexState.entries.delete(key) || changed;
+    }
+    if (changed) {
+      await this.#persistNamespaceIndexUsingDriver(
+        driver,
+        scope,
+        indexState.entries,
+      );
+    }
   }
 
   async #driverGetManyFrom(
@@ -1167,6 +1368,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async #performStartupCleanup(): Promise<void> {
     await this.flushAllPendingNamespaceCommits();
+    await this.#flushAllPendingNamespaceIndexes();
     await this.#withCleanupDriver((driver) =>
       this.#performStartupCleanupWithDriver(driver),
     );
@@ -1185,37 +1387,90 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
 
     await Promise.all(
-      discoveredScopes.map(async ({ scope, metadataRecordKeys }) => {
+      discoveredScopes.map(async ({ knownRecordKeys, scope }) => {
         const protectedRefs = protectedRefsBySession.get(scope.sessionKey);
+        const rawKeys = knownRecordKeys ?? (await driver.listKeys(scope));
+        const indexState = await this.#readNamespaceIndexStateUsingDriver(
+          driver,
+          scope,
+          rawKeys,
+        );
+        const payloadKeys = new Set<string>();
+        const legacyMetadataRecordKeys: string[] = [];
+        const rawKeysToRemove: string[] = [];
 
-        const metadataEntries =
-          metadataRecordKeys === null
-            ? await this.#listManagedMetadataUsingDriver(driver, scope, {
-                order: 'key',
-              })
-            : await this.#listManagedMetadataByMetadataKeysUsingDriver(
-                driver,
-                scope,
-                metadataRecordKeys,
-                'key',
-              );
-        const keysToRemove: string[] = [];
-        for (const entry of metadataEntries) {
-          const isProtected =
-            isOfflineProtectedMetadata(entry.customMetadata) ||
-            protectedRefs?.has(
-              serializeProtectedRef({ ...scope, key: entry.key }),
-            ) === true;
-          if (
-            !isProtected &&
-            now - entry.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
-          ) {
-            keysToRemove.push(entry.key);
+        for (const key of rawKeys) {
+          if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
+            payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
+          } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
+            legacyMetadataRecordKeys.push(key);
+          } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+            rawKeysToRemove.push(key);
           }
         }
 
-        if (keysToRemove.length > 0) {
-          await this.#removeManagedKeysUsingDriver(driver, scope, keysToRemove);
+        if (!indexState.valid || indexState.entries === null) {
+          const keysToRemove = rawKeys.filter(
+            (key) =>
+              key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY || indexState.exists,
+          );
+          if (keysToRemove.length > 0) {
+            await this.#driverRemoveManyFrom(driver, scope, keysToRemove);
+          }
+          return;
+        }
+
+        const nextEntries = new Map<string, InternalManagedMetadataRecord>();
+        const payloadRecordKeysToRemove = new Set<string>([
+          ...legacyMetadataRecordKeys,
+          ...rawKeysToRemove,
+        ]);
+
+        for (const [key, metadata] of indexState.entries.entries()) {
+          const isProtected =
+            isOfflineProtectedMetadata(metadata.customMetadata) ||
+            protectedRefs?.has(serializeProtectedRef({ ...scope, key })) ===
+              true;
+          if (!payloadKeys.has(key)) continue;
+          if (
+            !isProtected &&
+            now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
+          ) {
+            payloadRecordKeysToRemove.add(getPayloadRecordKey(key));
+            continue;
+          }
+
+          nextEntries.set(key, metadata);
+        }
+
+        for (const payloadKey of payloadKeys) {
+          if (!indexState.entries.has(payloadKey)) {
+            payloadRecordKeysToRemove.add(getPayloadRecordKey(payloadKey));
+          }
+        }
+
+        const indexChanged =
+          nextEntries.size !== indexState.entries.size ||
+          rawKeysToRemove.length > 0 ||
+          legacyMetadataRecordKeys.length > 0;
+
+        const shouldDeleteEmptyIndex = indexChanged && nextEntries.size === 0;
+        if (shouldDeleteEmptyIndex) {
+          payloadRecordKeysToRemove.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+        }
+
+        if (payloadRecordKeysToRemove.size > 0) {
+          await this.#driverRemoveManyFrom(driver, scope, [
+            ...payloadRecordKeysToRemove,
+          ]);
+        }
+
+        if (indexChanged && !shouldDeleteEmptyIndex) {
+          await this.#persistNamespaceIndexUsingDriver(
+            driver,
+            scope,
+            nextEntries,
+          );
         }
       }),
     );
@@ -1226,7 +1481,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     sessionKey?: string,
   ): Promise<AsyncStorageDiscoveredScope[]> {
     const discoveredScopes =
-      await driver.listScopesWithMetadataKeys?.(sessionKey);
+      await driver.listScopesWithKnownRecordKeys?.(sessionKey);
     if (discoveredScopes !== undefined) {
       return discoveredScopes.filter(
         ({ scope }) => scope.kind !== '__internal.protected',
@@ -1234,7 +1489,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
 
     return (await this.#listDiscoveredScopes(sessionKey, driver)).map(
-      (scope) => ({ metadataRecordKeys: null, scope }),
+      (scope) => ({ knownRecordKeys: null, scope }),
     );
   }
 

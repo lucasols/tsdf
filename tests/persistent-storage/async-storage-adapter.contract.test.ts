@@ -88,9 +88,7 @@ function createNaiveAsyncStorageDriver() {
 }
 
 function isUserRecordKey(key: string): boolean {
-  return (
-    key.startsWith('__tsdf_payload__:') || key.startsWith('__tsdf_meta__:')
-  );
+  return key.startsWith('__tsdf_payload__:') || key === '_i';
 }
 
 beforeAll(() => {
@@ -170,18 +168,11 @@ describe('createAsyncStorageAdapter', () => {
           }
         }),
     ).toMatchInlineSnapshot(`
-      - { key: '__tsdf_meta__:document', type: 'get' }
+      - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'set' }
-      - { key: '__tsdf_meta__:document', type: 'set' }
+      - { key: '_i', type: 'set' }
       - { key: '__tsdf_payload__:document', type: 'get' }
-      - { key: '__tsdf_meta__:document', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'get' }
-      - { key: '__tsdf_meta__:document', type: 'get' }
-      - keys: ['__tsdf_meta__:document', '__tsdf_payload__:document']
-        type: 'listKeys'
-      - keys: ['__tsdf_meta__:document', '__tsdf_payload__:document']
-        type: 'listKeys'
-      - { key: '__tsdf_meta__:document', type: 'get' }
       - type: 'clear'
     `);
   });
@@ -201,6 +192,7 @@ describe('createAsyncStorageAdapter', () => {
     });
     await advanceTime(40);
     await seedCommit;
+    await advanceTime(2000);
 
     driverState.operations.length = 0;
 
@@ -208,6 +200,7 @@ describe('createAsyncStorageAdapter', () => {
     const firstRead = await namespace.get('document', { touch: 'coarse' });
     await advanceTime(40);
     const secondRead = await namespace.get('document', { touch: 'coarse' });
+    await advanceTime(2000);
 
     expect(firstRead?.value).toMatchInlineSnapshot(`
       value: 'cached'
@@ -222,12 +215,12 @@ describe('createAsyncStorageAdapter', () => {
           operation.scope.sessionKey === 'sess1' &&
           operation.scope.storeName === 'touch-guard' &&
           operation.scope.kind === 'document' &&
-          operation.key === '__tsdf_meta__:document',
+          operation.key === '_i',
       ),
     ).toHaveLength(1);
   });
 
-  test('metadata parsing accepts both explicit and implicit default version records', async () => {
+  test('index parsing accepts both explicit and implicit default version entries', async () => {
     const driverState = createNaiveAsyncStorageDriver();
     const adapter = createAsyncStorageAdapter(driverState.driver);
     const scope = {
@@ -243,16 +236,14 @@ describe('createAsyncStorageAdapter', () => {
       driverState.driver.set(scope, '__tsdf_payload__:explicit', {
         value: 'with-version',
       }),
-      driverState.driver.set(scope, '__tsdf_meta__:explicit', {
-        a: TEST_INITIAL_TIME,
-        v: 1,
-      }),
       driverState.driver.set(scope, '__tsdf_payload__:implicit', {
         value: 'without-version',
       }),
-      driverState.driver.set(scope, '__tsdf_meta__:implicit', {
-        a: TEST_INITIAL_TIME + 1,
-        o: true,
+      driverState.driver.set(scope, '_i', {
+        e: {
+          explicit: { a: TEST_INITIAL_TIME, v: 1 },
+          implicit: { a: TEST_INITIAL_TIME + 1, o: true },
+        },
       }),
     ]);
 
@@ -282,7 +273,7 @@ describe('createAsyncStorageAdapter', () => {
       `);
   });
 
-  test('commits omit v when writing the default metadata version', async () => {
+  test('commits omit v when writing the default index metadata version', async () => {
     const driverState = createNaiveAsyncStorageDriver();
     const adapter = createAsyncStorageAdapter(driverState.driver);
     const scope = {
@@ -307,14 +298,15 @@ describe('createAsyncStorageAdapter', () => {
 
     await advanceTime(40);
     await commit;
+    await advanceTime(2000);
 
     expect(
       driverState.namespaces
         .get(JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]))
-        ?.get('__tsdf_meta__:document'),
+        ?.get('_i'),
     ).toMatchInlineSnapshot(`
-      a: 1735689600040
-      o: '✅'
+      e:
+        document: { a: 1735689600040, o: '✅' }
     `);
   });
 

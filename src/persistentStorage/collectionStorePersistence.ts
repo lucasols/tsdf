@@ -415,7 +415,7 @@ export function setupCollectionPersistence<
           config.payloadSchema,
         );
         if (!persisted) {
-          scheduleIdleCleanup(() => void namespace.remove(itemKey));
+          void namespace.remove(itemKey).catch(() => {});
           return false;
         }
 
@@ -426,7 +426,7 @@ export function setupCollectionPersistence<
         );
 
         if (!validated) {
-          scheduleIdleCleanup(() => void namespace.remove(itemKey));
+          void namespace.remove(itemKey).catch(() => {});
           return false;
         }
 

@@ -91,6 +91,8 @@ export async function flushInvalidationPersistence(
   await flushAllTimers();
   await advanceTime(delayMs);
   await flushAllTimers();
+  await advanceTime(2100);
+  await flushAllTimers();
 }
 
 export async function captureHookRemount<Result>(args: {

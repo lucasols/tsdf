@@ -43,6 +43,7 @@ type MockBrowserOpfsListDirOperation = MockBrowserOpfsBaseOperation & {
 type MockBrowserOpfsDeleteDirOperation = MockBrowserOpfsBaseOperation & {
   deleted: boolean;
   exists: boolean;
+  recursive: boolean;
   type: 'deleteDir';
 };
 
@@ -571,6 +572,7 @@ export class MockBrowserOpfsEnvironment {
           path: filePath,
           exists,
           deleted,
+          recursive: options?.recursive === true,
         });
 
         if (!exists) {

@@ -224,7 +224,8 @@ describe('opfs: converted document store persistence', () => {
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
     await resolveAfterAllTimers(preloadPromise);
-    await advanceTime(2100);
+    await advanceTime(4300);
+    await flushAllTimers();
 
     expect(
       mockAdapter.has(

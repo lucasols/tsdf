@@ -1,11 +1,12 @@
 import { createCache, type Cache } from '@ls-stack/utils/cache';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   buildFileName,
   decodePathSegment,
   encodePathSegment,
+  getNamespaceId,
   joinPath,
-  METADATA_RECORD_PREFIX,
   OPFS_ROOT_DIR,
   parseFileName,
 } from './opfsFileNaming';
@@ -72,7 +73,7 @@ type OpfsCacheContext = {
 type ScopedDirectoryEntry = { fileName: string; key: string };
 
 type DiscoveredScopeEntry = {
-  metadataRecordKeys: string[];
+  knownRecordKeys: string[];
   scope: AsyncStorageNamespaceScope;
 };
 
@@ -89,10 +90,6 @@ function withExpiringNull<T extends FileSystemHandle>(
   return __LEGIT_CAST__<T | null, unknown>(
     utils.withExpiration(null, OPFS_MISSING_HANDLE_CACHE_DURATION),
   );
-}
-
-function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
-  return JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]);
 }
 
 export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
@@ -157,7 +154,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     return this.#listScopesWithContext(sessionKey, this.#mainCacheContext);
   }
 
-  async listScopesWithMetadataKeys(
+  async listScopesWithKnownRecordKeys(
     sessionKey?: string,
   ): Promise<AsyncStorageDiscoveredScope[]> {
     return this.#listDiscoveredScopesWithContext(
@@ -201,7 +198,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       clear: (scope) => this.#clearWithContext(scope, cacheContext),
       listScopes: (currentSessionKey) =>
         this.#listScopesWithContext(currentSessionKey, cacheContext),
-      listScopesWithMetadataKeys: (currentSessionKey) =>
+      listScopesWithKnownRecordKeys: (currentSessionKey) =>
         this.#listDiscoveredScopesWithContext(currentSessionKey, cacheContext),
       getMany: (scope, keys) =>
         this.#getManyWithContext(scope, keys, cacheContext),
@@ -266,7 +263,8 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     keys: string[],
     cacheContext: OpfsCacheContext,
   ): Promise<void> {
-    if (keys.length === 0) return;
+    const uniqueKeys = [...new Set(keys)];
+    if (uniqueKeys.length === 0) return;
 
     const storeDir = await this.#getStoreDir(scope, {
       create: false,
@@ -274,8 +272,18 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     });
     if (storeDir === null) return;
 
+    if (
+      await this.#removeWholeStoreDirIfAllKnownEntriesAreBeingRemoved(
+        scope,
+        uniqueKeys,
+        cacheContext,
+      )
+    ) {
+      return;
+    }
+
     const removeResults = await Promise.all(
-      keys.map(async (key) => {
+      uniqueKeys.map(async (key) => {
         const fileName = buildFileName(scope, key);
         try {
           await storeDir.removeEntry(fileName);
@@ -318,6 +326,17 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     if (storeDir === null) return;
 
     const scopedEntries = await this.#listScopedFiles(scope, cacheContext);
+    const keys = scopedEntries.map((entry) => entry.key);
+
+    if (
+      await this.#removeWholeStoreDirIfAllKnownEntriesAreBeingRemoved(
+        scope,
+        keys,
+        cacheContext,
+      )
+    ) {
+      return;
+    }
 
     const removeResults = await Promise.all(
       scopedEntries.map(async (entry) => {
@@ -426,7 +445,15 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
           let knownEntryCount = 0;
           const discoveredStoreScopes = new Map<string, DiscoveredScopeEntry>();
 
-          for await (const fileName of storeEntry.handle.keys()) {
+          for await (const [
+            fileName,
+            entryHandle,
+          ] of storeEntry.handle.entries()) {
+            if (entryHandle.kind !== 'file') {
+              invalidEntryNames.push(fileName);
+              continue;
+            }
+
             const parsed = parseFileName(fileName);
             if (parsed === null) {
               invalidEntryNames.push(fileName);
@@ -439,23 +466,21 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
               storeName: decodedStoreName,
               kind: parsed.kind,
             } satisfies AsyncStorageNamespaceScope;
+            if (parsed.key === ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+              cacheContext.fileCache.set(
+                this.#getFilePath(scope, parsed.key),
+                entryHandle,
+              );
+            }
             const scopeId = getNamespaceId(scope);
-            const metadataRecordKey = parsed.key.startsWith(
-              METADATA_RECORD_PREFIX,
-            )
-              ? parsed.key
-              : null;
             const existing = discoveredStoreScopes.get(scopeId);
             if (existing !== undefined) {
-              if (metadataRecordKey !== null) {
-                existing.metadataRecordKeys.push(metadataRecordKey);
-              }
+              existing.knownRecordKeys.push(parsed.key);
               continue;
             }
 
             discoveredStoreScopes.set(scopeId, {
-              metadataRecordKeys:
-                metadataRecordKey === null ? [] : [metadataRecordKey],
+              knownRecordKeys: [parsed.key],
               scope,
             });
           }
@@ -504,7 +529,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
           const scopeId = getNamespaceId(scopeEntry.scope);
           const existing = discoveredScopes.get(scopeId);
           if (existing !== undefined) {
-            existing.metadataRecordKeys.push(...scopeEntry.metadataRecordKeys);
+            existing.knownRecordKeys.push(...scopeEntry.knownRecordKeys);
             continue;
           }
 
@@ -534,7 +559,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const results = [...discoveredScopes.values()];
 
     for (const entry of results) {
-      entry.metadataRecordKeys.sort((left, right) => left.localeCompare(right));
+      entry.knownRecordKeys.sort((left, right) => left.localeCompare(right));
     }
 
     return results.sort((left, right) => {
@@ -823,45 +848,61 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     }
   }
 
-  async #pruneEmptyDirectories(
+  async #removeWholeStoreDirIfAllKnownEntriesAreBeingRemoved(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+    cacheContext: OpfsCacheContext,
+  ): Promise<boolean> {
+    const cleanupKnowledge = cacheContext.cleanupKnowledge;
+    if (cleanupKnowledge === null) return false;
+
+    const storeDirPath = this.#getStoreDirPath(scope);
+    const knownStoreEntryCount =
+      cleanupKnowledge.knownRemainingEntryCountByStorePath.get(storeDirPath);
+    if (
+      knownStoreEntryCount === undefined ||
+      knownStoreEntryCount !== keys.length
+    ) {
+      return false;
+    }
+
+    const sessionDir = await this.#getSessionDir(scope.sessionKey, {
+      create: false,
+      cacheContext,
+    });
+    if (sessionDir === null) return false;
+
+    for (const key of keys) {
+      this.#invalidateFileHandle(scope, key, cacheContext);
+    }
+
+    try {
+      await sessionDir.removeEntry(encodePathSegment(scope.storeName), {
+        recursive: true,
+      });
+    } catch {
+      return false;
+    }
+
+    await this.#handleRemovedStoreDir(scope, cacheContext);
+    return true;
+  }
+
+  async #handleRemovedStoreDir(
     scope: Pick<AsyncStorageNamespaceScope, 'sessionKey' | 'storeName'>,
     cacheContext: OpfsCacheContext,
   ): Promise<void> {
     const root = await this.#getRootDir();
     const sessionDirPath = this.#getSessionDirPath(scope.sessionKey);
     const storeDirPath = this.#getStoreDirPath(scope);
-    const sessionDir = await this.#getSessionDir(scope.sessionKey, {
-      create: false,
-      cacheContext,
-    });
-    if (sessionDir === null) return;
 
-    const knownStoreEntryCount =
-      cacheContext.cleanupKnowledge?.knownRemainingEntryCountByStorePath.get(
-        storeDirPath,
-      );
-    if (knownStoreEntryCount !== undefined && knownStoreEntryCount > 0) return;
-
-    let removedStoreDir = false;
-    try {
-      await sessionDir.removeEntry(encodePathSegment(scope.storeName), {
-        recursive: cacheContext.cleanupKnowledge !== null,
-      });
-      removedStoreDir = true;
-    } catch {
-      // Ignore missing or non-empty directories.
-    } finally {
-      if (removedStoreDir) {
-        this.#invalidateDirectory(storeDirPath, cacheContext);
-        cacheContext.cleanupKnowledge?.knownStorePathsBySessionPath
-          .get(sessionDirPath)
-          ?.delete(storeDirPath);
-        cacheContext.cleanupKnowledge?.knownRemainingEntryCountByStorePath.delete(
-          storeDirPath,
-        );
-      }
-    }
-    if (!removedStoreDir) return;
+    this.#invalidateDirectory(storeDirPath, cacheContext);
+    cacheContext.cleanupKnowledge?.knownStorePathsBySessionPath
+      .get(sessionDirPath)
+      ?.delete(storeDirPath);
+    cacheContext.cleanupKnowledge?.knownRemainingEntryCountByStorePath.delete(
+      storeDirPath,
+    );
 
     const knownStorePaths =
       cacheContext.cleanupKnowledge?.knownStorePathsBySessionPath.get(
@@ -883,6 +924,36 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         this.#clearKnownSessionStores(sessionDirPath, cacheContext);
       }
     }
+  }
+
+  async #pruneEmptyDirectories(
+    scope: Pick<AsyncStorageNamespaceScope, 'sessionKey' | 'storeName'>,
+    cacheContext: OpfsCacheContext,
+  ): Promise<void> {
+    const storeDirPath = this.#getStoreDirPath(scope);
+    const sessionDir = await this.#getSessionDir(scope.sessionKey, {
+      create: false,
+      cacheContext,
+    });
+    if (sessionDir === null) return;
+
+    const knownStoreEntryCount =
+      cacheContext.cleanupKnowledge?.knownRemainingEntryCountByStorePath.get(
+        storeDirPath,
+      );
+    if (knownStoreEntryCount !== undefined && knownStoreEntryCount > 0) return;
+
+    let removedStoreDir = false;
+    try {
+      await sessionDir.removeEntry(encodePathSegment(scope.storeName), {
+        recursive: cacheContext.cleanupKnowledge !== null,
+      });
+      removedStoreDir = true;
+    } catch {
+      // Ignore missing or non-empty directories.
+    }
+    if (!removedStoreDir) return;
+    await this.#handleRemovedStoreDir(scope, cacheContext);
   }
 
   #setKnownSessionStorePaths(

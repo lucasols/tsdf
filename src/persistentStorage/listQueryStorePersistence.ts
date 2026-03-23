@@ -942,13 +942,13 @@ export function setupListQueryPersistence<
           config.itemPayloadSchema,
         );
         if (!persisted) {
-          scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
+          void itemNamespace.remove(itemKey).catch(() => {});
           return false;
         }
 
         const itemState = toItemState(persisted, dataSchema, shouldIgnoreItem);
         if (!itemState) {
-          scheduleIdleCleanup(() => void itemNamespace.remove(itemKey));
+          void itemNamespace.remove(itemKey).catch(() => {});
           return false;
         }
 
@@ -1034,7 +1034,7 @@ export function setupListQueryPersistence<
           config.queryPayloadSchema,
         );
         if (!persistedQuery) {
-          scheduleIdleCleanup(() => void queryNamespace.remove(queryKey));
+          void queryNamespace.remove(queryKey).catch(() => {});
           return false;
         }
 

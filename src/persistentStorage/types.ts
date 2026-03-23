@@ -97,8 +97,8 @@ export type AsyncStorageMaintenanceState = {
 export type AsyncStorageDriverSetEntry = { key: string; value: unknown };
 
 export type AsyncStorageDiscoveredScope = {
-  /** Known metadata record keys for this scope. `null` if keys were not enumerated during discovery. */
-  metadataRecordKeys: string[] | null;
+  /** Known raw record keys for this scope. `null` if keys were not enumerated during discovery. */
+  knownRecordKeys: string[] | null;
   scope: AsyncStorageNamespaceScope;
 };
 
@@ -120,8 +120,8 @@ export type AsyncStorageDriver = {
   clear(scope: AsyncStorageNamespaceScope): Promise<void>;
   /** Optional namespace discovery fast path used by OPFS cleanup/session clearing. */
   listScopes?(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]>;
-  /** Optional cleanup fast path that returns discovered scopes together with metadata record keys. */
-  listScopesWithMetadataKeys?(
+  /** Optional cleanup fast path that returns discovered scopes together with known raw record keys. */
+  listScopesWithKnownRecordKeys?(
     sessionKey?: string,
   ): Promise<AsyncStorageDiscoveredScope[]>;
   /** Optional bulk read fast path for backends that support it cheaply. */

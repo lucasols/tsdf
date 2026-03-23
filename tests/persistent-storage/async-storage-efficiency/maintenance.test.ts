@@ -71,11 +71,12 @@ describe('async storage efficiency: maintenance', () => {
       expiredEntryExists: '❌'
       freshEntryExists: '✅'
     `);
+    expect(operationsBreakdown).not.toContain('📄 file-open');
     expect(localStorageOperations).toMatchInlineSnapshot(`
       "
       time   |
       2s     | 📖 ❌ #1 tsdf._am.g (async global maintenance)
-      2.011s | ✍️ ❌->✅ #1 tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
+      2.009s | ✍️ ❌->✅ #1 tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
       "
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
@@ -86,22 +87,18 @@ describe('async storage efficiency: maintenance', () => {
       2.003s | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
       2.004s | 🗂️ list-dir tsdf/sess1/expired-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       .      | 🗂️ list-dir tsdf/sess1/fresh-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      2.005s | 📄 file-open ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
-      .      | 📄 file-open ✅ #2 tsdf/sess1/fresh-doc/d.e.m.json (metadata)
-      2.007s | 📖 #1 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.04 kb
-      .      | 📖 #2 tsdf/sess1/fresh-doc/d.e.m.json (metadata) | 0.04 kb
-      2.009s | 🗑️ ✅ #3 tsdf/sess1/expired-doc/d.e.p.json (payload)
-      .      | 🗑️ ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
-      2.01s  | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
-      2.011s | end
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      2.006s | 📖 #1 tsdf/sess1/expired-doc/d._i.r.json (namespace index) | 0.07 kb
+      .      | 📖 #2 tsdf/sess1/fresh-doc/d._i.r.json (namespace index) | 0.07 kb
+      2.008s | 🧹 del-dir recursive ✅ tsdf/sess1/expired-doc (store directory)
+      2.009s | end
       "
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1735689602011`);
+    ).toMatchInlineSnapshot(`lca: 1735689602009`);
   });
 
   test('startup cleanup removes malformed metadata entries together with their payload files', async () => {
@@ -151,17 +148,13 @@ describe('async storage efficiency: maintenance', () => {
       2.003s | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:corrupted","dir:trigger"]
       2.004s | 🗂️ list-dir tsdf/sess1/corrupted
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       .      | 🗂️ list-dir tsdf/sess1/trigger
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      2.005s | 📄 file-open ✅ #1 tsdf/sess1/corrupted/d.e.m.json (metadata)
-      .      | 📄 file-open ✅ #2 tsdf/sess1/trigger/d.e.m.json (metadata)
-      2.007s | 📖 #1 tsdf/sess1/corrupted/d.e.m.json (metadata) | 0.02 kb
-      .      | 📖 #2 tsdf/sess1/trigger/d.e.m.json (metadata) | 0.04 kb
-      2.009s | 🗑️ ✅ #3 tsdf/sess1/corrupted/d.e.p.json (payload)
-      .      | 🗑️ ✅ #1 tsdf/sess1/corrupted/d.e.m.json (metadata)
-      2.01s  | 🧹 del-dir ✅ tsdf/sess1/corrupted (store directory)
-      2.011s | end
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      2.006s | 📖 #1 tsdf/sess1/corrupted/d._i.r.json (namespace index) | 0.02 kb
+      .      | 📖 #2 tsdf/sess1/trigger/d._i.r.json (namespace index) | 0.07 kb
+      2.008s | 🧹 del-dir recursive ✅ tsdf/sess1/corrupted (store directory)
+      2.009s | end
       "
     `);
   });
@@ -231,7 +224,7 @@ describe('async storage efficiency: maintenance', () => {
     }).toMatchInlineSnapshot(`
       expiredStoreEntries: []
       freshEntryExists: '✅'
-      freshStoreEntries: ['file:d.e.m.json', 'file:d.e.p.json']
+      freshStoreEntries: ['file:d._i.r.json', 'file:d.e.p.json']
       freshStoreJunkExists: '❌'
       invalidOnlyStoreEntries: []
       invalidOnlyStoreJunkExists: '❌'
@@ -252,9 +245,9 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc","dir:invalid-only-store","file:session-junk.txt"]
       2.005s | 🗑️ ✅ #2 tsdf/sess1/session-junk.txt (untracked session file)
       2.006s | 🗂️ list-dir tsdf/sess1/expired-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json","file:store-junk.txt"]
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:store-junk.txt"]
       .      | 🗂️ list-dir tsdf/sess1/fresh-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json","file:store-junk.txt"]
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:store-junk.txt"]
       .      | 🗂️ list-dir tsdf/sess1/invalid-only-store
              |    └ (store directory) entries=["file:store-junk.txt"]
       2.007s | 🗑️ ✅ #3 tsdf/sess1/expired-doc/store-junk.txt
@@ -262,15 +255,12 @@ describe('async storage efficiency: maintenance', () => {
       2.008s | 🗑️ ✅ #4 tsdf/sess1/fresh-doc/store-junk.txt (untracked store file)
       2.009s | 🗑️ ✅ #5 tsdf/sess1/invalid-only-store/store-junk.txt
              |    └ (untracked store file)
-      2.01s  | 🧹 del-dir ✅ tsdf/sess1/invalid-only-store (store directory)
-      2.011s | 📄 file-open ✅ #6 tsdf/sess1/expired-doc/d.e.m.json (metadata)
-      .      | 📄 file-open ✅ #7 tsdf/sess1/fresh-doc/d.e.m.json (metadata)
-      2.013s | 📖 #6 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.04 kb
-      .      | 📖 #7 tsdf/sess1/fresh-doc/d.e.m.json (metadata) | 0.04 kb
-      2.015s | 🗑️ ✅ #8 tsdf/sess1/expired-doc/d.e.p.json (payload)
-      .      | 🗑️ ✅ #6 tsdf/sess1/expired-doc/d.e.m.json (metadata)
-      2.016s | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
-      2.017s | end
+      2.01s  | 🧹 del-dir recursive ✅ tsdf/sess1/invalid-only-store
+             |    └ (store directory)
+      2.012s | 📖 #6 tsdf/sess1/expired-doc/d._i.r.json (namespace index) | 0.07 kb
+      .      | 📖 #7 tsdf/sess1/fresh-doc/d._i.r.json (namespace index) | 0.07 kb
+      2.014s | 🧹 del-dir recursive ✅ tsdf/sess1/expired-doc (store directory)
+      2.015s | end
       "
     `);
   });
@@ -320,27 +310,20 @@ describe('async storage efficiency: maintenance', () => {
       2.003s | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:expired-doc"]
       2.004s | 🗂️ list-dir tsdf/sess1/expired-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.005s | 🗂️ list-dir tsdf/sess2
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
       2.006s | 🗂️ list-dir tsdf/sess2/expired-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       .      | 🗂️ list-dir tsdf/sess2/fresh-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      2.007s | 📄 file-open ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
-      .      | 📄 file-open ✅ #2 tsdf/sess2/expired-doc/d.e.m.json (metadata)
-      .      | 📄 file-open ✅ #3 tsdf/sess2/fresh-doc/d.e.m.json (metadata)
-      2.009s | 📖 #1 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.04 kb
-      .      | 📖 #2 tsdf/sess2/expired-doc/d.e.m.json (metadata) | 0.04 kb
-      .      | 📖 #3 tsdf/sess2/fresh-doc/d.e.m.json (metadata) | 0.04 kb
-      2.011s | 🗑️ ✅ #4 tsdf/sess1/expired-doc/d.e.p.json (payload)
-      .      | 🗑️ ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
-      .      | 🗑️ ✅ #5 tsdf/sess2/expired-doc/d.e.p.json (payload)
-      .      | 🗑️ ✅ #2 tsdf/sess2/expired-doc/d.e.m.json (metadata)
-      2.012s | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
-      .      | 🧹 del-dir ✅ tsdf/sess2/expired-doc (store directory)
-      2.013s | 🧹 del-dir ✅ tsdf/sess1 (session directory)
-      2.014s | end
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      2.008s | 📖 #1 tsdf/sess1/expired-doc/d._i.r.json (namespace index) | 0.07 kb
+      .      | 📖 #2 tsdf/sess2/expired-doc/d._i.r.json (namespace index) | 0.07 kb
+      .      | 📖 #3 tsdf/sess2/fresh-doc/d._i.r.json (namespace index) | 0.07 kb
+      2.01s  | 🧹 del-dir recursive ✅ tsdf/sess1/expired-doc (store directory)
+      .      | 🧹 del-dir recursive ✅ tsdf/sess2/expired-doc (store directory)
+      2.011s | 🧹 del-dir recursive ✅ tsdf/sess1 (session directory)
+      2.012s | end
       "
     `);
   });
@@ -389,24 +372,17 @@ describe('async storage efficiency: maintenance', () => {
       2.003s | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:invalid-metadata","dir:missing-payload","dir:valid-doc"]
       2.004s | 🗂️ list-dir tsdf/sess1/invalid-metadata
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+             |    └ (store directory) entries=["file:d.e.p.json"]
       .      | 🗂️ list-dir tsdf/sess1/missing-payload
-             |    └ (store directory) entries=["file:d.e.m.json"]
+             |    └ (store directory) entries=["file:d._i.r.json"]
       .      | 🗂️ list-dir tsdf/sess1/valid-doc
-             |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      2.005s | 📄 file-open ✅ #1 tsdf/sess1/invalid-metadata/d.e.m.json (metadata)
-      .      | 📄 file-open ✅ #2 tsdf/sess1/missing-payload/d.e.m.json (metadata)
-      .      | 📄 file-open ✅ #3 tsdf/sess1/valid-doc/d.e.m.json (metadata)
-      2.007s | 📖 #1 tsdf/sess1/invalid-metadata/d.e.m.json (metadata) | 0.02 kb
-      .      | 📖 #2 tsdf/sess1/missing-payload/d.e.m.json (metadata) | 0.04 kb
-      .      | 📖 #3 tsdf/sess1/valid-doc/d.e.m.json (metadata) | 0.04 kb
-      2.009s | 🗑️ ✅ #4 tsdf/sess1/invalid-metadata/d.e.p.json (payload)
-      .      | 🗑️ ✅ #1 tsdf/sess1/invalid-metadata/d.e.m.json (metadata)
-      .      | 🧹 del-dir ❌ tsdf/sess1/missing-payload/d.e.p.json (scope directory)
-      .      | 🗑️ ✅ #2 tsdf/sess1/missing-payload/d.e.m.json (metadata)
-      2.01s  | 🧹 del-dir ✅ tsdf/sess1/invalid-metadata (store directory)
-      .      | 🧹 del-dir ✅ tsdf/sess1/missing-payload (store directory)
-      2.011s | end
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      2.005s | 🧹 del-dir recursive ✅ tsdf/sess1/invalid-metadata (store directory)
+      2.006s | 📖 #1 tsdf/sess1/missing-payload/d._i.r.json
+             |    └ (namespace index) | 0.07 kb
+      .      | 📖 #2 tsdf/sess1/valid-doc/d._i.r.json (namespace index) | 0.07 kb
+      2.008s | 🧹 del-dir recursive ✅ tsdf/sess1/missing-payload (store directory)
+      2.009s | end
       "
     `);
   });
@@ -523,7 +499,7 @@ describe('async storage efficiency: maintenance', () => {
 
     // Let the trigger store finish its own async persistence before we start
     // capturing, so the timeline only shows the cleanup sweep it scheduled.
-    for (let attempt = 0; attempt < 10; attempt++) {
+    for (let attempt = 0; attempt < 300; attempt++) {
       if (mockAdapter.has(triggerDoc.document.storageKey())) break;
       await advanceTime(10);
     }
@@ -542,9 +518,13 @@ describe('async storage efficiency: maintenance', () => {
       invalidStrayExists: mockAdapter.has(
         invalidStrayDoc.document.storageKey(),
       ),
+      invalidStrayEntries: mockAdapter.mockBrowserOpfs.listEntries(
+        'tsdf/user%40example.com/invalid-stray',
+      ),
       protectedEntryExists: mockAdapter.has(protectedDocStorageKey),
       unprotectedEntryExists: mockAdapter.has(unprotectedDocStorageKey),
     }).toMatchInlineSnapshot(`
+      invalidStrayEntries: []
       invalidStrayExists: '❌'
       protectedEntryExists: '✅'
       unprotectedEntryExists: '❌'
@@ -552,73 +532,55 @@ describe('async storage efficiency: maintenance', () => {
     expect(localStorageOperations).toMatchInlineSnapshot(`
       "
       time  |
-      140ms | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
-      151ms | ✍️ ✅->✅ #1 tsdf._am.g
+      130ms | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
+      139ms | ✍️ ✅->✅ #1 tsdf._am.g
             |    └ (async global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      140ms | 🗂️ list-dir tsdf
+      130ms | 🗂️ list-dir tsdf
             |    └ (root directory) entries=["dir:sess-trigger","dir:user%40example.com"]
-      141ms | 🗂️ list-dir tsdf/sess-trigger
+      131ms | 🗂️ list-dir tsdf/sess-trigger
             |    └ (session directory) entries=["dir:trigger-doc"]
-      142ms | 🗂️ list-dir tsdf/sess-trigger/trigger-doc
-            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      143ms | 🗂️ list-dir tsdf/user%40example.com
+      132ms | 🗂️ list-dir tsdf/sess-trigger/trigger-doc
+            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      133ms | 🗂️ list-dir tsdf/user%40example.com
             |    └ (session directory) entries=["dir:_o_.s","dir:invalid-stray","dir:protected-doc","dir:unprotected-doc"]
-      144ms | 🗂️ list-dir tsdf/user%40example.com/_o_.s
-            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+      134ms | 🗂️ list-dir tsdf/user%40example.com/_o_.s
+            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       .     | 🗂️ list-dir tsdf/user%40example.com/invalid-stray
-            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
+            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       .     | 🗂️ list-dir tsdf/user%40example.com/protected-doc
-            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json","file:oe.document.m.json","file:oe.document.p.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
+            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:oq._i.r.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
       .     | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
-            |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
-      145ms | 📄 file-open ✅ #1 tsdf/user%40example.com/_o_.s/d.e.m.json
-            |    └ (metadata)
-      .     | 📄 file-open ✅ #2 tsdf/user%40example.com/invalid-stray/d.e.m.json
-            |    └ (metadata)
-      .     | 📄 file-open ✅ #3 tsdf/user%40example.com/protected-doc/d.e.m.json
-            |    └ (metadata)
-      .     | 📄 file-open ✅ #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
-            |    └ ([queueKey: protected-doc:1736985603621:4fzzzxjy], metadata)
-      .     | 📄 file-open ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
-            |    └ (metadata)
-      146ms | 📖 #6 tsdf/sess-trigger/trigger-doc/d.e.m.json (metadata) | 0.04 kb
-      .     | 📖 #7 tsdf/user%40example.com/protected-doc/oe.document.m.json
-            |    └ ([entityKey: document], metadata) | 0.04 kb
-      147ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.m.json (metadata) | 0.04 kb
-      .     | 📖 #2 tsdf/user%40example.com/invalid-stray/d.e.m.json
-            |    └ (metadata) | 0.02 kb
-      .     | 📖 #3 tsdf/user%40example.com/protected-doc/d.e.m.json
-            |    └ (metadata) | 0.05 kb
-      .     | 📖 #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
-            |    └ ([queueKey: protected-doc:1736985603621:4fzzzxjy], metadata) | 0.04 kb
-      .     | 📖 #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
-            |    └ (metadata) | 0.04 kb
-      149ms | 🗑️ ✅ #8 tsdf/user%40example.com/invalid-stray/d.e.p.json (payload)
-      .     | 🗑️ ✅ #2 tsdf/user%40example.com/invalid-stray/d.e.m.json (metadata)
-      .     | 🗑️ ✅ #9 tsdf/user%40example.com/unprotected-doc/d.e.p.json
-            |    └ (payload)
-      .     | 🗑️ ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
-            |    └ (metadata)
-      150ms | 🧹 del-dir ✅ tsdf/user%40example.com/invalid-stray (store directory)
-      .     | 🧹 del-dir ✅ tsdf/user%40example.com/unprotected-doc
+            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      136ms | 📖 #1 tsdf/sess-trigger/trigger-doc/d._i.r.json
+            |    └ (namespace index) | 0.07 kb
+      .     | 📖 #2 tsdf/user%40example.com/_o_.s/d._i.r.json
+            |    └ (namespace index) | 0.07 kb
+      .     | 📖 #3 tsdf/user%40example.com/invalid-stray/d._i.r.json
+            |    └ (namespace index) | 0.02 kb
+      .     | 📖 #4 tsdf/user%40example.com/protected-doc/d._i.r.json
+            |    └ (namespace index) | 0.09 kb
+      .     | 📖 #5 tsdf/user%40example.com/protected-doc/oq._i.r.json
+            |    └ (namespace index) | 0.13 kb
+      .     | 📖 #6 tsdf/user%40example.com/unprotected-doc/d._i.r.json
+            |    └ (namespace index) | 0.07 kb
+      138ms | 🧹 del-dir recursive ✅ tsdf/user%40example.com/invalid-stray
             |    └ (store directory)
-      151ms | end
+      .     | 🧹 del-dir recursive ✅ tsdf/user%40example.com/unprotected-doc
+            |    └ (store directory)
+      139ms | end
       "
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1736985605678`);
+    ).toMatchInlineSnapshot(`lca: 1736985605680`);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.m.json'),
-    ).toMatchInlineSnapshot(`
-      a: 1735689601853
-      o: '✅'
-    `);
+    ).toMatchInlineSnapshot(`null`);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),
     ).toMatchInlineSnapshot(`

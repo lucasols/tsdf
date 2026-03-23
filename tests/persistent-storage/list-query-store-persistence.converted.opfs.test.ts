@@ -284,7 +284,8 @@ describe('opfs: converted list query store persistence', () => {
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
     await resolveAfterAllTimers(preloadPromise);
-    await advanceTime(2100);
+    await advanceTime(4300);
+    await flushAllTimers();
 
     expect(mockAdapter.has(persistedQuery.itemStorageKey('users', 1))).toBe(
       false,
