@@ -175,10 +175,9 @@ describe('async storage efficiency: collection', () => {
              |    └ (namespace index) | 0.21 kb
       3.101s | 🗑️ ✅ #3 tsdf/sess1/col-max-items-metadata/ci.%22a.p.json
              |    └ ([itemKey: "a], payload)
-      3.102s | 🧹 del-dir ❌ tsdf/sess1/col-max-items-metadata (store directory)
-      3.105s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      3.104s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.15 kb
-      3.107s | end
+      3.106s | end
       "
     `);
 
@@ -258,10 +257,9 @@ describe('async storage efficiency: collection', () => {
              |    └ ([itemKey: "b], payload)
       .      | 🗑️ ✅ #5 tsdf/sess1/col-coalesced-maintenance/ci.%22a.p.json
              |    └ ([itemKey: "a], payload)
-      3.102s | 🧹 del-dir ❌ tsdf/sess1/col-coalesced-maintenance (store directory)
-      3.105s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      3.104s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.28 kb -> 0.15 kb
-      3.107s | end
+      3.106s | end
       "
     `);
   });
@@ -436,10 +434,9 @@ describe('async storage efficiency: collection', () => {
              |    └ (namespace index) | 0.15 kb
       1.043s | 🗑️ ✅ #2 tsdf/sess1/col-delete-flow/ci.%221.p.json
              |    └ ([itemKey: "1], payload)
-      1.044s | 🧹 del-dir ❌ tsdf/sess1/col-delete-flow (store directory)
-      1.047s | ✍️ #1 tsdf/sess1/col-delete-flow/ci._i.r.json
+      1.046s | ✍️ #1 tsdf/sess1/col-delete-flow/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.08 kb
-      1.049s | end
+      1.048s | end
       "
     `);
   });

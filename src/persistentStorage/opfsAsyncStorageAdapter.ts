@@ -400,6 +400,10 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       removeResults.filter(Boolean).length,
     );
 
+    if (!this.#shouldPruneStoreDirAfterRemovingKeys(uniqueKeys, cacheContext)) {
+      return;
+    }
+
     await this.#pruneEmptyDirectories(scope, cacheContext);
   }
 
@@ -1098,6 +1102,15 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     if (cacheContext !== this.#mainCacheContext) {
       this.#mainCacheContext.dirCache.delete(path);
     }
+  }
+
+  #shouldPruneStoreDirAfterRemovingKeys(
+    keys: string[],
+    cacheContext: OpfsCacheContext,
+  ): boolean {
+    if (cacheContext.cleanupKnowledge !== null) return true;
+
+    return keys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
   }
 
   async #removeWholeStoreDirIfAllKnownEntriesAreBeingRemoved(

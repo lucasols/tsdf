@@ -171,10 +171,9 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.47 kb
       3.912s | 🗑️ ✅ #5 tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22first%22%7D.p.json
              |    └ ([queryKey: {tableId:"first"}], payload)
-      3.913s | 🧹 del-dir ❌ tsdf/sess1/lq-query-metadata (store directory)
-      3.916s | ✍️ #2 tsdf/sess1/lq-query-metadata/lq._i.r.json
+      3.915s | ✍️ #2 tsdf/sess1/lq-query-metadata/lq._i.r.json
              |    └ (namespace index) | 0.47 kb -> 0.33 kb
-      3.918s | end
+      3.917s | end
       "
     `);
     expect(getParsedOpfsFileData('tsdf/sess1/lq-query-metadata/li._i.r.json'))
@@ -308,11 +307,9 @@ describe('async storage efficiency: list-query', () => {
              |    └ ([queryKey: {tableId:"second"}], payload)
       .      | 🗑️ ✅ #8 tsdf/sess1/lq-coalesced-query-maintenance/lq.%7BtableId%3A%22first%22%7D.p.json
              |    └ ([queryKey: {tableId:"first"}], payload)
-      3.913s | 🧹 del-dir ❌ tsdf/sess1/lq-coalesced-query-maintenance
-             |    └ (store directory)
-      3.916s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+      3.915s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (namespace index) | 0.64 kb -> 0.35 kb
-      3.918s | end
+      3.917s | end
       "
     `);
   });
@@ -555,10 +552,9 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.29 kb
       3.105s | 🗑️ ✅ #3 tsdf/sess1/lq-item-metadata/li.%22users%7C%7C3.p.json
              |    └ ([itemKey: "users||3], payload)
-      3.106s | 🧹 del-dir ❌ tsdf/sess1/lq-item-metadata (store directory)
-      3.109s | ✍️ #1 tsdf/sess1/lq-item-metadata/li._i.r.json
+      3.108s | ✍️ #1 tsdf/sess1/lq-item-metadata/li._i.r.json
              |    └ (namespace index) | 0.29 kb -> 0.20 kb
-      3.111s | end
+      3.11s  | end
       "
     `);
   });
@@ -801,18 +797,17 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.20 kb
       1.043s | 🗑️ ✅ #3 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C1.p.json
              |    └ ([itemKey: "users||1], payload)
-      1.044s | 🧹 del-dir ❌ tsdf/sess1/lq-delete-flow (store directory)
       1.045s | ✍️ #4 tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ ([queryKey: {tableId:"users"}], payload) | 0.11 kb -> 0.09 kb
       .      | ✍️ #5 tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json
              |    └ ([queryKey: {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}], payload) | 0.19 kb -> 0.17 kb
-      1.047s | ✍️ #6 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.p.json
+      1.046s | ✍️ #6 tsdf/sess1/lq-delete-flow/li.%22users%7C%7C2.p.json
              |    └ ([itemKey: "users||2], payload) | 0.08 kb -> 0.15 kb
       1.049s | ✍️ #1 tsdf/sess1/lq-delete-flow/lq._i.r.json
              |    └ (namespace index) | 0.58 kb -> 0.53 kb
-      1.051s | ✍️ #2 tsdf/sess1/lq-delete-flow/li._i.r.json
+      1.05s  | ✍️ #2 tsdf/sess1/lq-delete-flow/li._i.r.json
              |    └ (namespace index) | 0.20 kb -> 0.11 kb
-      1.053s | end
+      1.052s | end
       "
     `);
   });
@@ -1840,19 +1835,15 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.53 kb
       3.905s | 🗑️ ✅ #6 tsdf/sess1/list-query-opfs-eviction-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ ([queryKey: {tableId:"users"}], payload)
-      3.906s | 🧹 del-dir ❌ tsdf/sess1/list-query-opfs-eviction-efficiency
-             |    └ (store directory)
-      3.909s | ✍️ #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq._i.r.json
+      3.908s | ✍️ #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq._i.r.json
              |    └ (namespace index) | 0.53 kb -> 0.36 kb
-      3.951s | 📖 #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
+      3.95s  | 📖 #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
              |    └ (namespace index) | 0.31 kb
-      3.954s | 🗑️ ✅ #7 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.p.json
+      3.953s | 🗑️ ✅ #7 tsdf/sess1/list-query-opfs-eviction-efficiency/li.%22users%7C%7C1.p.json
              |    └ ([itemKey: "users||1], payload)
-      3.955s | 🧹 del-dir ❌ tsdf/sess1/list-query-opfs-eviction-efficiency
-             |    └ (store directory)
-      3.958s | ✍️ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
+      3.956s | ✍️ #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
              |    └ (namespace index) | 0.31 kb -> 0.21 kb
-      3.96s  | end
+      3.958s | end
       "
     `);
   });
