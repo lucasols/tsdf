@@ -13,7 +13,10 @@ import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  getNextStoreId,
+  registerMockStoreInstance,
+} from './browserTabsTestUtils';
 import {
   createServerMock,
   type FetchErrorConfig,
@@ -59,6 +62,7 @@ export type DocumentStoreTestEnvOptions<
   getSessionKey?: () => string | false;
   sharedServerState?: SharedServerMockState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
+  testBrowserTabId?: string;
   browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
   /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
   bindFocusController?: {
@@ -98,6 +102,7 @@ export function createDocumentStoreTestEnv<
     getSessionKey = () => 'test-session',
     sharedServerState,
     browserTabsTransportFactory,
+    testBrowserTabId,
     browserTabsLeadershipTimings,
     bindFocusController,
     dynamicRealtimeThrottleMs,
@@ -148,61 +153,79 @@ export function createDocumentStoreTestEnv<
       ? { ...persistentStorage, adapter: storageAdapter }
       : persistentStorage;
 
-  const documentStore = createDocumentStore<
-    { value: D },
-    TOfflineOperations,
-    StorageState
-  >({
-    id,
-    getSessionKey,
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs,
-    baseCoalescingWindowMs,
-    fetchFn: async (signal) => {
-      const value = await serverMock.fetch(signal);
-      return { value };
-    },
-    usesRealTimeUpdates,
-    dynamicRealtimeThrottleMs,
-    revalidateOnWindowFocus,
-    transportReconnectCooldownMs,
-    mediumPriorityDelayMs,
-    blockWindowClose: blockWindowClose ?? null,
-    persistentStorage: resolvedPersistentStorage,
-    '~test': {
-      ...testOptions,
-      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
-      onWindowFocus: bindFocusController
-        ? (handler: () => void) => {
-            return bindFocusController.onWindowFocus(handler);
-          }
-        : undefined,
-      onWindowFocusChange: bindFocusController
-        ? (handler: () => void) => {
-            const cleanupFocus = bindFocusController.onWindowFocus(handler);
-            const cleanupBlur = bindFocusController.onWindowBlur(handler);
-            return () => {
-              cleanupFocus();
-              cleanupBlur();
-            };
-          }
-        : undefined,
-      browserTabsTransportFactory,
-      browserTabsLeadershipTimings,
-      onReceiveRemoteMsg: (
-        message: DocumentBrowserTabsMessage<{ value: D }>,
-      ) => {
-        if (message.kind === 'document-snapshot') {
-          addAction(`<${message.consistency}-snapshot-received`, {
-            actionValue: message.data?.value,
-          });
-        }
+  const unregisterMockStoreInstance =
+    testBrowserTabId === undefined
+      ? () => {}
+      : registerMockStoreInstance({
+          storeId: id,
+          storeType: 'document',
+          testBrowserTabId,
+        });
+
+  let documentStore: ReturnType<
+    typeof createDocumentStore<{ value: D }, TOfflineOperations, StorageState>
+  >;
+
+  try {
+    documentStore = createDocumentStore<
+      { value: D },
+      TOfflineOperations,
+      StorageState
+    >({
+      id,
+      getSessionKey,
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs,
+      baseCoalescingWindowMs,
+      fetchFn: async (signal) => {
+        const value = await serverMock.fetch(signal);
+        return { value };
       },
-    },
-    onSchedulerEvent: (event) => {
-      logSchedulerEvent(event, addAction);
-    },
-  });
+      usesRealTimeUpdates,
+      dynamicRealtimeThrottleMs,
+      revalidateOnWindowFocus,
+      transportReconnectCooldownMs,
+      mediumPriorityDelayMs,
+      blockWindowClose: blockWindowClose ?? null,
+      persistentStorage: resolvedPersistentStorage,
+      '~test': {
+        ...testOptions,
+        getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+        onWindowFocus: bindFocusController
+          ? (handler: () => void) => {
+              return bindFocusController.onWindowFocus(handler);
+            }
+          : undefined,
+        onWindowFocusChange: bindFocusController
+          ? (handler: () => void) => {
+              const cleanupFocus = bindFocusController.onWindowFocus(handler);
+              const cleanupBlur = bindFocusController.onWindowBlur(handler);
+              return () => {
+                cleanupFocus();
+                cleanupBlur();
+              };
+            }
+          : undefined,
+        browserTabsTransportFactory,
+        browserTabsLeadershipTimings,
+        onReceiveRemoteMsg: (
+          message: DocumentBrowserTabsMessage<{ value: D }>,
+        ) => {
+          if (message.kind === 'document-snapshot') {
+            addAction(`<${message.consistency}-snapshot-received`, {
+              actionValue: message.data?.value,
+            });
+          }
+        },
+      },
+      onSchedulerEvent: (event) => {
+        logSchedulerEvent(event, addAction);
+      },
+    });
+  } catch (error) {
+    unregisterMockStoreInstance();
+    throw error;
+  }
 
   if (usesRealTimeUpdates) {
     serverMock.wsEvents.on('data_changed', () => {
