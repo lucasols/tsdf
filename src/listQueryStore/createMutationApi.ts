@@ -792,58 +792,7 @@ export function createMutationApi<
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    if (!offline) {
-      const result = await performMutationWithLifecycle({
-        startMutation: () => startItemMutation(payloadToUse),
-        optimisticUpdate: optimisticUpdate
-          ? () =>
-              runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(payloadToUse),
-              )
-          : undefined,
-        debounce,
-        blockWindowClose: blockWindowClose ?? undefined,
-        mutation: () => mutation(payloadToUse),
-        onSuccess: (result) => {
-          if (revalidateOnSuccess) {
-            invalidateQueryAndItems({
-              itemPayload:
-                revalidateOnSuccess === 'queries' ? false : payloadToUse,
-              queryPayload: getRevalidateOnSuccessQueries,
-            });
-          }
-
-          onSuccess?.(result, payloadToUse);
-        },
-        onError: (exception) => {
-          const error = errorNormalizer(unknownToError(exception));
-
-          if (!silentErrors && onMutationError) {
-            onMutationError(exception, { silentErrors });
-          }
-
-          if (!dontRevalidateOnError) {
-            invalidateQueryAndItems({
-              itemPayload: payloadToUse,
-              queryPayload: getRelatedQueries,
-            });
-          }
-
-          if (onError) {
-            onError(error);
-          }
-
-          return error;
-        },
-      });
-
-      storeEvents.emit('mutationEnd', {
-        mutationId,
-        items: affectedItems,
-        success: result.ok,
-      });
-      return result;
-    }
+    const directMutation = () => mutation(payloadToUse);
 
     const result = await performMutationWithLifecycle({
       startMutation: () => startItemMutation(payloadToUse),
@@ -855,12 +804,17 @@ export function createMutationApi<
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () =>
-        runHybridOfflineMutation({
-          controller: offlineController,
-          offline,
-          directMutation: () => mutation(payloadToUse),
-        }),
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              controller: offlineController,
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
       onSuccess: (result) => {
         if (revalidateOnSuccess && result.kind === 'online') {
           invalidateQueryAndItems({
@@ -901,6 +855,11 @@ export function createMutationApi<
       items: affectedItems,
       success: result.ok,
     });
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
+
     return result;
   }
 

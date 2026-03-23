@@ -1595,49 +1595,8 @@ export function createCollectionStore<
       'mutationStart',
       hasPayload ? { mutationId, payload } : { mutationId },
     );
-    if (!offline) {
-      const result = await performMutationWithLifecycle({
-        startMutation: () =>
-          hasPayload ? startMutation(payload) : () => undefined,
-        optimisticUpdate: optimisticUpdate
-          ? () =>
-              runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(payload),
-              )
-          : undefined,
-        debounce: _debounce,
-        blockWindowClose: blockWindowClose ?? undefined,
-        mutation: () => mutation(payload),
-        onSuccess: (result) => {
-          if (hasPayload && revalidateOnSuccess) {
-            invalidateItem(payload);
-          }
 
-          onSuccess?.(result, payload);
-        },
-        onError: (exception) => {
-          const error = errorNormalizer(unknownToError(exception));
-
-          if (!silentErrors && onMutationError) {
-            onMutationError(exception, { silentErrors });
-          }
-
-          if (hasPayload) {
-            invalidateItem(payload);
-          }
-
-          return error;
-        },
-      });
-
-      storeEvents.emit(
-        'mutationEnd',
-        hasPayload
-          ? { mutationId, payload, success: result.ok }
-          : { mutationId, success: result.ok },
-      );
-      return result;
-    }
+    const directMutation = () => mutation(payload);
 
     const result = await performMutationWithLifecycle({
       startMutation: () =>
@@ -1650,12 +1609,17 @@ export function createCollectionStore<
         : undefined,
       debounce: _debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () =>
-        runHybridOfflineMutation({
-          controller: offlineController,
-          offline,
-          directMutation: () => mutation(payload),
-        }),
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              controller: offlineController,
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
       onSuccess: (result) => {
         if (hasPayload && revalidateOnSuccess && result.kind === 'online') {
           invalidateItem(payload);
@@ -1686,6 +1650,11 @@ export function createCollectionStore<
         ? { mutationId, payload, success: result.ok }
         : { mutationId, success: result.ok },
     );
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
+
     return result;
   }
 

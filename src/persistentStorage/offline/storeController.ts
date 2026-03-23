@@ -229,13 +229,15 @@ export function createOfflineStoreController<
   function ensureActiveSession(): ActiveSessionState | null {
     const sessionKey = getSessionKey();
     if (sessionKey === false) {
-      activeSession?.unregister?.();
-      activeSession = null;
-      resetConfirmationRetries();
-      queueEntries.clear();
-      conflicts.clear();
-      hydratedSessionKey = null;
-      hydratedPromise = null;
+      if (activeSession) {
+        activeSession.unregister?.();
+        activeSession = null;
+        resetConfirmationRetries();
+        queueEntries.clear();
+        conflicts.clear();
+        hydratedSessionKey = null;
+        hydratedPromise = null;
+      }
       return null;
     }
 
@@ -614,24 +616,16 @@ export function createOfflineStoreController<
     };
   }
 
-  function getPreparedSessionOrThrow(args: {
-    currentSessionKey: string;
-  }): ActiveSessionState {
-    const current = ensureActiveSession();
-    if (!current || current.sessionKey !== args.currentSessionKey) {
-      throw offlineSessionUnavailableError;
-    }
-
-    return current;
-  }
-
   async function queuePreparedMutation(args: {
     currentSessionKey: string;
     operationName: string;
     operation: AnyOfflineOperationDefinition;
     validatedInput: unknown;
   }): Promise<void> {
-    const current = getPreparedSessionOrThrow(args);
+    const current = ensureActiveSession();
+    if (!current || current.sessionKey !== args.currentSessionKey) {
+      throw offlineSessionUnavailableError;
+    }
     const { operation, operationName, validatedInput } = args;
 
     const tempEntity = operation.tempEntity;
@@ -917,7 +911,13 @@ export function createOfflineStoreController<
       effectiveOffline: current.session.getStatus().effectiveOffline,
       queueMutation: () => queuePreparedMutation(prepared),
       classifyError: async (error) => {
-        const preparedCurrent = getPreparedSessionOrThrow(prepared);
+        const preparedCurrent = ensureActiveSession();
+        if (
+          !preparedCurrent ||
+          preparedCurrent.sessionKey !== prepared.currentSessionKey
+        ) {
+          throw offlineSessionUnavailableError;
+        }
 
         await preparedCurrent.session.refreshNetworkState();
         if (preparedCurrent.session.getStatus().effectiveOffline) {

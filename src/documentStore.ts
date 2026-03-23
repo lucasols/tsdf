@@ -835,38 +835,9 @@ export function createDocumentStore<
 
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
-    if (!offline) {
-      const result = await performMutationWithLifecycle({
-        startMutation,
-        optimisticUpdate: optimisticUpdate
-          ? () =>
-              runWithBroadcastConsistency('optimistic', () =>
-                optimisticUpdate(store.state.data),
-              )
-          : undefined,
-        debounce,
-        blockWindowClose: blockWindowClose ?? undefined,
-        mutation: () =>
-          mutation({ updateState, currentState: store.state.data }),
-        onSuccess: () => {
-          if (revalidateOnSuccess) {
-            invalidateData();
-          }
-        },
-        onError: (exception) => {
-          if (onMutationError) {
-            onMutationError(exception, { dontShowToast: dontShowErrorToast });
-          }
 
-          invalidateData();
-
-          return errorNormalizer(unknownToError(exception));
-        },
-      });
-
-      storeEvents.emit('mutationEnd', { mutationId, success: result.ok });
-      return result;
-    }
+    const directMutation = () =>
+      mutation({ updateState, currentState: store.state.data });
 
     const result = await performMutationWithLifecycle({
       startMutation,
@@ -878,13 +849,17 @@ export function createDocumentStore<
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: () =>
-        runHybridOfflineMutation({
-          controller: offlineController,
-          offline,
-          directMutation: () =>
-            mutation({ updateState, currentState: store.state.data }),
-        }),
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              controller: offlineController,
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
       onSuccess: (result) => {
         if (revalidateOnSuccess && result.kind === 'online') {
           invalidateData();
@@ -902,6 +877,11 @@ export function createDocumentStore<
     });
 
     storeEvents.emit('mutationEnd', { mutationId, success: result.ok });
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
+
     return result;
   }
 
