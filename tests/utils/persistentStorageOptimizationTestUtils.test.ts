@@ -4,6 +4,8 @@ import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { resolveAfterAllTimers } from './genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from './opfsPersistentStorageTestStore';
 import {
+  getLocalStorageTree,
+  getOpfsDirTree,
   getParsedOpfsFileData,
   getParsedOpfsNamespaceValue,
   startPersistentStorageOperationCapture,
@@ -225,6 +227,58 @@ describe('startPersistentStorageOperationCapture', () => {
       0    | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
            |    └ (root, single, manifest) | ❌ -> 0.01 kb
       "
+    `);
+  });
+
+  test('getLocalStorageTree groups dotted keys and rolls up folder sizes', () => {
+    localStorage.setItem('tsdf.docs.item.a', 'x'.repeat(40));
+    localStorage.setItem('tsdf.docs.item.b', 'x'.repeat(60));
+    localStorage.setItem('tsdf.docs.meta', 'x'.repeat(20));
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.23 kb)
+      └ docs (0.23 kb)
+        ├ item (0.20 kb)
+        │ ├ a (0.08 kb)
+        │ └ b (0.12 kb)
+        └ meta (0.04 kb)"
+    `);
+  });
+});
+
+describe('storage tree helpers', () => {
+  beforeEach(() => {
+    resetMockBrowserOpfsForTests();
+  });
+
+  afterEach(() => {
+    resetMockBrowserOpfsForTests();
+  });
+
+  test('getOpfsDirTree expands file names into a dotted hierarchy', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+
+    mockAdapter.mockBrowserOpfs.writeFile(
+      'tsdf/sess1/docs/d.e.m.json',
+      'x'.repeat(20),
+    );
+    mockAdapter.mockBrowserOpfs.writeFile(
+      'tsdf/sess1/docs/d.e.p.json',
+      'x'.repeat(40),
+    );
+    mockAdapter.mockBrowserOpfs.writeFile(
+      'tsdf/sess1/users/ci.%22user-1.p.json',
+      'x'.repeat(60),
+    );
+
+    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+      "tsdf (0.23 kb)
+      └ sess1 (0.23 kb)
+        ├ docs (0.12 kb)
+        │ ├ d.e.m.json (0.04 kb)
+        │ └ d.e.p.json (0.08 kb)
+        └ users (0.12 kb)
+          └ ci.%22user-1.p.json (0.12 kb)"
     `);
   });
 });

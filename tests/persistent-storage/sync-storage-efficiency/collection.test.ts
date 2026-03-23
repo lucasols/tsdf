@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
+  getLocalStorageTree,
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -90,6 +91,21 @@ describe('sync storage efficiency: collection', () => {
       "
     `);
 
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.39 kb)
+      ├ _m (0.16 kb)
+      │ ├ g (0.04 kb)
+      │ └ r (0.12 kb)
+      │   └ n:sess1 (0.12 kb)
+      │     └ collection-expiration (0.12 kb)
+      │       └ ci (0.12 kb)
+      │         └ m (0.12 kb)
+      └ sess1 (0.23 kb)
+        └ collection-expiration (0.23 kb)
+          └ ci (0.23 kb)
+            └ "fresh-user (0.23 kb)"
+    `);
+
     expect(
       getParsedLocalStorageValue(
         'tsdf._m.r.n:sess1.collection-expiration.ci.m',
@@ -99,6 +115,15 @@ describe('sync storage efficiency: collection', () => {
         - a: 1735689600000
           k: '"fresh-user'
           p: 'fresh-user'
+    `);
+
+    expect(getParsedLocalStorageValue(freshItemKey)).toMatchInlineSnapshot(`
+      data:
+        data:
+          value: { id: 'fresh-user', name: 'Fresh User' }
+        payload: 'fresh-user'
+
+      timestamp: 1735689600000
     `);
   });
 
@@ -156,6 +181,22 @@ describe('sync storage efficiency: collection', () => {
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (root, namespace, manifest) | 0.24 kb -> 0.16 kb
       "
+    `);
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.58 kb)
+      ├ _m (0.20 kb)
+      │ ├ g (0.04 kb)
+      │ └ r (0.16 kb)
+      │   └ n:sess1 (0.16 kb)
+      │     └ col-max-items-metadata (0.16 kb)
+      │       └ ci (0.16 kb)
+      │         └ m (0.16 kb)
+      └ sess1 (0.38 kb)
+        └ col-max-items-metadata (0.38 kb)
+          └ ci (0.38 kb)
+            ├ "b (0.20 kb)
+            └ "c (0.18 kb)"
     `);
   });
 

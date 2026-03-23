@@ -583,19 +583,19 @@ describe('async storage efficiency: maintenance', () => {
       .     | 📄 file-open ✅ #3 tsdf/user%40example.com/protected-doc/d.e.m.json
             |    └ (metadata)
       .     | 📄 file-open ✅ #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
-            |    └ (tsdf.user@example.com.protected-doc.oq.protected-doc:1736985603621:4fzzzxjy (metadata))
+            |    └ ([queueKey: protected-doc:1736985603621:4fzzzxjy], metadata)
       .     | 📄 file-open ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
             |    └ (metadata)
       146ms | 📖 #6 tsdf/sess-trigger/trigger-doc/d.e.m.json (metadata) | 0.05 kb
       .     | 📖 #7 tsdf/user%40example.com/protected-doc/oe.document.m.json
-            |    └ (tsdf.user@example.com.protected-doc.oe.document (metadata)) | 0.05 kb
+            |    └ ([entityKey: document], metadata) | 0.05 kb
       147ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.m.json (metadata) | 0.05 kb
       .     | 📖 #2 tsdf/user%40example.com/invalid-stray/d.e.m.json
             |    └ (metadata) | 0.02 kb
       .     | 📖 #3 tsdf/user%40example.com/protected-doc/d.e.m.json
             |    └ (metadata) | 0.07 kb
       .     | 📖 #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
-            |    └ (tsdf.user@example.com.protected-doc.oq.protected-doc:1736985603621:4fzzzxjy (metadata)) | 0.05 kb
+            |    └ ([queueKey: protected-doc:1736985603621:4fzzzxjy], metadata) | 0.05 kb
       .     | 📖 #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
             |    └ (metadata) | 0.05 kb
       149ms | 🗑️ ✅ #8 tsdf/user%40example.com/invalid-stray/d.e.p.json (payload)

@@ -8,6 +8,7 @@ import {
 } from '../../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
+  getOpfsDirTree,
   getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -77,6 +78,21 @@ describe('async storage efficiency: document', () => {
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+
+    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+      "tsdf (0.19 kb)
+      ├ sess1 (0.15 kb)
+      │ └ doc-remount-flow (0.15 kb)
+      │   ├ d.e.m.json (0.05 kb)
+      │   └ d.e.p.json (0.10 kb)
+      └ tsdf._am.g* (0.04 kb)"
+    `);
+
+    expect(getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d.e.p.json'))
+      .toMatchInlineSnapshot(`
+      d:
+        value: { name: 'Cached document', value: 7 }
+    `);
   });
 
   test('document hook hydration does not skip the touch write once the cached document falls outside the current recency bucket', async () => {

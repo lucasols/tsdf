@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
+  getLocalStorageTree,
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -64,6 +65,27 @@ describe('sync storage efficiency: document', () => {
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.27 kb)
+      ├ _m (0.09 kb)
+      │ ├ g (0.04 kb)
+      │ └ r (0.05 kb)
+      │   └ s:sess1 (0.05 kb)
+      │     └ doc-remount-flow (0.05 kb)
+      │       └ m (0.05 kb)
+      └ sess1 (0.18 kb)
+        └ doc-remount-flow (0.18 kb)"
+    `);
+
+    expect(getParsedLocalStorageValue('tsdf.sess1.doc-remount-flow'))
+      .toMatchInlineSnapshot(`
+      data:
+        data:
+          value: { name: 'Cached document', value: 7 }
+
+      timestamp: 1735689600000
+    `);
   });
 
   test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {

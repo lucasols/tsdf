@@ -2,11 +2,17 @@ import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { vi } from 'vitest';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../src/persistentStorage/asyncStorageAdapter';
+import {
+  decodePathSegment,
+  OPFS_ROOT_DIR,
+  parseRecordKey,
+} from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { readMockBrowserOpfsFileForTests } from '../mocks/mockBrowserOpfs';
 import {
   createOpfsPersistentStorageTestStore,
   type MockOpfsOperation,
+  type OpfsPersistentStorageTestStore,
 } from './opfsPersistentStorageTestStore';
 
 const LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX = 'li';
@@ -428,6 +434,222 @@ export function getParsedOpfsNamespaceValue<T = unknown>(
   );
 }
 
+type StorageTreeNode = {
+  children: Map<string, StorageTreeNode>;
+  ownByteSize: number;
+  totalByteSize: number;
+};
+
+function createStorageTreeNode(): StorageTreeNode {
+  return { children: new Map(), ownByteSize: 0, totalByteSize: 0 };
+}
+
+type StorageEntryLabelKind =
+  | 'itemKey'
+  | 'queryKey'
+  | 'queueKey'
+  | 'conflictKey'
+  | 'entityKey';
+
+function getStorageEntryLabelKind(value: string): StorageEntryLabelKind | null {
+  switch (value) {
+    case 'collection.item':
+    case 'listQuery.item':
+    case 'ci':
+    case 'li':
+      return 'itemKey';
+    case 'listQuery.query':
+    case 'lq':
+      return 'queryKey';
+    case 'offline.queue':
+    case 'oq':
+      return 'queueKey';
+    case 'offline.conflict':
+    case 'oc':
+      return 'conflictKey';
+    case 'offline.entity':
+    case 'oe':
+      return 'entityKey';
+    default:
+      return null;
+  }
+}
+
+function formatStorageEntryLabel(
+  kind: StorageEntryLabelKind,
+  value: string,
+): string {
+  return `[${kind}: ${value}]`;
+}
+
+function addTreePath(
+  root: StorageTreeNode,
+  pathSegments: readonly string[],
+  byteSize: number,
+): void {
+  if (pathSegments.length === 0) return;
+
+  root.totalByteSize += byteSize;
+  let current = root;
+
+  for (const pathSegment of pathSegments) {
+    let next = current.children.get(pathSegment);
+    if (next === undefined) {
+      next = createStorageTreeNode();
+      current.children.set(pathSegment, next);
+    }
+
+    next.totalByteSize += byteSize;
+    current = next;
+  }
+
+  current.ownByteSize += byteSize;
+}
+
+function formatStorageTree(node: StorageTreeNode): string[] {
+  const entries = [...node.children.entries()].sort(([leftName], [rightName]) =>
+    leftName.localeCompare(rightName),
+  );
+
+  return entries.flatMap(([name, child], index) =>
+    formatStorageTreeNode({
+      child,
+      isLast: index === entries.length - 1,
+      isRootLevel: true,
+      name,
+      prefix: '',
+    }),
+  );
+}
+
+function formatStorageTreeNode(args: {
+  child: StorageTreeNode;
+  isLast: boolean;
+  isRootLevel: boolean;
+  name: string;
+  prefix: string;
+}): string[] {
+  const line = args.isRootLevel
+    ? `${args.name} (${formatByteSize(args.child.totalByteSize)})`
+    : `${args.prefix}${args.isLast ? '└' : '├'} ${args.name} (${formatByteSize(
+        args.child.totalByteSize,
+      )})`;
+
+  const childPrefix = args.isRootLevel
+    ? ''
+    : `${args.prefix}${args.isLast ? '  ' : '│ '}`;
+  const childEntries = [...args.child.children.entries()].sort(
+    ([leftName], [rightName]) => leftName.localeCompare(rightName),
+  );
+
+  return [
+    line,
+    ...childEntries.flatMap(([name, child], index) =>
+      formatStorageTreeNode({
+        child,
+        isLast: index === childEntries.length - 1,
+        isRootLevel: false,
+        name,
+        prefix: childPrefix,
+      }),
+    ),
+  ];
+}
+
+function getStorageTreeString(root: StorageTreeNode): string {
+  const lines = formatStorageTree(root);
+  return lines.length === 0 ? 'empty' : lines.join('\n');
+}
+
+function getOpfsTreeFileSegments(fileName: string): string[] {
+  return [fileName];
+}
+
+function addOpfsDirectoryToTree(args: {
+  dirPath: string;
+  pathSegments: string[];
+  root: StorageTreeNode;
+  storage: OpfsPersistentStorageTestStore['mockBrowserOpfs'];
+}): void {
+  const entries = args.storage.listEntries(args.dirPath);
+
+  for (const entry of entries) {
+    if (entry.startsWith('dir:')) {
+      const rawName = entry.slice('dir:'.length);
+      addOpfsDirectoryToTree({
+        dirPath: `${args.dirPath}/${rawName}`,
+        pathSegments: [...args.pathSegments, decodePathSegment(rawName)],
+        root: args.root,
+        storage: args.storage,
+      });
+      continue;
+    }
+
+    if (!entry.startsWith('file:')) continue;
+
+    const fileName = entry.slice('file:'.length);
+    const raw = args.storage.readFile(`${args.dirPath}/${fileName}`);
+    if (raw === null) continue;
+
+    addTreePath(
+      args.root,
+      [...args.pathSegments, ...getOpfsTreeFileSegments(fileName)],
+      raw.length * 2,
+    );
+  }
+}
+
+export function getLocalStorageTree(): string {
+  const root = createStorageTreeNode();
+  const keys = Array.from({ length: localStorage.length }, (_, index) => {
+    const key = localStorage.key(index);
+    return key === null ? [] : [key];
+  })
+    .flat()
+    .sort((left, right) => left.localeCompare(right));
+
+  for (const key of keys) {
+    const value = localStorage.getItem(key);
+    if (value === null) continue;
+
+    addTreePath(root, key.split('.'), value.length * 2);
+  }
+
+  return getStorageTreeString(root);
+}
+
+export function getOpfsDirTree(
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
+): string {
+  const root = createStorageTreeNode();
+  const rootEntries = mockAdapter.mockBrowserOpfs.listEntries(OPFS_ROOT_DIR);
+  const asyncGlobalMaintenance = localStorage.getItem(
+    ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+  );
+
+  if (rootEntries.length === 0 && asyncGlobalMaintenance === null)
+    return 'empty';
+
+  if (rootEntries.length > 0) {
+    addOpfsDirectoryToTree({
+      dirPath: OPFS_ROOT_DIR,
+      pathSegments: [OPFS_ROOT_DIR],
+      root,
+      storage: mockAdapter.mockBrowserOpfs,
+    });
+  }
+
+  if (asyncGlobalMaintenance !== null) {
+    addTreePath(
+      root,
+      [OPFS_ROOT_DIR, 'tsdf._am.g*'],
+      asyncGlobalMaintenance.length * 2,
+    );
+  }
+
+  return getStorageTreeString(root);
+}
+
 type TimelineLabel = { endTime: number; label: string; time: number };
 
 function sortTimedLabels(
@@ -565,6 +787,19 @@ function isPlainDocumentLogicalKey(
   );
 }
 
+function formatScopedRecordKeyLabel(
+  scope: AsyncStorageNamespaceScope,
+  recordKey: string,
+): string | null {
+  const parsedRecordKey = parseRecordKey(recordKey);
+  if (parsedRecordKey.recordKind === 'raw') return null;
+
+  const labelKind = getStorageEntryLabelKind(scope.kind);
+  if (labelKind === null) return null;
+
+  return formatStorageEntryLabel(labelKind, parsedRecordKey.userKey);
+}
+
 function formatRecordLabel(
   record: {
     key: string;
@@ -579,6 +814,13 @@ function formatRecordLabel(
     isPlainDocumentLogicalKey(scope, record.logicalKey)
   ) {
     return record.recordKind;
+  }
+
+  if (scope !== null) {
+    const compactRecordKeyLabel = formatScopedRecordKeyLabel(scope, record.key);
+    if (compactRecordKeyLabel !== null) {
+      return `${compactRecordKeyLabel}, ${record.recordKind}`;
+    }
   }
 
   if (record.recordKind === 'payload' && record.logicalKey !== null) {

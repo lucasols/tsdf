@@ -69,11 +69,7 @@ type OpfsCacheContext = {
   fileCache: OpfsFileCache;
 };
 
-type ScopedDirectoryEntry = {
-  fileName: string;
-  handle: FileSystemFileHandle;
-  key: string;
-};
+type ScopedDirectoryEntry = { fileName: string; key: string };
 
 type DiscoveredScopeEntry = {
   metadataRecordKeys: string[];
@@ -734,18 +730,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       const parsed = parseFileName(entry.name);
       if (parsed === null || parsed.kind !== scope.kind) continue;
 
-      const fileHandle = await this.#getFileHandle(scope, parsed.key, {
-        create: false,
-        cacheContext,
-        storeDir,
-      });
-      if (fileHandle === null) continue;
-
-      scopedEntries.push({
-        fileName: entry.name,
-        handle: fileHandle,
-        key: parsed.key,
-      });
+      scopedEntries.push({ fileName: entry.name, key: parsed.key });
     }
 
     return scopedEntries.sort((left, right) =>
