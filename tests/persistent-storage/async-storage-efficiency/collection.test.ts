@@ -406,9 +406,13 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(collectionScope.collection.readItemData('1')).toMatchInlineSnapshot(
-      `value: { id: '1', name: 'Edited user' }`,
-    );
+    expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.%221.p.json'))
+      .toMatchInlineSnapshot(`
+        d:
+          value: { id: '1', name: 'Edited user' }
+
+        p: '1'
+      `);
     expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.%221.m.json'))
       .toMatchInlineSnapshot(`
         a: 1735689604050
@@ -510,9 +514,14 @@ describe('async storage efficiency: collection', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user' }`,
     );
-    expect(collectionScope.collection.readItemData('1')).toMatchInlineSnapshot(
-      `value: { id: '1', name: 'Fresh user' }`,
-    );
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/col-invalidation-flow/ci.%221.p.json'),
+    ).toMatchInlineSnapshot(`
+      d:
+        value: { id: '1', name: 'Fresh user' }
+
+      p: '1'
+    `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -648,9 +657,16 @@ describe('async storage efficiency: collection', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { id: '1', name: 'Fresh user 2' }`,
     );
-    expect(collectionScope.collection.readItemData('1')).toMatchInlineSnapshot(
-      `value: { id: '1', name: 'Fresh user 2' }`,
-    );
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d:
+        value: { id: '1', name: 'Fresh user 2' }
+
+      p: '1'
+    `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |

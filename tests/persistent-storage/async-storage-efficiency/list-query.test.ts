@@ -511,21 +511,6 @@ describe('async storage efficiency: list-query', () => {
     const invalidationOperations = invalidationCapture.finish().timelineString;
 
     expect(hook.result.current.items).toMatchInlineSnapshot(`[]`);
-    expect(listQueryScope.listQuery.readQueryEntry(usersQuery))
-      .toMatchInlineSnapshot(`
-        data:
-          hasMore: '❌'
-          items: []
-          payload: { tableId: 'users' }
-
-        timestamp: 1735689604865
-        version: 1
-      `);
-    expect(listQueryScope.listQuery.readItemData('users', 1))
-      .toMatchInlineSnapshot(`
-        id: 1
-        name: 'Cached user'
-      `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -732,32 +717,60 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(
       `['"users||1', '"users||2', '"users||3', '"users||4']`,
     );
-    expect(listQueryScope.listQuery.readQueryEntry(firstUsersQuery))
-      .toMatchInlineSnapshot(`
-        data:
-          hasMore: '❌'
-          items: ['"users||1', '"users||2']
-          payload:
-            filters:
-              - { field: 'name', op: 'eq', value: 'Alice' }
-            tableId: 'users'
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600300
+      i: ['"users||1', '"users||2']
 
-        timestamp: 1735689600300
-        version: 1
-      `);
-    expect(listQueryScope.listQuery.readQueryEntry(secondUsersQuery))
-      .toMatchInlineSnapshot(`
-        data:
-          hasMore: '❌'
-          items: ['"users||1', '"users||3']
-          payload:
-            filters:
-              - { field: 'name', op: 'eq', value: 'Bob' }
-            tableId: 'users'
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Alice' }
+        tableId: 'users'
 
-        timestamp: 1735689600300
-        version: 1
-      `);
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"users||1', '"users||2']
+
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Alice' }
+        tableId: 'users'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600300
+      i: ['"users||1', '"users||3']
+
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Bob' }
+        tableId: 'users'
+
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-shared-item-cleanup/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Bob%22%7D%5D%2CtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"users||1', '"users||3']
+
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Bob' }
+        tableId: 'users'
+    `);
     expect(cleanupOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -840,29 +853,51 @@ describe('async storage efficiency: list-query', () => {
     expect(
       listQueryScope.listQuery.listStoredItemKeys().sort(),
     ).toMatchInlineSnapshot(`['"users||2']`);
-    expect(listQueryScope.listQuery.readQueryEntry(usersQuery))
-      .toMatchInlineSnapshot(`
-        data:
-          hasMore: '❌'
-          items: ['"users||2']
-          payload: { tableId: 'users' }
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604149
+      i: ['"users||2']
+      p: { tableId: 'users' }
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-delete-flow/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"users||2']
+      p: { tableId: 'users' }
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689604149
+      i: []
 
-        timestamp: 1735689604149
-        version: 1
-      `);
-    expect(listQueryScope.listQuery.readQueryEntry(filteredUsersQuery))
-      .toMatchInlineSnapshot(`
-        data:
-          hasMore: '❌'
-          items: []
-          payload:
-            filters:
-              - { field: 'name', op: 'eq', value: 'Alice' }
-            tableId: 'users'
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Alice' }
+        tableId: 'users'
 
-        timestamp: 1735689604149
-        version: 1
-      `);
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-delete-flow/lq.%7Bfilters%3A%5B%7Bfield%3A%22name%22%2Cop%3A%22eq%22%2Cvalue%3A%22Alice%22%7D%5D%2CtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: []
+
+      p:
+        filters:
+          - { field: 'name', op: 'eq', value: 'Alice' }
+        tableId: 'users'
+    `);
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -1058,16 +1093,24 @@ describe('async storage efficiency: list-query', () => {
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user' }`,
     );
-    expect(listQueryScope.listQuery.readQueryEntry(usersQuery))
-      .toMatchInlineSnapshot(`
-        data:
-          hasMore: '❌'
-          items: ['"users||1']
-          payload: { tableId: 'users' }
-
-        timestamp: 1735689600000
-        version: 1
-      `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-invalidation-flow/lq.%7BtableId%3A%22users%22%7D.m.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600000
+      i: ['"users||1']
+      p: { tableId: 'users' }
+      v: 1
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-query-invalidation-flow/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"users||1']
+      p: { tableId: 'users' }
+    `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -1152,11 +1195,15 @@ describe('async storage efficiency: list-query', () => {
     expect(hook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Fresh user 2' }`,
     );
-    expect(listQueryScope.listQuery.readItemData('users', 1))
-      .toMatchInlineSnapshot(`
-        id: 1
-        name: 'Fresh user 2'
-      `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Fresh user 2' }
+      lf: ['age', 'email', 'id', 'name']
+      p: 'users||1'
+    `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -1494,11 +1541,15 @@ describe('async storage efficiency: list-query', () => {
       id: 1
       name: 'Fresh user'
     `);
-    expect(listQueryScope.listQuery.readItemData('users', 1))
-      .toMatchInlineSnapshot(`
-        id: 1
-        name: 'Fresh user'
-      `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Fresh user' }
+      lf: ['age', 'email', 'id', 'name']
+      p: 'users||1'
+    `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -1763,11 +1814,15 @@ describe('async storage efficiency: list-query', () => {
     await flushAllTimers();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(listQueryScope.listQuery.readItemData('users', 1))
-      .toMatchInlineSnapshot(`
-        id: 1
-        name: 'Edited user'
-      `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Edited user' }
+      lf: ['age', 'email', 'id', 'name']
+      p: 'users||1'
+    `);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json',

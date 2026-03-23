@@ -312,9 +312,11 @@ describe('async storage efficiency: document', () => {
     await flushInvalidationPersistence();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(documentScope.document.readData()).toMatchInlineSnapshot(
-      `value: { name: 'Edited document', value: 99 }`,
-    );
+    expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.p.json'))
+      .toMatchInlineSnapshot(`
+        d:
+          value: { name: 'Edited document', value: 99 }
+      `);
     expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.m.json'))
       .toMatchInlineSnapshot(`
         a: 1735689605096
@@ -343,11 +345,7 @@ describe('async storage efficiency: document', () => {
       value: { name: 'Cached document', value: 8 },
     });
 
-    const env = createDocumentEnv({
-      storeName,
-      sessionKey,
-      serverData: { name: 'Fresh document', value: 42 },
-    });
+    const env = createDocumentEnv({ storeName, sessionKey });
 
     // Hydrate cached data first without a mount refetch so the invalidation path stays isolated.
     await settleStartupBackgroundScan(mockAdapter);
@@ -372,9 +370,16 @@ describe('async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document', value: 42 }`,
     );
-    expect(documentScope.document.readData()).toMatchInlineSnapshot(
-      `value: { name: 'Fresh document', value: 42 }`,
-    );
+    expect(getParsedOpfsFileData('tsdf/sess1/doc-invalidation-flow/d.e.p.json'))
+      .toMatchInlineSnapshot(`
+        d:
+          value: { name: 'Fresh document', value: 42 }
+      `);
+    expect(getParsedOpfsFileData('tsdf/sess1/doc-invalidation-flow/d.e.p.json'))
+      .toMatchInlineSnapshot(`
+      d:
+        value: { name: 'Fresh document', value: 42 }
+    `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -446,9 +451,14 @@ describe('async storage efficiency: document', () => {
     expect(hook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Fresh document 2', value: 42 }`,
     );
-    expect(documentScope.document.readData()).toMatchInlineSnapshot(
-      `value: { name: 'Fresh document 2', value: 42 }`,
-    );
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/doc-coalesced-invalidations/d.e.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d:
+        value: { name: 'Fresh document 2', value: 42 }
+    `);
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time   |

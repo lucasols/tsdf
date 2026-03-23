@@ -38,6 +38,7 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -843,13 +844,15 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(true);
-    expect(listQueryScope.readQueryEntry(usersQuery)).toMatchObject({
-      data: {
-        items: [
-          listQueryScope.itemKey('users', 1),
-          listQueryScope.itemKey('users', 2),
-        ],
-      },
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchObject({
+      i: [
+        listQueryScope.itemKey('users', 1),
+        listQueryScope.itemKey('users', 2),
+      ],
     });
 
     env.apiStore.deleteItemState('users||1');
@@ -857,9 +860,11 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
-    expect(listQueryScope.readQueryEntry(usersQuery)).toMatchObject({
-      data: { items: [listQueryScope.itemKey('users', 2)] },
-    });
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchObject({ i: [listQueryScope.itemKey('users', 2)] });
   });
 
   test('explicit item preload hydrates only the targeted item', async () => {
@@ -1035,10 +1040,11 @@ describe('opfs: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(listQueryScope.readQueryEntry(usersQuery).data.items)
-      .toMatchInlineSnapshot(`
-        ['"users||1', '"users||2']
-      `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-max-query-size/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchObject({ i: ['"users||1', '"users||2'] });
     expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 1))).toBe(
       true,
     );

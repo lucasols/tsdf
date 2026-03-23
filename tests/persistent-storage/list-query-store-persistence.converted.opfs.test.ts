@@ -13,7 +13,6 @@ import {
 } from 'vitest';
 import type {
   ListQueryPersistentStorageConfig,
-  PersistedListQueryData,
   PersistentStorageSchema,
 } from '../../src/persistentStorage/types';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
@@ -30,6 +29,7 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({ id: rc_number, name: rc_string, age: rc_number.optional() }),
@@ -76,17 +76,6 @@ function listQueryScope(
   sessionKey: string,
 ) {
   return mockAdapter.scope(storeName, sessionKey).listQuery;
-}
-
-function readStoredQuery(
-  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
-  storeName: string,
-  sessionKey: string,
-  params: ListQueryParams,
-): PersistedListQueryData {
-  return listQueryScope(mockAdapter, storeName, sessionKey).readQueryEntry(
-    params,
-  ).data;
 }
 
 function createEnv(options: {
@@ -347,24 +336,21 @@ describe('opfs: converted list query store persistence', () => {
     await flushAllTimers();
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(persistedQuery.readItemData<StoredRow>('users', 1))
-      .toMatchInlineSnapshot(`
-        label: 'Cached'
-        rowId: 1
-      `);
     expect(
-      readStoredQuery(mockAdapter, 'lq-opfs-save-error', 'sess1', usersQuery)
-        .payload,
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-save-error/li.%22users%7C%7C1.p.json',
+      ),
     ).toMatchInlineSnapshot(`
-      tableId: 'users'
+      d: { label: 'Cached', rowId: 1 }
+      p: 'users||1'
     `);
-    expect(
-      readStoredQuery(mockAdapter, 'lq-opfs-save-error', 'sess1', usersQuery)
-        .items,
-    ).toEqual([usersItemKey]);
-    expect(
-      readStoredQuery(mockAdapter, 'lq-opfs-save-error', 'sess1', usersQuery)
-        .hasMore,
-    ).toBe(false);
+    const storedQuery = getParsedOpfsFileData(
+      'tsdf/sess1/lq-opfs-save-error/lq.%7BtableId%3A%22users%22%7D.p.json',
+    );
+    expect(storedQuery).toMatchObject({
+      i: [usersItemKey],
+      p: { tableId: 'users' },
+    });
+    expect(storedQuery).not.toHaveProperty('h');
   });
 });

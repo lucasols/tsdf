@@ -15,10 +15,6 @@ import {
 } from '../../src/persistentStorage/opfsFileNaming';
 import type {
   AsyncStorageNamespaceScope,
-  PersistedCollectionItemData,
-  PersistedDocumentData,
-  PersistedListQueryData,
-  PersistedListQueryItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import {
@@ -805,8 +801,6 @@ export type OpfsPersistentStorageTestStoreScope = {
     namespace: AsyncStorageNamespaceScope;
     storageKey: () => string;
     seed: <T>(data: T, options?: StorageSeedOptions) => string;
-    readEntry: <T>() => StorageCacheEntry<PersistedDocumentData<T>>;
-    readData: <T>() => T | null;
     setPayload: (value: unknown) => void;
     setMetadata: (value: unknown) => void;
     removePayload: () => void;
@@ -822,10 +816,6 @@ export type OpfsPersistentStorageTestStoreScope = {
       data: T,
       options?: StorageSeedOptions,
     ) => string;
-    readItemEntry: <T>(
-      payload: string,
-    ) => StorageCacheEntry<PersistedCollectionItemData<T>>;
-    readItemData: <T>(payload: string) => T | null;
   };
   listQuery: {
     itemNamespace: AsyncStorageNamespaceScope;
@@ -847,14 +837,6 @@ export type OpfsPersistentStorageTestStoreScope = {
       items: ListQueryItemRef[],
       options?: StorageSeedOptions & { hasMore?: boolean },
     ) => string;
-    readItemEntry: <T>(
-      tableId: string,
-      id: number | string,
-    ) => StorageCacheEntry<PersistedListQueryItemData<T>>;
-    readItemData: <T>(tableId: string, id: number | string) => T | null;
-    readQueryEntry: (
-      params: unknown,
-    ) => StorageCacheEntry<PersistedListQueryData>;
   };
 };
 
@@ -896,8 +878,6 @@ export function createOpfsPersistentStorageTestStore(
   storage: {
     getRaw: (key: string) => string | null;
     has: (key: string) => boolean;
-    readEntry: <T>(key: string) => StorageCacheEntry<T> | null;
-    readMetadata: (key: string) => ManagedMetadataRecord | null;
     writeRaw: (key: string, raw: string) => void;
     writeValue: <T>(key: string, value: T) => void;
     writePayload: (key: string, value: unknown) => void;
@@ -959,17 +939,6 @@ export function createOpfsPersistentStorageTestStore(
 
   function hasLogicalStorageEntry(key: string): boolean {
     return readLogicalStorageEntry(mockBrowserOpfs, key) !== null;
-  }
-
-  function readRequiredLogicalStorageEntry<T>(
-    key: string,
-  ): StorageCacheEntry<T> {
-    const entry = readLogicalStorageEntry<T>(mockBrowserOpfs, key);
-    if (entry === null) {
-      throw new Error(`Missing persistent test entry for ${key}`);
-    }
-
-    return entry;
   }
 
   function createScope(
@@ -1059,19 +1028,6 @@ export function createOpfsPersistentStorageTestStore(
           );
           return documentStorageKey;
         },
-        readEntry<T>() {
-          return readRequiredLogicalStorageEntry<PersistedDocumentData<T>>(
-            documentStorageKey,
-          );
-        },
-        readData<T>() {
-          return (
-            readLogicalStorageEntry<PersistedDocumentData<T>>(
-              mockBrowserOpfs,
-              documentStorageKey,
-            )?.data.data ?? null
-          );
-        },
         setPayload: (value: unknown) =>
           setPayloadValue(mockBrowserOpfs, documentStorageKey, value),
         setMetadata: (value: unknown) =>
@@ -1116,19 +1072,6 @@ export function createOpfsPersistentStorageTestStore(
             ),
           );
           return storageKey;
-        },
-        readItemEntry<T>(payload: string) {
-          return readRequiredLogicalStorageEntry<
-            PersistedCollectionItemData<T>
-          >(collectionItemStorageKey(payload));
-        },
-        readItemData<T>(payload: string) {
-          return (
-            readLogicalStorageEntry<PersistedCollectionItemData<T>>(
-              mockBrowserOpfs,
-              collectionItemStorageKey(payload),
-            )?.data.data ?? null
-          );
         },
       },
       listQuery: {
@@ -1191,24 +1134,6 @@ export function createOpfsPersistentStorageTestStore(
             ),
           );
           return storageKey;
-        },
-        readItemEntry<T>(tableId: string, id: number | string) {
-          return readRequiredLogicalStorageEntry<PersistedListQueryItemData<T>>(
-            listQueryItemStorageKey(tableId, id),
-          );
-        },
-        readItemData<T>(tableId: string, id: number | string) {
-          return (
-            readLogicalStorageEntry<PersistedListQueryItemData<T>>(
-              mockBrowserOpfs,
-              listQueryItemStorageKey(tableId, id),
-            )?.data.data ?? null
-          );
-        },
-        readQueryEntry(params: unknown) {
-          return readRequiredLogicalStorageEntry<PersistedListQueryData>(
-            listQueryStorageKey(params),
-          );
         },
       },
     };
@@ -1291,9 +1216,6 @@ export function createOpfsPersistentStorageTestStore(
     storage: {
       getRaw,
       has: hasLogicalStorageEntry,
-      readEntry: <T>(key: string) =>
-        readLogicalStorageEntry<T>(mockBrowserOpfs, key),
-      readMetadata: (key: string) => readLogicalMetadata(mockBrowserOpfs, key),
       writeRaw: setRaw,
       writeValue: setValue,
       writePayload: (key: string, value: unknown) =>

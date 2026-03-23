@@ -22,6 +22,7 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
 
 const itemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -252,18 +253,13 @@ describe('opfs: converted collection store persistence', () => {
   });
 
   test('write conversion errors are reported and keep the previous cached item', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    createOpfsPersistentStorageTestStore({
       initialState: {
         storeName: 'col-opfs-save-error',
         sessionKey: 'sess1',
         collection: [{ payload: '1', data: { itemId: '1', label: 'Cached' } }],
       },
     });
-    const persistedCollection = collectionScope(
-      mockAdapter,
-      'col-opfs-save-error',
-      'sess1',
-    );
     const onPersistentStorageError = vi.fn();
     const env = createEnv({
       storeName: 'col-opfs-save-error',
@@ -288,10 +284,11 @@ describe('opfs: converted collection store persistence', () => {
     await flushAllTimers();
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(persistedCollection.readItemData<StoredItemState>('1'))
-      .toMatchInlineSnapshot(`
-        itemId: '1'
-        label: 'Cached'
-      `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/col-opfs-save-error/ci.%221.p.json'),
+    ).toMatchInlineSnapshot(`
+      d: { itemId: '1', label: 'Cached' }
+      p: '1'
+    `);
   });
 });

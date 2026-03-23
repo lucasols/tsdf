@@ -22,6 +22,7 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
 
 const documentSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -237,18 +238,13 @@ describe('opfs: converted document store persistence', () => {
   });
 
   test('write conversion errors are reported and keep the previous cached data', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
+    createOpfsPersistentStorageTestStore({
       initialState: {
         storeName: 'doc-opfs-save-error',
         sessionKey: 'sess1',
         document: { data: { fullName: 'cached', amount: 7 } },
       },
     });
-    const persistedDocument = documentScope(
-      mockAdapter,
-      'doc-opfs-save-error',
-      'sess1',
-    );
     const onPersistentStorageError = vi.fn();
     const env = createEnv({
       storeName: 'doc-opfs-save-error',
@@ -269,10 +265,9 @@ describe('opfs: converted document store persistence', () => {
     await flushAllTimers();
 
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
-    expect(persistedDocument.readData<StoredDocumentState>())
+    expect(getParsedOpfsFileData('tsdf/sess1/doc-opfs-save-error/d.e.p.json'))
       .toMatchInlineSnapshot(`
-        amount: 7
-        fullName: 'cached'
-      `);
+      d: { amount: 7, fullName: 'cached' }
+    `);
   });
 });
