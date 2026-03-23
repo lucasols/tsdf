@@ -292,9 +292,9 @@ describe('async storage efficiency: document', () => {
     );
     expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.m.json'))
       .toMatchInlineSnapshot(`
-      a: 1735689605096
-      v: 1
-    `);
+        a: 1735689605096
+        v: 1
+      `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
