@@ -281,7 +281,6 @@ describe('createAsyncStorageAdapter', () => {
           key: 'document'
           lastAccessAt: 1735689600040
           payloadRef: '__tsdf_payload__:document'
-          sizeBytes: 19
           version: 1
           writtenAt: 1735689600040
 

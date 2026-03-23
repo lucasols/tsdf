@@ -76,7 +76,7 @@ describe('async storage efficiency: document', () => {
       4ms  | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
            |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
       .    | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
+           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.05 kb
       6ms  | end
       "
     `);
@@ -86,7 +86,7 @@ describe('async storage efficiency: document', () => {
       1ms  | 📖 tsdf/sess1/doc-remount-flow/d.e.p.json
            |    └ (tsdf.sess1.doc-remount-flow (payload)) | 0.10 kb
       .    | 📖 tsdf/sess1/doc-remount-flow/d.e.m.json
-           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.23 kb
+           |    └ (tsdf.sess1.doc-remount-flow (metadata)) | 0.05 kb
       3ms  | end
       "
     `);
@@ -165,26 +165,19 @@ describe('async storage efficiency: document', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { o: '✅' }
       key: 'document'
-      lastAccessAt: 1735664400000
+      lastAccessAt: 1735689604149
       payloadRef: '__tsdf_payload__:document'
-      sizeBytes: 52
       version: 1
       writtenAt: 1735689604149
     `);
-    expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
-      .toMatchInlineSnapshot(`
-        metadata:
-          customMetadata: { o: '✅' }
-          key: 'document'
-          lastAccessAt: 1735664400000
-          sizeBytes: 52
-          version: 1
-          writtenAt: 1735689604149
-
-        payload:
-          d:
-            value: { name: 'Cached document', value: 8 }
-      `);
+    expect(
+      getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
+    ).toMatchInlineSnapshot(`
+      metadata: { a: 1735689604149, o: '✅', v: 1 }
+      payload:
+        d:
+          value: { name: 'Cached document', value: 8 }
+    `);
   });
 
   test('updating a hydrated document writes the mutation without rereading cached entries', async () => {
@@ -227,9 +220,8 @@ describe('async storage efficiency: document', () => {
       customMetadata: {}
 
       key: 'document'
-      lastAccessAt: 1735689600000
+      lastAccessAt: 1735689605249
       payloadRef: '__tsdf_payload__:document'
-      sizeBytes: 53
       version: 1
       writtenAt: 1735689605249
     `);
@@ -237,7 +229,7 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.041s | 📖 tsdf/sess1/doc-mutation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.20 kb
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.05 kb
       1.093s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.094s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-mutation-flow (store directory)
       1.095s | 📄 file-open-or-create ✅ tsdf/sess1/doc-mutation-flow/d.e.p.json
@@ -247,7 +239,7 @@ describe('async storage efficiency: document', () => {
       1.098s | ✍️ tsdf/sess1/doc-mutation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-mutation-flow (payload)) | 0.10 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/doc-mutation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.20 kb -> 0.20 kb
+             |    └ (tsdf.sess1.doc-mutation-flow (metadata)) | 0.05 kb -> 0.05 kb
       1.1s   | end
       "
     `);
@@ -303,7 +295,7 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.20 kb
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.05 kb
       1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-invalidation-flow (store directory)
       1.905s | 📄 file-open-or-create ✅ tsdf/sess1/doc-invalidation-flow/d.e.p.json
@@ -313,7 +305,7 @@ describe('async storage efficiency: document', () => {
       1.908s | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.p.json
              |    └ (tsdf.sess1.doc-invalidation-flow (payload)) | 0.10 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.20 kb -> 0.20 kb
+             |    └ (tsdf.sess1.doc-invalidation-flow (metadata)) | 0.05 kb -> 0.05 kb
       1.91s  | end
       "
     `);
@@ -390,7 +382,7 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.20 kb
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.05 kb
       1.903s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.904s | 📁 dir-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations (store directory)
       1.905s | 📄 file-open-or-create ✅ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
@@ -400,7 +392,7 @@ describe('async storage efficiency: document', () => {
       1.908s | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (tsdf.sess1.doc-coalesced-invalidations (payload)) | 0.10 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.20 kb -> 0.20 kb
+             |    └ (tsdf.sess1.doc-coalesced-invalidations (metadata)) | 0.05 kb -> 0.05 kb
       1.91s  | end
       "
     `);
@@ -451,26 +443,19 @@ describe('async storage efficiency: document', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { o: '✅' }
       key: 'document'
-      lastAccessAt: 1735689600000
+      lastAccessAt: 1735689606059
       payloadRef: '__tsdf_payload__:document'
-      sizeBytes: 52
       version: 1
       writtenAt: 1735689606059
     `);
-    expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
-      .toMatchInlineSnapshot(`
-        metadata:
-          customMetadata: { o: '✅' }
-          key: 'document'
-          lastAccessAt: 1735689600000
-          sizeBytes: 52
-          version: 1
-          writtenAt: 1735689606059
-
-        payload:
-          d:
-            value: { name: 'Fresh document', value: 42 }
-      `);
+    expect(
+      getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
+    ).toMatchInlineSnapshot(`
+      metadata: { a: 1735689606059, o: '✅', v: 1 }
+      payload:
+        d:
+          value: { name: 'Fresh document', value: 42 }
+    `);
   });
 
   test('namespace commits coalesce and pending writes flush before reads', async () => {
@@ -597,7 +582,7 @@ describe('async storage efficiency: document', () => {
       4ms  | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.p.json
            |    └ (tsdf.sess1.doc-opfs-efficiency (payload)) | 0.08 kb
       .    | 📖 tsdf/sess1/doc-opfs-efficiency/d.e.m.json
-           |    └ (tsdf.sess1.doc-opfs-efficiency (metadata)) | 0.23 kb
+           |    └ (tsdf.sess1.doc-opfs-efficiency (metadata)) | 0.05 kb
       56ms | end
       "
     `);

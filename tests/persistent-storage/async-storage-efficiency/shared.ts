@@ -210,9 +210,6 @@ export function readEntryMetadata(
     writtenAt: metadata.writtenAt,
     lastAccessAt: metadata.lastAccessAt,
     version: metadata.version,
-    ...(metadata.sizeBytes !== undefined
-      ? { sizeBytes: metadata.sizeBytes }
-      : {}),
     customMetadata: metadata.customMetadata,
   };
 }

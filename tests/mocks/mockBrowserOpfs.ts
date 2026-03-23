@@ -810,6 +810,10 @@ export function installMockBrowserOpfsForTests(): void {
   });
 }
 
+export function readMockBrowserOpfsFileForTests(path: string): string | null {
+  return currentEnvironment?.readFile(path) ?? null;
+}
+
 export function resetMockBrowserOpfsForTests(): void {
   currentEnvironment = null;
   installMockBrowserOpfsForTests();

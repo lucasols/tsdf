@@ -91,11 +91,11 @@ describe('async storage efficiency: collection', () => {
       .      | 📄 file-open ✅ tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
              |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata))
       2.007s | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.28 kb
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user (metadata)) | 0.09 kb
       .      | 📖 tsdf/sess1/collection-expiration/ci.%22expired-user-2.m.json
-             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.29 kb
+             |    └ (tsdf.sess1.collection-expiration.ci."expired-user-2 (metadata)) | 0.09 kb
       .      | 📖 tsdf/sess1/collection-expiration/ci.%22fresh-user.m.json
-             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.27 kb
+             |    └ (tsdf.sess1.collection-expiration.ci."fresh-user (metadata)) | 0.08 kb
       2.009s | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.p.json
              |    └ (tsdf.sess1.collection-expiration.ci."expired-user (payload))
       .      | 🗑️ ✅ tsdf/sess1/collection-expiration/ci.%22expired-user.m.json
@@ -107,21 +107,18 @@ describe('async storage efficiency: collection', () => {
       2.01s  | end
       "
     `);
-    expect(getParsedOpfsEntryFiles(mockAdapter, freshItemKey))
-      .toMatchInlineSnapshot(`
-        metadata:
-          customMetadata: { p: 'fresh-user' }
-          key: '"fresh-user'
-          lastAccessAt: 1735689600000
-          sizeBytes: 72
-          version: 1
-          writtenAt: 1735689600000
-
-        payload:
-          d:
-            value: { id: 'fresh-user', name: 'Fresh User' }
-          p: 'fresh-user'
-      `);
+    expect(
+      getParsedOpfsEntryFiles(
+        collectionScope.collection.namespace,
+        collectionScope.collection.itemKey('fresh-user'),
+      ),
+    ).toMatchInlineSnapshot(`
+      metadata: { a: 1735689600000, p: 'fresh-user', v: 1 }
+      payload:
+        d:
+          value: { id: 'fresh-user', name: 'Fresh User' }
+        p: 'fresh-user'
+    `);
   });
 
   test('maxItems cleanup snapshots the full manifest history', async () => {
@@ -191,15 +188,15 @@ describe('async storage efficiency: collection', () => {
       1.053s | ✍️ tsdf/sess1/col-max-items-metadata/ci.%22c.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."c (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
-             |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.00 kb -> 0.24 kb
+             |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.00 kb -> 0.06 kb
       3.055s | 🗂️ list-dir tsdf/sess1/col-max-items-metadata
              |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json"]
       3.057s | 📖 tsdf/sess1/col-max-items-metadata/ci.%22a.m.json
-             |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-max-items-metadata.ci."a (metadata)) | 0.06 kb
       .      | 📖 tsdf/sess1/col-max-items-metadata/ci.%22b.m.json
-             |    └ (tsdf.sess1.col-max-items-metadata.ci."b (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-max-items-metadata.ci."b (metadata)) | 0.06 kb
       .      | 📖 tsdf/sess1/col-max-items-metadata/ci.%22c.m.json
-             |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-max-items-metadata.ci."c (metadata)) | 0.06 kb
       3.099s | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.p.json
              |    └ (tsdf.sess1.col-max-items-metadata.ci."a (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-max-items-metadata/ci.%22a.m.json
@@ -273,7 +270,7 @@ describe('async storage efficiency: collection', () => {
       1.053s | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22c.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
-             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.00 kb -> 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.00 kb -> 0.06 kb
       2.14s  | 📄 file-open ❌ tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata))
       2.141s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
@@ -285,17 +282,17 @@ describe('async storage efficiency: collection', () => {
       2.146s | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22d.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (payload)) | 0.00 kb -> 0.10 kb
       .      | ✍️ tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
-             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.00 kb -> 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.00 kb -> 0.06 kb
       3.055s | 🗂️ list-dir tsdf/sess1/col-coalesced-maintenance
              |    └ (store directory) entries=["file:ci.%22a.m.json","file:ci.%22a.p.json","file:ci.%22b.m.json","file:ci.%22b.p.json","file:ci.%22c.m.json","file:ci.%22c.p.json","file:ci.%22d.m.json","file:ci.%22d.p.json"]
       3.057s | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22a.m.json
-             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."a (metadata)) | 0.06 kb
       .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22b.m.json
-             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (metadata)) | 0.06 kb
       .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22c.m.json
-             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."c (metadata)) | 0.06 kb
       .      | 📖 tsdf/sess1/col-coalesced-maintenance/ci.%22d.m.json
-             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-maintenance.ci."d (metadata)) | 0.06 kb
       3.099s | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.p.json
              |    └ (tsdf.sess1.col-coalesced-maintenance.ci."b (payload))
       .      | 🗑️ ✅ tsdf/sess1/col-coalesced-maintenance/ci.%22b.m.json
@@ -385,25 +382,21 @@ describe('async storage efficiency: collection', () => {
       key: '"1'
       lastAccessAt: 1735664400000
       payloadRef: '__tsdf_payload__:"1'
-      sizeBytes: 55
       version: 1
       writtenAt: 1735664400000
     `);
-    expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
-      .toMatchInlineSnapshot(`
-        metadata:
-          customMetadata: { o: '✅', p: '1' }
-          key: '"1'
-          lastAccessAt: 1735664400000
-          sizeBytes: 55
-          version: 1
-          writtenAt: 1735664400000
-
-        payload:
-          d:
-            value: { id: '1', name: 'Cached user' }
-          p: '1'
-      `);
+    expect(
+      getParsedOpfsEntryFiles(
+        collectionScope.collection.namespace,
+        collectionScope.collection.itemKey('1'),
+      ),
+    ).toMatchInlineSnapshot(`
+      metadata: { a: 1735664400000, o: '✅', p: '1', v: 1 }
+      payload:
+        d:
+          value: { id: '1', name: 'Cached user' }
+        p: '1'
+    `);
   });
 
   test('updating a hydrated collection item writes the mutation without rereading cached entries', async () => {
@@ -447,9 +440,8 @@ describe('async storage efficiency: collection', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { p: '1' }
       key: '"1'
-      lastAccessAt: 1735689600000
+      lastAccessAt: 1735689604150
       payloadRef: '__tsdf_payload__:"1'
-      sizeBytes: 55
       version: 1
       writtenAt: 1735689604150
     `);
@@ -459,7 +451,7 @@ describe('async storage efficiency: collection', () => {
       1s     | 🗂️ list-dir tsdf/sess1/col-mutation-flow
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       1.042s | 📖 tsdf/sess1/col-mutation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.06 kb
       1.094s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.095s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-flow (store directory)
       1.096s | 📄 file-open-or-create ✅ tsdf/sess1/col-mutation-flow/ci.%221.p.json
@@ -469,11 +461,11 @@ describe('async storage efficiency: collection', () => {
       1.099s | ✍️ tsdf/sess1/col-mutation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-mutation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
+             |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
       3.101s | 🗂️ list-dir tsdf/sess1/col-mutation-flow
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       3.103s | 📖 tsdf/sess1/col-mutation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.06 kb
       3.155s | end
       "
     `);
@@ -519,7 +511,7 @@ describe('async storage efficiency: collection', () => {
       3.042s | 🗂️ list-dir tsdf/sess1/col-delete-flow
              |    └ (store directory) entries=["file:ci.%222.m.json","file:ci.%222.p.json"]
       3.044s | 📖 tsdf/sess1/col-delete-flow/ci.%222.m.json
-             |    └ (tsdf.sess1.col-delete-flow.ci."2 (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-delete-flow.ci."2 (metadata)) | 0.06 kb
       3.046s | end
       "
     `);
@@ -577,7 +569,7 @@ describe('async storage efficiency: collection', () => {
       1.81s  | 🗂️ list-dir tsdf/sess1/col-invalidation-flow
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       1.852s | 📖 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.06 kb
       1.904s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.905s | 📁 dir-open-or-create ✅ tsdf/sess1/col-invalidation-flow (store directory)
       1.906s | 📄 file-open-or-create ✅ tsdf/sess1/col-invalidation-flow/ci.%221.p.json
@@ -587,11 +579,11 @@ describe('async storage efficiency: collection', () => {
       1.909s | ✍️ tsdf/sess1/col-invalidation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-invalidation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
+             |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
       3.911s | 🗂️ list-dir tsdf/sess1/col-invalidation-flow
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       3.913s | 📖 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.06 kb
       3.965s | end
       "
     `);
@@ -642,27 +634,23 @@ describe('async storage efficiency: collection', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { o: '✅', p: '1' }
       key: '"1'
-      lastAccessAt: 1735689600000
+      lastAccessAt: 1735689604960
       payloadRef: '__tsdf_payload__:"1'
-      sizeBytes: 54
       version: 1
       writtenAt: 1735689604960
     `);
-    expect(getParsedOpfsEntryFiles(mockAdapter, storageKey))
-      .toMatchInlineSnapshot(`
-        metadata:
-          customMetadata: { o: '✅', p: '1' }
-          key: '"1'
-          lastAccessAt: 1735689600000
-          sizeBytes: 54
-          version: 1
-          writtenAt: 1735689604960
-
-        payload:
-          d:
-            value: { id: '1', name: 'Fresh user' }
-          p: '1'
-      `);
+    expect(
+      getParsedOpfsEntryFiles(
+        collectionScope.collection.namespace,
+        collectionScope.collection.itemKey('1'),
+      ),
+    ).toMatchInlineSnapshot(`
+      metadata: { a: 1735689604960, o: '✅', p: '1', v: 1 }
+      payload:
+        d:
+          value: { id: '1', name: 'Fresh user' }
+        p: '1'
+    `);
   });
 
   test('repeated invalidations within the debounce window coalesce collection persistence writes', async () => {
@@ -738,7 +726,7 @@ describe('async storage efficiency: collection', () => {
       1.81s  | 🗂️ list-dir tsdf/sess1/col-coalesced-invalidations
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       1.852s | 📖 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
-             |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.06 kb
       1.904s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.905s | 📁 dir-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations (store directory)
       1.906s | 📄 file-open-or-create ✅ tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json
@@ -748,11 +736,11 @@ describe('async storage efficiency: collection', () => {
       1.909s | ✍️ tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
-             |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb -> 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
       3.911s | 🗂️ list-dir tsdf/sess1/col-coalesced-invalidations
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       3.913s | 📖 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
-             |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.24 kb
+             |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.06 kb
       3.965s | end
       "
     `);
@@ -803,7 +791,7 @@ describe('async storage efficiency: collection', () => {
       4ms  | 📖 tsdf/sess1/col-remount-flow/ci.%221.p.json
            |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload)) | 0.11 kb
       .    | 📖 tsdf/sess1/col-remount-flow/ci.%221.m.json
-           |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata)) | 0.24 kb
+           |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata)) | 0.06 kb
       56ms | end
       "
     `);
@@ -864,11 +852,11 @@ describe('async storage efficiency: collection', () => {
       4ms  | 📖 tsdf/sess1/col-multi-remount-flow/ci.%221.p.json
            |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (payload)) | 0.11 kb
       .    | 📖 tsdf/sess1/col-multi-remount-flow/ci.%221.m.json
-           |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (metadata)) | 0.24 kb
+           |    └ (tsdf.sess1.col-multi-remount-flow.ci."1 (metadata)) | 0.06 kb
       .    | 📖 tsdf/sess1/col-multi-remount-flow/ci.%222.p.json
            |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (payload)) | 0.11 kb
       .    | 📖 tsdf/sess1/col-multi-remount-flow/ci.%222.m.json
-           |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata)) | 0.24 kb
+           |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata)) | 0.06 kb
       56ms | end
       "
     `);
@@ -961,7 +949,7 @@ describe('async storage efficiency: collection', () => {
       4ms  | 📖 tsdf/sess1/collection-opfs-efficiency/ci.%221.p.json
            |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload)) | 0.09 kb
       .    | 📖 tsdf/sess1/collection-opfs-efficiency/ci.%221.m.json
-           |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata)) | 0.24 kb
+           |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata)) | 0.06 kb
       56ms | end
       "
     `);

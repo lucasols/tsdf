@@ -1,5 +1,5 @@
-/* eslint-disable @typescript-eslint/consistent-type-assertions -- test helper intentionally optimizes for compact fixture code. */
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { safeJsonParse } from '@ls-stack/utils/safeJson';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   buildFileName,
@@ -37,22 +37,6 @@ function listQueryItemKey(tableId: string, id: number | string): string {
 
 function listQueryQueryKey(params: unknown): string {
   return getCompositeKey(params);
-}
-
-function safeStringify(value: unknown): string | null {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
-}
-
-function parseJson<T>(raw: string): T | null {
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
 }
 
 function getRecord(value: unknown): Record<string, unknown> | null {
@@ -178,6 +162,7 @@ function parseFlatStorageKey(key: string): ParsedFlatKey | null {
 }
 
 type LogicalRecordLocation = {
+  key: string;
   metadataRecordKey: string;
   payloadRecordKey: string;
   scope: AsyncStorageNamespaceScope;
@@ -188,6 +173,7 @@ function getLogicalRecordLocation(key: string): LogicalRecordLocation | null {
   if (parsed === null) return null;
 
   return {
+    key: parsed.key,
     scope: parsed.scope,
     payloadRecordKey: getPayloadRecordKey(parsed.key),
     metadataRecordKey: getMetadataRecordKey(parsed.key),
@@ -233,51 +219,93 @@ type ManagedMetadataRecord = {
   customMetadata: Record<string, unknown>;
   key: string;
   lastAccessAt: number;
-  sizeBytes?: number;
   version: number;
   writtenAt: number;
 };
+
+type RawManagedMetadataRecord = { a: number; v: number } & Record<
+  string,
+  unknown
+>;
+
+function serializeManagedMetadataRecord(
+  metadata: ManagedMetadataRecord,
+): RawManagedMetadataRecord {
+  if ('a' in metadata.customMetadata || 'v' in metadata.customMetadata) {
+    throw new Error(
+      '[TSDF] Async storage custom metadata cannot use reserved keys "a" or "v".',
+    );
+  }
+
+  return {
+    a: metadata.lastAccessAt,
+    v: metadata.version,
+    ...metadata.customMetadata,
+  };
+}
 
 function createManagedMetadataRecord(
   scope: AsyncStorageNamespaceScope,
   key: string,
   entry: StorageCacheEntry<unknown>,
-): ManagedMetadataRecord {
-  const raw = safeStringify(entry.data);
+): RawManagedMetadataRecord {
   return {
-    key,
-    writtenAt: entry.timestamp,
-    lastAccessAt: entry.timestamp,
-    version: entry.version ?? 1,
-    ...(raw !== null ? { sizeBytes: raw.length } : {}),
-    customMetadata: buildCustomMetadata(scope, entry.data),
+    a: entry.timestamp,
+    v: entry.version ?? 1,
+    ...buildCustomMetadata(scope, entry.data),
   };
 }
 
 function parseManagedMetadataRecord(
   value: unknown,
+  key: string,
 ): ManagedMetadataRecord | null {
   const record = getRecord(value);
   if (
     record === null ||
-    typeof record.key !== 'string' ||
-    typeof record.writtenAt !== 'number' ||
-    typeof record.lastAccessAt !== 'number' ||
-    typeof record.version !== 'number'
+    typeof record.a !== 'number' ||
+    typeof record.v !== 'number'
   ) {
     return null;
   }
 
+  const customMetadata = Object.fromEntries(
+    Object.entries(record).filter(
+      ([entryKey]) => entryKey !== 'a' && entryKey !== 'v',
+    ),
+  );
+
   return {
-    key: record.key,
-    writtenAt: record.writtenAt,
-    lastAccessAt: record.lastAccessAt,
-    version: record.version,
-    ...(typeof record.sizeBytes === 'number'
-      ? { sizeBytes: record.sizeBytes }
-      : {}),
-    customMetadata: getRecord(record.customMetadata) ?? {},
+    key,
+    writtenAt: record.a,
+    lastAccessAt: record.a,
+    version: record.v,
+    customMetadata,
   };
+}
+
+function normalizeMetadataValue(key: string, value: unknown): unknown {
+  const record = getRecord(value);
+  if (record === null) return value;
+
+  if (typeof record.a === 'number' && typeof record.v === 'number') {
+    return value;
+  }
+
+  if (
+    typeof record.lastAccessAt === 'number' &&
+    typeof record.version === 'number'
+  ) {
+    return serializeManagedMetadataRecord({
+      key,
+      writtenAt: record.lastAccessAt,
+      lastAccessAt: record.lastAccessAt,
+      version: record.version,
+      customMetadata: getRecord(record.customMetadata) ?? {},
+    });
+  }
+
+  return value;
 }
 
 function normalizeLogicalPayload(
@@ -415,8 +443,11 @@ function readLogicalStorageEntry<T>(
   );
   if (payloadRaw === null || metadataRaw === null) return null;
 
-  const payload = parseJson<unknown>(payloadRaw);
-  const metadata = parseManagedMetadataRecord(parseJson<unknown>(metadataRaw));
+  const payload = safeJsonParse(payloadRaw);
+  const metadata = parseManagedMetadataRecord(
+    safeJsonParse(metadataRaw),
+    parsed.key,
+  );
   if (payload === null || metadata === null) {
     return null;
   }
@@ -444,7 +475,7 @@ function readLogicalMetadata(
   );
   if (raw === null) return null;
 
-  return parseManagedMetadataRecord(parseJson<unknown>(raw));
+  return parseManagedMetadataRecord(safeJsonParse(raw), location.key);
 }
 
 function setPayloadValue(
@@ -475,7 +506,9 @@ function setMetadataValue(
     mockBrowserOpfs,
     location.scope,
     location.metadataRecordKey,
-    typeof value === 'string' ? value : JSON.stringify(value),
+    typeof value === 'string'
+      ? value
+      : JSON.stringify(normalizeMetadataValue(location.key, value)),
   );
 }
 
@@ -781,8 +814,6 @@ export type OpfsPersistentStorageTestStore = ReturnType<
   typeof createOpfsPersistentStorageTestStore
 >;
 
-type RawOpfsLogicalFileContents = { metadata: unknown; payload: unknown };
-
 export type OpfsPersistentStorageTestStoreScope = {
   document: {
     namespace: AsyncStorageNamespaceScope;
@@ -815,6 +846,7 @@ export type OpfsPersistentStorageTestStoreScope = {
     queryNamespace: AsyncStorageNamespaceScope;
     itemKey: (tableId: string, id: number | string) => string;
     itemStorageKey: (tableId: string, id: number | string) => string;
+    queryKey: (params: unknown) => string;
     queryStorageKey: (params: unknown) => string;
     listStoredItemKeys: () => string[];
     listStoredQueryKeys: () => string[];
@@ -900,7 +932,6 @@ export function createOpfsPersistentStorageTestStore(
   clearInstrumentation: () => void;
   getRaw: (key: string) => string | null;
   has: (key: string) => boolean;
-  readEntryFiles: (key: string) => RawOpfsLogicalFileContents | null;
   scope: (
     storeName: string,
     sessionKey: string,
@@ -931,7 +962,7 @@ export function createOpfsPersistentStorageTestStore(
   }
 
   function setRaw(key: string, raw: string): void {
-    const parsed = parseJson<unknown>(raw);
+    const parsed = safeJsonParse(raw);
     if (parsed !== null) {
       writeLogicalStorageEntry(mockBrowserOpfs, key, parsed);
     }
@@ -948,29 +979,6 @@ export function createOpfsPersistentStorageTestStore(
 
   function hasLogicalStorageEntry(key: string): boolean {
     return readLogicalStorageEntry(mockBrowserOpfs, key) !== null;
-  }
-
-  function readLogicalFileContents(
-    key: string,
-  ): RawOpfsLogicalFileContents | null {
-    const location = getLogicalRecordLocation(key);
-    if (location === null) return null;
-
-    const payloadRaw = readRawRecord(
-      mockBrowserOpfs,
-      location.scope,
-      location.payloadRecordKey,
-    );
-    const metadataRaw = readRawRecord(
-      mockBrowserOpfs,
-      location.scope,
-      location.metadataRecordKey,
-    );
-
-    return {
-      payload: payloadRaw === null ? null : parseJson<unknown>(payloadRaw),
-      metadata: metadataRaw === null ? null : parseJson<unknown>(metadataRaw),
-    };
   }
 
   function readRequiredLogicalStorageEntry<T>(
@@ -1148,6 +1156,7 @@ export function createOpfsPersistentStorageTestStore(
         queryNamespace: listQueryQueryNamespace,
         itemKey: listQueryItemKey,
         itemStorageKey: listQueryItemStorageKey,
+        queryKey: listQueryQueryKey,
         queryStorageKey: listQueryStorageKey,
         listStoredItemKeys: () =>
           listStoredKeysForNamespace(listQueryItemNamespace),
@@ -1348,7 +1357,6 @@ export function createOpfsPersistentStorageTestStore(
     },
     getRaw,
     has: hasLogicalStorageEntry,
-    readEntryFiles: readLogicalFileContents,
     scope: createScope,
     setRaw,
     setValue,
@@ -1362,7 +1370,7 @@ export function createOpfsPersistentStorageTestStore(
     rawNamespace: {
       get(scope: AsyncStorageNamespaceScope, key: string) {
         const raw = readRawRecord(mockBrowserOpfs, scope, key);
-        return raw === null ? null : parseJson<unknown>(raw);
+        return raw === null ? null : safeJsonParse(raw);
       },
       listKeys(scope: AsyncStorageNamespaceScope) {
         return listRawKeys(mockBrowserOpfs, scope);

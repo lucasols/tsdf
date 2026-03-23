@@ -121,13 +121,26 @@ function parseProtectedRef(
   return { sessionKey, storeName, kind, key };
 }
 
+const ASYNC_METADATA_LAST_ACCESS_AT_KEY = 'a';
+const ASYNC_METADATA_VERSION_KEY = 'v';
+
+function getInlineCustomMetadata(
+  record: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const customMetadataEntries = Object.entries(record).filter(
+    ([key]) =>
+      key !== ASYNC_METADATA_LAST_ACCESS_AT_KEY &&
+      key !== ASYNC_METADATA_VERSION_KEY,
+  );
+  if (customMetadataEntries.length === 0) return undefined;
+
+  return Object.fromEntries(customMetadataEntries);
+}
+
 type InternalManagedMetadataRecord = {
   customMetadata?: Record<string, unknown>;
-  key: string;
   lastAccessAt: number;
-  sizeBytes?: number;
   version: number;
-  writtenAt: number;
 };
 
 function parseInternalManagedMetadataRecord(
@@ -136,25 +149,42 @@ function parseInternalManagedMetadataRecord(
   const record = getRecord(value);
   if (
     record === null ||
-    typeof record.key !== 'string' ||
-    typeof record.writtenAt !== 'number' ||
-    typeof record.lastAccessAt !== 'number' ||
-    typeof record.version !== 'number' ||
-    (record.sizeBytes !== undefined && typeof record.sizeBytes !== 'number')
+    typeof record.a !== 'number' ||
+    typeof record.v !== 'number'
   ) {
     return null;
   }
 
+  const customMetadata = getInlineCustomMetadata(record);
+
   return {
-    key: record.key,
-    writtenAt: record.writtenAt,
-    lastAccessAt: record.lastAccessAt,
-    version: record.version,
-    ...(record.sizeBytes !== undefined ? { sizeBytes: record.sizeBytes } : {}),
-    ...(getRecord(record.customMetadata)
-      ? { customMetadata: getRecord(record.customMetadata) ?? undefined }
-      : {}),
+    lastAccessAt: record.a,
+    version: record.v,
+    ...(customMetadata ? { customMetadata } : {}),
   };
+}
+
+function serializeInternalManagedMetadataRecord(
+  metadata: InternalManagedMetadataRecord,
+): Record<string, unknown> {
+  const serialized: Record<string, unknown> = {
+    [ASYNC_METADATA_LAST_ACCESS_AT_KEY]: metadata.lastAccessAt,
+    [ASYNC_METADATA_VERSION_KEY]: metadata.version,
+  };
+
+  const customMetadata = metadata.customMetadata;
+  if (customMetadata === undefined) return serialized;
+
+  if (
+    ASYNC_METADATA_LAST_ACCESS_AT_KEY in customMetadata ||
+    ASYNC_METADATA_VERSION_KEY in customMetadata
+  ) {
+    throw new Error(
+      '[TSDF] Async storage custom metadata cannot use reserved keys "a" or "v".',
+    );
+  }
+
+  return { ...serialized, ...customMetadata };
 }
 
 function parseMaintenanceState(
@@ -497,7 +527,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
           setEntries.push({
             key: getMetadataRecordKey(key),
-            value: nextMetadata,
+            value: serializeInternalManagedMetadataRecord(nextMetadata),
           });
         }
 
@@ -737,7 +767,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         metadata: __LEGIT_CAST__<
           AsyncStorageEntryMetadata<TCustomMetadata>,
           AsyncStorageEntryMetadata<Record<string, unknown>>
-        >(this.#toPublicMetadata(metadata)),
+        >(this.#toPublicMetadata(key, metadata)),
       });
     }
 
@@ -796,7 +826,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       );
       const userKey = getUserKeyFromMetadataRecord(metadataKey);
       if (metadata !== null && userKey !== null) {
-        validEntries.push(this.#toPublicMetadata(metadata));
+        validEntries.push(this.#toPublicMetadata(userKey, metadata));
       } else if (userKey !== null) {
         orphanedUserKeys.push(userKey);
       }
@@ -831,17 +861,15 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   #toPublicMetadata(
+    key: string,
     metadata: InternalManagedMetadataRecord,
   ): AsyncStorageEntryMetadata<Record<string, unknown>> {
     return {
-      key: metadata.key,
-      payloadRef: getPayloadRecordKey(metadata.key),
-      writtenAt: metadata.writtenAt,
+      key,
+      payloadRef: getPayloadRecordKey(key),
+      writtenAt: metadata.lastAccessAt,
       lastAccessAt: metadata.lastAccessAt,
       version: metadata.version,
-      ...(metadata.sizeBytes !== undefined
-        ? { sizeBytes: metadata.sizeBytes }
-        : {}),
       customMetadata: metadata.customMetadata ?? {},
     };
   }
@@ -891,7 +919,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
 
     for (const upsert of upserts) {
-      const serializedValue = this.#safeSerializeValue(upsert.value);
       const existingMetadata = existingMetadataByKey.get(upsert.key);
       const customMetadata = this.#mergeOfflineProtectionMetadata(
         scope,
@@ -901,14 +928,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         protectedKeysSnapshotSet,
       );
       const nextMetadata: InternalManagedMetadataRecord = {
-        key: upsert.key,
-        writtenAt: now,
-        lastAccessAt:
-          touchesByKey.get(upsert.key) ?? existingMetadata?.lastAccessAt ?? now,
+        lastAccessAt: touchesByKey.get(upsert.key) ?? now,
         version: upsert.version,
-        ...(serializedValue !== null
-          ? { sizeBytes: serializedValue.length }
-          : {}),
         ...(customMetadata ? { customMetadata } : {}),
       };
 
@@ -918,7 +939,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       });
       setEntries.push({
         key: getMetadataRecordKey(upsert.key),
-        value: nextMetadata,
+        value: serializeInternalManagedMetadataRecord(nextMetadata),
       });
     }
 
@@ -929,7 +950,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       if (!metadata) continue;
       setEntries.push({
         key: getMetadataRecordKey(key),
-        value: { ...metadata, lastAccessAt: touchesByKey.get(key) ?? now },
+        value: serializeInternalManagedMetadataRecord({
+          ...metadata,
+          lastAccessAt: touchesByKey.get(key) ?? now,
+        }),
       });
     }
 
@@ -967,14 +991,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       isOfflineProtectedMetadata(nextCustomMetadata) ||
         isOfflineProtectedMetadata(currentCustomMetadata),
     );
-  }
-
-  #safeSerializeValue(value: unknown): string | null {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return null;
-    }
   }
 
   async #removeManagedKeysUsingDriver(
@@ -1190,8 +1206,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             ) === true;
           if (
             !isProtected &&
-            now - Math.max(entry.lastAccessAt, entry.writtenAt) >
-              ASYNC_STORAGE_MAX_AGE_MS
+            now - entry.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
           ) {
             keysToRemove.push(entry.key);
           }

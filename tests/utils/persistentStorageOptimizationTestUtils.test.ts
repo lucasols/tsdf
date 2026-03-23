@@ -84,7 +84,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       5ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
       6ms  | 📄 file-open ✅ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata))
       8ms  | 📖 tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload)) | 0.10 kb
-      12ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.19 kb -> 0.16 kb
+      12ms | ✍️ tsdf/sess1/docs/d.e.m.json (tsdf.sess1.docs (metadata)) | 0.03 kb -> 0.16 kb
       14ms | 🗑️ ✅ tsdf/sess1/docs/d.e.p.json (tsdf.sess1.docs (payload))
       15ms | end
       "
@@ -181,16 +181,9 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     });
 
     expect(
-      getParsedOpfsEntryFiles(mockAdapter, documentScope.document.storageKey()),
+      getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
     ).toMatchInlineSnapshot(`
-      metadata:
-        customMetadata: {}
-        key: 'document'
-        lastAccessAt: 0
-        sizeBytes: 52
-        version: 1
-        writtenAt: 0
-
+      metadata: { a: 0, v: 1 }
       payload:
         d:
           value: { name: 'Cached document', value: 1 }
