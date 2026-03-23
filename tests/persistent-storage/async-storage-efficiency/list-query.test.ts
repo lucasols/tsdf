@@ -454,10 +454,12 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       a: 1735689604851
       i: []
+
       p:
         filters:
           - { field: 'name', op: 'eq', value: 'Missing user' }
         tableId: 'users'
+
       v: 1
     `);
     expect(
@@ -466,6 +468,7 @@ describe('async storage efficiency: list-query', () => {
       ),
     ).toMatchInlineSnapshot(`
       i: []
+
       p:
         filters:
           - { field: 'name', op: 'eq', value: 'Missing user' }
@@ -1762,7 +1765,6 @@ describe('async storage efficiency: list-query', () => {
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({});
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
-    const itemStorageKey = listQueryScope.listQuery.itemStorageKey('users', 1);
 
     listQueryScope.listQuery.seedItem('users', 1, {
       id: 1,

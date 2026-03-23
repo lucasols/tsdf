@@ -122,6 +122,7 @@ describe('async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`
       d:
         value: { id: 'fresh-user', name: 'Fresh User' }
+
       p: 'fresh-user'
     `);
   });
@@ -386,6 +387,7 @@ describe('async storage efficiency: collection', () => {
     expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
       d:
         value: { id: '1', name: 'Cached user' }
+
       p: '1'
     `);
   });
@@ -427,10 +429,10 @@ describe('async storage efficiency: collection', () => {
     );
     expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.%221.m.json'))
       .toMatchInlineSnapshot(`
-      a: 1735689604050
-      p: '1'
-      v: 1
-    `);
+        a: 1735689604050
+        p: '1'
+        v: 1
+      `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -606,6 +608,7 @@ describe('async storage efficiency: collection', () => {
     ).toMatchInlineSnapshot(`
       d:
         value: { id: '1', name: 'Fresh user' }
+
       p: '1'
     `);
   });
