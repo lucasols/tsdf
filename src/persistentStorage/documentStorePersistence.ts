@@ -191,7 +191,7 @@ export function setupDocumentPersistence<
 
     const currentGeneration = generation;
     preloadPromise = handle
-      .load({ touch: 'never' })
+      .load({ touch: 'coarse' })
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 

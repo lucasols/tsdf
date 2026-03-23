@@ -25,12 +25,14 @@ import {
 setupAsyncStorageEfficiencyTestSuite();
 
 describe('async storage efficiency: document', () => {
-  test('document hook remount stays fully in memory after the cached document is loaded at startup', async () => {
+  test('document hook remount skips the touch write when the cached document is still in the current recency bucket', async () => {
     const storeName = 'doc-remount-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
+    // Seed with the current fake time so hydration should treat the entry as fresh
+    // and skip the follow-up metadata touch.
     documentScope.document.seed({
       value: { name: 'Cached document', value: 7 },
     });
@@ -48,7 +50,9 @@ describe('async storage efficiency: document', () => {
     // Drain the startup scan so this capture focuses only on hook mount behavior.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // The first mount must hydrate the cold cached document from persistence.
+    // The first mount must hydrate the cold cached document from persistence,
+    // but because the entry is still in the current recency bucket no touch write
+    // should be scheduled after the read completes.
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
@@ -62,6 +66,8 @@ describe('async storage efficiency: document', () => {
     expect(secondHook.result.current.data).toMatchInlineSnapshot(
       `value: { name: 'Cached document', value: 7 }`,
     );
+    // The snapshot ends after the initial payload+metadata reads, which makes the
+    // skipped touch explicit.
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
@@ -72,6 +78,59 @@ describe('async storage efficiency: document', () => {
       4ms  | 📖 #1 tsdf/sess1/doc-remount-flow/d.e.p.json (payload) | 0.10 kb
       .    | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.m.json (metadata) | 0.05 kb
       6ms  | end
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('document hook hydration does not skip the touch write once the cached document falls outside the current recency bucket', async () => {
+    const storeName = 'doc-remount-stale-touch';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope(storeName, sessionKey);
+
+    documentScope.document.seed(
+      { value: { name: 'Cached document', value: 9 } },
+      { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
+    );
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture isolates the mounted hydration flow.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // This entry is older than the current recency bucket, so hydration should
+    // reread metadata and then write the touched timestamp back.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount({
+        mockAdapter,
+        render: () =>
+          env.apiStore.useDocument({
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+      });
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'Cached document', value: 9 }`,
+    );
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json (payload)
+      .    | 📄 file-open ✅ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata)
+      4ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json (payload) | 0.10 kb
+      .    | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata) | 0.05 kb
+      47ms | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json (metadata) | 0.05 kb
+      49ms | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      50ms | 📁 dir-open-or-create ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
+      51ms | 📄 file-open-or-create ✅ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
+           |    └ (metadata)
+      54ms | ✍️ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
+           |    └ (metadata) | 0.05 kb -> 0.05 kb
+      56ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

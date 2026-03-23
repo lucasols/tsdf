@@ -397,7 +397,7 @@ export function setupCollectionPersistence<
 
     const currentGeneration = generation;
     const promise = namespace
-      .load(itemKey, { touch: 'never' })
+      .load(itemKey, { touch: 'coarse' })
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;

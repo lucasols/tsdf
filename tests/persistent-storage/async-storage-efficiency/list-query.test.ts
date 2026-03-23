@@ -1428,7 +1428,7 @@ describe('async storage efficiency: list-query', () => {
     `);
   });
 
-  test('query hook remount reuses hydrated list-query state without touching localStorage again', async () => {
+  test('query hook remount skips touch writes when the cached query and item are still in the current recency bucket', async () => {
     const storeName = 'lq-remount-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
@@ -1437,6 +1437,8 @@ describe('async storage efficiency: list-query', () => {
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
+    // Seed both entries with the current fake time so hydration should treat them
+    // as fresh and skip the follow-up metadata touches.
     listQueryScope.listQuery.seedItem('users', 1, {
       id: 1,
       name: 'Cached user',
@@ -1448,7 +1450,9 @@ describe('async storage efficiency: list-query', () => {
     // Drain the startup scan so the capture focuses on the mounted query flow.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // The first mount hydrates the cold query and its item from persistence.
+    // The first mount hydrates the cold query and its item from persistence, but
+    // because both entries are still in the current recency bucket no touch write
+    // should be scheduled after the reads complete.
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
@@ -1462,6 +1466,8 @@ describe('async storage efficiency: list-query', () => {
     expect(secondHook.result.current.items).toMatchInlineSnapshot(
       `- { id: 1, name: 'Cached user' }`,
     );
+    // The snapshot ends after the initial query+item reads, which makes the
+    // skipped touches explicit for both entries.
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time  |
@@ -1484,6 +1490,88 @@ describe('async storage efficiency: list-query', () => {
       .     | 📖 #4 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
             |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (metadata)) | 0.08 kb
       110ms | end
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('query hydration does not skip stale query and item touches once they fall outside the current recency bucket', async () => {
+    const storeName = 'lq-remount-stale-touch';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+
+    listQueryScope.listQuery.seedItem(
+      'users',
+      1,
+      { id: 1, name: 'Cached user' },
+      { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
+    );
+    listQueryScope.listQuery.seedQuery(usersQuery, [storeItemKey('users', 1)], {
+      timestamp: Date.now() - 7 * 60 * 60 * 1000,
+    });
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture isolates the mounted hydration flow.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Both entries are older than the current recency bucket, so hydration should
+    // reread metadata and then write the touched timestamps back.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount({
+        mockAdapter,
+        render: () =>
+          env.apiStore.useListQuery(usersQuery, {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+      });
+
+    expect(secondHook.result.current.items).toMatchInlineSnapshot(
+      `- { id: 1, name: 'Cached user' }`,
+    );
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-remount-stale-touch (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/lq-remount-stale-touch/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.lq.{tableId:"users"} (payload))
+      .    | 📄 file-open ✅ #2 tsdf/sess1/lq-remount-stale-touch/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.lq.{tableId:"users"} (metadata))
+      4ms  | 📖 #1 tsdf/sess1/lq-remount-stale-touch/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.lq.{tableId:"users"} (payload)) | 0.09 kb
+      .    | 📖 #2 tsdf/sess1/lq-remount-stale-touch/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.lq.{tableId:"users"} (metadata)) | 0.13 kb
+      6ms  | 📄 file-open ✅ #3 tsdf/sess1/lq-remount-stale-touch/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.li."users||1 (payload))
+      .    | 📄 file-open ✅ #4 tsdf/sess1/lq-remount-stale-touch/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.li."users||1 (metadata))
+      8ms  | 📖 #3 tsdf/sess1/lq-remount-stale-touch/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.li."users||1 (payload)) | 0.10 kb
+      .    | 📖 #4 tsdf/sess1/lq-remount-stale-touch/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.li."users||1 (metadata)) | 0.08 kb
+      47ms | 📖 #2 tsdf/sess1/lq-remount-stale-touch/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.lq.{tableId:"users"} (metadata)) | 0.13 kb
+      49ms | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      50ms | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      .    | 📁 dir-open-or-create ✅ tsdf/sess1/lq-remount-stale-touch (store directory)
+      51ms | 📂 dir-open ✅ tsdf/sess1/lq-remount-stale-touch (store directory)
+      .    | 📄 file-open-or-create ✅ #2 tsdf/sess1/lq-remount-stale-touch/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.lq.{tableId:"users"} (metadata))
+      53ms | 📖 #4 tsdf/sess1/lq-remount-stale-touch/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.li."users||1 (metadata)) | 0.08 kb
+      54ms | ✍️ #2 tsdf/sess1/lq-remount-stale-touch/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.lq.{tableId:"users"} (metadata)) | 0.13 kb -> 0.13 kb
+      55ms | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      56ms | 📁 dir-open-or-create ✅ tsdf/sess1/lq-remount-stale-touch (store directory)
+      57ms | 📄 file-open-or-create ✅ #4 tsdf/sess1/lq-remount-stale-touch/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.li."users||1 (metadata))
+      60ms | ✍️ #4 tsdf/sess1/lq-remount-stale-touch/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-remount-stale-touch.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
+      62ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1570,7 +1658,7 @@ describe('async storage efficiency: list-query', () => {
     `);
   });
 
-  test('item hook remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
+  test('item hook remount skips the touch write when the cached standalone item is still in the current recency bucket', async () => {
     const storeName = 'lq-item-remount-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
@@ -1578,6 +1666,8 @@ describe('async storage efficiency: list-query', () => {
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
+    // Seed with the current fake time so hydration should treat the entry as fresh
+    // and skip the follow-up metadata touch.
     listQueryScope.listQuery.seedItem('users', 1, {
       id: 1,
       name: 'Cached user',
@@ -1588,7 +1678,9 @@ describe('async storage efficiency: list-query', () => {
     // Drain the startup scan so the capture focuses on the mounted item flow.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // The first mount must hydrate the cold cached item from persistence.
+    // The first mount must hydrate the cold cached item from persistence,
+    // but because the entry is still in the current recency bucket no touch write
+    // should be scheduled after the read completes.
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
@@ -1603,6 +1695,8 @@ describe('async storage efficiency: list-query', () => {
       id: 1
       name: 'Cached user'
     `);
+    // The snapshot ends after the initial payload+metadata reads, which makes the
+    // skipped touch explicit.
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |

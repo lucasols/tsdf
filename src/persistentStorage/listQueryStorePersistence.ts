@@ -904,7 +904,7 @@ export function setupListQueryPersistence<
 
     const currentGeneration = generation;
     const promise = itemNamespace
-      .load(itemKey, { touch: 'never' })
+      .load(itemKey, { touch: 'coarse' })
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;
@@ -996,7 +996,7 @@ export function setupListQueryPersistence<
 
     const currentGeneration = generation;
     const promise = queryNamespace
-      .load(queryKey, { touch: 'never' })
+      .load(queryKey, { touch: 'coarse' })
       .then(async (cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) {
           return false;

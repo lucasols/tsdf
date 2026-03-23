@@ -746,7 +746,7 @@ describe('async storage efficiency: collection', () => {
     `);
   });
 
-  test('hook remount reuses hydrated collection state without touching localStorage again', async () => {
+  test('hook remount skips the touch write when the cached collection item is still in the current recency bucket', async () => {
     const storeName = 'col-remount-flow';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
@@ -754,6 +754,8 @@ describe('async storage efficiency: collection', () => {
     });
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
+    // Seed with the current fake time so hydration should treat the entry as fresh
+    // and skip the follow-up metadata touch.
     collectionScope.collection.seedItem('1', {
       value: { id: '1', name: 'Cached user' },
     });
@@ -763,7 +765,62 @@ describe('async storage efficiency: collection', () => {
     // Drain the startup scan so the capture focuses on the UI mount path only.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // The first mount must hydrate the cold cached item from persistence.
+    // The first mount must hydrate the cold cached item from persistence,
+    // but because the entry is still in the current recency bucket no touch write
+    // should be scheduled after the read completes.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount({
+        mockAdapter,
+        render: () =>
+          env.apiStore.useItem('1', {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+      });
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+      `value: { id: '1', name: 'Cached user' }`,
+    );
+    // The snapshot ends after the initial payload+metadata reads, which makes the
+    // skipped touch explicit.
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/col-remount-flow (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/col-remount-flow/ci.%221.p.json
+           |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload))
+      .    | 📄 file-open ✅ #2 tsdf/sess1/col-remount-flow/ci.%221.m.json
+           |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata))
+      4ms  | 📖 #1 tsdf/sess1/col-remount-flow/ci.%221.p.json
+           |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload)) | 0.11 kb
+      .    | 📖 #2 tsdf/sess1/col-remount-flow/ci.%221.m.json
+           |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata)) | 0.06 kb
+      56ms | end
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('collection hydration does not skip the touch write once the cached item falls outside the current recency bucket', async () => {
+    const storeName = 'col-remount-stale-touch';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+
+    collectionScope.collection.seedItem(
+      '1',
+      { value: { id: '1', name: 'Cached user' } },
+      { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
+    );
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture isolates the mounted hydration flow.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // This entry is older than the current recency bucket, so hydration should
+    // reread metadata and then write the touched timestamp back.
     const { secondHook, firstMountOperations, remountOperations } =
       await captureHookRemount({
         mockAdapter,
@@ -781,15 +838,23 @@ describe('async storage efficiency: collection', () => {
       "
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms  | 📂 dir-open ✅ tsdf/sess1/col-remount-flow (store directory)
-      2ms  | 📄 file-open ✅ #1 tsdf/sess1/col-remount-flow/ci.%221.p.json
-           |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload))
-      .    | 📄 file-open ✅ #2 tsdf/sess1/col-remount-flow/ci.%221.m.json
-           |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata))
-      4ms  | 📖 #1 tsdf/sess1/col-remount-flow/ci.%221.p.json
-           |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload)) | 0.11 kb
-      .    | 📖 #2 tsdf/sess1/col-remount-flow/ci.%221.m.json
-           |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata)) | 0.06 kb
+      1ms  | 📂 dir-open ✅ tsdf/sess1/col-remount-stale-touch (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/col-remount-stale-touch/ci.%221.p.json
+           |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (payload))
+      .    | 📄 file-open ✅ #2 tsdf/sess1/col-remount-stale-touch/ci.%221.m.json
+           |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (metadata))
+      4ms  | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci.%221.p.json
+           |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (payload)) | 0.11 kb
+      .    | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.%221.m.json
+           |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (metadata)) | 0.06 kb
+      47ms | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.%221.m.json
+           |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (metadata)) | 0.06 kb
+      49ms | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      50ms | 📁 dir-open-or-create ✅ tsdf/sess1/col-remount-stale-touch (store directory)
+      51ms | 📄 file-open-or-create ✅ #2 tsdf/sess1/col-remount-stale-touch/ci.%221.m.json
+           |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (metadata))
+      54ms | ✍️ #2 tsdf/sess1/col-remount-stale-touch/ci.%221.m.json
+           |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
       56ms | end
       "
     `);
