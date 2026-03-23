@@ -3,7 +3,10 @@ import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
 import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
-import { getManagedLocalStorageManifestKeyForSingle } from '../../../src/persistentStorage/localStorageMetadata';
+import {
+  getManagedLocalStorageManifestKeyForPrefix,
+  getManagedLocalStorageManifestKeyForSingle,
+} from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { advanceTime } from '../../utils/genericTestUtils';
@@ -13,6 +16,7 @@ import {
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
+  createCollectionEnv,
   createDocumentEnv,
   persistentStore,
   setupSyncStorageEfficiencyTestSuite,
@@ -298,6 +302,77 @@ describe('sync storage efficiency: maintenance', () => {
       straySinglePayloadExists: '❌'
       validCompactQueryExists: '✅'
       validSinglePayloadExists: '✅'
+    `);
+  });
+
+  test('global cleanup removes collection payload keys that are no longer referenced by their manifest', async () => {
+    const collectionScope = persistentStore.scope('orphan-collection', 'sess1');
+    const keptItemKey = collectionScope.collection.seedItem('kept-user', {
+      value: { id: 'kept-user', name: 'Kept User' },
+    });
+    const orphanedItemKey = collectionScope.collection.seedItem('orphan-user', {
+      value: { id: 'orphan-user', name: 'Orphan User' },
+    });
+    const manifestKey = getManagedLocalStorageManifestKeyForPrefix(
+      'tsdf.sess1.orphan-collection.ci.',
+    );
+
+    // Rewrite the manifest so only the kept payload is still owned by the
+    // collection namespace. The orphaned payload key should be pruned by the
+    // strict global sweep before manifest cleanup runs.
+    localStorage.setItem(
+      manifestKey,
+      JSON.stringify({
+        e: [
+          {
+            a: Date.now(),
+            k: collectionScope.collection.itemKey('kept-user'),
+            p: 'kept-user',
+          },
+        ],
+      }),
+    );
+
+    createCollectionEnv({
+      storeName: 'orphan-collection',
+      sessionKey: 'sess1',
+    });
+
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      keptItemExists: localStorage.getItem(keptItemKey) !== null,
+      manifest: getParsedLocalStorageValue(manifestKey),
+      orphanedItemExists: localStorage.getItem(orphanedItemKey) !== null,
+    }).toMatchInlineSnapshot(`
+      keptItemExists: '✅'
+
+      manifest:
+        e:
+          - a: 1735689600000
+            k: '"kept-user'
+            p: 'kept-user'
+
+      orphanedItemExists: '❌'
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
+      .    | 🔑[0] ✅ #2 tsdf.sess1.orphan-collection.ci."kept-user
+           |    └ (collection entry)
+      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.orphan-collection.ci.m
+           |    └ (root, namespace, manifest)
+      .    | 🔑[2] ✅ #4 tsdf.sess1.orphan-collection.ci."orphan-user
+           |    └ (collection entry)
+      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.orphan-collection.ci.m
+           |    └ (root, namespace, manifest) | 0.12 kb
+      .    | 🗑️ ✅->❌ #4 tsdf.sess1.orphan-collection.ci."orphan-user
+           |    └ (collection entry)
+      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      "
     `);
   });
 

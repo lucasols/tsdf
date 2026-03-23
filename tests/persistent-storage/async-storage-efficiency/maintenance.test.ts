@@ -13,12 +13,14 @@ import {
 import { createOfflineNetworkMock } from '../../utils/networkMock';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
+  getOpfsDirTree,
   getParsedLocalStorageValue,
   getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
+  createCollectionEnv,
   createDocumentEnv,
   setupAsyncStorageEfficiencyTestSuite,
   waitForScheduledCleanup,
@@ -481,6 +483,74 @@ describe('async storage efficiency: maintenance', () => {
       .      | 🧹 del-dir recursive ✅ tsdf/sess1/missing-payload (store directory)
       2.009s | end
       "
+    `);
+  });
+
+  test('startup cleanup removes collection payload files that are no longer referenced by the namespace index', async () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope('orphan-collection', 'sess1');
+    const keptItemKey = collectionScope.collection.seedItem('kept-user', {
+      value: { id: 'kept-user', name: 'Kept User' },
+    });
+    const orphanedItemKey = collectionScope.collection.seedItem('orphan-user', {
+      value: { id: 'orphan-user', name: 'Orphan User' },
+    });
+
+    // Drop one item from the namespace index while leaving its payload file
+    // behind so startup cleanup has to prune the orphaned record.
+    mockAdapter.removeMetadata(orphanedItemKey);
+
+    createCollectionEnv({
+      storeName: 'orphan-collection',
+      sessionKey: 'sess1',
+    });
+
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      keptPayloadExists: mockAdapter.has(keptItemKey),
+      namespaceRecords: mockAdapter.rawNamespace
+        .listKeys(collectionScope.collection.namespace)
+        .sort(),
+      orphanedPayloadFileExists: mockAdapter.mockBrowserOpfs.fileExists(
+        'tsdf/sess1/orphan-collection/ci.%22orphan-user.p.json',
+      ),
+    }).toMatchInlineSnapshot(`
+      keptPayloadExists: '✅'
+      namespaceRecords: ['__tsdf_payload__:"kept-user', '_i']
+      orphanedPayloadFileExists: '❌'
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time   |
+      2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir tsdf/sess1
+             |    └ (session directory) entries=["dir:orphan-collection"]
+      2.004s | 🗂️ list-dir tsdf/sess1/orphan-collection
+             |    └ (store directory) entries=["file:ci._i.r.json","file:ci.%22kept-user.p.json","file:ci.%22orphan-user.p.json"]
+      2.005s | 📖 #1 tsdf/sess1/orphan-collection/ci._i.r.json
+             |    └ (namespace index) | 0.11 kb
+      2.008s | 🗑️ ✅ #2 tsdf/sess1/orphan-collection/ci.%22orphan-user.p.json
+             |    └ ([itemKey: "orphan-user], payload)
+      2.009s | end
+      "
+    `);
+
+    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+      "tsdf (0.43 kb)
+      ├ sess1 (0.36 kb)
+      │ └ orphan-collection (0.35 kb)
+      │   ├ ci._i.r.json (0.13 kb)
+      │   └ ci.%22kept-user.p.json (0.18 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+    expect(getParsedOpfsFileData('tsdf/sess1/orphan-collection/ci._i.r.json'))
+      .toMatchInlineSnapshot(`
+      e:
+        "kept-user: { a: 1735689600000, p: 'kept-user' }
     `);
   });
 
