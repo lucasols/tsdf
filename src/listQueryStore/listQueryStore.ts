@@ -679,6 +679,15 @@ export function createListQueryStore<
   };
   const offlineMutationController = {
     canQueueMutation: () => offlineController?.canQueueMutation() ?? false,
+    prepareForMutation: <
+      TName extends keyof Exclude<TOfflineOperations, null>,
+    >(args: {
+      operationName: TName;
+      input: OperationInput<Exclude<TOfflineOperations, null>, TName>;
+    }) =>
+      offlineController
+        ? offlineController.prepareForMutation(args)
+        : Promise.reject(new Error('Offline mutation controller unavailable')),
     queueMutation: <
       TName extends keyof Exclude<TOfflineOperations, null>,
     >(args: {
@@ -1157,7 +1166,9 @@ export function createListQueryStore<
       events.emit('invalidateItem', event);
     },
     blockWindowClose,
-    offlineController: offlineMutationController,
+    offlineController: persistentStorageConfig?.offlineMode
+      ? offlineMutationController
+      : null,
     runWithBroadcastConsistency,
     publishQuerySnapshot,
     publishItemSnapshot,
