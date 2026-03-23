@@ -374,6 +374,61 @@ type AsyncStorageCleanupCapableDriver = AsyncStorageDriver & {
   ) => Promise<T>;
 };
 
+type AsyncStorageStartupCleanupActionCapableDriver =
+  AsyncStorageCleanupCapableDriver & {
+    cleanupFinalizeRemovedRecords?: (
+      scope: AsyncStorageNamespaceScope,
+      removedKeys: string[],
+    ) => void;
+    cleanupFinalizeRemovedSessionDir?: (sessionKey: string) => void;
+    cleanupFinalizeRemovedStoreDir?: (
+      scope: AsyncStorageNamespaceScope,
+      removedKeys: string[],
+    ) => void;
+    cleanupRemoveKnownRecords?: (
+      scope: AsyncStorageNamespaceScope,
+      keys: string[],
+    ) => Promise<string[]>;
+    cleanupRemoveKnownSessionDir?: (sessionKey: string) => Promise<boolean>;
+    cleanupRemoveKnownStoreDir?: (
+      scope: AsyncStorageNamespaceScope,
+      keys: string[],
+    ) => Promise<boolean>;
+  };
+
+type StartupCleanupDeleteAction =
+  | { kind: 'removeRecords'; keys: string[]; scope: AsyncStorageNamespaceScope }
+  | { kind: 'removeSessionDir'; sessionKey: string }
+  | {
+      kind: 'removeStoreDir';
+      keys: string[];
+      scope: AsyncStorageNamespaceScope;
+    };
+
+type StartupCleanupScopePlan = {
+  deleteAction: StartupCleanupDeleteAction | null;
+  persistEntries: Map<string, InternalManagedMetadataRecord> | null;
+  scope: AsyncStorageNamespaceScope;
+};
+
+type StartupCleanupDeleteActionResult =
+  | {
+      action: Extract<StartupCleanupDeleteAction, { kind: 'removeRecords' }>;
+      allSucceeded: boolean;
+      kind: 'removeRecords';
+      removedKeys: string[];
+    }
+  | {
+      action: Extract<StartupCleanupDeleteAction, { kind: 'removeSessionDir' }>;
+      kind: 'removeSessionDir';
+      removed: boolean;
+    }
+  | {
+      action: Extract<StartupCleanupDeleteAction, { kind: 'removeStoreDir' }>;
+      kind: 'removeStoreDir';
+      removed: boolean;
+    };
+
 type PendingNamespaceCommit = {
   cancelFlush: (() => void) | null;
   flushPromise: Promise<void> | null;
@@ -1377,6 +1432,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   async #performStartupCleanupWithDriver(
     driver: AsyncStorageDriver,
   ): Promise<void> {
+    const cleanupActionDriver = __LEGIT_CAST__<
+      AsyncStorageStartupCleanupActionCapableDriver,
+      AsyncStorageDriver
+    >(driver);
     const discoveredScopes = await this.#listDiscoveredCleanupScopes(driver);
     const now = Date.now();
     const protectedRefsBySession = new Map(
@@ -1386,93 +1445,328 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       ),
     );
 
-    await Promise.all(
-      discoveredScopes.map(async ({ knownRecordKeys, scope }) => {
-        const protectedRefs = protectedRefsBySession.get(scope.sessionKey);
-        const rawKeys = knownRecordKeys ?? (await driver.listKeys(scope));
-        const indexState = await this.#readNamespaceIndexStateUsingDriver(
+    const scopePlans = await Promise.all(
+      discoveredScopes.map(async ({ knownRecordKeys, scope }) =>
+        this.#planStartupCleanupForScope({
+          cleanupActionDriver,
           driver,
+          knownRecordKeys,
+          now,
+          protectedRefs: protectedRefsBySession.get(scope.sessionKey),
           scope,
-          rawKeys,
-        );
-        const payloadKeys = new Set<string>();
-        const legacyMetadataRecordKeys: string[] = [];
-        const rawKeysToRemove: string[] = [];
+        }),
+      ),
+    );
 
-        for (const key of rawKeys) {
-          if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
-            payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
-          } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
-            legacyMetadataRecordKeys.push(key);
-          } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
-            rawKeysToRemove.push(key);
+    const deleteResults = await Promise.allSettled(
+      scopePlans.flatMap((plan) =>
+        plan.deleteAction === null
+          ? []
+          : [
+              this.#runStartupCleanupDeleteAction(
+                cleanupActionDriver,
+                plan.deleteAction,
+              ),
+            ],
+      ),
+    );
+
+    const persistPlans: Array<{
+      entries: Map<string, InternalManagedMetadataRecord>;
+      scope: AsyncStorageNamespaceScope;
+    }> = [];
+    const successfulStoreDeleteSessions = new Set<string>();
+    const successfulStoreDeleteScopes = new Set<string>();
+    const scopePlansByNamespaceId = new Map(
+      scopePlans.map((plan) => [getNamespaceId(plan.scope), plan]),
+    );
+
+    for (const settledResult of deleteResults) {
+      if (settledResult.status !== 'fulfilled') continue;
+
+      const result = settledResult.value;
+      switch (result.kind) {
+        case 'removeRecords': {
+          if (result.removedKeys.length > 0) {
+            cleanupActionDriver.cleanupFinalizeRemovedRecords?.(
+              result.action.scope,
+              result.removedKeys,
+            );
           }
-        }
+          if (!result.allSucceeded) continue;
 
-        if (!indexState.valid || indexState.entries === null) {
-          const keysToRemove = rawKeys.filter(
-            (key) =>
-              key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY || indexState.exists,
+          const scopePlan = scopePlansByNamespaceId.get(
+            getNamespaceId(result.action.scope),
           );
-          if (keysToRemove.length > 0) {
-            await this.#driverRemoveManyFrom(driver, scope, keysToRemove);
+          if (scopePlan !== undefined && scopePlan.persistEntries !== null) {
+            persistPlans.push({
+              entries: scopePlan.persistEntries,
+              scope: scopePlan.scope,
+            });
           }
-          return;
+          continue;
         }
-
-        const nextEntries = new Map<string, InternalManagedMetadataRecord>();
-        const payloadRecordKeysToRemove = new Set<string>([
-          ...legacyMetadataRecordKeys,
-          ...rawKeysToRemove,
-        ]);
-
-        for (const [key, metadata] of indexState.entries.entries()) {
-          const isProtected =
-            isOfflineProtectedMetadata(metadata.customMetadata) ||
-            protectedRefs?.has(serializeProtectedRef({ ...scope, key })) ===
-              true;
-          if (!payloadKeys.has(key)) continue;
-          if (
-            !isProtected &&
-            now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
-          ) {
-            payloadRecordKeysToRemove.add(getPayloadRecordKey(key));
-            continue;
-          }
-
-          nextEntries.set(key, metadata);
-        }
-
-        for (const payloadKey of payloadKeys) {
-          if (!indexState.entries.has(payloadKey)) {
-            payloadRecordKeysToRemove.add(getPayloadRecordKey(payloadKey));
-          }
-        }
-
-        const indexChanged =
-          nextEntries.size !== indexState.entries.size ||
-          rawKeysToRemove.length > 0 ||
-          legacyMetadataRecordKeys.length > 0;
-
-        const shouldDeleteEmptyIndex = indexChanged && nextEntries.size === 0;
-        if (shouldDeleteEmptyIndex) {
-          payloadRecordKeysToRemove.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
-        }
-
-        if (payloadRecordKeysToRemove.size > 0) {
-          await this.#driverRemoveManyFrom(driver, scope, [
-            ...payloadRecordKeysToRemove,
-          ]);
-        }
-
-        if (indexChanged && !shouldDeleteEmptyIndex) {
-          await this.#persistNamespaceIndexUsingDriver(
-            driver,
-            scope,
-            nextEntries,
+        case 'removeStoreDir': {
+          if (!result.removed) continue;
+          cleanupActionDriver.cleanupFinalizeRemovedStoreDir?.(
+            result.action.scope,
+            result.action.keys,
           );
+          successfulStoreDeleteSessions.add(result.action.scope.sessionKey);
+          successfulStoreDeleteScopes.add(getNamespaceId(result.action.scope));
+          continue;
         }
-      }),
+      }
+    }
+
+    for (const scopePlan of scopePlans) {
+      if (
+        scopePlan.deleteAction !== null ||
+        scopePlan.persistEntries === null
+      ) {
+        continue;
+      }
+
+      persistPlans.push({
+        entries: scopePlan.persistEntries,
+        scope: scopePlan.scope,
+      });
+    }
+
+    const sessionDeletePlans = [...successfulStoreDeleteSessions].flatMap(
+      (sessionKey) =>
+        this.#shouldPlanStartupCleanupSessionDelete(
+          cleanupActionDriver,
+          scopePlans,
+          successfulStoreDeleteScopes,
+          sessionKey,
+        )
+          ? [
+              { kind: 'removeSessionDir', sessionKey } satisfies Extract<
+                StartupCleanupDeleteAction,
+                { kind: 'removeSessionDir' }
+              >,
+            ]
+          : [],
+    );
+
+    const sessionDeletePromise = Promise.allSettled(
+      sessionDeletePlans.map((action) =>
+        this.#runStartupCleanupDeleteAction(cleanupActionDriver, action),
+      ),
+    );
+
+    const persistPromise = Promise.all(
+      persistPlans.map(({ entries, scope }) =>
+        this.#persistNamespaceIndexUsingDriver(driver, scope, entries),
+      ),
+    );
+
+    const [sessionDeleteResults] = await Promise.all([
+      sessionDeletePromise,
+      persistPromise,
+    ]);
+
+    for (const settledResult of sessionDeleteResults) {
+      if (settledResult.status !== 'fulfilled') continue;
+      const result = settledResult.value;
+      if (result.kind !== 'removeSessionDir' || !result.removed) continue;
+      cleanupActionDriver.cleanupFinalizeRemovedSessionDir?.(
+        result.action.sessionKey,
+      );
+    }
+  }
+
+  async #planStartupCleanupForScope(args: {
+    cleanupActionDriver: AsyncStorageStartupCleanupActionCapableDriver;
+    driver: AsyncStorageDriver;
+    knownRecordKeys: string[] | null;
+    now: number;
+    protectedRefs: Set<string> | null | undefined;
+    scope: AsyncStorageNamespaceScope;
+  }): Promise<StartupCleanupScopePlan> {
+    const rawKeys =
+      args.knownRecordKeys ?? (await args.driver.listKeys(args.scope));
+    const indexState = await this.#readNamespaceIndexStateUsingDriver(
+      args.driver,
+      args.scope,
+      rawKeys,
+    );
+    const payloadKeys = new Set<string>();
+    const legacyMetadataRecordKeys: string[] = [];
+    const rawKeysToRemove: string[] = [];
+
+    for (const key of rawKeys) {
+      if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
+        payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
+      } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
+        legacyMetadataRecordKeys.push(key);
+      } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+        rawKeysToRemove.push(key);
+      }
+    }
+
+    if (!indexState.valid || indexState.entries === null) {
+      const keysToRemove = rawKeys.filter(
+        (key) => key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY || indexState.exists,
+      );
+      return {
+        deleteAction:
+          keysToRemove.length === 0
+            ? null
+            : this.#createStartupCleanupDeleteAction({
+                cleanupActionDriver: args.cleanupActionDriver,
+                keys: keysToRemove,
+                scope: args.scope,
+              }),
+        persistEntries: null,
+        scope: args.scope,
+      };
+    }
+
+    const nextEntries = new Map<string, InternalManagedMetadataRecord>();
+    const payloadRecordKeysToRemove = new Set<string>([
+      ...legacyMetadataRecordKeys,
+      ...rawKeysToRemove,
+    ]);
+
+    for (const [key, metadata] of indexState.entries.entries()) {
+      const isProtected =
+        isOfflineProtectedMetadata(metadata.customMetadata) ||
+        args.protectedRefs?.has(
+          serializeProtectedRef({ ...args.scope, key }),
+        ) === true;
+      if (!payloadKeys.has(key)) continue;
+      if (
+        !isProtected &&
+        args.now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
+      ) {
+        payloadRecordKeysToRemove.add(getPayloadRecordKey(key));
+        continue;
+      }
+
+      nextEntries.set(key, metadata);
+    }
+
+    for (const payloadKey of payloadKeys) {
+      if (!indexState.entries.has(payloadKey)) {
+        payloadRecordKeysToRemove.add(getPayloadRecordKey(payloadKey));
+      }
+    }
+
+    const indexChanged =
+      nextEntries.size !== indexState.entries.size ||
+      rawKeysToRemove.length > 0 ||
+      legacyMetadataRecordKeys.length > 0;
+
+    const deleteKeys = [...payloadRecordKeysToRemove];
+    if (indexChanged && nextEntries.size === 0) {
+      deleteKeys.push(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+    }
+
+    return {
+      deleteAction:
+        deleteKeys.length === 0
+          ? null
+          : this.#createStartupCleanupDeleteAction({
+              cleanupActionDriver: args.cleanupActionDriver,
+              keys: deleteKeys,
+              scope: args.scope,
+            }),
+      persistEntries: indexChanged && nextEntries.size > 0 ? nextEntries : null,
+      scope: args.scope,
+    };
+  }
+
+  #createStartupCleanupDeleteAction(args: {
+    cleanupActionDriver: AsyncStorageStartupCleanupActionCapableDriver;
+    keys: string[];
+    scope: AsyncStorageNamespaceScope;
+  }): StartupCleanupDeleteAction {
+    const uniqueKeys = [...new Set(args.keys)];
+    if (
+      args.cleanupActionDriver.cleanupRemoveKnownStoreDir !== undefined &&
+      uniqueKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)
+    ) {
+      return { kind: 'removeStoreDir', keys: uniqueKeys, scope: args.scope };
+    }
+
+    return { kind: 'removeRecords', keys: uniqueKeys, scope: args.scope };
+  }
+
+  async #runStartupCleanupDeleteAction(
+    cleanupActionDriver: AsyncStorageStartupCleanupActionCapableDriver,
+    action: StartupCleanupDeleteAction,
+  ): Promise<StartupCleanupDeleteActionResult> {
+    switch (action.kind) {
+      case 'removeRecords': {
+        const removedKeys =
+          cleanupActionDriver.cleanupRemoveKnownRecords !== undefined
+            ? await cleanupActionDriver.cleanupRemoveKnownRecords(
+                action.scope,
+                action.keys,
+              )
+            : await this.#driverRemoveManyFrom(
+                cleanupActionDriver,
+                action.scope,
+                action.keys,
+              ).then(() => action.keys);
+
+        return {
+          action,
+          allSucceeded: removedKeys.length === action.keys.length,
+          kind: 'removeRecords',
+          removedKeys,
+        };
+      }
+      case 'removeStoreDir': {
+        return {
+          action,
+          kind: 'removeStoreDir',
+          removed:
+            cleanupActionDriver.cleanupRemoveKnownStoreDir === undefined
+              ? false
+              : await cleanupActionDriver.cleanupRemoveKnownStoreDir(
+                  action.scope,
+                  action.keys,
+                ),
+        };
+      }
+      case 'removeSessionDir': {
+        return {
+          action,
+          kind: 'removeSessionDir',
+          removed:
+            cleanupActionDriver.cleanupRemoveKnownSessionDir === undefined
+              ? false
+              : await cleanupActionDriver.cleanupRemoveKnownSessionDir(
+                  action.sessionKey,
+                ),
+        };
+      }
+    }
+  }
+
+  #shouldPlanStartupCleanupSessionDelete(
+    cleanupActionDriver: AsyncStorageStartupCleanupActionCapableDriver,
+    scopePlans: StartupCleanupScopePlan[],
+    successfulStoreDeleteScopes: Set<string>,
+    sessionKey: string,
+  ): boolean {
+    if (cleanupActionDriver.cleanupRemoveKnownSessionDir === undefined) {
+      return false;
+    }
+
+    const sessionScopePlans = scopePlans.filter(
+      (plan) => plan.scope.sessionKey === sessionKey,
+    );
+    return (
+      sessionScopePlans.length > 0 &&
+      sessionScopePlans.every(
+        (plan) =>
+          plan.deleteAction?.kind === 'removeStoreDir' &&
+          successfulStoreDeleteScopes.has(getNamespaceId(plan.scope)),
+      )
     );
   }
 

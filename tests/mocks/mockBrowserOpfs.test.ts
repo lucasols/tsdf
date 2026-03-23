@@ -221,8 +221,8 @@ describe('mockBrowserOpfs', () => {
         type: operation.type,
       })),
     ).toMatchInlineSnapshot(`
-      - { path: 'docs/entry.json', startedTime: 8, time: 10, type: 'readFile' }
-      - { path: 'docs/entry.json', startedTime: 8, time: 10, type: 'readFile' }
+      - { path: 'docs/entry.json', startedTime: 7, time: 10, type: 'readFile' }
+      - { path: 'docs/entry.json', startedTime: 7, time: 10, type: 'readFile' }
     `);
   });
 });

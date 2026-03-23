@@ -178,6 +178,64 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     return callback(this.#createScopedDriver(cleanupCacheContext));
   }
 
+  async cleanupRemoveKnownRecords(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+  ): Promise<string[]> {
+    return this.#cleanupRemoveKnownRecordsWithContext(
+      scope,
+      keys,
+      this.#mainCacheContext,
+    );
+  }
+
+  async cleanupRemoveKnownStoreDir(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+  ): Promise<boolean> {
+    return this.#cleanupRemoveKnownStoreDirWithContext(
+      scope,
+      keys,
+      this.#mainCacheContext,
+    );
+  }
+
+  async cleanupRemoveKnownSessionDir(sessionKey: string): Promise<boolean> {
+    return this.#cleanupRemoveKnownSessionDirWithContext(
+      sessionKey,
+      this.#mainCacheContext,
+    );
+  }
+
+  cleanupFinalizeRemovedRecords(
+    scope: AsyncStorageNamespaceScope,
+    removedKeys: string[],
+  ): void {
+    this.#cleanupFinalizeRemovedRecordsWithContext(
+      scope,
+      removedKeys,
+      this.#mainCacheContext,
+    );
+  }
+
+  cleanupFinalizeRemovedStoreDir(
+    scope: AsyncStorageNamespaceScope,
+    removedKeys: string[],
+  ): void {
+    this.#cleanupFinalizeRemovedStoreDirWithContext(
+      scope,
+      removedKeys,
+      this.#mainCacheContext,
+    );
+  }
+
+  cleanupFinalizeRemovedSessionDir(sessionKey: string): void {
+    this.#cleanupFinalizeRemovedSessionDirWithContext(
+      sessionKey,
+      this.#mainCacheContext,
+    );
+  }
+
   resetForTests(): void {
     this.#rootDirPromise = null;
     this.#mainCacheContext.dirCache.clear();
@@ -185,28 +243,68 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
   }
 
   #createScopedDriver(cacheContext: OpfsCacheContext): AsyncStorageDriver {
-    return {
-      get: (scope, key) =>
+    const scopedDriver = {
+      cleanupFinalizeRemovedRecords: (
+        scope: AsyncStorageNamespaceScope,
+        removedKeys: string[],
+      ) =>
+        this.#cleanupFinalizeRemovedRecordsWithContext(
+          scope,
+          removedKeys,
+          cacheContext,
+        ),
+      cleanupFinalizeRemovedSessionDir: (sessionKey: string) =>
+        this.#cleanupFinalizeRemovedSessionDirWithContext(
+          sessionKey,
+          cacheContext,
+        ),
+      cleanupFinalizeRemovedStoreDir: (
+        scope: AsyncStorageNamespaceScope,
+        removedKeys: string[],
+      ) =>
+        this.#cleanupFinalizeRemovedStoreDirWithContext(
+          scope,
+          removedKeys,
+          cacheContext,
+        ),
+      cleanupRemoveKnownRecords: (
+        scope: AsyncStorageNamespaceScope,
+        keys: string[],
+      ) =>
+        this.#cleanupRemoveKnownRecordsWithContext(scope, keys, cacheContext),
+      cleanupRemoveKnownSessionDir: (sessionKey: string) =>
+        this.#cleanupRemoveKnownSessionDirWithContext(sessionKey, cacheContext),
+      cleanupRemoveKnownStoreDir: (
+        scope: AsyncStorageNamespaceScope,
+        keys: string[],
+      ) =>
+        this.#cleanupRemoveKnownStoreDirWithContext(scope, keys, cacheContext),
+      get: (scope: AsyncStorageNamespaceScope, key: string) =>
         this.#getManyWithContext(scope, [key], cacheContext).then(
           ([value]) => value ?? null,
         ),
-      set: (scope, key, value) =>
+      set: (scope: AsyncStorageNamespaceScope, key: string, value: unknown) =>
         this.#setManyWithContext(scope, [{ key, value }], cacheContext),
-      remove: (scope, key) =>
+      remove: (scope: AsyncStorageNamespaceScope, key: string) =>
         this.#removeManyWithContext(scope, [key], cacheContext),
-      listKeys: (scope) => this.#listKeysWithContext(scope, cacheContext),
-      clear: (scope) => this.#clearWithContext(scope, cacheContext),
-      listScopes: (currentSessionKey) =>
+      listKeys: (scope: AsyncStorageNamespaceScope) =>
+        this.#listKeysWithContext(scope, cacheContext),
+      clear: (scope: AsyncStorageNamespaceScope) =>
+        this.#clearWithContext(scope, cacheContext),
+      listScopes: (currentSessionKey?: string) =>
         this.#listScopesWithContext(currentSessionKey, cacheContext),
-      listScopesWithKnownRecordKeys: (currentSessionKey) =>
+      listScopesWithKnownRecordKeys: (currentSessionKey?: string) =>
         this.#listDiscoveredScopesWithContext(currentSessionKey, cacheContext),
-      getMany: (scope, keys) =>
+      getMany: (scope: AsyncStorageNamespaceScope, keys: string[]) =>
         this.#getManyWithContext(scope, keys, cacheContext),
-      setMany: (scope, entries) =>
-        this.#setManyWithContext(scope, entries, cacheContext),
-      removeMany: (scope, keys) =>
+      setMany: (
+        scope: AsyncStorageNamespaceScope,
+        entries: AsyncStorageDriverSetEntry[],
+      ) => this.#setManyWithContext(scope, entries, cacheContext),
+      removeMany: (scope: AsyncStorageNamespaceScope, keys: string[]) =>
         this.#removeManyWithContext(scope, keys, cacheContext),
     };
+    return scopedDriver;
   }
 
   async #getManyWithContext(
@@ -827,6 +925,160 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         );
       }
     }
+  }
+
+  async #cleanupRemoveKnownRecordsWithContext(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+    cacheContext: OpfsCacheContext,
+  ): Promise<string[]> {
+    if (keys.length === 0) return [];
+
+    const cleanupKnowledge = cacheContext.cleanupKnowledge;
+    const storeDirPath = this.#getStoreDirPath(scope);
+    const knownStoreEntryCount =
+      cleanupKnowledge?.knownRemainingEntryCountByStorePath.get(storeDirPath);
+    if (
+      knownStoreEntryCount !== undefined &&
+      knownStoreEntryCount === keys.length
+    ) {
+      const sessionDir = await this.#getSessionDir(scope.sessionKey, {
+        create: false,
+        cacheContext,
+      });
+      if (sessionDir !== null) {
+        try {
+          await sessionDir.removeEntry(encodePathSegment(scope.storeName), {
+            recursive: true,
+          });
+          return keys;
+        } catch {
+          // Fall back to per-file deletion when the recursive delete fails.
+        }
+      }
+    }
+
+    const storeDir = await this.#getStoreDir(scope, {
+      create: false,
+      cacheContext,
+    });
+    if (storeDir === null) return [];
+
+    const removeResults = await Promise.all(
+      keys.map(async (key) => {
+        const fileName = buildFileName(scope, key);
+        try {
+          await storeDir.removeEntry(fileName);
+          return key;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return removeResults.flatMap((key) => (key === null ? [] : [key]));
+  }
+
+  async #cleanupRemoveKnownStoreDirWithContext(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+    cacheContext: OpfsCacheContext,
+  ): Promise<boolean> {
+    const cleanupKnowledge = cacheContext.cleanupKnowledge;
+    if (cleanupKnowledge === null) return false;
+
+    const storeDirPath = this.#getStoreDirPath(scope);
+    const knownStoreEntryCount =
+      cleanupKnowledge.knownRemainingEntryCountByStorePath.get(storeDirPath);
+    if (
+      knownStoreEntryCount === undefined ||
+      knownStoreEntryCount !== keys.length
+    ) {
+      return false;
+    }
+
+    const sessionDir = await this.#getSessionDir(scope.sessionKey, {
+      create: false,
+      cacheContext,
+    });
+    if (sessionDir === null) return false;
+
+    try {
+      await sessionDir.removeEntry(encodePathSegment(scope.storeName), {
+        recursive: true,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #cleanupRemoveKnownSessionDirWithContext(
+    sessionKey: string,
+    cacheContext: OpfsCacheContext,
+  ): Promise<boolean> {
+    if (cacheContext.cleanupKnowledge === null) return false;
+
+    const sessionDirPath = this.#getSessionDirPath(sessionKey);
+    const knownStorePaths =
+      cacheContext.cleanupKnowledge.knownStorePathsBySessionPath.get(
+        sessionDirPath,
+      );
+    if (knownStorePaths !== undefined && knownStorePaths.size > 0) return false;
+
+    const root = await this.#getRootDir();
+    try {
+      await root.removeEntry(encodePathSegment(sessionKey), {
+        recursive: true,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  #cleanupFinalizeRemovedRecordsWithContext(
+    scope: AsyncStorageNamespaceScope,
+    removedKeys: string[],
+    cacheContext: OpfsCacheContext,
+  ): void {
+    for (const key of removedKeys) {
+      this.#invalidateFileHandle(scope, key, cacheContext);
+    }
+    this.#decrementKnownStoreEntryCount(
+      this.#getStoreDirPath(scope),
+      cacheContext,
+      removedKeys.length,
+    );
+  }
+
+  #cleanupFinalizeRemovedStoreDirWithContext(
+    scope: AsyncStorageNamespaceScope,
+    removedKeys: string[],
+    cacheContext: OpfsCacheContext,
+  ): void {
+    for (const key of removedKeys) {
+      this.#invalidateFileHandle(scope, key, cacheContext);
+    }
+
+    const sessionDirPath = this.#getSessionDirPath(scope.sessionKey);
+    const storeDirPath = this.#getStoreDirPath(scope);
+    this.#invalidateDirectory(storeDirPath, cacheContext);
+    cacheContext.cleanupKnowledge?.knownStorePathsBySessionPath
+      .get(sessionDirPath)
+      ?.delete(storeDirPath);
+    cacheContext.cleanupKnowledge?.knownRemainingEntryCountByStorePath.delete(
+      storeDirPath,
+    );
+  }
+
+  #cleanupFinalizeRemovedSessionDirWithContext(
+    sessionKey: string,
+    cacheContext: OpfsCacheContext,
+  ): void {
+    const sessionDirPath = this.#getSessionDirPath(sessionKey);
+    this.#invalidateDirectory(sessionDirPath, cacheContext);
+    this.#clearKnownSessionStores(sessionDirPath, cacheContext);
   }
 
   #invalidateFileHandle(

@@ -169,6 +169,7 @@ export type MockBrowserOpfsOperation =
 export class MockBrowserOpfsEnvironment {
   readonly operations: MockBrowserOpfsOperation[] = [];
 
+  readonly #removeEntryFailures = new Map<string, number>();
   readonly #handlePaths = new WeakMap<FileSystemHandle, string[]>();
   readonly #pendingLatencies = new Set<Promise<void>>();
   readonly #root = createDirectoryNode('');
@@ -221,6 +222,16 @@ export class MockBrowserOpfsEnvironment {
     if (delayMs <= 0) return;
 
     this.#dynamicReadDelays.push({ matches, delayMs });
+  }
+
+  failRemoveEntry(path: string, times = 1): void {
+    const normalizedPath = normalizePath(path);
+    if (times <= 0) {
+      this.#removeEntryFailures.delete(normalizedPath);
+      return;
+    }
+
+    this.#removeEntryFailures.set(normalizedPath, times);
   }
 
   ensureDir(path: string): void {
@@ -366,6 +377,7 @@ export class MockBrowserOpfsEnvironment {
     readyAtRef: ReadyAtRef,
   ): FileSystemDirectoryHandle {
     const operations = this.operations;
+    const removeEntryFailures = this.#removeEntryFailures;
     const waitLatency = this.#waitLatency.bind(this);
     const createDirectoryHandle = this.#createDirectoryHandle.bind(this);
     const createFileHandle = this.#createFileHandle.bind(this);
@@ -547,6 +559,37 @@ export class MockBrowserOpfsEnvironment {
           readyAtRef: cloneReadyAtRef(readyAtRef),
         });
         const filePath = joinPath(pathSegments, name);
+        const remainingFailures = removeEntryFailures.get(filePath) ?? 0;
+        if (remainingFailures > 0) {
+          if (remainingFailures === 1) {
+            removeEntryFailures.delete(filePath);
+          } else {
+            removeEntryFailures.set(filePath, remainingFailures - 1);
+          }
+
+          const directory = node.directories.get(name);
+          operations.push(
+            directory === undefined
+              ? {
+                  startedTime,
+                  time: completionTime,
+                  type: 'deleteFile',
+                  path: filePath,
+                  exists: node.files.has(name),
+                }
+              : {
+                  startedTime,
+                  time: completionTime,
+                  type: 'deleteDir',
+                  path: filePath,
+                  exists: true,
+                  deleted: false,
+                  recursive: options?.recursive === true,
+                },
+          );
+          throw new Error(`Failed to remove entry "${name}".`);
+        }
+
         if (node.files.has(name)) {
           node.files.delete(name);
           operations.push({
@@ -670,10 +713,11 @@ export class MockBrowserOpfsEnvironment {
         );
       },
       async getFile(): Promise<File> {
-        const { completionTime } = await waitLatency({
-          delayMs: MOCK_OPFS_LATENCY_MS.getFile,
-          readyAtRef: cloneReadyAtRef(readyAtRef),
-        });
+        const { completionTime, startedTime: getFileStartedTime } =
+          await waitLatency({
+            delayMs: MOCK_OPFS_LATENCY_MS.getFile,
+            readyAtRef: cloneReadyAtRef(readyAtRef),
+          });
         const path = joinPath(pathSegments, node.name);
         const currentNode = getCurrentFileNode();
         const fileReadyAtRef: ReadyAtRef = { value: completionTime };
@@ -696,10 +740,7 @@ export class MockBrowserOpfsEnvironment {
 
         return __LEGIT_CAST__<File, unknown>({
           async text(): Promise<string> {
-            let {
-              completionTime: textCompletionTime,
-              startedTime: textStartedTime,
-            } = await waitLatency({
+            let { completionTime: textCompletionTime } = await waitLatency({
               delayMs: MOCK_OPFS_LATENCY_MS.textRead,
               readyAtRef: fileReadyAtRef,
             });
@@ -715,7 +756,9 @@ export class MockBrowserOpfsEnvironment {
             assertSnapshotIsReadable();
 
             operations.push({
-              startedTime: textStartedTime,
+              // Model the visible read as starting when the file snapshot
+              // acquisition began, since getFile() is part of the effective read.
+              startedTime: getFileStartedTime,
               time: textCompletionTime,
               type: 'readFile',
               path,

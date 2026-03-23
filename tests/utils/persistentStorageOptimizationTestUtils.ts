@@ -422,11 +422,41 @@ export function getParsedLocalStorageValue<T = unknown>(key: string): T | null {
   return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(value) ?? value);
 }
 
+function compactDocumentOpfsIndexSnapshotValue(
+  filePath: string,
+  value: unknown,
+): unknown {
+  if (!filePath.endsWith('/d._i.r.json')) return value;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+  const entries = record.e;
+  if (
+    typeof entries !== 'object' ||
+    entries === null ||
+    Array.isArray(entries)
+  ) {
+    return value;
+  }
+
+  const entriesRecord = __LEGIT_CAST__<Record<string, unknown>, unknown>(
+    entries,
+  );
+  const keys = Object.keys(entriesRecord);
+  if (keys.length !== 1 || keys[0] !== 'document') return value;
+
+  return { ...record, e: [entriesRecord.document] };
+}
+
 export function getParsedOpfsFileData<T = unknown>(filePath: string): T | null {
   const raw = readMockBrowserOpfsFileForTests(filePath);
   if (raw === null) return null;
 
-  return __LEGIT_CAST__<T | null, unknown>(safeJsonParse(raw) ?? raw);
+  return __LEGIT_CAST__<T | null, unknown>(
+    compactDocumentOpfsIndexSnapshotValue(filePath, safeJsonParse(raw) ?? raw),
+  );
 }
 
 export function getParsedOpfsNamespaceValue<T = unknown>(

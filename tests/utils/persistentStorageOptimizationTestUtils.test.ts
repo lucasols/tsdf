@@ -80,7 +80,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       5ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
       6ms  | 📄 file-open ✅ #2 tsdf/sess1/docs/d._i.r.json (namespace index)
-      8ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
+      7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
       12ms | ✍️ #2 tsdf/sess1/docs/d._i.r.json
            |    └ (namespace index) | 0.05 kb -> 0.05 kb
       14ms | 🗑️ ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
@@ -122,7 +122,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
-      6ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
+      5ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
       8ms  | end
       "
     `);
@@ -212,7 +212,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(getParsedOpfsFileData('tsdf/sess1/docs/d._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          document: { a: 0 }
+          - a: 0
       `);
     expect(getParsedOpfsFileData('tsdf/sess1/docs/d.e.p.json'))
       .toMatchInlineSnapshot(`
