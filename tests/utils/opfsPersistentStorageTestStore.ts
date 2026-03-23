@@ -620,20 +620,6 @@ function parseFileContext(
   };
 }
 
-function isAppStoreFilePath(path: string): boolean {
-  const pathSegments = path.split('/');
-  if (pathSegments.length < 4 || pathSegments[0] !== OPFS_ROOT_DIR) {
-    return false;
-  }
-
-  const encodedStoreName = pathSegments[2];
-  if (encodedStoreName === undefined) return false;
-
-  const storeName = decodePathSegment(encodedStoreName);
-
-  return storeName !== '_o_.p';
-}
-
 type MockOpfsBaseOperation = {
   path: string;
   startedTime: number;
@@ -873,7 +859,6 @@ export type OpfsPersistentStorageTestStoreScope = {
 };
 
 export type OpfsPersistentStorageTestStoreOptions = {
-  readDelayMs?: number;
   initialState?: {
     storeName: string;
     sessionKey: string;
@@ -955,11 +940,6 @@ export function createOpfsPersistentStorageTestStore(
   };
 } {
   const mockBrowserOpfs = createMockBrowserOpfs();
-  const readDelayMs = options.readDelayMs ?? 0;
-
-  if (readDelayMs > 0) {
-    mockBrowserOpfs.setDynamicReadDelay(isAppStoreFilePath, readDelayMs);
-  }
 
   function setRaw(key: string, raw: string): void {
     const parsed = safeJsonParse(raw);

@@ -106,7 +106,6 @@ afterEach(() => {
 describe('opfs: converted document store persistence', () => {
   test('explicit preload hydrates converted cached data before mount', async () => {
     createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
       initialState: {
         storeName: 'doc-opfs-converted',
         sessionKey: 'sess1',
@@ -147,7 +146,6 @@ describe('opfs: converted document store persistence', () => {
 
   test('invalid converted cached data is removed during preload', async () => {
     const invalidStorageAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName: 'doc-opfs-invalid-storage',
         sessionKey: 'sess1',
@@ -155,7 +153,6 @@ describe('opfs: converted document store persistence', () => {
       },
     });
     const throwingAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName: 'doc-opfs-throwing',
         sessionKey: 'sess1',
@@ -209,7 +206,6 @@ describe('opfs: converted document store persistence', () => {
 
   test('invalid final data after conversion is removed during preload', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName: 'doc-opfs-invalid-final',
         sessionKey: 'sess1',
@@ -242,7 +238,6 @@ describe('opfs: converted document store persistence', () => {
 
   test('write conversion errors are reported and keep the previous cached data', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
       initialState: {
         storeName: 'doc-opfs-save-error',
         sessionKey: 'sess1',

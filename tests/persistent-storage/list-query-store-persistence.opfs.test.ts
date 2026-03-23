@@ -118,7 +118,6 @@ function createPersistedListQueryState(
 }
 
 function createListQueryOpfsTestStore(options: {
-  readDelayMs?: number;
   storeName: string;
   sessionKey: string;
   initialState?: NonNullable<
@@ -126,7 +125,6 @@ function createListQueryOpfsTestStore(options: {
   >['listQuery'];
 }) {
   const mockAdapter = createOpfsPersistentStorageTestStore({
-    readDelayMs: options.readDelayMs,
     ...(options.initialState !== undefined
       ? {
           initialState: {
@@ -168,7 +166,6 @@ describe('opfs: list query store persistence', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const { mockAdapter } = createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {
@@ -225,7 +222,6 @@ describe('opfs: list query store persistence', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {
@@ -273,7 +269,6 @@ describe('opfs: list query store persistence', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 50,
       storeName,
       sessionKey,
       initialState: {
@@ -319,7 +314,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-partial-roundtrip';
     const sessionKey = 'sess1';
     const { listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
     });
@@ -380,7 +374,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-item-partial-missing-fields';
     const sessionKey = 'sess1';
     const { listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
     });
@@ -460,7 +453,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-partial-missing-fields';
     const sessionKey = 'sess1';
     const { listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
     });
@@ -543,7 +535,7 @@ describe('opfs: list query store persistence', () => {
   });
 
   test('round-trip persistence preserves offset-pagination progress for loadMore', async () => {
-    createOpfsPersistentStorageTestStore({ readDelayMs: 100 });
+    createOpfsPersistentStorageTestStore();
     const productsQuery = { tableId: 'products' };
     const products = Array.from({ length: 20 }, (_, index) => ({
       id: index + 1,
@@ -628,7 +620,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-hook-loadsize-smaller';
     const sessionKey = 'sess1';
     createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: createPersistedListQueryState(
@@ -703,7 +694,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-hook-loadsize-larger';
     const sessionKey = 'sess1';
     createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: createPersistedListQueryState('products', cachedProducts, 5)
@@ -755,7 +745,7 @@ describe('opfs: list query store persistence', () => {
   });
 
   test('round-trip persistence keeps state-manipulated query membership and item updates', async () => {
-    createOpfsPersistentStorageTestStore({ readDelayMs: 100 });
+    createOpfsPersistentStorageTestStore();
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-state-roundtrip';
     const sessionKey = 'sess1';
@@ -831,7 +821,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-delete-persisted-item';
     const sessionKey = 'sess1';
     const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
     });
@@ -877,7 +866,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-preload-item';
     const sessionKey = 'sess1';
     createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {
@@ -910,7 +898,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-invalid';
     const sessionKey = 'sess1';
     const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 50,
       storeName,
       sessionKey,
     });
@@ -939,7 +926,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-invalid-item-payload';
     const sessionKey = 'sess1';
     const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 50,
       storeName,
       sessionKey,
     });
@@ -970,7 +956,6 @@ describe('opfs: list query store persistence', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
-      readDelayMs: 50,
       storeName,
       sessionKey,
     });
@@ -1006,7 +991,6 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-reset';
     const sessionKey = 'sess1';
     createListQueryOpfsTestStore({
-      readDelayMs: 100,
       storeName,
       sessionKey,
       initialState: {

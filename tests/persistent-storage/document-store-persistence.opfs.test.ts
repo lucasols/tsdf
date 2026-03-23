@@ -117,9 +117,7 @@ describe('opfs: document store persistence', () => {
   });
 
   test('schema validation failure triggers cleanup', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = 'tsdf.session1.opfs-cleanup';
     const entry: StorageCacheEntry<{ d: { badField: true } }> = {
       data: { d: { badField: true } },
@@ -144,9 +142,7 @@ describe('opfs: document store persistence', () => {
   });
 
   test('loads cached data on first read and refetches on mount', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = populateStorage(mockAdapter, 'opfs-doc', 'session1', {
       name: 'cached',
       value: 42,
@@ -190,9 +186,7 @@ describe('opfs: document store persistence', () => {
   });
 
   test('explicit preload hydrates cached data before mount', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     populateStorage(mockAdapter, 'opfs-preload', 'session1', {
       name: 'cached',
       value: 7,
@@ -228,9 +222,7 @@ describe('opfs: document store persistence', () => {
   });
 
   test('remount does not reread OPFS after the document is already hydrated in memory', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = populateStorage(mockAdapter, 'opfs-remount', 'session1', {
       name: 'cached',
       value: 7,
@@ -268,9 +260,7 @@ describe('opfs: document store persistence', () => {
   });
 
   test('reset prevents stale OPFS hydration from modifying store', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     populateStorage(mockAdapter, 'test-dispose', 'session1', {
       name: 'stale',
       value: 999,

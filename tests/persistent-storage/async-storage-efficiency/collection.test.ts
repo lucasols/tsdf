@@ -304,9 +304,7 @@ describe('async storage efficiency: collection', () => {
   test('direct getItemState reads the cached collection item multiple times with short gaps and promotes it once', async () => {
     const storeName = 'col-direct-get-item-state';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     collectionScope.collection.seedItem('1', {
@@ -344,9 +342,7 @@ describe('async storage efficiency: collection', () => {
   test('direct getItemState touch preserves an offline marker added by another tab before the batched manifest update', async () => {
     const storeName = 'col-direct-touch-offline-marker';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = collectionScope.collection.itemStorageKey('1');
 
@@ -396,9 +392,7 @@ describe('async storage efficiency: collection', () => {
   test('updating a hydrated collection item writes the mutation without rereading cached entries', async () => {
     const storeName = 'col-mutation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = collectionScope.collection.itemStorageKey('1');
 
@@ -434,10 +428,10 @@ describe('async storage efficiency: collection', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { p: '1' }
       key: '"1'
-      lastAccessAt: 1735689604150
+      lastAccessAt: 1735689604050
       payloadRef: '__tsdf_payload__:"1'
       version: 1
-      writtenAt: 1735689604150
+      writtenAt: 1735689604050
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -446,11 +440,11 @@ describe('async storage efficiency: collection', () => {
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       1.042s | 📖 #1 tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.06 kb
-      1.096s | ✍️ #2 tsdf/sess1/col-mutation-flow/ci.%221.p.json
+      1.046s | ✍️ #2 tsdf/sess1/col-mutation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
-      1.098s | end
+      1.048s | end
       "
     `);
   });
@@ -500,9 +494,7 @@ describe('async storage efficiency: collection', () => {
   test('useItem invalidation snapshots the full persistence timeline through the refetch save', async () => {
     const storeName = 'col-invalidation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     collectionScope.collection.seedItem('1', {
@@ -550,11 +542,11 @@ describe('async storage efficiency: collection', () => {
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       1.852s | 📖 #1 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.06 kb
-      1.906s | ✍️ #2 tsdf/sess1/col-invalidation-flow/ci.%221.p.json
+      1.856s | ✍️ #2 tsdf/sess1/col-invalidation-flow/ci.%221.p.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
-      1.908s | end
+      1.858s | end
       "
     `);
   });
@@ -562,9 +554,7 @@ describe('async storage efficiency: collection', () => {
   test('collection invalidation preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'col-offline-marker-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = collectionScope.collection.itemStorageKey('1');
 
@@ -604,10 +594,10 @@ describe('async storage efficiency: collection', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { o: '✅', p: '1' }
       key: '"1'
-      lastAccessAt: 1735689604960
+      lastAccessAt: 1735689604860
       payloadRef: '__tsdf_payload__:"1'
       version: 1
-      writtenAt: 1735689604960
+      writtenAt: 1735689604860
     `);
     expect(
       getParsedOpfsEntryFiles(
@@ -615,7 +605,7 @@ describe('async storage efficiency: collection', () => {
         collectionScope.collection.itemKey('1'),
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689604960, o: '✅', p: '1', v: 1 }
+      metadata: { a: 1735689604860, o: '✅', p: '1', v: 1 }
       payload:
         d:
           value: { id: '1', name: 'Fresh user' }
@@ -626,9 +616,7 @@ describe('async storage efficiency: collection', () => {
   test('repeated invalidations within the debounce window coalesce collection persistence writes', async () => {
     const storeName = 'col-coalesced-invalidations';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     collectionScope.collection.seedItem('1', {
@@ -697,11 +685,11 @@ describe('async storage efficiency: collection', () => {
              |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
       1.852s | 📖 #1 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.06 kb
-      1.906s | ✍️ #2 tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json
+      1.856s | ✍️ #2 tsdf/sess1/col-coalesced-invalidations/ci.%221.p.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
-      1.908s | end
+      1.858s | end
       "
     `);
   });
@@ -709,9 +697,7 @@ describe('async storage efficiency: collection', () => {
   test('hook remount skips the touch write when the cached collection item is still in the current recency bucket', async () => {
     const storeName = 'col-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed with the current fake time so hydration should treat the entry as fresh
@@ -756,7 +742,7 @@ describe('async storage efficiency: collection', () => {
            |    └ (tsdf.sess1.col-remount-flow.ci."1 (payload)) | 0.11 kb
       .    | 📖 #2 tsdf/sess1/col-remount-flow/ci.%221.m.json
            |    └ (tsdf.sess1.col-remount-flow.ci."1 (metadata)) | 0.06 kb
-      56ms | end
+      6ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -870,9 +856,7 @@ describe('async storage efficiency: collection', () => {
   test('useMultipleItems remount reuses hydrated collection items without touching localStorage again', async () => {
     const storeName = 'col-multi-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     collectionScope.collection.seedItem('1', {
@@ -924,7 +908,7 @@ describe('async storage efficiency: collection', () => {
            |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (payload)) | 0.11 kb
       .    | 📖 #4 tsdf/sess1/col-multi-remount-flow/ci.%222.m.json
            |    └ (tsdf.sess1.col-multi-remount-flow.ci."2 (metadata)) | 0.06 kb
-      56ms | end
+      6ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -933,9 +917,7 @@ describe('async storage efficiency: collection', () => {
   test('getItemState stays in memory after a hook has already hydrated the collection item', async () => {
     const storeName = 'col-get-item-state-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
 
     collectionScope.collection.seedItem('1', {
@@ -974,7 +956,6 @@ describe('async storage efficiency: collection', () => {
     const hotPayload = '1';
     const coldPayload = '2';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName,
         sessionKey,
@@ -1017,7 +998,7 @@ describe('async storage efficiency: collection', () => {
            |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (payload)) | 0.09 kb
       .    | 📖 #2 tsdf/sess1/collection-opfs-efficiency/ci.%221.m.json
            |    └ (tsdf.sess1.collection-opfs-efficiency.ci."1 (metadata)) | 0.06 kb
-      56ms | end
+      6ms  | end
       "
     `);
 

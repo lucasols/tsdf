@@ -135,7 +135,6 @@ describe('opfs: converted list query store persistence', () => {
   test('explicit query preload hydrates converted item data before mount', async () => {
     const usersQuery = { tableId: 'users' };
     createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
       initialState: {
         storeName: 'lq-opfs-converted',
         sessionKey: 'sess1',
@@ -189,7 +188,6 @@ describe('opfs: converted list query store persistence', () => {
   test('invalid converted cached items are removed during query preload', async () => {
     const usersQuery = { tableId: 'users' };
     const invalidStorageAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName: 'lq-opfs-invalid-storage',
         sessionKey: 'sess1',
@@ -207,7 +205,6 @@ describe('opfs: converted list query store persistence', () => {
       'sess1',
     );
     const throwingAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName: 'lq-opfs-throwing',
         sessionKey: 'sess1',
@@ -265,7 +262,6 @@ describe('opfs: converted list query store persistence', () => {
   test('invalid final data after conversion is removed during query preload', async () => {
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName: 'lq-opfs-invalid-final',
         sessionKey: 'sess1',
@@ -309,7 +305,6 @@ describe('opfs: converted list query store persistence', () => {
   test('write conversion errors are reported without overwriting item entries', async () => {
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
       initialState: {
         storeName: 'lq-opfs-save-error',
         sessionKey: 'sess1',

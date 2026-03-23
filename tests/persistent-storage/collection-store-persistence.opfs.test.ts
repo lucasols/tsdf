@@ -102,9 +102,7 @@ afterEach(() => {
 
 describe('opfs: collection store persistence', () => {
   test('first hook read hydrates only the requested cached item and refetches', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     setCachedCollectionItem(mockAdapter, 'col-opfs-hook', 'sess1', '1', {
       value: { id: '1', name: 'Cached' },
     });
@@ -160,9 +158,7 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('explicit preload hydrates cached data before mount', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     setCachedCollectionItem(mockAdapter, 'col-opfs-preload', 'sess1', '1', {
       value: { id: '1', name: 'Cached' },
     });
@@ -201,9 +197,7 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('invalid cached items are removed during targeted preload', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = itemStorageKey('col-opfs-invalid', 'sess1', 'bad');
     const entry: StorageCacheEntry<PersistedCollectionItemData<{ bad: true }>> =
       {
@@ -229,9 +223,7 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('invalid cached payloads are removed during targeted preload', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = itemStorageKey('col-opfs-invalid-payload', 'sess1', 'bad');
     const entry: StorageCacheEntry<
       PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
@@ -258,9 +250,7 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('ignored cached items are skipped during preload and removed from opfs', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = setCachedCollectionItem(
       mockAdapter,
       'col-opfs-ignore',
@@ -288,9 +278,7 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('stale async preload does not overwrite live state', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     setCachedCollectionItem(mockAdapter, 'col-opfs-race', 'sess1', '1', {
       value: { id: '1', name: 'Stale' },
     });
@@ -316,9 +304,7 @@ describe('opfs: collection store persistence', () => {
   });
 
   test('deleteItemState removes deleted items from persisted storage', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 100,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const storeName = 'col-opfs-delete-persisted-item';
     const sessionKey = 'sess1';
     const deletedItemStorageKey = itemStorageKey(storeName, sessionKey, '1');

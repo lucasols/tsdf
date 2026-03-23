@@ -93,9 +93,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
   });
 
   test('timelineString end marker uses completion time instead of the last start time', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const documentScope = mockAdapter.scope('docs', 'sess1');
     documentScope.document.seed({
       value: { name: 'Cached document', value: 1 },
@@ -128,7 +126,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
       6ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
-      58ms | end
+      8ms  | end
       "
     `);
   });

@@ -179,9 +179,7 @@ describe('async storage efficiency: document', () => {
   test('direct store.state reads with short gaps stay fully in memory once the document is hydrated', async () => {
     const storeName = 'doc-direct-state-read';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -223,9 +221,7 @@ describe('async storage efficiency: document', () => {
   test('startup hydration touch preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'doc-startup-touch-offline-marker';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = documentScope.document.storageKey();
 
@@ -249,15 +245,15 @@ describe('async storage efficiency: document', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { o: '✅' }
       key: 'document'
-      lastAccessAt: 1735689604149
+      lastAccessAt: 1735689604049
       payloadRef: '__tsdf_payload__:document'
       version: 1
-      writtenAt: 1735689604149
+      writtenAt: 1735689604049
     `);
     expect(
       getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689604149, o: '✅', v: 1 }
+      metadata: { a: 1735689604049, o: '✅', v: 1 }
       payload:
         d:
           value: { name: 'Cached document', value: 8 }
@@ -267,9 +263,7 @@ describe('async storage efficiency: document', () => {
   test('updating a hydrated document writes the mutation without rereading cached entries', async () => {
     const storeName = 'doc-mutation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const documentScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = documentScope.document.storageKey();
 
@@ -304,18 +298,18 @@ describe('async storage efficiency: document', () => {
       customMetadata: {}
 
       key: 'document'
-      lastAccessAt: 1735689605246
+      lastAccessAt: 1735689605096
       payloadRef: '__tsdf_payload__:document'
       version: 1
-      writtenAt: 1735689605246
+      writtenAt: 1735689605096
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
       1.041s | 📖 #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.05 kb
-      1.095s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
+      1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
       .      | ✍️ #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.05 kb -> 0.05 kb
-      1.097s | end
+      1.047s | end
       "
     `);
   });
@@ -323,9 +317,7 @@ describe('async storage efficiency: document', () => {
   test('useDocument invalidation snapshots the full persistence timeline through the refetch save', async () => {
     const storeName = 'doc-invalidation-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -370,10 +362,10 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json (metadata) | 0.05 kb
-      1.905s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
+      1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json (payload) | 0.10 kb -> 0.10 kb
       .      | ✍️ #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json
              |    └ (metadata) | 0.05 kb -> 0.05 kb
-      1.907s | end
+      1.857s | end
       "
     `);
   });
@@ -381,9 +373,7 @@ describe('async storage efficiency: document', () => {
   test('repeated invalidations within the debounce window coalesce document persistence writes', async () => {
     const storeName = 'doc-coalesced-invalidations';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const documentScope = mockAdapter.scope(storeName, sessionKey);
 
     documentScope.document.seed({
@@ -449,11 +439,11 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json (metadata) | 0.05 kb
-      1.905s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
+      1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (payload) | 0.10 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
              |    └ (metadata) | 0.05 kb -> 0.05 kb
-      1.907s | end
+      1.857s | end
       "
     `);
   });
@@ -461,9 +451,7 @@ describe('async storage efficiency: document', () => {
   test('document invalidation preserves an offline marker added by another tab before the manifest update', async () => {
     const storeName = 'doc-offline-marker-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const documentScope = mockAdapter.scope(storeName, sessionKey);
     const storageKey = documentScope.document.storageKey();
 
@@ -503,15 +491,15 @@ describe('async storage efficiency: document', () => {
     expect(readEntryMetadata(mockAdapter, storageKey)).toMatchInlineSnapshot(`
       customMetadata: { o: '✅' }
       key: 'document'
-      lastAccessAt: 1735689606056
+      lastAccessAt: 1735689605906
       payloadRef: '__tsdf_payload__:document'
       version: 1
-      writtenAt: 1735689606056
+      writtenAt: 1735689605906
     `);
     expect(
       getParsedOpfsEntryFiles(documentScope.document.namespace, 'document'),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689606056, o: '✅', v: 1 }
+      metadata: { a: 1735689605906, o: '✅', v: 1 }
       payload:
         d:
           value: { name: 'Fresh document', value: 42 }
@@ -656,7 +644,6 @@ describe('async storage efficiency: document', () => {
     const storeName = 'doc-opfs-efficiency';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName,
         sessionKey,
@@ -684,7 +671,7 @@ describe('async storage efficiency: document', () => {
       .    | 📄 file-open ✅ #2 tsdf/sess1/doc-opfs-efficiency/d.e.m.json (metadata)
       4ms  | 📖 #1 tsdf/sess1/doc-opfs-efficiency/d.e.p.json (payload) | 0.08 kb
       .    | 📖 #2 tsdf/sess1/doc-opfs-efficiency/d.e.m.json (metadata) | 0.05 kb
-      56ms | end
+      6ms  | end
       "
     `);
 

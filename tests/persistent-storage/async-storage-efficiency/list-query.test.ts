@@ -468,9 +468,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-query-becomes-empty';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed the cache with a query that has one item.
@@ -521,7 +519,7 @@ describe('async storage efficiency: list-query', () => {
           items: []
           payload: { tableId: 'users' }
 
-        timestamp: 1735689605015
+        timestamp: 1735689604865
         version: 1
       `);
     expect(listQueryScope.listQuery.readItemData('users', 1))
@@ -540,7 +538,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata)) | 0.13 kb
       .      | 📖 #2 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata)) | 0.08 kb
-      1.907s | ✍️ #3 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.p.json
+      1.857s | ✍️ #3 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.p.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (payload)) | 0.09 kb -> 0.06 kb
       .      | ✍️ #1 tsdf/sess1/lq-query-becomes-empty/lq.%7BtableId%3A%22users%22%7D.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (metadata)) | 0.13 kb -> 0.11 kb
@@ -548,7 +546,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
       .      | ✍️ #2 tsdf/sess1/lq-query-becomes-empty/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-becomes-empty.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
-      1.909s | end
+      1.859s | end
       "
     `);
     expect(
@@ -557,7 +555,7 @@ describe('async storage efficiency: list-query', () => {
         listQueryScope.listQuery.itemKey('users', 1),
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689605015, p: 'users||1', v: 1 }
+      metadata: { a: 1735689604865, p: 'users||1', v: 1 }
       payload:
         d: { id: 1, name: 'Cached user' }
         lf: ['age', 'email', 'id', 'name']
@@ -570,7 +568,7 @@ describe('async storage efficiency: list-query', () => {
       ),
     ).toMatchInlineSnapshot(`
       metadata:
-        a: 1735689605015
+        a: 1735689604865
         i: []
         p: { tableId: 'users' }
         v: 1
@@ -900,9 +898,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-direct-get-query-state';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedItem('users', 1, {
@@ -956,9 +952,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-direct-touch-offline-marker';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const itemStorageKey = listQueryScope.listQuery.itemStorageKey('users', 1);
     const queryStorageKey =
@@ -1046,9 +1040,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-query-invalidation-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedItem('users', 1, {
@@ -1110,11 +1102,11 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
       1.853s | 📖 #1 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata)) | 0.08 kb
-      1.907s | ✍️ #2 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.p.json
+      1.857s | ✍️ #2 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
       .      | ✍️ #1 tsdf/sess1/lq-query-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-query-invalidation-flow.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
-      1.909s | end
+      1.859s | end
       "
     `);
   });
@@ -1123,9 +1115,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-coalesced-invalidations';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedItem('users', 1, {
@@ -1206,11 +1196,11 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
       1.853s | 📖 #1 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata)) | 0.08 kb
-      1.907s | ✍️ #2 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.p.json
+      1.857s | ✍️ #2 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
       .      | ✍️ #1 tsdf/sess1/lq-coalesced-invalidations/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-coalesced-invalidations.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
-      1.909s | end
+      1.859s | end
       "
     `);
   });
@@ -1219,9 +1209,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-offline-marker-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const itemStorageKey = listQueryScope.listQuery.itemStorageKey('users', 1);
     const queryStorageKey =
@@ -1275,10 +1263,10 @@ describe('async storage efficiency: list-query', () => {
       .toMatchInlineSnapshot(`
         customMetadata: { o: '✅', p: 'users||1' }
         key: '"users||1'
-        lastAccessAt: 1735689605015
+        lastAccessAt: 1735689604865
         payloadRef: '__tsdf_payload__:"users||1'
         version: 1
-        writtenAt: 1735689605015
+        writtenAt: 1735689604865
       `);
     expect(
       getParsedOpfsEntryFiles(
@@ -1286,7 +1274,7 @@ describe('async storage efficiency: list-query', () => {
         listQueryScope.listQuery.itemKey('users', 1),
       ),
     ).toMatchInlineSnapshot(`
-      metadata: { a: 1735689605015, o: '✅', p: 'users||1', v: 1 }
+      metadata: { a: 1735689604865, o: '✅', p: 'users||1', v: 1 }
       payload:
         d: { id: 1, name: 'Fresh user' }
         lf: ['age', 'email', 'id', 'name']
@@ -1300,10 +1288,10 @@ describe('async storage efficiency: list-query', () => {
           p: { tableId: 'users' }
 
         key: '{tableId:"users"}'
-        lastAccessAt: 1735689605015
+        lastAccessAt: 1735689604865
         payloadRef: '__tsdf_payload__:{tableId:"users"}'
         version: 1
-        writtenAt: 1735689605015
+        writtenAt: 1735689604865
       `);
     expect(
       getParsedOpfsEntryFiles(
@@ -1312,7 +1300,7 @@ describe('async storage efficiency: list-query', () => {
       ),
     ).toMatchInlineSnapshot(`
       metadata:
-        a: 1735689605015
+        a: 1735689604865
         i: ['"users||1', '"users||2']
         o: '✅'
         p: { tableId: 'users' }
@@ -1328,9 +1316,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-remount-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed both entries with the current fake time so hydration should treat them
@@ -1366,26 +1352,26 @@ describe('async storage efficiency: list-query', () => {
     // skipped touches explicit for both entries.
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
-      time  |
-      0     | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms   | 📂 dir-open ✅ tsdf/sess1/lq-remount-flow (store directory)
-      2ms   | 📄 file-open ✅ #1 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
-            |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload))
-      .     | 📄 file-open ✅ #2 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
-            |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata))
-      4ms   | 📖 #1 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
-            |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload)) | 0.09 kb
-      .     | 📖 #2 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
-            |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      56ms  | 📄 file-open ✅ #3 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
-            |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (payload))
-      .     | 📄 file-open ✅ #4 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
-            |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (metadata))
-      58ms  | 📖 #3 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
-            |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (payload)) | 0.10 kb
-      .     | 📖 #4 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
-            |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (metadata)) | 0.08 kb
-      110ms | end
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-remount-flow (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload))
+      .    | 📄 file-open ✅ #2 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata))
+      4ms  | 📖 #1 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (payload)) | 0.09 kb
+      .    | 📖 #2 tsdf/sess1/lq-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
+      6ms  | 📄 file-open ✅ #3 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (payload))
+      .    | 📄 file-open ✅ #4 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (metadata))
+      8ms  | 📖 #3 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (payload)) | 0.10 kb
+      .    | 📖 #4 tsdf/sess1/lq-remount-flow/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-remount-flow.li."users||1 (metadata)) | 0.08 kb
+      10ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1395,9 +1381,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-empty-remount-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     // Persist an explicit empty query so this is an empty-cache remount, not a
@@ -1433,7 +1417,7 @@ describe('async storage efficiency: list-query', () => {
            |    └ (tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"} (payload)) | 0.06 kb
       .    | 📖 #2 tsdf/sess1/lq-empty-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
            |    └ (tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"} (metadata)) | 0.11 kb
-      56ms | end
+      6ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1515,9 +1499,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-item-invalidation-flow';
     const sessionKey = 'sess1';
     const itemPayload = rawItemPayload('users', 1);
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedItem('users', 1, {
@@ -1571,11 +1553,11 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json"]
       1.853s | 📖 #1 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata)) | 0.08 kb
-      1.907s | ✍️ #2 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.p.json
+      1.857s | ✍️ #2 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
       .      | ✍️ #1 tsdf/sess1/lq-item-invalidation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-item-invalidation-flow.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
-      1.909s | end
+      1.859s | end
       "
     `);
   });
@@ -1583,9 +1565,7 @@ describe('async storage efficiency: list-query', () => {
   test('item hook remount skips the touch write when the cached standalone item is still in the current recency bucket', async () => {
     const storeName = 'lq-item-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     // Seed with the current fake time so hydration should treat the entry as fresh
@@ -1632,7 +1612,7 @@ describe('async storage efficiency: list-query', () => {
            |    └ (tsdf.sess1.lq-item-remount-flow.li."users||1 (payload)) | 0.10 kb
       .    | 📖 #2 tsdf/sess1/lq-item-remount-flow/li.%22users%7C%7C1.m.json
            |    └ (tsdf.sess1.lq-item-remount-flow.li."users||1 (metadata)) | 0.08 kb
-      56ms | end
+      6ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1641,9 +1621,7 @@ describe('async storage efficiency: list-query', () => {
   test('useMultipleItems remount reuses hydrated standalone list-query items without touching localStorage again', async () => {
     const storeName = 'lq-multi-item-remount-flow';
     const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedItem('users', 1, {
@@ -1700,7 +1678,7 @@ describe('async storage efficiency: list-query', () => {
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (payload)) | 0.10 kb
       .    | 📖 #4 tsdf/sess1/lq-multi-item-remount-flow/li.%22users%7C%7C2.m.json
            |    └ (tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (metadata)) | 0.08 kb
-      56ms | end
+      6ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1711,9 +1689,7 @@ describe('async storage efficiency: list-query', () => {
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
 
     listQueryScope.listQuery.seedItem('users', 1, {
@@ -1755,42 +1731,42 @@ describe('async storage efficiency: list-query', () => {
     `);
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
-      time  |
-      0     | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms   | 📂 dir-open ✅ tsdf/sess1/lq-multi-query-remount-flow (store directory)
-      2ms   | 📄 file-open ✅ #1 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload))
-      .     | 📄 file-open ✅ #2 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata))
-      .     | 📄 file-open ✅ #3 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload))
-      .     | 📄 file-open ✅ #4 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata))
-      4ms   | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload)) | 0.09 kb
-      .     | 📖 #2 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      .     | 📖 #3 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload)) | 0.10 kb
-      .     | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata)) | 0.14 kb
-      56ms  | 📄 file-open ✅ #5 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload))
-      .     | 📄 file-open ✅ #6 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata))
-      .     | 📄 file-open ✅ #7 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload))
-      .     | 📄 file-open ✅ #8 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata))
-      58ms  | 📖 #5 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload)) | 0.10 kb
-      .     | 📖 #6 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata)) | 0.08 kb
-      .     | 📖 #7 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload)) | 0.11 kb
-      .     | 📖 #8 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
-            |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata)) | 0.08 kb
-      110ms | end
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-multi-query-remount-flow (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload))
+      .    | 📄 file-open ✅ #2 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata))
+      .    | 📄 file-open ✅ #3 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload))
+      .    | 📄 file-open ✅ #4 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata))
+      4ms  | 📖 #1 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (payload)) | 0.09 kb
+      .    | 📖 #2 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (metadata)) | 0.13 kb
+      .    | 📖 #3 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (payload)) | 0.10 kb
+      .    | 📖 #4 tsdf/sess1/lq-multi-query-remount-flow/lq.%7BtableId%3A%22projects%22%7D.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (metadata)) | 0.14 kb
+      6ms  | 📄 file-open ✅ #5 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload))
+      .    | 📄 file-open ✅ #6 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata))
+      .    | 📄 file-open ✅ #7 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload))
+      .    | 📄 file-open ✅ #8 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata))
+      8ms  | 📖 #5 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (payload)) | 0.10 kb
+      .    | 📖 #6 tsdf/sess1/lq-multi-query-remount-flow/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (metadata)) | 0.08 kb
+      .    | 📖 #7 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.p.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (payload)) | 0.11 kb
+      .    | 📖 #8 tsdf/sess1/lq-multi-query-remount-flow/li.%22projects%7C%7C1.m.json
+           |    └ (tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (metadata)) | 0.08 kb
+      10ms | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1800,9 +1776,7 @@ describe('async storage efficiency: list-query', () => {
     const storeName = 'lq-mutation-flow';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
-    });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const itemStorageKey = listQueryScope.listQuery.itemStorageKey('users', 1);
 
@@ -1844,10 +1818,10 @@ describe('async storage efficiency: list-query', () => {
       .toMatchInlineSnapshot(`
         customMetadata: { p: 'users||1' }
         key: '"users||1'
-        lastAccessAt: 1735689604205
+        lastAccessAt: 1735689604055
         payloadRef: '__tsdf_payload__:"users||1'
         version: 1
-        writtenAt: 1735689604205
+        writtenAt: 1735689604055
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -1858,11 +1832,11 @@ describe('async storage efficiency: list-query', () => {
              |    └ (store directory) entries=["file:li.%22users%7C%7C1.m.json","file:li.%22users%7C%7C1.p.json","file:lq.%7BtableId%3A%22users%22%7D.m.json","file:lq.%7BtableId%3A%22users%22%7D.p.json"]
       1.043s | 📖 #1 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata)) | 0.08 kb
-      1.097s | ✍️ #2 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.p.json
+      1.047s | ✍️ #2 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.p.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (payload)) | 0.10 kb -> 0.16 kb
       .      | ✍️ #1 tsdf/sess1/lq-mutation-flow/li.%22users%7C%7C1.m.json
              |    └ (tsdf.sess1.lq-mutation-flow.li."users||1 (metadata)) | 0.08 kb -> 0.08 kb
-      1.099s | end
+      1.049s | end
       "
     `);
   });
@@ -1873,7 +1847,6 @@ describe('async storage efficiency: list-query', () => {
     const usersQuery = { tableId: 'users' };
     const projectsQuery = { tableId: 'projects' };
     const mockAdapter = createOpfsPersistentStorageTestStore({
-      readDelayMs: 50,
       initialState: {
         storeName,
         sessionKey,
@@ -1911,26 +1884,26 @@ describe('async storage efficiency: list-query', () => {
 
     expect(readCapture.finish().timelineString).toMatchInlineSnapshot(`
       "
-      time  |
-      0     | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1ms   | 📂 dir-open ✅ tsdf/sess1/list-query-opfs-efficiency (store directory)
-      2ms   | 📄 file-open ✅ #1 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload))
-      .     | 📄 file-open ✅ #2 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata))
-      4ms   | 📖 #1 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload)) | 0.09 kb
-      .     | 📖 #2 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata)) | 0.13 kb
-      56ms  | 📄 file-open ✅ #3 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload))
-      .     | 📄 file-open ✅ #4 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata))
-      58ms  | 📖 #3 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload)) | 0.09 kb
-      .     | 📖 #4 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
-            |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata)) | 0.08 kb
-      110ms | end
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/list-query-opfs-efficiency (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload))
+      .    | 📄 file-open ✅ #2 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata))
+      4ms  | 📖 #1 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.p.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (payload)) | 0.09 kb
+      .    | 📖 #2 tsdf/sess1/list-query-opfs-efficiency/lq.%7BtableId%3A%22users%22%7D.m.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.lq.{tableId:"users"} (metadata)) | 0.13 kb
+      6ms  | 📄 file-open ✅ #3 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload))
+      .    | 📄 file-open ✅ #4 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata))
+      8ms  | 📖 #3 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.p.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (payload)) | 0.09 kb
+      .    | 📖 #4 tsdf/sess1/list-query-opfs-efficiency/li.%22users%7C%7C1.m.json
+           |    └ (tsdf.sess1.list-query-opfs-efficiency.li."users||1 (metadata)) | 0.08 kb
+      10ms | end
       "
     `);
 
