@@ -540,7 +540,8 @@ describe('async storage efficiency: maintenance', () => {
       "
       time  |
       140ms | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
-      151ms | ✍️ ✅->✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb -> 0.04 kb
+      151ms | ✍️ ✅->✅ #1 tsdf._am.g
+            |    └ (async global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`

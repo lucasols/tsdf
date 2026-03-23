@@ -6,6 +6,7 @@ import { createOpfsPersistentStorageTestStore } from './opfsPersistentStorageTes
 import {
   getParsedOpfsEntryFiles,
   getParsedOpfsNamespaceValue,
+  startPersistentStorageOperationCapture,
   startOpfsPersistentStorageOperationCapture,
 } from './persistentStorageOptimizationTestUtils';
 
@@ -197,6 +198,33 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     ).toMatchInlineSnapshot(`
       lastSuccessfulCleanupAt: 123
       startupCleanupLease: null
+    `);
+  });
+});
+
+describe('startPersistentStorageOperationCapture', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    localStorage.clear();
+  });
+
+  test('timelineString wraps long localStorage labels onto a detail line', () => {
+    const capture = startPersistentStorageOperationCapture();
+
+    localStorage.setItem('tsdf._m.r.s:sess1.doc-remount-flow.m', 'abc');
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
+           |    └ (root, single, manifest) | ❌ -> 0.01 kb
+      "
     `);
   });
 });

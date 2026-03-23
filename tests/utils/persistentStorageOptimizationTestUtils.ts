@@ -142,6 +142,21 @@ function formatPersistentStorageKey(
   return `${idPrefix}${key} (${description})`;
 }
 
+function formatPersistentStorageKeyParts(
+  key: string | null,
+  keyId: number | undefined,
+): { main: string; detail?: string } {
+  if (typeof key !== 'string') {
+    return { main: formatPersistentStorageKey(key, keyId) };
+  }
+
+  const idPrefix = keyId !== undefined ? `#${keyId} ` : '';
+  const description = describePersistentStorageKey(key);
+  if (description === null) return { main: `${idPrefix}${key}` };
+
+  return { main: `${idPrefix}${key}`, detail: `(${description})` };
+}
+
 function formatByteSize(byteSize: number): string {
   return `${(byteSize / 1024).toFixed(2)} kb`;
 }
@@ -200,25 +215,51 @@ function formatPersistentStorageOperation(
 
   switch (operation.type) {
     case 'getItem': {
-      const base = `📖 ${operation.exists ? '✅' : '❌'} ${formatPersistentStorageKey(operation.key, keyId)}`;
+      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
       if (operation.valueByteSize !== null) {
-        return `${base} | ${formatByteSize(operation.valueByteSize)}`;
+        return formatWrappedPersistentStorageOperationLabel(
+          `📖 ${operation.exists ? '✅' : '❌'}`,
+          keyParts.main,
+          `${keyParts.detail ?? ''} | ${formatByteSize(operation.valueByteSize)}`.trim(),
+        );
       }
-      return base;
+      return formatWrappedPersistentStorageOperationLabel(
+        `📖 ${operation.exists ? '✅' : '❌'}`,
+        keyParts.main,
+        keyParts.detail,
+      );
     }
     case 'setItem': {
       const unchangedFlag = !operation.valueChanged ? ' ⚠️ UNCHANGED' : '';
-      const base = `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅ ${formatPersistentStorageKey(operation.key, keyId)}`;
+      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
       const before =
         operation.valueByteSizeBefore !== null
           ? formatByteSize(operation.valueByteSizeBefore)
           : '❌';
-      return `${base} | ${before} -> ${formatByteSize(operation.valueByteSizeAfter)}${unchangedFlag}`;
+      return formatWrappedPersistentStorageOperationLabel(
+        `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅`,
+        keyParts.main,
+        `${keyParts.detail ?? ''} | ${before} -> ${formatByteSize(
+          operation.valueByteSizeAfter,
+        )}${unchangedFlag}`.trim(),
+      );
     }
-    case 'removeItem':
-      return `🗑️ ${operation.existsBefore ? '✅' : '❌'}->❌ ${formatPersistentStorageKey(operation.key, keyId)}`;
-    case 'key':
-      return `🔑[${operation.index}] ${operation.key === null ? '❌' : '✅'} ${formatPersistentStorageKey(operation.key, keyId)}`;
+    case 'removeItem': {
+      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
+      return formatWrappedPersistentStorageOperationLabel(
+        `🗑️ ${operation.existsBefore ? '✅' : '❌'}->❌`,
+        keyParts.main,
+        keyParts.detail,
+      );
+    }
+    case 'key': {
+      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
+      return formatWrappedPersistentStorageOperationLabel(
+        `🔑[${operation.index}] ${operation.key === null ? '❌' : '✅'}`,
+        keyParts.main,
+        keyParts.detail,
+      );
+    }
     case 'clear':
       return '🧹';
   }
@@ -259,20 +300,31 @@ export function getPersistentStorageOperationTimelineString(
     }
   }
 
-  const rows: Array<{ cols: string[] }> = [{ cols: ['time', ''] }];
-  let previousTime: number | undefined;
+  return getTimelineString(
+    operations.map((operation) => ({
+      time: operation.time,
+      endTime: operation.time,
+      label: formatPersistentStorageOperation(operation, keyIdMap),
+    })),
+    { showEndMarker: false },
+  );
+}
 
-  for (const operation of operations) {
-    rows.push({
-      cols: [
-        formatRelativeTime(operation.time, previousTime),
-        formatPersistentStorageOperation(operation, keyIdMap),
-      ],
-    });
-    previousTime = operation.time;
-  }
+const PERSISTENT_TIMELINE_WRAP_AT = 68;
+const PERSISTENT_TIMELINE_DETAIL_PREFIX = '   └ ';
 
-  return ['\n', formatTableString(rows), '\n'].join('');
+function formatWrappedPersistentStorageOperationLabel(
+  prefix: string,
+  value: string,
+  detail?: string,
+): string {
+  const mainLine = `${prefix} ${value}`;
+  if (detail === undefined) return mainLine;
+
+  const fullLine = `${mainLine} ${detail}`;
+  return fullLine.length > PERSISTENT_TIMELINE_WRAP_AT
+    ? `${mainLine}\n${PERSISTENT_TIMELINE_DETAIL_PREFIX}${detail}`
+    : fullLine;
 }
 
 export type PersistentStorageOperationCapture = {
@@ -431,9 +483,11 @@ function stripScopePrefix(
   return key.startsWith(prefix) ? key.slice(prefix.length) : key;
 }
 
-type TimedLabel = { endTime: number; label: string; time: number };
+type TimelineLabel = { endTime: number; label: string; time: number };
 
-function sortTimedLabels(operations: readonly TimedLabel[]): TimedLabel[] {
+function sortTimedLabels(
+  operations: readonly TimelineLabel[],
+): TimelineLabel[] {
   return operations
     .map((operation, index) => ({ ...operation, index }))
     .sort((left, right) => {
@@ -443,7 +497,10 @@ function sortTimedLabels(operations: readonly TimedLabel[]): TimedLabel[] {
     .map(({ endTime, time, label }) => ({ endTime, time, label }));
 }
 
-function formatTimedLabelTable(operations: TimedLabel[]): string {
+function formatTimelineTable(
+  operations: TimelineLabel[],
+  options: { showEndMarker: boolean },
+): string {
   if (operations.length === 0) return 'empty';
 
   const rows: Array<{ cols: string[] }> = [{ cols: ['time', ''] }];
@@ -460,24 +517,33 @@ function formatTimedLabelTable(operations: TimedLabel[]): string {
     previousTime = operation.time;
   }
 
-  rows.push({
-    cols: [
-      formatTimeMs(
-        Math.max(...operations.map((operation) => operation.endTime)),
-      ),
-      'end',
-    ],
-  });
+  if (options.showEndMarker) {
+    rows.push({
+      cols: [
+        formatTimeMs(
+          Math.max(...operations.map((operation) => operation.endTime)),
+        ),
+        'end',
+      ],
+    });
+  }
 
   return formatTableString(rows);
 }
 
-function getOpfsPersistentStorageOperationTimelineString(
-  operations: TimedLabel[],
+function getTimelineString(
+  operations: TimelineLabel[],
+  options: { showEndMarker: boolean },
 ): string {
   if (operations.length === 0) return 'empty';
 
-  return ['\n', formatTimedLabelTable(operations), '\n'].join('');
+  return ['\n', formatTimelineTable(operations, options), '\n'].join('');
+}
+
+function getOpfsPersistentStorageOperationTimelineString(
+  operations: TimelineLabel[],
+): string {
+  return getTimelineString(operations, { showEndMarker: true });
 }
 
 const OPFS_TIMELINE_WRAP_AT = 80;
@@ -693,7 +759,7 @@ function buildOpfsOperationCaptureResult(
   mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
   captureStartedAt: number,
 ): OpfsPersistentStorageOperationCaptureResult {
-  const verboseTimelineEntries: TimedLabel[] = [];
+  const verboseTimelineEntries: TimelineLabel[] = [];
 
   for (const operation of mockAdapter.operations) {
     verboseTimelineEntries.push({
