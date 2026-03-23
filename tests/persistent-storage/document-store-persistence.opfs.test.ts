@@ -227,6 +227,46 @@ describe('opfs: document store persistence', () => {
     `);
   });
 
+  test('remount does not reread OPFS after the document is already hydrated in memory', async () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      readDelayMs: 100,
+    });
+    const key = populateStorage(mockAdapter, 'opfs-remount', 'session1', {
+      name: 'cached',
+      value: 7,
+    });
+
+    const env = createDocPersistenceEnv({
+      storeName: 'opfs-remount',
+      serverData: { name: 'fresh', value: 8 },
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    const firstHook = renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushAllTimers();
+
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+
+    firstHook.unmount();
+
+    renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushAllTimers();
+
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+  });
+
   test('reset prevents stale OPFS hydration from modifying store', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({
       readDelayMs: 100,

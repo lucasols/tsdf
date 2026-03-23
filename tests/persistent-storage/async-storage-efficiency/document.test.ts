@@ -74,14 +74,7 @@ describe('async storage efficiency: document', () => {
       6ms  | end
       "
     `);
-    expect(remountOperations).toMatchInlineSnapshot(`
-      "
-      time |
-      1ms  | 📖 #1 tsdf/sess1/doc-remount-flow/d.e.p.json (payload) | 0.10 kb
-      .    | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.m.json (metadata) | 0.05 kb
-      3ms  | end
-      "
-    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
   test('direct store.state reads with short gaps stay fully in memory once the document is hydrated', async () => {

@@ -100,8 +100,8 @@ export function setupDocumentPersistence<
     if (!storeRef) return;
     if (localStorageAdapter === null) return;
 
-    const currentState = storeRef.state;
-    if (currentState.status !== 'idle' || currentState.data !== null) return;
+    const initialState = storeRef.state;
+    if (initialState.status !== 'idle' || initialState.data !== null) return;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return;
@@ -186,6 +186,9 @@ export function setupDocumentPersistence<
     if (localStorageAdapter !== null || !storeRef) return;
     if (preloadPromise) return preloadPromise;
 
+    const currentState = storeRef.state;
+    if (currentState.status !== 'idle' || currentState.data !== null) return;
+
     const currentGeneration = generation;
     preloadPromise = handle
       .load({ touch: 'never' })
@@ -198,8 +201,8 @@ export function setupDocumentPersistence<
           return;
         }
 
-        const currentState = storeRef.state;
-        if (currentState.status !== 'idle' || currentState.data !== null) {
+        const liveState = storeRef.state;
+        if (liveState.status !== 'idle' || liveState.data !== null) {
           return;
         }
 
