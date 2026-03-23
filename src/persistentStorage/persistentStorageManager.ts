@@ -906,17 +906,13 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
           key,
           options.namespacePrefix,
         );
-  const raw = localPersistentStorage.readRaw(key);
 
   function removeAndReturnNull(): null {
     scheduleLocalStorageRemoval(key, options);
     return null;
   }
 
-  if (metadata === null) {
-    if (raw !== null) return removeAndReturnNull();
-    return null;
-  }
+  if (metadata === null) return null;
 
   if (
     Date.now() - metadata.lastAccessAt >
@@ -925,6 +921,7 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
     return removeAndReturnNull();
   }
 
+  const raw = localPersistentStorage.readRaw(key);
   if (raw === null) return removeAndReturnNull();
 
   try {

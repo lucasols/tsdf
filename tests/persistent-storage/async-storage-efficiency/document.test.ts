@@ -136,6 +136,50 @@ describe('async storage efficiency: document', () => {
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
+  test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {
+    const storeName = 'doc-remount-no-cache';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture isolates the mounted hydration flow.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // With no persisted document, the first mount should miss storage, fetch the
+    // document, and write it once. The remount should then stay fully in memory.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount({
+        mockAdapter,
+        settleTimeMs: 2200,
+        render: () =>
+          env.apiStore.useDocument({
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+      });
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'test', value: 42 }`,
+    );
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time   |
+      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache (store directory)
+      1.853s | 📄 file-open-or-create 🆕 #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
+             |    └ (payload)
+      .      | 📄 file-open-or-create 🆕 #2 tsdf/sess1/doc-remount-no-cache/d.e.m.json
+             |    └ (metadata)
+      1.856s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json (payload) | 0.00 kb -> 0.08 kb
+      .      | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d.e.m.json (metadata) | 0.00 kb -> 0.05 kb
+      1.858s | end
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
   test('direct store.state reads with short gaps stay fully in memory once the document is hydrated', async () => {
     const storeName = 'doc-direct-state-read';
     const sessionKey = 'sess1';

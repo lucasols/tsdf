@@ -66,6 +66,43 @@ describe('sync storage efficiency: document', () => {
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
+  test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {
+    const storeName = 'doc-remount-no-cache';
+    const sessionKey = 'sess1';
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture focuses only on hook mount behavior.
+    await settleStartupBackgroundScan();
+
+    // With no persisted document, the first mount should miss storage, fetch the
+    // document, and write it once. The remount should then stay fully in memory.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useDocument({
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'test', value: 42 }`,
+    );
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
+            |    └ (root, single, manifest)
+      1.81s | ✍️ ❌->✅ #2 tsdf.sess1.doc-remount-no-cache (entry) | ❌ -> 0.16 kb
+      .     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
+            |    └ (root, single, manifest)
+      .     | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
+            |    └ (root, single, manifest) | ❌ -> 0.05 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
   test('direct store.state reads with short gaps stay fully in memory once the document is hydrated', async () => {
     const storeName = 'doc-direct-state-read';
     const sessionKey = 'sess1';

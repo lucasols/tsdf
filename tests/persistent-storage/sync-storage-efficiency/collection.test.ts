@@ -656,6 +656,48 @@ describe('sync storage efficiency: collection', () => {
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
+  test('collection hook cache miss writes the fetched item once and remount stays fully in memory', async () => {
+    const storeName = 'col-remount-no-cache';
+    const sessionKey = 'sess1';
+
+    const env = createCollectionEnv({
+      storeName,
+      sessionKey,
+      serverData: { '1': { id: '1', name: 'Fetched user' } },
+    });
+
+    // Drain the startup scan so the capture focuses on the UI mount path only.
+    await settleStartupBackgroundScan();
+
+    // With no persisted item, the first mount should miss storage, fetch the
+    // item, and write it once. The remount should then stay fully in memory.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useItem('1', {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Fetched user' }
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | 📖 ❌ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+            |    └ (root, namespace, manifest)
+      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+            |    └ (root, namespace, manifest)
+      .     | ✍️ ❌->✅ #2 tsdf.sess1.col-remount-no-cache.ci."1
+            |    └ (collection entry) | ❌ -> 0.20 kb
+      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+            |    └ (root, namespace, manifest) | ❌ -> 0.09 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
   test('useMultipleItems remount reuses hydrated collection items without touching localStorage again', async () => {
     const storeName = 'col-multi-remount-flow';
     const sessionKey = 'sess1';

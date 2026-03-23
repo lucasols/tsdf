@@ -462,11 +462,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/col-mutation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
-      3.101s | 🗂️ list-dir tsdf/sess1/col-mutation-flow
-             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
-      3.103s | 📖 #1 tsdf/sess1/col-mutation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-mutation-flow.ci."1 (metadata)) | 0.06 kb
-      3.155s | end
+      1.101s | end
       "
     `);
   });
@@ -508,11 +504,7 @@ describe('async storage efficiency: collection', () => {
       .      | 🗑️ ✅ #2 tsdf/sess1/col-delete-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-delete-flow.ci."1 (metadata))
       1.041s | 🧹 del-dir ❌ tsdf/sess1/col-delete-flow (store directory)
-      3.042s | 🗂️ list-dir tsdf/sess1/col-delete-flow
-             |    └ (store directory) entries=["file:ci.%222.m.json","file:ci.%222.p.json"]
-      3.044s | 📖 #3 tsdf/sess1/col-delete-flow/ci.%222.m.json
-             |    └ (tsdf.sess1.col-delete-flow.ci."2 (metadata)) | 0.06 kb
-      3.046s | end
+      1.042s | end
       "
     `);
   });
@@ -580,11 +572,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
              |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
-      3.911s | 🗂️ list-dir tsdf/sess1/col-invalidation-flow
-             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
-      3.913s | 📖 #1 tsdf/sess1/col-invalidation-flow/ci.%221.m.json
-             |    └ (tsdf.sess1.col-invalidation-flow.ci."1 (metadata)) | 0.06 kb
-      3.965s | end
+      1.911s | end
       "
     `);
   });
@@ -737,11 +725,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (payload)) | 0.11 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
              |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
-      3.911s | 🗂️ list-dir tsdf/sess1/col-coalesced-invalidations
-             |    └ (store directory) entries=["file:ci.%221.m.json","file:ci.%221.p.json"]
-      3.913s | 📖 #1 tsdf/sess1/col-coalesced-invalidations/ci.%221.m.json
-             |    └ (tsdf.sess1.col-coalesced-invalidations.ci."1 (metadata)) | 0.06 kb
-      3.965s | end
+      1.911s | end
       "
     `);
   });
@@ -856,6 +840,56 @@ describe('async storage efficiency: collection', () => {
       54ms | ✍️ #2 tsdf/sess1/col-remount-stale-touch/ci.%221.m.json
            |    └ (tsdf.sess1.col-remount-stale-touch.ci."1 (metadata)) | 0.06 kb -> 0.06 kb
       56ms | end
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('collection hook cache miss writes the fetched item once and remount stays fully in memory', async () => {
+    const storeName = 'col-remount-no-cache';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+
+    const env = createCollectionEnv({
+      storeName,
+      sessionKey,
+      serverData: { '1': { id: '1', name: 'Fetched user' } },
+    });
+
+    // Drain the startup scan so this capture isolates the mounted hydration flow.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // With no persisted item, the first mount should miss storage, fetch the
+    // item, and write it once. The remount should then stay fully in memory.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount({
+        mockAdapter,
+        settleTimeMs: 2200,
+        render: () =>
+          env.apiStore.useItem('1', {
+            disableRefetchOnMount: true,
+            returnRefetchingStatus: true,
+          }),
+      });
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(`
+      value: { id: '1', name: 'Fetched user' }
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time   |
+      0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache (store directory)
+      1.853s | 📄 file-open-or-create 🆕 #1 tsdf/sess1/col-remount-no-cache/ci.%221.p.json
+             |    └ (tsdf.sess1.col-remount-no-cache.ci."1 (payload))
+      .      | 📄 file-open-or-create 🆕 #2 tsdf/sess1/col-remount-no-cache/ci.%221.m.json
+             |    └ (tsdf.sess1.col-remount-no-cache.ci."1 (metadata))
+      1.856s | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.%221.p.json
+             |    └ (tsdf.sess1.col-remount-no-cache.ci."1 (payload)) | 0.00 kb -> 0.11 kb
+      .      | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci.%221.m.json
+             |    └ (tsdf.sess1.col-remount-no-cache.ci."1 (metadata)) | 0.00 kb -> 0.06 kb
+      1.858s | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

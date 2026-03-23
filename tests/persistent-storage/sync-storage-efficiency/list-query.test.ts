@@ -155,7 +155,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (query entry) | ❌ -> 0.12 kb
       .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
             |    └ (root, namespace, manifest)
-      .     | 📖 ❌ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
       .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-metadata.li."third||1
             |    └ (item entry) | ❌ -> 0.17 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
@@ -258,8 +257,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (query entry) | ❌ -> 0.12 kb
       .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest)
-      .     | 📖 ❌ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
-            |    └ (item entry)
       .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
             |    └ (item entry) | ❌ -> 0.17 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
@@ -272,8 +269,6 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (item entry) | 0.17 kb -> 0.26 kb
       .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
-      .     | 📖 ❌ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
-            |    └ (item entry)
       .     | ✍️ ❌->✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
             |    └ (item entry) | ❌ -> 0.18 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
@@ -502,7 +497,6 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
-      .    | 📖 ❌ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
       .    | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-metadata.li."users||3
            |    └ (item entry) | ❌ -> 0.17 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
@@ -1214,6 +1208,90 @@ describe('sync storage efficiency: list-query', () => {
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
   });
 
+  test('query hook remount reuses a persisted empty query without treating it as a cache miss', async () => {
+    const storeName = 'lq-empty-remount-flow';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    // Persist an explicit empty query so this is an empty-cache remount, not a
+    // missing-cache remount.
+    setCachedQuery(storeName, sessionKey, usersQuery, []);
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the mounted query flow.
+    await settleStartupBackgroundScan();
+
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useListQuery(usersQuery, {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.items).toMatchInlineSnapshot(`[]`);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 ✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+           |    └ (query entry) | 0.10 kb
+      2s   | 📖 ✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+           |    └ (query entry) | 0.10 kb
+      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+           |    └ (query entry) | 0.10 kb -> 0.10 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('query hook cache miss writes the fetched query once and remount stays fully in memory', async () => {
+    const storeName = 'lq-query-remount-no-cache';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fetched user' }] },
+    });
+
+    // Drain the startup scan so the capture focuses on the mounted query flow.
+    await settleStartupBackgroundScan();
+
+    // With no persisted query, the first mount should pay the cache miss once,
+    // then keep the fetched result in memory for the remount.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useListQuery(usersQuery, {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.items).toMatchInlineSnapshot(`
+      - { id: 1, name: 'Fetched user' }
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | 📖 ❌ #1 tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query entry)
+      1.81s | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+            |    └ (root, namespace, manifest)
+      .     | ✍️ ❌->✅ #1 tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query entry) | ❌ -> 0.12 kb
+      .     | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+            |    └ (root, namespace, manifest)
+      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-remount-no-cache.li."users||1
+            |    └ (item entry) | ❌ -> 0.19 kb
+      .     | ✍️ ❌->✅ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+            |    └ (root, namespace, manifest) | ❌ -> 0.12 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
   test('useItem invalidation snapshots the full item persistence timeline through the refetch save', async () => {
     const storeName = 'lq-item-invalidation-flow';
     const sessionKey = 'sess1';
@@ -1314,6 +1392,52 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('item hook cache miss writes the fetched item once and remount stays fully in memory', async () => {
+    const storeName = 'lq-item-remount-no-cache';
+    const sessionKey = 'sess1';
+    const itemPayload = rawItemPayload('users', 1);
+
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fetched user' }] },
+    });
+
+    // Drain the startup scan so the capture focuses on the mounted item flow.
+    await settleStartupBackgroundScan();
+
+    // With no persisted item, the first mount should pay the cache miss once,
+    // then keep the fetched result in memory for the remount.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useItem(itemPayload, {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Fetched user'
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (root, namespace, manifest)
+      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (root, namespace, manifest)
+      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-remount-no-cache.li."users||1
+            |    └ (item entry) | ❌ -> 0.19 kb
+      .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (root, namespace, manifest)
+      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (root, namespace, manifest) | ❌ -> 0.12 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);

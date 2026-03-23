@@ -329,6 +329,8 @@ export function setupListQueryPersistence<
   const querySnapshotByKey = new Map<string, string>();
   const hydratedPersistedItemKeys = new Set<string>();
   const hydratedPersistedQueryKeys = new Set<string>();
+  const knownMissingPersistedItemKeys = new Set<string>();
+  const knownMissingPersistedQueryKeys = new Set<string>();
   let knownPersistedItemKeys: Set<string> | null = null;
   let knownPersistedQueryKeys: Set<string> | null = null;
   let maintenanceCallbackKey: string | null = null;
@@ -437,12 +439,17 @@ export function setupListQueryPersistence<
 
     try {
       await localStorageAdapter.runLocked(() => {
+        const existingOfflineProtected = knownMissingPersistedQueryKeys.has(
+          queryKey,
+        )
+          ? false
+          : parseCompactListQueryLocalStorageEntry(
+              localStorageAdapter.readRaw(storageKey),
+            )?.offlineProtected === true;
         const offlineProtected = mergeLocalStorageOfflineProtection(
           sessionKey,
           storageKey,
-          parseCompactListQueryLocalStorageEntry(
-            localStorageAdapter.readRaw(storageKey),
-          )?.offlineProtected === true,
+          existingOfflineProtected,
         );
 
         localStorageAdapter.write(
@@ -577,6 +584,7 @@ export function setupListQueryPersistence<
     persisted: PersistedListQueryItemData<unknown>,
   ): void {
     hydratedPersistedItemKeys.add(itemKey);
+    knownMissingPersistedItemKeys.delete(itemKey);
     itemSnapshotByKey.set(itemKey, JSON.stringify(persisted));
     knownPersistedItemKeys?.add(itemKey);
   }
@@ -586,6 +594,7 @@ export function setupListQueryPersistence<
     persisted: PersistedListQueryData,
   ): void {
     hydratedPersistedQueryKeys.add(queryKey);
+    knownMissingPersistedQueryKeys.delete(queryKey);
     querySnapshotByKey.set(queryKey, JSON.stringify(persisted));
     knownPersistedQueryKeys?.add(queryKey);
   }
@@ -684,6 +693,7 @@ export function setupListQueryPersistence<
       }
     | undefined {
     if (localStorageAdapter === null) return undefined;
+    if (knownMissingPersistedItemKeys.has(itemKey)) return undefined;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return undefined;
@@ -697,6 +707,7 @@ export function setupListQueryPersistence<
     >(storageKey, version, { metadata: 'namespace', namespacePrefix: prefix });
 
     if (!cacheEntry) {
+      knownMissingPersistedItemKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -710,6 +721,7 @@ export function setupListQueryPersistence<
         metadata: 'namespace',
         namespacePrefix: prefix,
       });
+      knownMissingPersistedItemKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -720,6 +732,7 @@ export function setupListQueryPersistence<
         metadata: 'namespace',
         namespacePrefix: prefix,
       });
+      knownMissingPersistedItemKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -780,17 +793,28 @@ export function setupListQueryPersistence<
   function readHydratedLocalStorageQuery(
     queryKey: string,
   ): ParsedPersistedListQueryData<QueryPayload> | undefined {
-    const entry = readLocalStorageQueryEntry(queryKey);
-    if (!entry) {
-      // If the raw key exists but didn't parse/match version, clean it up
-      const storageKey = getLocalStorageQueryStorageKey(queryKey);
-      if (
-        storageKey !== false &&
-        localStorageAdapter !== null &&
-        localStorageAdapter.readRaw(storageKey) !== null
-      ) {
-        scheduleLocalStorageRemoval(storageKey, undefined);
-      }
+    if (knownMissingPersistedQueryKeys.has(queryKey)) return undefined;
+
+    const storageKey = getLocalStorageQueryStorageKey(queryKey);
+    if (storageKey === false || localStorageAdapter === null) {
+      knownMissingPersistedQueryKeys.add(queryKey);
+      forgetPersistedQuery(queryKey);
+      return undefined;
+    }
+
+    const rawEntry = localStorageAdapter.readRaw(storageKey);
+    if (rawEntry === null) {
+      knownMissingPersistedQueryKeys.add(queryKey);
+      forgetPersistedQuery(queryKey);
+      return undefined;
+    }
+
+    const entry = parseCompactListQueryLocalStorageEntry(rawEntry);
+    if (entry === null || entry.version !== version) {
+      // If the raw key exists but didn't parse or match the expected version,
+      // clean it up without rereading the same missing entry again.
+      scheduleLocalStorageRemoval(storageKey, undefined);
+      knownMissingPersistedQueryKeys.add(queryKey);
       forgetPersistedQuery(queryKey);
       return undefined;
     }
@@ -800,10 +824,11 @@ export function setupListQueryPersistence<
       config.queryPayloadSchema,
     );
     if (!persistedQuery) {
-      const storageKey = getLocalStorageQueryStorageKey(queryKey);
-      if (storageKey !== false) {
-        scheduleLocalStorageRemoval(storageKey, undefined);
+      const invalidStorageKey = getLocalStorageQueryStorageKey(queryKey);
+      if (invalidStorageKey !== false) {
+        scheduleLocalStorageRemoval(invalidStorageKey, undefined);
       }
+      knownMissingPersistedQueryKeys.add(queryKey);
       forgetPersistedQuery(queryKey);
       return undefined;
     }
@@ -1638,7 +1663,11 @@ export function setupListQueryPersistence<
 
       querySnapshotByKey.set(queryKey, nextSnapshot);
       hydratedPersistedQueryKeys.add(queryKey);
-      tasks.push(saveLocalStorageQueryEntry(queryKey, nextValue));
+      tasks.push(
+        saveLocalStorageQueryEntry(queryKey, nextValue).then(() => {
+          knownMissingPersistedQueryKeys.delete(queryKey);
+        }),
+      );
     }
 
     for (const queryKey of previousQueryKeys) {
@@ -1719,6 +1748,7 @@ export function setupListQueryPersistence<
 
       itemSnapshotByKey.set(itemKey, nextSnapshot);
       hydratedPersistedItemKeys.add(itemKey);
+      knownMissingPersistedItemKeys.delete(itemKey);
       tasks.push(itemNamespace.save(itemKey, nextValue));
     }
 
@@ -1749,11 +1779,12 @@ export function setupListQueryPersistence<
     }
 
     if (localStorageAdapter !== null) {
-      const needsMaintenance =
-        hasIgnoreItemFilter ||
-        knownPersistedItemKeys.size > maxItems ||
-        knownPersistedQueryKeys.size > maxQueries;
-      if (needsMaintenance && maintenanceCallbackKey !== null) {
+      if (
+        maintenanceCallbackKey !== null &&
+        (hasIgnoreItemFilter ||
+          knownPersistedItemKeys.size > maxItems ||
+          knownPersistedQueryKeys.size > maxQueries)
+      ) {
         scheduleLocalStorageMaintenance({
           forceManifestKeys: [maintenanceCallbackKey],
         });
@@ -1763,14 +1794,20 @@ export function setupListQueryPersistence<
 
     const sessionKey = config.getSessionKey();
     if (sessionKey !== false) {
-      scheduleAsyncStorageMaintenance(
-        `list-query:${sessionKey}:${config.storeName}`,
-        async () => {
-          const { keptQueryKeys, managedQueryEntriesByKey } =
-            await evictStoredQueries();
-          await evictStoredItems(keptQueryKeys, managedQueryEntriesByKey);
-        },
-      );
+      if (
+        hasIgnoreItemFilter ||
+        knownPersistedItemKeys.size > maxItems ||
+        knownPersistedQueryKeys.size > maxQueries
+      ) {
+        scheduleAsyncStorageMaintenance(
+          `list-query:${sessionKey}:${config.storeName}`,
+          async () => {
+            const { keptQueryKeys, managedQueryEntriesByKey } =
+              await evictStoredQueries();
+            await evictStoredItems(keptQueryKeys, managedQueryEntriesByKey);
+          },
+        );
+      }
     }
   }
 
@@ -1801,6 +1838,8 @@ export function setupListQueryPersistence<
     pendingQueryPreloads.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    knownMissingPersistedItemKeys.clear();
+    knownMissingPersistedQueryKeys.clear();
     knownPersistedItemKeys = null;
     knownPersistedQueryKeys = null;
     suppressedPersistedStateFlushes = 0;
@@ -1825,6 +1864,8 @@ export function setupListQueryPersistence<
     querySnapshotByKey.clear();
     hydratedPersistedItemKeys.clear();
     hydratedPersistedQueryKeys.clear();
+    knownMissingPersistedItemKeys.clear();
+    knownMissingPersistedQueryKeys.clear();
     await Promise.all([itemNamespace.clear(), clearLocalStorageQueries()]);
   }
 

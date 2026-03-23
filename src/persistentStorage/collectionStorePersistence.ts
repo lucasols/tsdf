@@ -189,6 +189,7 @@ export function setupCollectionPersistence<
   const pendingPreloads = new Map<string, Promise<boolean>>();
   const persistedSnapshotByKey = new Map<string, string>();
   const hydratedPersistedKeys = new Set<string>();
+  const knownMissingPersistedKeys = new Set<string>();
   let knownPersistedKeys: Set<string> | null = null;
   let maintenanceManifestKey: string | null = null;
 
@@ -242,6 +243,7 @@ export function setupCollectionPersistence<
     persisted: PersistedCollectionItemData<unknown>,
   ): void {
     hydratedPersistedKeys.add(itemKey);
+    knownMissingPersistedKeys.delete(itemKey);
     persistedSnapshotByKey.set(itemKey, JSON.stringify(persisted));
     knownPersistedKeys?.add(itemKey);
   }
@@ -299,6 +301,7 @@ export function setupCollectionPersistence<
     itemKey: string,
   ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
     if (localStorageAdapter === null) return undefined;
+    if (knownMissingPersistedKeys.has(itemKey)) return undefined;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return undefined;
@@ -312,6 +315,7 @@ export function setupCollectionPersistence<
     >(storageKey, version, { metadata: 'namespace', namespacePrefix: prefix });
 
     if (!cacheEntry) {
+      knownMissingPersistedKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -325,6 +329,7 @@ export function setupCollectionPersistence<
         metadata: 'namespace',
         namespacePrefix: prefix,
       });
+      knownMissingPersistedKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -335,6 +340,7 @@ export function setupCollectionPersistence<
         metadata: 'namespace',
         namespacePrefix: prefix,
       });
+      knownMissingPersistedKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -665,6 +671,19 @@ export function setupCollectionPersistence<
       const state = storeRef?.state;
       if (!state) return;
 
+      if (
+        localStorageAdapter !== null &&
+        hydratedPersistedKeys.size === 0 &&
+        !Object.values(state).some(
+          (item) =>
+            item?.data !== null &&
+            item?.data !== undefined &&
+            !shouldIgnoreItem(item.payload),
+        )
+      ) {
+        return;
+      }
+
       const tasks: Promise<void>[] = [];
       const nextPersistedKeys = new Set<string>();
       const previousPersistedKeys = await ensureKnownPersistedKeys();
@@ -727,6 +746,7 @@ export function setupCollectionPersistence<
 
         persistedSnapshotByKey.set(itemKey, nextSnapshot);
         hydratedPersistedKeys.add(itemKey);
+        knownMissingPersistedKeys.delete(itemKey);
         tasks.push(namespace.save(itemKey, nextValue));
       }
 
@@ -749,9 +769,7 @@ export function setupCollectionPersistence<
       }
 
       if (localStorageAdapter !== null && maintenanceManifestKey !== null) {
-        const needsMaintenance =
-          hasIgnoreItemFilter || knownPersistedKeys.size > maxItems;
-        if (needsMaintenance) {
+        if (hasIgnoreItemFilter || knownPersistedKeys.size > maxItems) {
           scheduleLocalStorageMaintenance({
             forceManifestKeys: [maintenanceManifestKey],
           });
@@ -761,10 +779,12 @@ export function setupCollectionPersistence<
 
       const sessionKey = config.getSessionKey();
       if (sessionKey !== false && localStorageAdapter === null) {
-        scheduleAsyncStorageMaintenance(
-          `collection:${sessionKey}:${config.storeName}`,
-          evictStoredItems,
-        );
+        if (hasIgnoreItemFilter || knownPersistedKeys.size > maxItems) {
+          scheduleAsyncStorageMaintenance(
+            `collection:${sessionKey}:${config.storeName}`,
+            evictStoredItems,
+          );
+        }
       }
     }
 
@@ -803,6 +823,7 @@ export function setupCollectionPersistence<
     generation++;
     pendingPreloads.clear();
     hydratedPersistedKeys.clear();
+    knownMissingPersistedKeys.clear();
     knownPersistedKeys = null;
     suppressedPersistedStateFlushes = 0;
     clearSaveTimer();
@@ -822,6 +843,7 @@ export function setupCollectionPersistence<
     suppressedPersistedStateFlushes = 0;
     persistedSnapshotByKey.clear();
     hydratedPersistedKeys.clear();
+    knownMissingPersistedKeys.clear();
     await namespace.clear();
   }
 

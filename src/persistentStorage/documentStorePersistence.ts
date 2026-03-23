@@ -95,6 +95,7 @@ export function setupDocumentPersistence<
   let unsubscribe: (() => void) | null = null;
   let generation = 0;
   let preloadPromise: Promise<void> | null = null;
+  let syncHydrationMissKnown = false;
 
   function hydrateFromLocalStorage(): void {
     if (!storeRef) return;
@@ -102,6 +103,7 @@ export function setupDocumentPersistence<
 
     const initialState = storeRef.state;
     if (initialState.status !== 'idle' || initialState.data !== null) return;
+    if (syncHydrationMissKnown) return;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return;
@@ -113,6 +115,7 @@ export function setupDocumentPersistence<
     );
 
     if (!persisted) {
+      syncHydrationMissKnown = true;
       if (foundEntry) {
         scheduleIdleCleanup(() => void handle.clear());
       }
@@ -121,10 +124,12 @@ export function setupDocumentPersistence<
 
     const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
+      syncHydrationMissKnown = true;
       scheduleIdleCleanup(() => void handle.clear());
       return;
     }
 
+    syncHydrationMissKnown = false;
     scheduleIdleCleanup(() =>
       refreshLocalStorageTimestamp(key, { metadata: 'single' }),
     );
@@ -158,6 +163,7 @@ export function setupDocumentPersistence<
     );
 
     if (!persisted) {
+      syncHydrationMissKnown = true;
       if (foundEntry) {
         scheduleIdleCleanup(() => void handle.clear());
       }
@@ -166,10 +172,12 @@ export function setupDocumentPersistence<
 
     const validated = parsePersistedStoreData(persisted.data, dataSchema);
     if (validated === null) {
+      syncHydrationMissKnown = true;
       scheduleIdleCleanup(() => void handle.clear());
       return baseState;
     }
 
+    syncHydrationMissKnown = false;
     scheduleIdleCleanup(() =>
       refreshLocalStorageTimestamp(key, { metadata: 'single' }),
     );
@@ -257,6 +265,7 @@ export function setupDocumentPersistence<
   function dispose(): void {
     generation++;
     preloadPromise = null;
+    syncHydrationMissKnown = false;
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
