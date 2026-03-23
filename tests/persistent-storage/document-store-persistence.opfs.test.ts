@@ -12,6 +12,7 @@ import {
 } from 'vitest';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
+  PersistentStorageMigration,
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -31,6 +32,7 @@ function createDocPersistenceEnv(options: {
   storeName: string;
   sessionKey?: string;
   version?: number;
+  migrate?: PersistentStorageMigration;
   getSessionKey?: () => string | false;
   serverData?: TestData;
   storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
@@ -46,6 +48,7 @@ function createDocPersistenceEnv(options: {
       adapter: opfsPersistentStorage,
       schema: wrappedSchema,
       version: options.version,
+      migrate: options.migrate,
     },
   });
 }
@@ -114,6 +117,97 @@ describe('opfs: document store persistence', () => {
     expect(mockAdapter.readRequests).toEqual([key, key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
+
+  test.each([
+    { label: 'older stored version', fromVersion: 1 },
+    { label: 'versionless stored entry', fromVersion: undefined },
+  ])(
+    'preload migrates and rewrites the $label',
+    async ({ fromVersion: storedVersion }) => {
+      const storeName = `opfs-migrate-${storedVersion ?? 'none'}`;
+      const sessionKey = 'sess1';
+      const key = `tsdf.${sessionKey}.${storeName}`;
+      const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+
+      mockAdapter.setValue(key, {
+        data: { data: { legacyName: 'cached', legacyValue: 5 } },
+        timestamp: Date.now(),
+        ...(storedVersion === undefined ? {} : { version: storedVersion }),
+      } satisfies StorageCacheEntry<
+        PersistedDocumentData<{ legacyName: string; legacyValue: number }>
+      >);
+
+      const env = createDocPersistenceEnv({
+        storeName,
+        sessionKey,
+        version: 2,
+        migrate: ({ persistedData, fromVersion, toVersion }) => {
+          expect(fromVersion).toBe(storedVersion);
+          expect(toVersion).toBe(2);
+          expect(persistedData).toEqual({
+            data: { legacyName: 'cached', legacyValue: 5 },
+          });
+
+          return { data: { value: { name: 'cached', value: 5 } } };
+        },
+        storageAdapter: mockAdapter.adapter,
+      });
+
+      const preloadPromise = env.apiStore.preloadPersistentStorage();
+      await advanceTime(50);
+      await preloadPromise;
+
+      expect(env.store.state.data).toMatchInlineSnapshot(`
+        value: { name: 'cached', value: 5 }
+      `);
+      expect(mockAdapter.storage.readEntry(key)).toMatchObject({
+        data: { data: { value: { name: 'cached', value: 5 } } },
+        version: 2,
+      });
+    },
+  );
+
+  test.each([
+    { label: 'migration returns null', migrate: () => null },
+    {
+      label: 'migration throws',
+      migrate: () => {
+        throw new Error('boom');
+      },
+    },
+    {
+      label: 'migration returns invalid current shape',
+      migrate: () => ({ data: { wrong: true } }),
+    },
+  ])(
+    '$label removes the stale opfs entry during preload',
+    async ({ label, migrate }) => {
+      const storeName = `opfs-migrate-fail-${label.replaceAll(' ', '-')}`;
+      const sessionKey = 'sess1';
+      const key = `tsdf.${sessionKey}.${storeName}`;
+      const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+      mockAdapter.setValue(key, {
+        data: { data: { legacyName: 'cached', legacyValue: 5 } },
+        timestamp: Date.now(),
+        version: 1,
+      });
+
+      const env = createDocPersistenceEnv({
+        storeName,
+        sessionKey,
+        version: 2,
+        migrate,
+        storageAdapter: mockAdapter.adapter,
+      });
+
+      const preloadPromise = env.apiStore.preloadPersistentStorage();
+      await advanceTime(50);
+      await preloadPromise;
+      await advanceTime(2100);
+
+      expect(mockAdapter.has(key)).toBe(false);
+    },
+  );
 
   test('schema validation failure triggers cleanup', async () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });

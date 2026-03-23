@@ -18,6 +18,7 @@ import type {
 import type {
   PersistedListQueryData,
   PersistedListQueryItemData,
+  PersistentStorageMigration,
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -60,6 +61,8 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
+  version?: number;
+  migrate?: PersistentStorageMigration;
   maxQuerySize?: number;
   ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Tables<Row>;
@@ -80,6 +83,8 @@ function createEnv(options: {
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
+      version: options.version,
+      migrate: options.migrate,
       maxQuerySize: options.maxQuerySize,
       ignoreItems: options.ignoreItems,
     },
@@ -238,6 +243,96 @@ describe('opfs: list query store persistence', () => {
       "
     `);
   });
+
+  test.each([
+    { label: 'older stored version', fromVersion: 1 },
+    { label: 'versionless stored entry', fromVersion: undefined },
+  ])(
+    'explicit preload migrates and rewrites the $label',
+    async ({ fromVersion: storedVersion }) => {
+      const storeName = `lq-opfs-migrate-${storedVersion ?? 'none'}`;
+      const sessionKey = 'sess1';
+      const usersQuery = { tableId: 'users' };
+      const mockAdapter = createMockOpfsStorageAdapter({
+        readDelayMs: 50,
+        storeName,
+        sessionKey,
+      });
+      const itemKey = `${`tsdf.${sessionKey}.${storeName}`}.li."users||1`;
+      const queryKey = `${`tsdf.${sessionKey}.${storeName}`}.lq.{tableId:"users"}`;
+
+      mockAdapter.setValue(itemKey, {
+        data: {
+          data: { legacyRow: { id: 1, name: 'Cached' } },
+          payload: 'users||1',
+        },
+        timestamp: Date.now(),
+        ...(storedVersion === undefined ? {} : { version: storedVersion }),
+      } satisfies StorageCacheEntry<
+        PersistedListQueryItemData<{ legacyRow: { id: number; name: string } }>
+      >);
+      mockAdapter.setValue(queryKey, {
+        data: { payload: usersQuery, items: ['"users||1'], hasMore: false },
+        timestamp: Date.now(),
+        ...(storedVersion === undefined ? {} : { version: storedVersion }),
+      } satisfies StorageCacheEntry<PersistedListQueryData>);
+
+      const env = createEnv({
+        storeName,
+        sessionKey,
+        storageAdapter: mockAdapter.adapter,
+        version: 2,
+        migrate: ({ persistedData, fromVersion, toVersion }) => {
+          expect(fromVersion).toBe(storedVersion);
+          expect(toVersion).toBe(2);
+
+          if (
+            typeof persistedData === 'object' &&
+            persistedData !== null &&
+            'items' in persistedData &&
+            'hasMore' in persistedData
+          ) {
+            return {
+              payload: usersQuery,
+              items: ['"users||1'],
+              hasMore: false,
+            };
+          }
+
+          return { data: { id: 1, name: 'Cached' }, payload: 'users||1' };
+        },
+      });
+
+      const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
+      await advanceTime(100);
+      await preloadPromise;
+      const itemPreloadPromise =
+        env.apiStore.preloadItemFromStorage('users||1');
+      await advanceTime(50);
+      await itemPreloadPromise;
+
+      expect(env.apiStore.getQueryState(usersQuery)?.items)
+        .toMatchInlineSnapshot(`
+        ['"users||1']
+      `);
+      expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached'
+      `);
+      expect(mockAdapter.storage.readEntry(itemKey)).toMatchObject({
+        data: { data: { id: 1, name: 'Cached' }, payload: 'users||1' },
+        version: 2,
+      });
+      expect(mockAdapter.storage.readEntry(queryKey)).toMatchObject({
+        data: {
+          hasMore: false,
+          items: ['"users||1'],
+          payload: { tableId: 'users' },
+        },
+        version: 2,
+      });
+    },
+  );
 
   test('ignored cached items are skipped during query preload and removed from opfs', async () => {
     const storeName = 'lq-opfs-ignore';

@@ -358,6 +358,7 @@ describe('offline replay queueing and retry behavior', () => {
   });
 
   test('needs-confirmation entries retry execute when shouldSkipSync returns false', async () => {
+    network.setOffline();
     let skipCheckEnqueuedAt: number | null = null;
     const execute = vi
       .fn<
@@ -398,6 +399,7 @@ describe('offline replay queueing and retry behavior', () => {
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
+          network: network.config,
           operations: {
             updateValue: {
               inputSchema: docMutationInputSchema,
@@ -421,8 +423,10 @@ describe('offline replay queueing and retry behavior', () => {
 
     expect(mutationResult.ok).toBe(true);
 
-    await Promise.resolve();
-    await Promise.resolve();
+    act(() => {
+      network.goOnline();
+    });
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
 
     expect(execute).toHaveBeenCalledTimes(1);
     expect(shouldSkipSync).toHaveBeenCalledTimes(0);
@@ -504,7 +508,7 @@ describe('offline replay queueing and retry behavior', () => {
   });
 
   test('needs-confirmation entries keep retrying shouldSkipSync while the session stays online', async () => {
-    network.setOnline();
+    network.setOffline();
     let skipCheckEnqueuedAt: number | null = null;
     const execute = vi
       .fn<
@@ -566,7 +570,15 @@ describe('offline replay queueing and retry behavior', () => {
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
-    await Promise.resolve();
+    act(() => {
+      network.goOnline();
+    });
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+    await waitForMicrotaskCondition(
+      () =>
+        env.apiStore.getOfflineEntities()[0]?.syncState ===
+        'needs-confirmation',
+    );
     expect(execute).toHaveBeenCalledTimes(1);
     expect(shouldSkipSync).toHaveBeenCalledTimes(0);
     expect(env.apiStore.getOfflineEntities()).toMatchObject([

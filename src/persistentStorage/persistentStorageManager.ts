@@ -218,6 +218,8 @@ function refreshLocalStorageTimestampUnlocked(
 }
 
 export type PersistentStorageHandle<T> = {
+  /** Loads the raw cache entry without enforcing version equality. Returns null if not found or invalid. */
+  readEntry(): Promise<StorageCacheEntry<T> | null>;
   /** Loads persisted data, validating version and schema. Returns null if not found or invalid. */
   load(): Promise<T | null>;
   /** Schedules a debounced save. getData is called at save time to capture latest state. */
@@ -263,32 +265,61 @@ export function createPersistentStorageHandle<T>(
   }
 
   async function load(): Promise<T | null> {
+    const entry = await readEntry();
+    if (!entry) return null;
+
+    const key = getKey();
+    if (key === false) return null;
+
+    try {
+      if (!doesStorageEntryVersionMatch(entry.version, version)) {
+        if (adapter === 'local-sync') {
+          scheduleLocalStorageRemoval(key, { metadata: 'single' });
+        } else {
+          scheduleIdleCleanup(() => {
+            void adapter.remove(key);
+          });
+        }
+        return null;
+      }
+
+      if (adapter === 'local-sync') {
+        scheduleIdleCleanup(() =>
+          refreshLocalStorageTimestamp(key, { metadata: 'single' }),
+        );
+      }
+
+      return entry.data;
+    } catch (error) {
+      onPersistentStorageError?.(error);
+      return null;
+    }
+  }
+
+  async function readEntry(): Promise<StorageCacheEntry<T> | null> {
     const key = getKey();
     if (key === false) return null;
     try {
       if (adapter === 'local-sync') {
-        const entry = readStorageEntryFromLocalStorageSync<T>(key, version, {
+        return readRawStorageEntryFromLocalStorageSync<T>(key, {
           metadata: 'single',
         });
-        if (!entry) return null;
-
-        scheduleIdleCleanup(() =>
-          refreshLocalStorageTimestamp(key, { metadata: 'single' }),
-        );
-        return entry.data;
       }
 
-      const entry = await adapter.read<StorageCacheEntry<T>>(key);
-      if (!entry) return null;
+      const rawEntry = await adapter.read<unknown>(key);
+      if (!rawEntry) return null;
 
-      if (!doesStorageEntryVersionMatch(entry.version, version)) {
+      const entry = parseStorageEntry(rawEntry);
+      if (entry === null) {
         scheduleIdleCleanup(() => {
           void adapter.remove(key);
         });
         return null;
       }
 
-      return entry.data;
+      return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
+        entry,
+      );
     } catch (error) {
       onPersistentStorageError?.(error);
       return null;
@@ -373,7 +404,7 @@ export function createPersistentStorageHandle<T>(
     clearTimer();
   }
 
-  return { load, scheduleSave, saveNow, clear, dispose };
+  return { readEntry, load, scheduleSave, saveNow, clear, dispose };
 }
 
 export type PersistentStorageNamespaceHandle<T> = {
@@ -421,23 +452,26 @@ export function createPersistentStorageNamespaceHandle<T>(
     const key = `${prefix}${entryKey}`;
     try {
       if (adapter === 'local-sync') {
-        return readStorageEntryFromLocalStorageSync<T>(key, version, {
+        return readRawStorageEntryFromLocalStorageSync<T>(key, {
           metadata: 'namespace',
           namespacePrefix: prefix,
         });
       }
 
-      const entry = await adapter.read<StorageCacheEntry<T>>(key);
-      if (!entry) return null;
+      const rawEntry = await adapter.read<unknown>(key);
+      if (!rawEntry) return null;
 
-      if (!doesStorageEntryVersionMatch(entry.version, version)) {
+      const entry = parseStorageEntry(rawEntry);
+      if (entry === null) {
         scheduleIdleCleanup(() => {
           void adapter.remove(key);
         });
         return null;
       }
 
-      return entry;
+      return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
+        entry,
+      );
     } catch (error) {
       onPersistentStorageError?.(error);
       return null;
@@ -451,6 +485,20 @@ export function createPersistentStorageNamespaceHandle<T>(
     const key = `${prefix}${entryKey}`;
     const entry = await readEntry(entryKey);
     if (!entry) return null;
+
+    if (!doesStorageEntryVersionMatch(entry.version, version)) {
+      if (adapter === 'local-sync') {
+        scheduleLocalStorageRemoval(key, {
+          metadata: 'namespace',
+          namespacePrefix: prefix,
+        });
+      } else {
+        scheduleIdleCleanup(() => {
+          void adapter.remove(key);
+        });
+      }
+      return null;
+    }
 
     if (adapter === 'local-sync') {
       scheduleIdleCleanup(() =>
@@ -573,9 +621,13 @@ export function createPersistentStorageNamespaceHandle<T>(
   return { readEntry, load, save, remove, listKeys, clear, dispose };
 }
 
-export function readStorageEntryFromLocalStorageSync<T = unknown>(
+function parseStorageEntry(value: unknown): StorageCacheEntry<unknown> | null {
+  const result = rc_parse(value, cacheEntrySchema);
+  return result.ok ? result.value : null;
+}
+
+export function readRawStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
-  version: number | undefined,
   options: LocalStorageMetadataOptions,
 ): StorageCacheEntry<T> | null {
   const metadata =
@@ -610,9 +662,6 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
     const result = rc_parse_json(raw, cacheEntrySchema);
     if (!result.ok) return removeAndReturnNull();
     const entry = result.value;
-    if (!doesStorageEntryVersionMatch(entry.version, version)) {
-      return removeAndReturnNull();
-    }
 
     return __LEGIT_CAST__<StorageCacheEntry<T>, StorageCacheEntry<unknown>>(
       entry,
@@ -622,7 +671,22 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
   }
 }
 
-function doesStorageEntryVersionMatch(
+export function readStorageEntryFromLocalStorageSync<T = unknown>(
+  key: string,
+  version: number | undefined,
+  options: LocalStorageMetadataOptions,
+): StorageCacheEntry<T> | null {
+  const entry = readRawStorageEntryFromLocalStorageSync<T>(key, options);
+  if (entry === null) return null;
+  if (doesStorageEntryVersionMatch(entry.version, version)) {
+    return entry;
+  }
+
+  scheduleLocalStorageRemoval(key, options);
+  return null;
+}
+
+export function doesStorageEntryVersionMatch(
   entryVersion: number | undefined,
   expectedVersion: number | undefined,
 ): boolean {

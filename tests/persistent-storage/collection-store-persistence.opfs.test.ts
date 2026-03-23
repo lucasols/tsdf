@@ -13,6 +13,7 @@ import {
 } from 'vitest';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
+  PersistentStorageMigration,
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -37,22 +38,16 @@ function itemStorageKey(
   return `tsdf.${sessionKey}.${storeName}.ci.${itemKey(payload)}`;
 }
 
-type ItemState = { id: string; name: string };
-
-type PersistedItemState = { value: ItemState };
-
 function setCachedCollectionItem(
   mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
   storeName: string,
   sessionKey: string,
   payload: string,
-  data: PersistedItemState,
+  data: unknown,
   version: number | undefined = undefined,
 ): string {
   const key = itemStorageKey(storeName, sessionKey, payload);
-  const entry: StorageCacheEntry<
-    PersistedCollectionItemData<PersistedItemState>
-  > =
+  const entry: StorageCacheEntry<PersistedCollectionItemData<unknown>> =
     version === undefined
       ? { data: { data, payload }, timestamp: Date.now() }
       : { data: { data, payload }, timestamp: Date.now(), version };
@@ -62,10 +57,14 @@ function setCachedCollectionItem(
   return key;
 }
 
+type ItemState = { id: string; name: string };
+
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
+  version?: number;
+  migrate?: PersistentStorageMigration;
   ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Record<string, ItemState>;
 }) {
@@ -77,6 +76,8 @@ function createEnv(options: {
       adapter: opfsPersistentStorage,
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
+      version: options.version,
+      migrate: options.migrate,
       ignoreItems: options.ignoreItems,
     },
   });
@@ -94,6 +95,8 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
 });
+
+type PersistedItemState = { value: ItemState };
 
 describe('opfs: collection store persistence', () => {
   test('first hook read hydrates only the requested cached item and refetches', async () => {
@@ -187,6 +190,56 @@ describe('opfs: collection store persistence', () => {
       "
     `);
   });
+
+  test.each([
+    { label: 'older stored version', fromVersion: 1 },
+    { label: 'versionless stored entry', fromVersion: undefined },
+  ])(
+    'preload migrates and rewrites the $label',
+    async ({ fromVersion: storedVersion }) => {
+      const storeName = `col-opfs-migrate-${storedVersion ?? 'none'}`;
+      const sessionKey = 'sess1';
+      const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+      const key = itemStorageKey(storeName, sessionKey, '1');
+
+      mockAdapter.setValue(key, {
+        data: {
+          data: { legacyValue: { id: '1', name: 'Cached' } },
+          payload: '1',
+        },
+        timestamp: Date.now(),
+        ...(storedVersion === undefined ? {} : { version: storedVersion }),
+      } satisfies StorageCacheEntry<
+        PersistedCollectionItemData<{
+          legacyValue: { id: string; name: string };
+        }>
+      >);
+
+      const env = createEnv({
+        storeName,
+        sessionKey,
+        storageAdapter: mockAdapter.adapter,
+        version: 2,
+        migrate: ({ fromVersion, toVersion }) => {
+          expect(fromVersion).toBe(storedVersion);
+          expect(toVersion).toBe(2);
+          return { data: { value: { id: '1', name: 'Cached' } }, payload: '1' };
+        },
+      });
+
+      const preloadPromise = env.apiStore.preloadItemFromStorage('1');
+      await advanceTime(50);
+      await preloadPromise;
+
+      expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+        value: { id: '1', name: 'Cached' }
+      `);
+      expect(mockAdapter.storage.readEntry(key)).toMatchObject({
+        data: { data: { value: { id: '1', name: 'Cached' } }, payload: '1' },
+        version: 2,
+      });
+    },
+  );
 
   test('invalid cached items are removed during targeted preload', async () => {
     const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });

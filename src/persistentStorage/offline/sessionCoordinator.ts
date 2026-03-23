@@ -155,6 +155,7 @@ function toCanonicalConfig(
 
 function createNoopPersistentStorageHandle<T>(): PersistentStorageHandle<T> {
   return {
+    readEntry: () => Promise.resolve(null),
     load: () => Promise.resolve(null),
     scheduleSave: () => {},
     saveNow: () => Promise.resolve(),

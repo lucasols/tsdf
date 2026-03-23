@@ -144,6 +144,43 @@ describe('offline mode network and session', () => {
         mutation: () => Promise.resolve(2),
         offline: { operation: 'updateValue', input: { value: 2 } },
       });
+
+      async function queuedOfflineResultType_() {
+        const queued = await typedEnv.apiStore.performMutation({
+          mutation: () => Promise.resolve(2),
+          offline: { operation: 'updateValue', input: { value: 2 } },
+        });
+
+        if (queued.ok) {
+          const queuedValue:
+            | { kind: 'online'; data: number }
+            | { kind: 'queued' } = queued.value;
+          void queuedValue;
+
+          if (queued.value.kind === 'online') {
+            const serverValue: number = queued.value.data;
+            void serverValue;
+          }
+
+          // @ts-expect-error - queued offline mutations do not always expose a server payload directly
+          const serverValue: number = queued.value.data;
+          void serverValue;
+        }
+      }
+
+      async function onlineResultType_() {
+        const result = await typedEnv.apiStore.performMutation({
+          mutation: () => Promise.resolve(2),
+        });
+
+        if (result.ok) {
+          const serverValue: number = result.value;
+          void serverValue;
+        }
+      }
+
+      void queuedOfflineResultType_;
+      void onlineResultType_;
     }
 
     void typeCheck_;
@@ -169,10 +206,95 @@ describe('offline mode network and session', () => {
         mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
         offline: { operation: 'renameItem', input: { name: 'Grace' } },
       });
+
+      async function queuedOfflineResultType_() {
+        const queued = await typedEnv.apiStore.performMutation('users||1', {
+          mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
+          offline: { operation: 'renameItem', input: { name: 'Grace' } },
+        });
+
+        if (queued.ok) {
+          const queuedValue:
+            | { kind: 'online'; data: { value: { name: string } } }
+            | { kind: 'queued' } = queued.value;
+          void queuedValue;
+
+          if (queued.value.kind === 'online') {
+            const serverValue: { value: { name: string } } = queued.value.data;
+            void serverValue;
+          }
+
+          // @ts-expect-error - queued offline mutations do not always expose a server payload directly
+          const serverValue: { value: { name: string } } = queued.value.data;
+          void serverValue;
+        }
+      }
+
+      async function onlineResultType_() {
+        const result = await typedEnv.apiStore.performMutation('users||1', {
+          mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
+        });
+
+        if (result.ok) {
+          const serverValue: { value: { name: string } } = result.value;
+          void serverValue;
+        }
+      }
+
+      void queuedOfflineResultType_;
+      void onlineResultType_;
     }
 
     void typeCheck_;
     expect(true).toBe(true);
+  });
+
+  test('stores unregister their previous offline session when the session key becomes unavailable', async () => {
+    network.setOffline();
+
+    let currentSessionKey: string | false = 'offline-session-cleanup';
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      getSessionKey: () => currentSessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        storeName: 'offline-session-cleanup-doc',
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }: UpdateValueExecuteContext) => input,
+            },
+          },
+        },
+      },
+    });
+
+    await act(async () => {
+      await env.apiStore.performMutation({
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value = 2;
+          });
+        },
+        mutation: () => Promise.resolve(2),
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      });
+    });
+
+    expect(getGlobalOfflineEntities('offline-session-cleanup')).toMatchObject([
+      { entityKey: 'document', storeName: 'offline-session-cleanup-doc' },
+    ]);
+
+    // Simulate logout so the store no longer belongs to the previous session.
+    currentSessionKey = false;
+
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(
+      getGlobalOfflineEntities('offline-session-cleanup'),
+    ).toMatchInlineSnapshot(`[]`);
   });
 
   test('document offline mutations are queued durably and replay when the browser comes back online', async () => {

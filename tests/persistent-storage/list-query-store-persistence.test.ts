@@ -20,6 +20,7 @@ import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persis
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import type {
   PersistedListQueryItemData,
+  PersistentStorageMigration,
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -93,7 +94,7 @@ function setCachedItem(
   sessionKey: string,
   tableId: string,
   id: number,
-  data: Row,
+  data: unknown,
   version: number | undefined = undefined,
   timestamp = Date.now(),
 ): string {
@@ -172,6 +173,7 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   version?: number;
+  migrate?: PersistentStorageMigration;
   maxItems?: number;
   maxQueries?: number;
   maxQuerySize?: number;
@@ -210,6 +212,7 @@ function createEnv(options: {
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
       version: options.version,
+      migrate: options.migrate,
       maxItems: options.maxItems,
       maxQueries: options.maxQueries,
       maxQuerySize: options.maxQuerySize,
@@ -241,6 +244,131 @@ describe('localStorage: list query store persistence', () => {
     ).toThrowError(
       '[tsdf] persistentStorage.storeName "users.with-dot" must not contain ".".',
     );
+  });
+
+  test.each([
+    { label: 'older stored version', fromVersion: 1 },
+    { label: 'versionless stored entry', fromVersion: undefined },
+  ])(
+    'query and item hydration migrate and rewrite the $label',
+    async ({ fromVersion: storedVersion }) => {
+      const storeName = `lq-migrate-${storedVersion ?? 'none'}`;
+      const sessionKey = 'sess1';
+      const usersQuery = { tableId: 'users' };
+
+      setCachedItem(
+        storeName,
+        sessionKey,
+        'users',
+        1,
+        { legacyRow: { id: 1, name: 'Cached' } },
+        storedVersion,
+      );
+      setCachedQuery(
+        storeName,
+        sessionKey,
+        usersQuery,
+        [storeItemKey('users', 1)],
+        false,
+        storedVersion,
+      );
+
+      const migrate = vi.fn(({ persistedData, fromVersion, toVersion }) => {
+        expect(fromVersion).toBe(storedVersion);
+        expect(toVersion).toBe(2);
+
+        if (
+          typeof persistedData === 'object' &&
+          persistedData !== null &&
+          'items' in persistedData &&
+          'hasMore' in persistedData
+        ) {
+          return {
+            payload: usersQuery,
+            items: [storeItemKey('users', 1)],
+            hasMore: false,
+          };
+        }
+
+        return { data: { id: 1, name: 'Cached' }, payload: 'users||1' };
+      });
+
+      const env = createEnv({ storeName, sessionKey, version: 2, migrate });
+
+      await expect(env.apiStore.preloadQueryFromStorage(usersQuery)).resolves
+        .toMatchInlineSnapshot(`
+        - payload: { tableId: 'users' }
+          preloaded: '✅'
+      `);
+      await expect(env.apiStore.preloadItemFromStorage('users||1')).resolves
+        .toMatchInlineSnapshot(`
+        - { payload: 'users||1', preloaded: '✅' }
+      `);
+      expect(env.apiStore.getQueryState(usersQuery)?.items)
+        .toMatchInlineSnapshot(`
+        ['"users||1']
+      `);
+      expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached'
+      `);
+
+      await flushAllTimers();
+
+      expect(migrate).toHaveBeenCalledTimes(2);
+      expect(
+        persistentStore
+          .scope(storeName, sessionKey)
+          .listQuery.readItemEntry('users', 1),
+      ).toMatchObject({
+        data: { data: { id: 1, name: 'Cached' }, payload: 'users||1' },
+        version: 2,
+      });
+      expect(
+        persistentStore
+          .scope(storeName, sessionKey)
+          .listQuery.readQueryEntry(usersQuery),
+      ).toMatchObject({
+        data: {
+          hasMore: false,
+          items: ['"users||1'],
+          payload: { tableId: 'users' },
+        },
+        version: 2,
+      });
+    },
+  );
+
+  test('without migrate, mismatched list-query entries are discarded and cleaned up', async () => {
+    const storeName = 'lq-migrate-missing';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const itemKey = setCachedItem(
+      storeName,
+      sessionKey,
+      'users',
+      1,
+      { legacyRow: { id: 1, name: 'Cached' } },
+      1,
+    );
+    const queryKey = setCachedQuery(
+      storeName,
+      sessionKey,
+      usersQuery,
+      [storeItemKey('users', 1)],
+      false,
+      1,
+    );
+
+    const env = createEnv({ storeName, sessionKey, version: 2 });
+
+    expect(env.apiStore.getQueryState(usersQuery)).toBeUndefined();
+    expect(env.apiStore.getItemState('users||1')).toBeUndefined();
+
+    await flushAllTimers();
+
+    expect(localStorage.getItem(itemKey)).toBeNull();
+    expect(localStorage.getItem(queryKey)).toBeNull();
   });
 
   test('direct query reads lazily hydrate only the requested query and its items', () => {

@@ -14,9 +14,10 @@ import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetada
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
   convertStoreDataForPersistence,
+  finalizePersistedStoreData,
   normalizePersistentStorageDataSchema,
   parsePersistedCollectionItemData,
-  parsePersistedStoreData,
+  validatePersistedStoreData,
   type NormalizedPersistentStorageDataSchema,
   type ParsedPersistedCollectionItemData,
 } from './parsePersistedData';
@@ -29,7 +30,7 @@ import {
   readProtectedStorageKeys,
   scheduleLocalStorageRemoval,
   scheduleLocalStorageMaintenance,
-  readStorageEntryFromLocalStorageSync,
+  readRawStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import {
@@ -43,6 +44,7 @@ import type {
   PersistedCollectionItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
+import { resolveVersionedPersistedData } from './versionedPersistence';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
@@ -71,7 +73,16 @@ function toCollectionItemState<
   dataSchema: NormalizedPersistentStorageDataSchema<ItemState, StorageState>,
   shouldIgnoreItem: (payload: ItemPayload) => boolean,
 ): TSFDCollectionItem<ItemState, ItemPayload> | null {
-  const validated = parsePersistedStoreData(persisted.data, dataSchema);
+  const validatedPersistedData = validatePersistedStoreData(
+    persisted.data,
+    dataSchema,
+  );
+  if (validatedPersistedData === null) return null;
+
+  const validated = finalizePersistedStoreData(
+    validatedPersistedData,
+    dataSchema,
+  );
   if (validated === null) return null;
 
   if (shouldIgnoreItem(persisted.payload)) return null;
@@ -160,6 +171,53 @@ export function setupCollectionPersistence<
   const hydratedPersistedKeys = new Set<string>();
   let knownPersistedKeys: Set<string> | null = null;
   let maintenanceManifestKey: string | null = null;
+
+  function resolveHydratedPersistedItem(args: {
+    itemKey: string;
+    entryData: unknown;
+    entryVersion: number | undefined;
+    rewriteMigrated: (
+      persisted: PersistedCollectionItemData<ItemState | StorageState>,
+    ) => void;
+  }): {
+    item: TSFDCollectionItem<ItemState, ItemPayload>;
+    persisted: PersistedCollectionItemData<ItemState | StorageState> & {
+      payload: ItemPayload;
+    };
+  } | null {
+    const versioned = resolveVersionedPersistedData({
+      persistedData: args.entryData,
+      fromVersion: args.entryVersion,
+      targetVersion: version,
+      migrate: config.migrate,
+      parseCurrentPersistedData: (value) =>
+        parsePersistedCollectionItemData(value, config.payloadSchema),
+    });
+    if (versioned === null) return null;
+
+    const validatedPersistedData = validatePersistedStoreData(
+      versioned.persisted.data,
+      dataSchema,
+    );
+    if (validatedPersistedData === null) return null;
+
+    const persisted: PersistedCollectionItemData<ItemState | StorageState> & {
+      payload: ItemPayload;
+    } = { data: validatedPersistedData, payload: versioned.persisted.payload };
+
+    if (versioned.wasMigrated) {
+      args.rewriteMigrated(persisted);
+    }
+
+    const item = toCollectionItemState(
+      { ...versioned.persisted, data: validatedPersistedData },
+      dataSchema,
+      shouldIgnoreItem,
+    );
+    if (item === null) return null;
+
+    return { item, persisted };
+  }
 
   function clearSaveTimer(): void {
     if (saveTimer !== null) {
@@ -276,30 +334,24 @@ export function setupCollectionPersistence<
     if (prefix === false) return undefined;
 
     const storageKey = `${prefix}${itemKey}`;
-    const cacheEntry = readStorageEntryFromLocalStorageSync<
+    const cacheEntry = readRawStorageEntryFromLocalStorageSync<
       PersistedCollectionItemData<unknown>
-    >(storageKey, version, { metadata: 'namespace', namespacePrefix: prefix });
+    >(storageKey, { metadata: 'namespace', namespacePrefix: prefix });
 
     if (!cacheEntry) {
       forgetPersistedItem(itemKey);
       return undefined;
     }
 
-    const persisted = parsePersistedCollectionItemData(
-      cacheEntry.data,
-      config.payloadSchema,
-    );
-    if (!persisted) {
-      scheduleLocalStorageRemoval(storageKey, {
-        metadata: 'namespace',
-        namespacePrefix: prefix,
-      });
-      forgetPersistedItem(itemKey);
-      return undefined;
-    }
-
-    const item = toCollectionItemState(persisted, dataSchema, shouldIgnoreItem);
-    if (!item) {
+    const resolved = resolveHydratedPersistedItem({
+      itemKey,
+      entryData: cacheEntry.data,
+      entryVersion: cacheEntry.version,
+      rewriteMigrated: (persisted) => {
+        void namespace.save(itemKey, persisted);
+      },
+    });
+    if (!resolved) {
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',
         namespacePrefix: prefix,
@@ -314,8 +366,8 @@ export function setupCollectionPersistence<
         namespacePrefix: prefix,
       }),
     );
-    rememberHydratedItem(itemKey, cacheEntry.data);
-    return item;
+    rememberHydratedItem(itemKey, resolved.persisted);
+    return resolved.item;
   }
 
   function createInitialState(
@@ -366,39 +418,32 @@ export function setupCollectionPersistence<
 
     const currentGeneration = generation;
     const promise = namespace
-      .load(itemKey)
-      .then((cached) => {
-        if (!cached || currentGeneration !== generation || !storeRef) {
+      .readEntry(itemKey)
+      .then((entry) => {
+        if (!entry || currentGeneration !== generation || !storeRef) {
           return false;
         }
 
-        const persisted = parsePersistedCollectionItemData(
-          cached,
-          config.payloadSchema,
-        );
-        if (!persisted) {
+        const resolved = resolveHydratedPersistedItem({
+          itemKey,
+          entryData: entry.data,
+          entryVersion: entry.version,
+          rewriteMigrated: (persisted) => {
+            void namespace.save(itemKey, persisted);
+          },
+        });
+        if (!resolved) {
           scheduleIdleCleanup(() => void namespace.remove(itemKey));
           return false;
         }
 
-        const validated = toCollectionItemState(
-          persisted,
-          dataSchema,
-          shouldIgnoreItem,
-        );
-
-        if (!validated) {
-          scheduleIdleCleanup(() => void namespace.remove(itemKey));
-          return false;
-        }
-
-        rememberHydratedItem(itemKey, cached);
+        rememberHydratedItem(itemKey, resolved.persisted);
 
         if (storeRef.state[itemKey] !== undefined) {
           return storeRef.state[itemKey] !== null;
         }
 
-        materializeHydratedItem(itemKey, validated);
+        materializeHydratedItem(itemKey, resolved.item);
 
         return true;
       })
@@ -558,14 +603,14 @@ export function setupCollectionPersistence<
     const invalidEntries = filterAndMap(entries, ({ itemKey, entry }) => {
       if (!entry) return false;
 
-      const persisted = parsePersistedCollectionItemData(
-        entry.data,
-        config.payloadSchema,
-      );
-
-      if (!persisted) return { itemKey };
-
-      return parsePersistedStoreData(persisted.data, dataSchema)
+      return resolveHydratedPersistedItem({
+        itemKey,
+        entryData: entry.data,
+        entryVersion: entry.version,
+        rewriteMigrated: (persisted) => {
+          void namespace.save(itemKey, persisted);
+        },
+      })
         ? false
         : { itemKey };
     });
@@ -579,15 +624,21 @@ export function setupCollectionPersistence<
     const validEntries = filterAndMap(entries, ({ itemKey, entry }) => {
       if (!entry) return false;
 
-      const persisted = parsePersistedCollectionItemData(
-        entry.data,
-        config.payloadSchema,
-      );
-      if (!persisted) return false;
+      const resolved = resolveHydratedPersistedItem({
+        itemKey,
+        entryData: entry.data,
+        entryVersion: entry.version,
+        rewriteMigrated: (persisted) => {
+          void namespace.save(itemKey, persisted);
+        },
+      });
+      if (!resolved) return false;
 
-      return parsePersistedStoreData(persisted.data, dataSchema)
-        ? { itemKey, lastAccessAt: entry.timestamp, persisted }
-        : false;
+      return {
+        itemKey,
+        lastAccessAt: entry.timestamp,
+        persisted: resolved.persisted,
+      };
     });
 
     const ignoredEntries = validEntries.filter(({ persisted }) =>

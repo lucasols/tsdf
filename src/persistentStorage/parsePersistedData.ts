@@ -57,15 +57,37 @@ export function parsePersistedStoreData<TFinal, TStorage = unknown>(
   value: unknown,
   schema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
 ): TFinal | null {
+  const persistedData = validatePersistedStoreData(value, schema);
+  if (persistedData === null) return null;
+
+  return finalizePersistedStoreData(persistedData, schema);
+}
+
+export function validatePersistedStoreData<TFinal, TStorage = unknown>(
+  value: unknown,
+  schema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): TFinal | TStorage | null {
   if (schema.mode === 'direct') {
     return validateWithSchema(schema.storeSchema, value);
   }
 
   const persistedData = validateWithSchema(schema.storageSchema, value);
-  if (persistedData === null) return null;
+  return persistedData;
+}
+
+export function finalizePersistedStoreData<TFinal, TStorage = unknown>(
+  persistedData: TFinal | TStorage,
+  schema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): TFinal | null {
+  if (schema.mode === 'direct') {
+    return validateWithSchema(schema.storeSchema, persistedData);
+  }
+
+  const storageData = validateWithSchema(schema.storageSchema, persistedData);
+  if (storageData === null) return null;
 
   try {
-    const convertedData = schema.convertFromStorage(persistedData);
+    const convertedData = schema.convertFromStorage(storageData);
     return validateWithSchema(schema.storeSchema, convertedData);
   } catch {
     return null;

@@ -18,6 +18,7 @@ import {
 } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import type {
+  PersistentStorageMigration,
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -73,6 +74,7 @@ function createDocPersistenceEnv(options: {
   storeName: string;
   sessionKey?: string;
   version?: number;
+  migrate?: PersistentStorageMigration;
   getSessionKey?: () => string | false;
   serverData?: TestData;
   onPersistentStorageError?: (error: unknown) => void;
@@ -87,6 +89,7 @@ function createDocPersistenceEnv(options: {
       adapter: 'local-sync',
       schema: wrappedSchema,
       version: options.version,
+      migrate: options.migrate,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -218,6 +221,123 @@ describe('localStorage: document store persistence', () => {
       status: 'idle'
     `);
   });
+
+  test.each([
+    { label: 'older stored version', fromVersion: 1 },
+    { label: 'versionless stored entry', fromVersion: undefined },
+  ])(
+    'mismatched cache entry migration hydrates and rewrites the $label',
+    async ({ fromVersion: storedVersion }) => {
+      const storeName = `doc-migrate-${storedVersion ?? 'none'}`;
+      const sessionKey = 'sess1';
+      const storageKey = documentStorageKey(storeName, sessionKey);
+      const migrate = vi.fn(
+        ({
+          persistedData,
+          fromVersion,
+          toVersion,
+        }: {
+          persistedData: unknown;
+          fromVersion: number | undefined;
+          toVersion: number;
+        }) => {
+          expect(fromVersion).toBe(storedVersion);
+          expect(toVersion).toBe(2);
+          expect(persistedData).toEqual({
+            data: { legacyName: 'cached', legacyValue: 7 },
+          });
+
+          return { data: { value: { name: 'cached', value: 7 } } };
+        },
+      );
+
+      persistentStore
+        .scope(storeName, sessionKey)
+        .document.seed(
+          { legacyName: 'cached', legacyValue: 7 },
+          { version: storedVersion },
+        );
+
+      const env = createDocPersistenceEnv({
+        storeName,
+        sessionKey,
+        version: 2,
+        migrate,
+      });
+
+      expect(env.store.state.data).toMatchInlineSnapshot(`
+        value: { name: 'cached', value: 7 }
+      `);
+
+      await flushAllTimers();
+
+      expect(migrate).toHaveBeenCalledTimes(1);
+      expect(
+        persistentStore.scope(storeName, sessionKey).document.readEntry(),
+      ).toMatchObject({
+        data: { data: { value: { name: 'cached', value: 7 } } },
+        version: 2,
+      });
+      expect(localStorage.getItem(storageKey)).not.toBeNull();
+    },
+  );
+
+  test('missing migration callback keeps version mismatches on the discard path', async () => {
+    const storeName = 'doc-migrate-missing';
+    const sessionKey = 'sess1';
+    const storageKey = documentStorageKey(storeName, sessionKey);
+    persistentStore
+      .scope(storeName, sessionKey)
+      .document.seed({ legacyName: 'old', legacyValue: 1 }, { version: 1 });
+
+    const env = createDocPersistenceEnv({ storeName, sessionKey, version: 2 });
+
+    expect(env.store.state.status).toBe('idle');
+
+    await flushAllTimers();
+
+    expect(localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  test.each([
+    { label: 'migration returns null', migrate: () => null },
+    {
+      label: 'migration throws',
+      migrate: () => {
+        throw new Error('boom');
+      },
+    },
+    {
+      label: 'migration returns invalid current shape',
+      migrate: () => ({ data: { wrong: true } }),
+    },
+  ])(
+    '$label discards and cleans up the cached document',
+    async ({ label, migrate }) => {
+      const storeName = `doc-migrate-fail-${label.replaceAll(' ', '-')}`;
+      const sessionKey = 'sess1';
+      const storageKey = documentStorageKey(storeName, sessionKey);
+      persistentStore
+        .scope(storeName, sessionKey)
+        .document.seed(
+          { legacyName: 'cached', legacyValue: 1 },
+          { version: 1 },
+        );
+
+      const env = createDocPersistenceEnv({
+        storeName,
+        sessionKey,
+        version: 2,
+        migrate,
+      });
+
+      expect(env.store.state.status).toBe('idle');
+
+      await flushAllTimers();
+
+      expect(localStorage.getItem(storageKey)).toBeNull();
+    },
+  );
 
   test('schema validation failure causes cached data to be discarded', () => {
     // Store invalid data (doesn't match wrapped schema { value: { name, value } })

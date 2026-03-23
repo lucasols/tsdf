@@ -11,7 +11,10 @@ import {
   test,
   vi,
 } from 'vitest';
-import type { ConvertedPersistentStorageDataSchema } from '../../src/persistentStorage/types';
+import type {
+  ConvertedPersistentStorageDataSchema,
+  PersistentStorageMigration,
+} from '../../src/persistentStorage/types';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
@@ -56,6 +59,8 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
+  version?: number;
+  migrate?: PersistentStorageMigration;
   schema?: ConvertedPersistentStorageDataSchema<
     DocumentState,
     StoredDocumentState
@@ -70,6 +75,8 @@ function createEnv(options: {
       storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: options.schema ?? createConvertedSchema(),
+      version: options.version,
+      migrate: options.migrate,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -238,5 +245,49 @@ describe('opfs: converted document store persistence', () => {
         amount: 7
         fullName: 'cached'
       `);
+  });
+
+  test('preload migrates before conversion and rewrites the storage payload', async () => {
+    const calls: string[] = [];
+    const mockAdapter = createMockOpfsStorageAdapter({
+      readDelayMs: 50,
+      storeName: 'doc-opfs-converted-migrate',
+      sessionKey: 'sess1',
+      initialState: {
+        document: {
+          data: { legacyFullName: 'cached', legacyAmount: 9 },
+          version: 1,
+        },
+      },
+    });
+
+    const env = createEnv({
+      storeName: 'doc-opfs-converted-migrate',
+      sessionKey: 'sess1',
+      storageAdapter: mockAdapter.adapter,
+      version: 2,
+      migrate: ({ fromVersion, toVersion }) => {
+        calls.push(`migrate:${fromVersion ?? 'none'}->${toVersion}`);
+        return { data: { fullName: 'cached', amount: 9 } };
+      },
+      schema: createConvertedSchema({
+        convertFromStorage(value) {
+          calls.push(`convert:${value.fullName}`);
+          return { value: { name: value.fullName, value: value.amount } };
+        },
+      }),
+    });
+
+    const preloadPromise = env.apiStore.preloadPersistentStorage();
+    await advanceTime(50);
+    await preloadPromise;
+
+    expect(env.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'cached', value: 9 }
+    `);
+    expect(calls).toMatchInlineSnapshot(`['migrate:1->2', 'convert:cached']`);
+    expect(mockAdapter.document.readEntry<StoredDocumentState>()).toMatchObject(
+      { data: { data: { amount: 9, fullName: 'cached' } }, version: 2 },
+    );
   });
 });

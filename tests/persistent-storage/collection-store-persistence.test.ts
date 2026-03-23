@@ -14,6 +14,7 @@ import {
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
 import type {
+  PersistentStorageMigration,
   PersistedCollectionItemData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
@@ -48,15 +49,11 @@ function itemStoragePrefix(storeName: string, sessionKey: string): string {
   return `tsdf.${sessionKey}.${storeName}.ci.`;
 }
 
-type ItemState = { id: string; name: string };
-
-type PersistedItemState = { value: ItemState };
-
 function setCachedCollectionItem(
   storeName: string,
   sessionKey: string,
   payload: string,
-  data: PersistedItemState,
+  data: unknown,
   version: number | undefined = undefined,
   timestamp = Date.now(),
 ): string {
@@ -115,10 +112,13 @@ function getStoredCollectionItemTimestamp(key: string): number {
   return entry.lastAccessAt;
 }
 
+type ItemState = { id: string; name: string };
+
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   version?: number;
+  migrate?: PersistentStorageMigration;
   maxItems?: number;
   pinnedItems?: string[];
   ignoreItems?: string[] | ((payload: string) => boolean);
@@ -133,6 +133,7 @@ function createEnv(options: {
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
       version: options.version,
+      migrate: options.migrate,
       maxItems: options.maxItems,
       pinnedItems: options.pinnedItems,
       ignoreItems: options.ignoreItems,
@@ -153,6 +154,8 @@ afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
 });
+
+type PersistedItemState = { value: ItemState };
 
 describe('localStorage: collection store persistence', () => {
   test('dev-only check rejects store ids containing dots', () => {
@@ -201,6 +204,115 @@ describe('localStorage: collection store persistence', () => {
       value: { id: '2', name: 'Bob' }
     `);
   });
+
+  test.each([
+    { label: 'older stored version', fromVersion: 1 },
+    { label: 'versionless stored entry', fromVersion: undefined },
+  ])(
+    'direct item reads migrate and rewrite the $label',
+    async ({ fromVersion: storedVersion }) => {
+      const storeName = `col-migrate-${storedVersion ?? 'none'}`;
+      const sessionKey = 'sess1';
+      const storageKey = setCachedCollectionItem(
+        storeName,
+        sessionKey,
+        '1',
+        { legacyValue: { id: '1', name: 'Cached' } },
+        storedVersion,
+      );
+
+      const env = createEnv({
+        storeName,
+        sessionKey,
+        version: 2,
+        migrate: ({ persistedData, fromVersion, toVersion }) => {
+          expect(fromVersion).toBe(storedVersion);
+          expect(toVersion).toBe(2);
+          expect(persistedData).toEqual({
+            data: { legacyValue: { id: '1', name: 'Cached' } },
+            payload: '1',
+          });
+
+          return { data: { value: { id: '1', name: 'Cached' } }, payload: '1' };
+        },
+      });
+
+      await expect(env.apiStore.preloadItemFromStorage('1')).resolves
+        .toMatchInlineSnapshot(`
+        - { payload: '1', preloaded: '✅' }
+      `);
+      expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(`
+        value: { id: '1', name: 'Cached' }
+      `);
+
+      await flushAllTimers();
+
+      expect(
+        persistentStore
+          .scope(storeName, sessionKey)
+          .collection.readItemEntry('1'),
+      ).toMatchObject({
+        data: { data: { value: { id: '1', name: 'Cached' } }, payload: '1' },
+        version: 2,
+      });
+      expect(localStorage.getItem(storageKey)).not.toBeNull();
+    },
+  );
+
+  test('without migrate, mismatched collection items are discarded and cleaned up', async () => {
+    const storeName = 'col-migrate-missing';
+    const sessionKey = 'sess1';
+    const storageKey = setCachedCollectionItem(
+      storeName,
+      sessionKey,
+      '1',
+      { legacyValue: { id: '1', name: 'Cached' } },
+      1,
+    );
+
+    const env = createEnv({ storeName, sessionKey, version: 2 });
+
+    expect(env.apiStore.getItemState('1')).toBeUndefined();
+
+    await flushAllTimers();
+
+    expect(localStorage.getItem(storageKey)).toBeNull();
+  });
+
+  test.each([
+    { label: 'migration returns null', migrate: () => null },
+    {
+      label: 'migration throws',
+      migrate: () => {
+        throw new Error('boom');
+      },
+    },
+    {
+      label: 'migration returns invalid current shape',
+      migrate: () => ({ data: { wrong: true }, payload: '1' }),
+    },
+  ])(
+    '$label discards and cleans up the cached collection item',
+    async ({ label, migrate }) => {
+      const storeName = `col-migrate-fail-${label.replaceAll(' ', '-')}`;
+      const sessionKey = 'sess1';
+      const storageKey = setCachedCollectionItem(
+        storeName,
+        sessionKey,
+        '1',
+        { legacyValue: { id: '1', name: 'Cached' } },
+        1,
+      );
+
+      const env = createEnv({ storeName, sessionKey, version: 2, migrate });
+
+      expect(env.apiStore.getItemState('1')).toBeUndefined();
+
+      await flushAllTimers();
+
+      expect(localStorage.getItem(storageKey)).toBeNull();
+    },
+  );
 
   test('direct cold key reads materialize state and stop consulting localStorage', () => {
     const storeName = 'col-external-overwrite';

@@ -80,6 +80,32 @@ export type PersistentStoragePreloadResult<
   preloaded: boolean;
 };
 
+/** Context passed to versioned cache-entry migrations. */
+export type PersistentStorageMigrationContext = {
+  /** Raw persisted payload read from storage for this cache entry. */
+  persistedData: unknown;
+  /** Stored cache-entry version, or `undefined` when the entry had no version. */
+  fromVersion: number | undefined;
+  /** Current configured cache-entry version that the store expects. */
+  toVersion: number;
+};
+
+/** Allowed return values from a cache-entry migration callback. */
+export type PersistentStorageMigrationResult =
+  | object
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | undefined
+  | null;
+
+/** Optional callback used to upgrade mismatched persisted cache-entry payloads. */
+export type PersistentStorageMigration = (
+  ctx: PersistentStorageMigrationContext,
+) => PersistentStorageMigrationResult;
+
 // --- Config Types ---
 
 /** Base config shared by all store types. */
@@ -92,6 +118,15 @@ export type PersistentStorageBaseConfig<TFinal, TStorage = unknown> = {
   schema: PersistentStorageDataSchema<TFinal, TStorage>;
   /** Optional version number for cache invalidation. When omitted, no version is persisted or checked. */
   version?: number;
+  /**
+   * Optional version-aware migration used when `version` is configured and a
+   * stored cache entry has a different version or no version.
+   *
+   * `persistedData` is the raw stored payload from the cache entry.
+   * Return the payload in the current configured persisted-data shape, or
+   * return `null` to discard the cached entry.
+   */
+  migrate?: PersistentStorageMigration;
   /**
    * Returns a session key scoping storage per org/tenant.
    * Return `false` to indicate the session is not ready — all storage

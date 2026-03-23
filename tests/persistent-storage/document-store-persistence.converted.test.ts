@@ -12,6 +12,7 @@ import {
   vi,
 } from 'vitest';
 import type { ConvertedPersistentStorageDataSchema } from '../../src/persistentStorage/types';
+import type { PersistentStorageMigration } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
@@ -54,6 +55,8 @@ function createConvertedSchema(
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
+  version?: number;
+  migrate?: PersistentStorageMigration;
   schema?: ConvertedPersistentStorageDataSchema<
     DocumentState,
     StoredDocumentState
@@ -67,6 +70,8 @@ function createEnv(options: {
       storeName: options.storeName,
       adapter: 'local-sync',
       schema: options.schema ?? createConvertedSchema(),
+      version: options.version,
+      migrate: options.migrate,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -224,5 +229,80 @@ describe('localStorage: converted document store persistence', () => {
         amount: 7
         fullName: 'cached'
       `);
+  });
+
+  test('migration runs before convertFromStorage and rewrites the normalized storage payload', async () => {
+    const calls: string[] = [];
+    const mockStore = createMockLocalStorageStore({
+      storeName: 'doc-converted-migrate',
+      sessionKey: 'sess1',
+      initialState: {
+        document: {
+          data: { legacyFullName: 'cached', legacyAmount: 7 },
+          version: 1,
+        },
+      },
+    });
+
+    const env = createEnv({
+      storeName: 'doc-converted-migrate',
+      sessionKey: 'sess1',
+      version: 2,
+      migrate: ({ persistedData, fromVersion, toVersion }) => {
+        calls.push(`migrate:${fromVersion ?? 'none'}->${toVersion}`);
+        expect(persistedData).toEqual({
+          data: { legacyFullName: 'cached', legacyAmount: 7 },
+        });
+
+        return { data: { fullName: 'cached', amount: 7 } };
+      },
+      schema: createConvertedSchema({
+        convertFromStorage(value) {
+          calls.push(`convert:${value.fullName}`);
+          return { value: { name: value.fullName, value: value.amount } };
+        },
+      }),
+    });
+
+    expect(env.store.state.data).toMatchInlineSnapshot(`
+      value: { name: 'cached', value: 7 }
+    `);
+
+    await flushAllTimers();
+
+    expect(calls).toMatchInlineSnapshot(`['migrate:1->2', 'convert:cached']`);
+    expect(mockStore.document.readEntry<StoredDocumentState>()).toMatchObject({
+      data: { data: { amount: 7, fullName: 'cached' } },
+      version: 2,
+    });
+  });
+
+  test('migrated converted payload still goes through final store validation', async () => {
+    const mockStore = createMockLocalStorageStore({
+      storeName: 'doc-converted-migrate-invalid-final',
+      sessionKey: 'sess1',
+      initialState: {
+        document: {
+          data: { legacyFullName: 'cached', legacyAmount: 7 },
+          version: 1,
+        },
+      },
+    });
+
+    const env = createEnv({
+      storeName: 'doc-converted-migrate-invalid-final',
+      sessionKey: 'sess1',
+      version: 2,
+      migrate: () => ({ data: { fullName: 'cached', amount: 7 } }),
+      schema: createConvertedSchema({
+        convertFromStorage: createInvalidDocumentState,
+      }),
+    });
+
+    expect(env.store.state.status).toBe('idle');
+
+    await flushAllTimers();
+
+    expect(mockStore.has(mockStore.document.storageKey())).toBe(false);
   });
 });
