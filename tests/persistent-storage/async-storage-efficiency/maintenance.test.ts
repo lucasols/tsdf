@@ -91,8 +91,8 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (store directory) entries=["file:d.e.m.json","file:d.e.p.json"]
       2.005s | 📄 file-open ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
       .      | 📄 file-open ✅ #2 tsdf/sess1/fresh-doc/d.e.m.json (metadata)
-      2.007s | 📖 #1 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.05 kb
-      .      | 📖 #2 tsdf/sess1/fresh-doc/d.e.m.json (metadata) | 0.05 kb
+      2.007s | 📖 #1 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.04 kb
+      .      | 📖 #2 tsdf/sess1/fresh-doc/d.e.m.json (metadata) | 0.04 kb
       2.009s | 🗑️ ✅ #3 tsdf/sess1/expired-doc/d.e.p.json (payload)
       .      | 🗑️ ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
       2.01s  | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
@@ -157,7 +157,7 @@ describe('async storage efficiency: maintenance', () => {
       2.005s | 📄 file-open ✅ #1 tsdf/sess1/corrupted/d.e.m.json (metadata)
       .      | 📄 file-open ✅ #2 tsdf/sess1/trigger/d.e.m.json (metadata)
       2.007s | 📖 #1 tsdf/sess1/corrupted/d.e.m.json (metadata) | 0.02 kb
-      .      | 📖 #2 tsdf/sess1/trigger/d.e.m.json (metadata) | 0.05 kb
+      .      | 📖 #2 tsdf/sess1/trigger/d.e.m.json (metadata) | 0.04 kb
       2.009s | 🗑️ ✅ #3 tsdf/sess1/corrupted/d.e.p.json (payload)
       .      | 🗑️ ✅ #1 tsdf/sess1/corrupted/d.e.m.json (metadata)
       2.01s  | 🧹 del-dir ✅ tsdf/sess1/corrupted (store directory)
@@ -265,8 +265,8 @@ describe('async storage efficiency: maintenance', () => {
       2.01s  | 🧹 del-dir ✅ tsdf/sess1/invalid-only-store (store directory)
       2.011s | 📄 file-open ✅ #6 tsdf/sess1/expired-doc/d.e.m.json (metadata)
       .      | 📄 file-open ✅ #7 tsdf/sess1/fresh-doc/d.e.m.json (metadata)
-      2.013s | 📖 #6 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.05 kb
-      .      | 📖 #7 tsdf/sess1/fresh-doc/d.e.m.json (metadata) | 0.05 kb
+      2.013s | 📖 #6 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.04 kb
+      .      | 📖 #7 tsdf/sess1/fresh-doc/d.e.m.json (metadata) | 0.04 kb
       2.015s | 🗑️ ✅ #8 tsdf/sess1/expired-doc/d.e.p.json (payload)
       .      | 🗑️ ✅ #6 tsdf/sess1/expired-doc/d.e.m.json (metadata)
       2.016s | 🧹 del-dir ✅ tsdf/sess1/expired-doc (store directory)
@@ -330,9 +330,9 @@ describe('async storage efficiency: maintenance', () => {
       2.007s | 📄 file-open ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
       .      | 📄 file-open ✅ #2 tsdf/sess2/expired-doc/d.e.m.json (metadata)
       .      | 📄 file-open ✅ #3 tsdf/sess2/fresh-doc/d.e.m.json (metadata)
-      2.009s | 📖 #1 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.05 kb
-      .      | 📖 #2 tsdf/sess2/expired-doc/d.e.m.json (metadata) | 0.05 kb
-      .      | 📖 #3 tsdf/sess2/fresh-doc/d.e.m.json (metadata) | 0.05 kb
+      2.009s | 📖 #1 tsdf/sess1/expired-doc/d.e.m.json (metadata) | 0.04 kb
+      .      | 📖 #2 tsdf/sess2/expired-doc/d.e.m.json (metadata) | 0.04 kb
+      .      | 📖 #3 tsdf/sess2/fresh-doc/d.e.m.json (metadata) | 0.04 kb
       2.011s | 🗑️ ✅ #4 tsdf/sess1/expired-doc/d.e.p.json (payload)
       .      | 🗑️ ✅ #1 tsdf/sess1/expired-doc/d.e.m.json (metadata)
       .      | 🗑️ ✅ #5 tsdf/sess2/expired-doc/d.e.p.json (payload)
@@ -398,8 +398,8 @@ describe('async storage efficiency: maintenance', () => {
       .      | 📄 file-open ✅ #2 tsdf/sess1/missing-payload/d.e.m.json (metadata)
       .      | 📄 file-open ✅ #3 tsdf/sess1/valid-doc/d.e.m.json (metadata)
       2.007s | 📖 #1 tsdf/sess1/invalid-metadata/d.e.m.json (metadata) | 0.02 kb
-      .      | 📖 #2 tsdf/sess1/missing-payload/d.e.m.json (metadata) | 0.05 kb
-      .      | 📖 #3 tsdf/sess1/valid-doc/d.e.m.json (metadata) | 0.05 kb
+      .      | 📖 #2 tsdf/sess1/missing-payload/d.e.m.json (metadata) | 0.04 kb
+      .      | 📖 #3 tsdf/sess1/valid-doc/d.e.m.json (metadata) | 0.04 kb
       2.009s | 🗑️ ✅ #4 tsdf/sess1/invalid-metadata/d.e.p.json (payload)
       .      | 🗑️ ✅ #1 tsdf/sess1/invalid-metadata/d.e.m.json (metadata)
       .      | 🧹 del-dir ❌ tsdf/sess1/missing-payload/d.e.p.json (scope directory)
@@ -586,18 +586,18 @@ describe('async storage efficiency: maintenance', () => {
             |    └ ([queueKey: protected-doc:1736985603621:4fzzzxjy], metadata)
       .     | 📄 file-open ✅ #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
             |    └ (metadata)
-      146ms | 📖 #6 tsdf/sess-trigger/trigger-doc/d.e.m.json (metadata) | 0.05 kb
+      146ms | 📖 #6 tsdf/sess-trigger/trigger-doc/d.e.m.json (metadata) | 0.04 kb
       .     | 📖 #7 tsdf/user%40example.com/protected-doc/oe.document.m.json
-            |    └ ([entityKey: document], metadata) | 0.05 kb
-      147ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.m.json (metadata) | 0.05 kb
+            |    └ ([entityKey: document], metadata) | 0.04 kb
+      147ms | 📖 #1 tsdf/user%40example.com/_o_.s/d.e.m.json (metadata) | 0.04 kb
       .     | 📖 #2 tsdf/user%40example.com/invalid-stray/d.e.m.json
             |    └ (metadata) | 0.02 kb
       .     | 📖 #3 tsdf/user%40example.com/protected-doc/d.e.m.json
-            |    └ (metadata) | 0.07 kb
-      .     | 📖 #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
-            |    └ ([queueKey: protected-doc:1736985603621:4fzzzxjy], metadata) | 0.05 kb
-      .     | 📖 #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
             |    └ (metadata) | 0.05 kb
+      .     | 📖 #4 tsdf/user%40example.com/protected-doc/oq.protected-doc%3A1736985603621%3A4fzzzxjy.m.json
+            |    └ ([queueKey: protected-doc:1736985603621:4fzzzxjy], metadata) | 0.04 kb
+      .     | 📖 #5 tsdf/user%40example.com/unprotected-doc/d.e.m.json
+            |    └ (metadata) | 0.04 kb
       149ms | 🗑️ ✅ #8 tsdf/user%40example.com/invalid-stray/d.e.p.json (payload)
       .     | 🗑️ ✅ #2 tsdf/user%40example.com/invalid-stray/d.e.m.json (metadata)
       .     | 🗑️ ✅ #9 tsdf/user%40example.com/unprotected-doc/d.e.p.json
@@ -618,7 +618,6 @@ describe('async storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`
       a: 1735689601853
       o: '✅'
-      v: 1
     `);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),

@@ -73,17 +73,17 @@ describe('async storage efficiency: document', () => {
       2ms  | 📄 file-open ✅ #1 tsdf/sess1/doc-remount-flow/d.e.p.json (payload)
       .    | 📄 file-open ✅ #2 tsdf/sess1/doc-remount-flow/d.e.m.json (metadata)
       4ms  | 📖 #1 tsdf/sess1/doc-remount-flow/d.e.p.json (payload) | 0.10 kb
-      .    | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.m.json (metadata) | 0.05 kb
+      .    | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.m.json (metadata) | 0.04 kb
       6ms  | end
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.30 kb)
-      ├ sess1 (0.23 kb)
-      │ └ doc-remount-flow (0.22 kb)
-      │   ├ d.e.m.json (0.07 kb)
+      "tsdf (0.29 kb)
+      ├ sess1 (0.22 kb)
+      │ └ doc-remount-flow (0.21 kb)
+      │   ├ d.e.m.json (0.06 kb)
       │   └ d.e.p.json (0.12 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
@@ -94,11 +94,9 @@ describe('async storage efficiency: document', () => {
           value: { name: 'Cached document', value: 7 }
       `);
 
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d.e.m.json'))
-      .toMatchInlineSnapshot(`
-      a: 1735689600000
-      v: 1
-    `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/doc-remount-flow/d.e.m.json'),
+    ).toMatchInlineSnapshot(`a: 1735689600000`);
   });
 
   test('document hook hydration does not skip the touch write once the cached document falls outside the current recency bucket', async () => {
@@ -144,11 +142,11 @@ describe('async storage efficiency: document', () => {
       4ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (payload) | 0.10 kb
       .    | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
-           |    └ (metadata) | 0.05 kb
+           |    └ (metadata) | 0.04 kb
       47ms | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
-           |    └ (metadata) | 0.05 kb
+           |    └ (metadata) | 0.04 kb
       51ms | ✍️ #2 tsdf/sess1/doc-remount-stale-touch/d.e.m.json
-           |    └ (metadata) | 0.05 kb -> 0.05 kb
+           |    └ (metadata) | 0.04 kb -> 0.04 kb
       53ms | end
       "
     `);
@@ -195,7 +193,7 @@ describe('async storage efficiency: document', () => {
       1.856s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (payload) | 0.00 kb -> 0.08 kb
       .      | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d.e.m.json
-             |    └ (metadata) | 0.00 kb -> 0.05 kb
+             |    └ (metadata) | 0.00 kb -> 0.04 kb
       1.858s | end
       "
     `);
@@ -270,7 +268,6 @@ describe('async storage efficiency: document', () => {
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       a: 1735664400000
       o: '✅'
-      v: 1
     `);
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
@@ -281,7 +278,6 @@ describe('async storage efficiency: document', () => {
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       a: 1735689604049
       o: '✅'
-      v: 1
     `);
     expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
       d:
@@ -291,15 +287,15 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1ms    | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
-             |    └ (metadata) | 0.07 kb
+             |    └ (metadata) | 0.05 kb
       5ms    | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
-             |    └ (metadata) | 0.07 kb -> 0.07 kb
+             |    └ (metadata) | 0.05 kb -> 0.05 kb
       1.001s | 📖 #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
-             |    └ (metadata) | 0.07 kb
+             |    └ (metadata) | 0.05 kb
       1.005s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
              |    └ (payload) | 0.10 kb -> 0.10 kb ⚠️ UNCHANGED
       .      | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d.e.m.json
-             |    └ (metadata) | 0.07 kb -> 0.07 kb
+             |    └ (metadata) | 0.05 kb -> 0.05 kb
       1.007s | end
       "
     `);
@@ -338,19 +334,17 @@ describe('async storage efficiency: document', () => {
         d:
           value: { name: 'Edited document', value: 99 }
       `);
-    expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.m.json'))
-      .toMatchInlineSnapshot(`
-        a: 1735689605096
-        v: 1
-      `);
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d.e.m.json'),
+    ).toMatchInlineSnapshot(`a: 1735689605096`);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      1.041s | 📖 #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.05 kb
+      1.041s | 📖 #1 tsdf/sess1/doc-mutation-flow/d.e.m.json (metadata) | 0.04 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json
              |    └ (payload) | 0.10 kb -> 0.10 kb
       .      | ✍️ #1 tsdf/sess1/doc-mutation-flow/d.e.m.json
-             |    └ (metadata) | 0.05 kb -> 0.05 kb
+             |    └ (metadata) | 0.04 kb -> 0.04 kb
       1.047s | end
       "
     `);
@@ -400,11 +394,11 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (metadata) | 0.05 kb
+             |    └ (metadata) | 0.04 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
              |    └ (payload) | 0.10 kb -> 0.10 kb
       .      | ✍️ #1 tsdf/sess1/doc-invalidation-flow/d.e.m.json
-             |    └ (metadata) | 0.05 kb -> 0.05 kb
+             |    └ (metadata) | 0.04 kb -> 0.04 kb
       1.857s | end
       "
     `);
@@ -475,11 +469,11 @@ describe('async storage efficiency: document', () => {
       "
       time   |
       1.851s | 📖 #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (metadata) | 0.05 kb
+             |    └ (metadata) | 0.04 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (payload) | 0.10 kb -> 0.11 kb
       .      | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d.e.m.json
-             |    └ (metadata) | 0.05 kb -> 0.05 kb
+             |    └ (metadata) | 0.04 kb -> 0.04 kb
       1.857s | end
       "
     `);
@@ -526,7 +520,6 @@ describe('async storage efficiency: document', () => {
     ).toMatchInlineSnapshot(`
       a: 1735689605906
       o: '✅'
-      v: 1
     `);
     expect(
       getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d.e.p.json'),

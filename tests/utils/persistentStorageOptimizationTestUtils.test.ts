@@ -87,7 +87,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       5ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
       6ms  | 📄 file-open ✅ #2 tsdf/sess1/docs/d.e.m.json (metadata)
       8ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (payload) | 0.10 kb
-      12ms | ✍️ #2 tsdf/sess1/docs/d.e.m.json (metadata) | 0.03 kb -> 0.16 kb
+      12ms | ✍️ #2 tsdf/sess1/docs/d.e.m.json (metadata) | 0.01 kb -> 0.16 kb
       14ms | 🗑️ ✅ #1 tsdf/sess1/docs/d.e.p.json (payload)
       15ms | end
       "
@@ -184,7 +184,6 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     expect(getParsedOpfsFileData('tsdf/sess1/docs/d.e.m.json'))
       .toMatchInlineSnapshot(`
         a: 0
-        v: 1
       `);
     expect(getParsedOpfsFileData('tsdf/sess1/docs/d.e.p.json'))
       .toMatchInlineSnapshot(`

@@ -86,9 +86,9 @@ describe('sync storage efficiency: document', () => {
 
     expect(getParsedLocalStorageValue('tsdf._m.r.s:sess1.doc-remount-flow.m'))
       .toMatchInlineSnapshot(`
-      e:
-        - a: 1735689604100
-    `);
+        e:
+          - a: 1735689604100
+      `);
   });
 
   test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {

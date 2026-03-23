@@ -150,7 +150,7 @@ function parseInternalManagedMetadataRecord(
   if (
     record === null ||
     typeof record.a !== 'number' ||
-    typeof record.v !== 'number'
+    ('v' in record && record.v !== undefined && typeof record.v !== 'number')
   ) {
     return null;
   }
@@ -159,7 +159,7 @@ function parseInternalManagedMetadataRecord(
 
   return {
     lastAccessAt: record.a,
-    version: record.v,
+    version: typeof record.v === 'number' ? record.v : 1,
     ...(customMetadata ? { customMetadata } : {}),
   };
 }
@@ -169,7 +169,9 @@ function serializeInternalManagedMetadataRecord(
 ): Record<string, unknown> {
   const serialized: Record<string, unknown> = {
     [ASYNC_METADATA_LAST_ACCESS_AT_KEY]: metadata.lastAccessAt,
-    [ASYNC_METADATA_VERSION_KEY]: metadata.version,
+    ...(metadata.version !== 1
+      ? { [ASYNC_METADATA_VERSION_KEY]: metadata.version }
+      : {}),
   };
 
   const customMetadata = metadata.customMetadata;

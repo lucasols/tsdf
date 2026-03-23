@@ -227,6 +227,97 @@ describe('createAsyncStorageAdapter', () => {
     ).toHaveLength(1);
   });
 
+  test('metadata parsing accepts both explicit and implicit default version records', async () => {
+    const driverState = createNaiveAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driverState.driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'metadata-compat',
+      kind: 'document',
+    } as const;
+    const namespace = adapter.openNamespace<{ value: string }, { o?: boolean }>(
+      scope,
+    );
+
+    await Promise.all([
+      driverState.driver.set(scope, '__tsdf_payload__:explicit', {
+        value: 'with-version',
+      }),
+      driverState.driver.set(scope, '__tsdf_meta__:explicit', {
+        a: TEST_INITIAL_TIME,
+        v: 1,
+      }),
+      driverState.driver.set(scope, '__tsdf_payload__:implicit', {
+        value: 'without-version',
+      }),
+      driverState.driver.set(scope, '__tsdf_meta__:implicit', {
+        a: TEST_INITIAL_TIME + 1,
+        o: true,
+      }),
+    ]);
+
+    expect(await namespace.get('explicit', { touch: 'never' }))
+      .toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: {}
+          key: 'explicit'
+          lastAccessAt: 1735689600000
+          payloadRef: '__tsdf_payload__:explicit'
+          version: 1
+          writtenAt: 1735689600000
+
+        value: { value: 'with-version' }
+      `);
+    expect(await namespace.get('implicit', { touch: 'never' }))
+      .toMatchInlineSnapshot(`
+        metadata:
+          customMetadata: { o: '✅' }
+          key: 'implicit'
+          lastAccessAt: 1735689600001
+          payloadRef: '__tsdf_payload__:implicit'
+          version: 1
+          writtenAt: 1735689600001
+
+        value: { value: 'without-version' }
+      `);
+  });
+
+  test('commits omit v when writing the default metadata version', async () => {
+    const driverState = createNaiveAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driverState.driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'metadata-write-shape',
+      kind: 'document',
+    } as const;
+    const namespace = adapter.openNamespace<{ value: string }, { o?: boolean }>(
+      scope,
+    );
+
+    const commit = namespace.commit({
+      upserts: [
+        {
+          key: 'document',
+          value: { value: 'cached' },
+          version: 1,
+          metadata: { o: true },
+        },
+      ],
+    });
+
+    await advanceTime(40);
+    await commit;
+
+    expect(
+      driverState.namespaces
+        .get(JSON.stringify([scope.sessionKey, scope.storeName, scope.kind]))
+        ?.get('__tsdf_meta__:document'),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600040
+      o: '✅'
+    `);
+  });
+
   test('clearSessionStorage works for any wrapped async driver', async () => {
     const driverState = createNaiveAsyncStorageDriver();
     const adapter = createAsyncStorageAdapter(driverState.driver);

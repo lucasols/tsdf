@@ -219,7 +219,7 @@ type ManagedMetadataRecord = {
   writtenAt: number;
 };
 
-type RawManagedMetadataRecord = { a: number; v: number } & Record<
+type RawManagedMetadataRecord = { a: number; v?: number } & Record<
   string,
   unknown
 >;
@@ -235,7 +235,7 @@ function serializeManagedMetadataRecord(
 
   return {
     a: metadata.lastAccessAt,
-    v: metadata.version,
+    ...(metadata.version !== 1 ? { v: metadata.version } : {}),
     ...metadata.customMetadata,
   };
 }
@@ -247,7 +247,9 @@ function createManagedMetadataRecord(
 ): RawManagedMetadataRecord {
   return {
     a: entry.timestamp,
-    v: entry.version ?? 1,
+    ...(entry.version !== undefined && entry.version !== 1
+      ? { v: entry.version }
+      : {}),
     ...buildCustomMetadata(scope, entry.data),
   };
 }
@@ -260,7 +262,7 @@ function parseManagedMetadataRecord(
   if (
     record === null ||
     typeof record.a !== 'number' ||
-    typeof record.v !== 'number'
+    ('v' in record && record.v !== undefined && typeof record.v !== 'number')
   ) {
     return null;
   }
@@ -275,7 +277,7 @@ function parseManagedMetadataRecord(
     key,
     writtenAt: record.a,
     lastAccessAt: record.a,
-    version: record.v,
+    version: typeof record.v === 'number' ? record.v : 1,
     customMetadata,
   };
 }
@@ -284,7 +286,10 @@ function normalizeMetadataValue(key: string, value: unknown): unknown {
   const record = getRecord(value);
   if (record === null) return value;
 
-  if (typeof record.a === 'number' && typeof record.v === 'number') {
+  if (
+    typeof record.a === 'number' &&
+    (!('v' in record) || record.v === undefined || typeof record.v === 'number')
+  ) {
     return value;
   }
 
