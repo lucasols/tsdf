@@ -331,7 +331,7 @@ describe('async storage efficiency: collection', () => {
     `);
   });
 
-  test('direct getItemState reads the cached collection item multiple times with short gaps and promotes it once', async () => {
+  test('preloadItemFromStorage hydrates the cached collection item once and keeps later preloads and direct reads in memory', async () => {
     const storeName = 'col-direct-get-item-state';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -340,29 +340,88 @@ describe('async storage efficiency: collection', () => {
     collectionScope.collection.seedItem('1', {
       value: { id: '1', name: 'Cached user' },
     });
+    collectionScope.collection.seedItem('2', {
+      value: { id: '2', name: 'Another cached user' },
+    });
 
     const env = createCollectionEnv({ storeName, sessionKey });
 
-    // Drain the startup scan so this capture only measures the direct read path.
+    // Drain the startup scan so the capture only measures explicit preload behavior.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // Repeated direct reads with short gaps should hydrate once, then reuse in-memory state.
+    // Preload should materialize the cached item into store state through the async path.
+    const preloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const preloadPromise = env.apiStore.preloadItemFromStorage('1');
+    expect(await resolveAfterAllTimers(preloadPromise)).toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '✅' }
+    `);
+    const preloadPromise2 = env.apiStore.preloadItemFromStorage('2');
+    expect(await resolveAfterAllTimers(preloadPromise2)).toMatchInlineSnapshot(
+      `- { payload: '2', preloaded: '✅' }`,
+    );
+
+    expect(preloadCapture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/col-direct-get-item-state (store directory)
+      2ms  | 📄 file-open ✅ #1 tsdf/sess1/col-direct-get-item-state/ci._i.r.json
+           |    └ (namespace index)
+      3ms  | 📖 #1 tsdf/sess1/col-direct-get-item-state/ci._i.r.json
+           |    └ (namespace index) | 0.15 kb
+      6ms  | 📄 file-open ✅ #2 tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
+           |    └ ([itemKey: "1], entry data)
+      7ms  | 📖 #2 tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
+           |    └ ([itemKey: "1], entry data) | 0.11 kb
+      10ms | 📄 file-open ✅ #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
+           |    └ ([itemKey: "2], entry data)
+      11ms | 📖 #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
+           |    └ ([itemKey: "2], entry data) | 0.12 kb
+      14ms | end
+      "
+    `);
+
+    // Once preloaded, repeated explicit preload calls should reuse in-memory state without new storage work.
+    const repeatedPreloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    expect(
+      await resolveAfterAllTimers(env.apiStore.preloadItemFromStorage('1')),
+    ).toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '✅' }
+    `);
+    await advanceTime(100);
+    expect(
+      await resolveAfterAllTimers(env.apiStore.preloadItemFromStorage('1')),
+    ).toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '✅' }
+    `);
+    await advanceTime(100);
+    expect(
+      await resolveAfterAllTimers(env.apiStore.preloadItemFromStorage('1')),
+    ).toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '✅' }
+    `);
+    expect(
+      repeatedPreloadCapture.finish().timelineString,
+    ).toMatchInlineSnapshot(`"empty"`);
+
+    // Repeated direct reads should also reuse in-memory state without new storage work.
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
-      `undefined`,
+      `value: { id: '1', name: 'Cached user' }`,
     );
     await advanceTime(100);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
-      `undefined`,
+      `value: { id: '1', name: 'Cached user' }`,
     );
     await advanceTime(100);
     expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
-      `undefined`,
+      `value: { id: '1', name: 'Cached user' }`,
     );
     await flushAllTimers();
     const operationsBreakdown = readCapture.finish().timelineString;
 
-    expect(env.store.state).toMatchInlineSnapshot(`{}`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
   });
 

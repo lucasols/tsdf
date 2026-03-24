@@ -567,6 +567,143 @@ describe('async storage efficiency: list-query', () => {
     `);
   });
 
+  test('maxItems-triggered flush also prunes expired persisted standalone items', async () => {
+    const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const storeName = 'lq-expired-during-max-items';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const adminsQuery = { tableId: 'admins' };
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      maxItems: 2,
+      serverData: {
+        users: [{ id: 3, name: 'Referenced fresh' }],
+        admins: [{ id: 4, name: 'Second referenced fresh' }],
+      },
+    });
+
+    // Drain startup cleanup first so the later item removals are attributable to the maxItems path.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Persist two standalone items that will later look expired to the cleanup pass.
+    env.apiStore.addItemToState(rawItemPayload('standalone', 1), {
+      id: 1,
+      name: 'Expired oldest',
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    await advanceTime(100);
+    env.apiStore.addItemToState(rawItemPayload('standalone', 2), {
+      id: 2,
+      name: 'Expired newer',
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // Persist one query-backed item so the cleanup has a referenced entry it must preserve.
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    // Backdate the standalone entries so the later maxItems cleanup sees them as stale persisted candidates.
+    mockAdapter.setMetadata(
+      listQueryScope.listQuery.itemStorageKey('standalone', 1),
+      {
+        ...mockAdapter.readMetadata(
+          listQueryScope.listQuery.itemStorageKey('standalone', 1),
+        ),
+        lastAccessAt: expiredTimestamp,
+      },
+    );
+    mockAdapter.setMetadata(
+      listQueryScope.listQuery.itemStorageKey('standalone', 2),
+      {
+        ...mockAdapter.readMetadata(
+          listQueryScope.listQuery.itemStorageKey('standalone', 2),
+        ),
+        lastAccessAt: expiredTimestamp,
+      },
+    );
+
+    // Fetching a second query-backed item should keep both referenced entries and prune the expired standalone ones.
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    env.scheduleFetch('highPriority', adminsQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(
+      listQueryScope.listQuery.listStoredItemKeys().sort(),
+    ).toMatchInlineSnapshot(`['"admins||4', '"users||3']`);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-expired-during-max-items/li._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "admins||4: { a: 1735689612163, p: 'admins||4' }
+        "users||3: { a: 1735689612163, p: 'users||3' }
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-expired-during-max-items/lq._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        {tableId:"admins"}:
+          a: 1735689612163
+          i: ['"admins||4']
+          p: { tableId: 'admins' }
+        {tableId:"users"}:
+          a: 1735689607151
+          i: ['"users||3']
+          p: { tableId: 'users' }
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time   |
+      1.85s  | 📖 #1 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
+             |    └ (namespace index) | 0.18 kb
+      .      | 📖 #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+             |    └ (namespace index) | 0.22 kb
+      1.853s | 📄 file-open-or-create 🆕 #3 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
+             |    └ ([queryKey: {tableId:"admins"}], entry data)
+      .      | 📄 file-open-or-create 🆕 #4 tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
+             |    └ (internal record)
+      .      | 📄 file-open-or-create 🆕 #5 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
+             |    └ ([itemKey: "admins||4], entry data)
+      1.855s | ✍️ #6 tsdf/sess1/lq-expired-during-max-items/li.h~3224064498.p.json
+             |    └ ([itemKey: "users||3], entry data) | 0.11 kb -> 0.17 kb
+      1.856s | ✍️ #3 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
+             |    └ ([queryKey: {tableId:"admins"}], entry data) | 0.00 kb -> 0.09 kb
+      .      | ✍️ #4 tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
+             |    └ (internal record) | 0.00 kb -> 0.11 kb
+      .      | ✍️ #5 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
+             |    └ ([itemKey: "admins||4], entry data) | 0.00 kb -> 0.12 kb
+      1.86s  | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
+             |    └ (namespace index) | 0.18 kb -> 0.35 kb
+      .      | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+             |    └ (namespace index) | 0.22 kb -> 0.43 kb
+             ·
+      3.902s | 📖 #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+             |    └ (namespace index) | 0.43 kb
+      3.905s | 🗑️ ✅ #4 tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
+             |    └ (internal record)
+      .      | 🗑️ ✅ #7 tsdf/sess1/lq-expired-during-max-items/li.h~3111345837.p.json
+             |    └ ([itemKey: "standalone||2], entry data)
+      3.908s | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
+             |    └ (namespace index) | 0.43 kb -> 0.21 kb
+      3.91s  | end
+      "
+    `);
+  });
+
   test('maxItems cleanup evicts standalone items before query-related shared items', async () => {
     const storeName = 'lq-shared-item-cleanup';
     const sessionKey = 'sess1';
