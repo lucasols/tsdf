@@ -526,10 +526,22 @@ export type PersistentStorageNamespaceMetadata<
   version: number;
 };
 
+export type PersistentStorageNamespaceCommitArgs<
+  T,
+  TMetadata extends Record<string, unknown> = Record<string, never>,
+> = {
+  removes?: string[];
+  touches?: Array<{ key: string; lastAccessAt?: number }>;
+  upserts?: Array<{ data: T; key: string; metadata?: TMetadata }>;
+};
+
 export type PersistentStorageNamespaceHandle<
   T,
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
+  commit(
+    args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
+  ): Promise<void>;
   readEntry(
     entryKey: string,
     options?: { touch?: AsyncStorageTouchMode },
@@ -593,12 +605,6 @@ export function createPersistentStorageNamespaceHandle<
     return `${getStorageKey(sessionKey, config.storeName)}.${config.entryPrefix}.`;
   }
 
-  function getKey(entryKey: string): string | false {
-    const prefix = getPrefix();
-    if (prefix === false) return false;
-    return `${prefix}${entryKey}`;
-  }
-
   function getAsyncNamespace() {
     if (asyncAdapter === null) return null;
 
@@ -614,6 +620,92 @@ export function createPersistentStorageNamespaceHandle<
 
   if (asyncAdapter !== null) {
     void getAsyncNamespace();
+  }
+
+  async function commit(
+    args: PersistentStorageNamespaceCommitArgs<T, TMetadata>,
+  ): Promise<void> {
+    try {
+      if (asyncAdapter !== null) {
+        const namespace = getAsyncNamespace();
+        if (!namespace) return;
+
+        await namespace.commit({
+          removes: args.removes,
+          touches: args.touches,
+          upserts: args.upserts?.map((upsert) => ({
+            key: upsert.key,
+            value: valueCodec
+              ? valueCodec.serialize(upsert.data)
+              : __LEGIT_CAST__<unknown, T>(upsert.data),
+            version: asyncVersion,
+            metadata:
+              upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
+          })),
+        });
+        return;
+      }
+
+      const prefix = getPrefix();
+      if (prefix === false) return;
+      const sessionKey = config.getSessionKey();
+      if (sessionKey === false) return;
+      const now = Date.now();
+      const touchTimestamps = new Map(
+        (args.touches ?? []).map((touch) => [touch.key, touch.lastAccessAt]),
+      );
+
+      await runLocalStorageMutation(() => {
+        for (const entryKey of args.removes ?? []) {
+          localPersistentStorage.remove(`${prefix}${entryKey}`, {
+            metadata: 'namespace',
+            namespacePrefix: prefix,
+          });
+        }
+
+        for (const upsert of args.upserts ?? []) {
+          const key = `${prefix}${upsert.key}`;
+          const timestamp = touchTimestamps.get(upsert.key) ?? now;
+          const entry = createCompactLocalStorageEntry(
+            localCodec.serialize(upsert.data),
+            version,
+          );
+
+          localPersistentStorage.write(key, entry);
+          localPersistentStorage.upsertNamespaceEntry({
+            storagePrefix: prefix,
+            entryKey: upsert.key,
+            lastAccessAt: timestamp,
+            meta: preserveOfflineProtectionFlag(
+              sessionKey,
+              key,
+              upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
+              () =>
+                localPersistentStorage.readNamespaceEntryMetadataByPayload(
+                  key,
+                  prefix,
+                )?.meta,
+            ),
+          });
+          recordLocalStorageTouch(key, timestamp);
+        }
+
+        for (const touch of args.touches ?? []) {
+          if ((args.upserts ?? []).some((upsert) => upsert.key === touch.key)) {
+            continue;
+          }
+
+          const key = `${prefix}${touch.key}`;
+          if (!localPersistentStorage.touchNamespaceEntry(key, prefix)) {
+            continue;
+          }
+
+          recordLocalStorageTouch(key, touch.lastAccessAt ?? now);
+        }
+      });
+    } catch (error) {
+      onPersistentStorageError?.(error);
+    }
   }
 
   async function readEntry(
@@ -771,84 +863,11 @@ export function createPersistentStorageNamespaceHandle<
   }
 
   async function save(entryKey: string, data: T): Promise<void> {
-    const key = getKey(entryKey);
-
-    try {
-      if (asyncAdapter !== null) {
-        const namespace = getAsyncNamespace();
-        if (!namespace) return;
-
-        await namespace.commit({
-          upserts: [
-            {
-              key: entryKey,
-              value: valueCodec ? valueCodec.serialize(data) : data,
-              version: asyncVersion,
-              metadata: getManifestMeta?.(data, entryKey),
-            },
-          ],
-        });
-        return;
-      }
-
-      if (key === false) return;
-      const sessionKey = config.getSessionKey();
-      if (sessionKey === false) return;
-      const timestamp = Date.now();
-      const entry = createCompactLocalStorageEntry(
-        localCodec.serialize(data),
-        version,
-      );
-
-      await runLocalStorageMutation(() => {
-        const prefix = getPrefix();
-        if (prefix === false) return;
-
-        localPersistentStorage.write(key, entry);
-        localPersistentStorage.upsertNamespaceEntry({
-          storagePrefix: prefix,
-          entryKey,
-          lastAccessAt: timestamp,
-          meta: preserveOfflineProtectionFlag(
-            sessionKey,
-            key,
-            getManifestMeta?.(data, entryKey),
-            () =>
-              localPersistentStorage.readNamespaceEntryMetadataByPayload(
-                key,
-                prefix,
-              )?.meta,
-          ),
-        });
-        recordLocalStorageTouch(key, timestamp);
-      });
-    } catch (error) {
-      onPersistentStorageError?.(error);
-    }
+    await commit({ upserts: [{ data, key: entryKey }] });
   }
 
   async function remove(entryKey: string): Promise<void> {
-    try {
-      if (asyncAdapter !== null) {
-        const namespace = getAsyncNamespace();
-        if (!namespace) return;
-        await namespace.commit({ removes: [entryKey] });
-        return;
-      }
-
-      const prefix = getPrefix();
-      if (prefix === false) return;
-      const key = `${prefix}${entryKey}`;
-
-      await runLocalStorageMutation(() => {
-        localPersistentStorage.remove(key, {
-          metadata: 'namespace',
-          namespacePrefix: prefix,
-        });
-      });
-    } catch (error) {
-      onPersistentStorageError?.(error);
-    }
+    await commit({ removes: [entryKey] });
   }
 
   async function listMetadata(
@@ -936,6 +955,7 @@ export function createPersistentStorageNamespaceHandle<
   }
 
   return {
+    commit,
     readEntry,
     load,
     loadMany,

@@ -13,6 +13,7 @@ import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
 } from './offline/types';
+import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import {
@@ -47,7 +48,10 @@ import type {
   PersistedCollectionItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
-import { getProtectedKeysFromMetadata } from './asyncStorageAdapter';
+import {
+  getProtectedKeysFromMetadata,
+  serializeProtectedRef,
+} from './asyncStorageAdapter';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;
@@ -685,10 +689,16 @@ export function setupCollectionPersistence<
         return;
       }
 
-      const tasks: Promise<void>[] = [];
       const nextPersistedKeys = new Set<string>();
       const previousPersistedKeys = await ensureKnownPersistedKeys();
-      const removedKeys = new Set<string>();
+      const pendingRemoves = new Set<string>();
+      const pendingUpserts = new Map<
+        string,
+        {
+          snapshot: string;
+          value: PersistedCollectionItemData<ItemState | StorageState>;
+        }
+      >();
       syncMaintenanceRegistration();
       const stateEntries: Array<
         [string, TSFDCollectionItem<ItemState, ItemPayload> | null]
@@ -712,18 +722,14 @@ export function setupCollectionPersistence<
             previousPersistedKeys.has(itemKey) &&
             hydratedPersistedKeys.has(itemKey)
           ) {
-            tasks.push(namespace.remove(itemKey));
-            forgetPersistedItem(itemKey);
-            removedKeys.add(itemKey);
+            pendingRemoves.add(itemKey);
           }
           continue;
         }
 
         if (shouldIgnoreItem(item.payload)) {
           if (previousPersistedKeys.has(itemKey)) {
-            tasks.push(namespace.remove(itemKey));
-            forgetPersistedItem(itemKey);
-            removedKeys.add(itemKey);
+            pendingRemoves.add(itemKey);
           }
           continue;
         }
@@ -745,27 +751,146 @@ export function setupCollectionPersistence<
           continue;
         }
 
-        persistedSnapshotByKey.set(itemKey, nextSnapshot);
-        hydratedPersistedKeys.add(itemKey);
-        knownMissingPersistedKeys.delete(itemKey);
-        tasks.push(namespace.save(itemKey, nextValue));
+        pendingUpserts.set(itemKey, {
+          snapshot: nextSnapshot,
+          value: nextValue,
+        });
       }
 
       for (const itemKey of previousPersistedKeys) {
         if (nextPersistedKeys.has(itemKey)) continue;
         if (!hydratedPersistedKeys.has(itemKey)) continue;
 
-        tasks.push(namespace.remove(itemKey));
-        forgetPersistedItem(itemKey);
-        removedKeys.add(itemKey);
+        pendingRemoves.add(itemKey);
       }
 
-      await Promise.all(tasks);
+      let optimizedOverflow = false;
+      let commitTimestamp: number | undefined;
+
+      if (
+        localStorageAdapter === null &&
+        !hasIgnoreItemFilter &&
+        previousPersistedKeys.size - pendingRemoves.size + pendingUpserts.size >
+          maxItems
+      ) {
+        const sessionKey = config.getSessionKey();
+        if (sessionKey !== false) {
+          commitTimestamp = Date.now();
+          const metadataEntries =
+            await listAllPersistentStorageNamespaceMetadata(namespace, {
+              order: 'lru-desc',
+            });
+          const metadataByKey = new Map(
+            metadataEntries.map((entry) => [entry.key, entry] as const),
+          );
+          const protectedItemKeys =
+            getProtectedKeysFromMetadata(metadataEntries);
+          const protectedRefs = getSessionProtectedKeysSnapshot(sessionKey);
+          const candidateEntries: Array<{
+            itemKey: string;
+            lastAccessAt: number;
+            protected: boolean;
+          }> = [];
+
+          for (const entry of metadataEntries) {
+            if (
+              pendingRemoves.has(entry.key) ||
+              pendingUpserts.has(entry.key)
+            ) {
+              continue;
+            }
+
+            const payload = validateWithSchema(
+              config.payloadSchema,
+              readManifestPayloadMeta(entry.customMetadata),
+            );
+            if (payload === null) {
+              pendingRemoves.add(entry.key);
+              nextPersistedKeys.delete(entry.key);
+              continue;
+            }
+
+            candidateEntries.push({
+              itemKey: entry.key,
+              lastAccessAt: entry.lastAccessAt,
+              protected: protectedItemKeys.has(entry.key),
+            });
+          }
+
+          for (const itemKey of pendingUpserts.keys()) {
+            candidateEntries.push({
+              itemKey,
+              lastAccessAt: commitTimestamp,
+              protected:
+                protectedItemKeys.has(itemKey) ||
+                protectedRefs?.has(
+                  serializeProtectedRef({
+                    key: itemKey,
+                    kind: 'collection.item',
+                    sessionKey,
+                    storeName: config.storeName,
+                  }),
+                ) === true,
+            });
+          }
+
+          if (candidateEntries.length > maxItems) {
+            candidateEntries.sort(
+              createEvictionComparator(
+                [
+                  (entry) => entry.protected,
+                  (entry) => pinnedItemKeys.has(entry.itemKey),
+                ],
+                (entry) => entry.lastAccessAt,
+              ),
+            );
+
+            const keptKeys = new Set(
+              candidateEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+            );
+
+            for (const { itemKey } of candidateEntries) {
+              if (keptKeys.has(itemKey)) continue;
+
+              pendingUpserts.delete(itemKey);
+              if (metadataByKey.has(itemKey)) {
+                pendingRemoves.add(itemKey);
+              }
+            }
+
+            optimizedOverflow = true;
+          }
+        }
+      }
+
+      await namespace.commit({
+        removes: [...pendingRemoves],
+        touches:
+          commitTimestamp === undefined
+            ? undefined
+            : [...pendingUpserts.keys()].map((key) => ({
+                key,
+                lastAccessAt: commitTimestamp,
+              })),
+        upserts: [...pendingUpserts.entries()].map(([key, entry]) => ({
+          data: entry.value,
+          key,
+        })),
+      });
+
+      for (const itemKey of pendingRemoves) {
+        forgetPersistedItem(itemKey);
+      }
+      for (const [itemKey, entry] of pendingUpserts.entries()) {
+        persistedSnapshotByKey.set(itemKey, entry.snapshot);
+        hydratedPersistedKeys.add(itemKey);
+        knownMissingPersistedKeys.delete(itemKey);
+      }
       knownPersistedKeys = new Set(previousPersistedKeys);
-      for (const itemKey of removedKeys) {
+      for (const itemKey of pendingRemoves) {
         knownPersistedKeys.delete(itemKey);
       }
-      for (const itemKey of nextPersistedKeys) {
+      for (const itemKey of pendingUpserts.keys()) {
         knownPersistedKeys.add(itemKey);
       }
 
@@ -780,7 +905,10 @@ export function setupCollectionPersistence<
 
       const sessionKey = config.getSessionKey();
       if (sessionKey !== false && localStorageAdapter === null) {
-        if (hasIgnoreItemFilter || knownPersistedKeys.size > maxItems) {
+        if (
+          hasIgnoreItemFilter ||
+          (!optimizedOverflow && knownPersistedKeys.size > maxItems)
+        ) {
           scheduleAsyncStorageMaintenance(
             `collection:${sessionKey}:${config.storeName}`,
             evictStoredItems,

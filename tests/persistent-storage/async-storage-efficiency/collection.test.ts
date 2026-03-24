@@ -166,20 +166,15 @@ describe('async storage efficiency: collection', () => {
              |
       1.046s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.049s | 📄 file-open-or-create 🆕 #2 tsdf/sess1/col-max-items-metadata/ci.h~3994120284.p.json
-             |    └ ([itemKey: "c], entry data)
-      1.052s | ✍️ #2 tsdf/sess1/col-max-items-metadata/ci.h~3994120284.p.json
-             |    └ ([itemKey: "c], entry data) | 0.00 kb -> 0.10 kb
-      1.056s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb -> 0.21 kb
-             |
-      3.098s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
-      3.101s | 🗑️ ✅ #3 tsdf/sess1/col-max-items-metadata/ci.h~3986551515.p.json
+      1.049s | 🗑️ ✅ #2 tsdf/sess1/col-max-items-metadata/ci.h~3986551515.p.json
              |    └ ([itemKey: "a], entry data)
-      3.104s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb -> 0.15 kb
-      3.106s | end
+      1.05s  | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-max-items-metadata/ci.h~3994120284.p.json
+             |    └ ([itemKey: "c], entry data)
+      1.053s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~3994120284.p.json
+             |    └ ([itemKey: "c], entry data) | 0.00 kb -> 0.10 kb
+      1.057s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+             |    └ (namespace index) | 0.15 kb -> 0.15 kb
+      1.059s | end
       "
     `);
 
@@ -240,31 +235,26 @@ describe('async storage efficiency: collection', () => {
              |
       1.046s | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.049s | 📄 file-open-or-create 🆕 #2 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
+      1.049s | 🗑️ ✅ #2 tsdf/sess1/col-coalesced-maintenance/ci.h~3986551515.p.json
+             |    └ ([itemKey: "a], entry data)
+      1.05s  | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
              |    └ ([itemKey: "c], entry data)
-      1.052s | ✍️ #2 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
+      1.053s | ✍️ #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
              |    └ ([itemKey: "c], entry data) | 0.00 kb -> 0.10 kb
-      1.056s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb -> 0.21 kb
+      1.057s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+             |    └ (namespace index) | 0.15 kb -> 0.15 kb
              |
       2.14s  | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
-      2.143s | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
-             |    └ ([itemKey: "d], entry data)
-      2.146s | ✍️ #3 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
-             |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
-      2.15s  | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb -> 0.28 kb
-             |
-      3.098s | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
-             |    └ (namespace index) | 0.28 kb
-      3.101s | 🗑️ ✅ #4 tsdf/sess1/col-coalesced-maintenance/ci.h~1374750182.p.json
+             |    └ (namespace index) | 0.15 kb
+      2.143s | 🗑️ ✅ #4 tsdf/sess1/col-coalesced-maintenance/ci.h~1374750182.p.json
              |    └ ([itemKey: "b], entry data)
-      .      | 🗑️ ✅ #5 tsdf/sess1/col-coalesced-maintenance/ci.h~3986551515.p.json
-             |    └ ([itemKey: "a], entry data)
-      3.104s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
-             |    └ (namespace index) | 0.28 kb -> 0.15 kb
-      3.106s | end
+      2.144s | 📄 file-open-or-create 🆕 #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
+             |    └ ([itemKey: "d], entry data)
+      2.147s | ✍️ #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
+             |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
+      2.151s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+             |    └ (namespace index) | 0.15 kb -> 0.15 kb
+      2.153s | end
       "
     `);
   });
