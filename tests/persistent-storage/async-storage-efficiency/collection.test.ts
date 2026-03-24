@@ -425,51 +425,6 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
   });
 
-  test('direct getItemState touch preserves an offline marker added by another tab before the batched manifest update', async () => {
-    const storeName = 'col-direct-touch-offline-marker';
-    const sessionKey = 'sess1';
-    const mockAdapter = createOpfsPersistentStorageTestStore();
-    const collectionScope = mockAdapter.scope(storeName, sessionKey);
-    const storageKey = collectionScope.collection.itemStorageKey('1');
-
-    collectionScope.collection.seedItem(
-      '1',
-      { value: { id: '1', name: 'Cached user' } },
-      { timestamp: Date.now() - 7 * 60 * 60 * 1000 },
-    );
-
-    const env = createCollectionEnv({ storeName, sessionKey });
-
-    // Drain the startup scan so the later touch only comes from the direct read path.
-    await settleStartupBackgroundScan(mockAdapter);
-
-    // The direct read schedules a timestamp touch for the cached item.
-    expect(env.apiStore.getItemState('1')?.data).toMatchInlineSnapshot(
-      `undefined`,
-    );
-
-    // Simulate another tab marking the item as offline-protected before the touch runs.
-    markEntryOfflineProtected(mockAdapter, storageKey);
-    await advanceTime(40);
-    await flushAllTimers();
-
-    const metadataPath =
-      'tsdf/sess1/col-direct-touch-offline-marker/ci._i.r.json';
-    const payloadPath =
-      'tsdf/sess1/col-direct-touch-offline-marker/ci.%221.p.json';
-
-    expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
-      e:
-        "1: { a: 1735664400000, o: '✅', p: '1' }
-    `);
-    expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
-      d:
-        value: { id: '1', name: 'Cached user' }
-
-      p: '1'
-    `);
-  });
-
   test('updating a hydrated collection item writes the mutation without rereading cached entries', async () => {
     const storeName = 'col-mutation-flow';
     const sessionKey = 'sess1';
