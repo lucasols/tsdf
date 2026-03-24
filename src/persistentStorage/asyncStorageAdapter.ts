@@ -1180,12 +1180,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       touchesApplied = true;
     }
 
-    if (removeEntries.length > 0) {
-      await this.#driverRemoveManyFrom(this.driver, scope, removeEntries);
-    }
-    if (setEntries.length > 0) {
-      await this.#driverSetManyFrom(this.driver, scope, setEntries);
-    }
+    await Promise.all([
+      removeEntries.length > 0
+        ? this.#driverRemoveManyFrom(this.driver, scope, removeEntries)
+        : Promise.resolve(),
+      setEntries.length > 0
+        ? this.#driverSetManyFrom(this.driver, scope, setEntries)
+        : Promise.resolve(),
+    ]);
 
     const indexChanged =
       removes.length > 0 || upserts.length > 0 || touchesApplied;

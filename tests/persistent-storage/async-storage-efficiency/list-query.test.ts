@@ -809,13 +809,13 @@ describe('async storage efficiency: list-query', () => {
              |    └ ([queryKey: {tableId:"users"}], entry data) | 0.11 kb -> 0.09 kb
       .      | ✍️ #5 tsdf/sess1/lq-delete-flow/lq.h~1805955701.p.json
              |    └ ([queryKey: {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}], entry data) | 0.19 kb -> 0.17 kb
-      1.046s | ✍️ #6 tsdf/sess1/lq-delete-flow/li.h~1937155452.p.json
+      .      | ✍️ #6 tsdf/sess1/lq-delete-flow/li.h~1937155452.p.json
              |    └ ([itemKey: "users||2], entry data) | 0.08 kb -> 0.15 kb
       1.049s | ✍️ #1 tsdf/sess1/lq-delete-flow/lq._i.r.json
              |    └ (namespace index) | 0.58 kb -> 0.53 kb
-      1.05s  | ✍️ #2 tsdf/sess1/lq-delete-flow/li._i.r.json
+      .      | ✍️ #2 tsdf/sess1/lq-delete-flow/li._i.r.json
              |    └ (namespace index) | 0.20 kb -> 0.11 kb
-      1.052s | end
+      1.051s | end
       "
     `);
   });

@@ -766,7 +766,9 @@ function formatTimelineTable(
 ): string {
   if (operations.length === 0) return 'empty';
 
-  const rows: Array<{ cols: string[] }> = [{ cols: ['time', ''] }];
+  const rows: Array<{ cols: string[]; type?: 'default' | 'gap' }> = [
+    { cols: ['time', ''] },
+  ];
   let previousTime: number | undefined;
 
   for (const operation of operations) {

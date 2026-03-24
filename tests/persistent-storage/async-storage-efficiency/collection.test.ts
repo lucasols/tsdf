@@ -174,13 +174,13 @@ describe('async storage efficiency: collection', () => {
              |    └ ([itemKey: "b], entry data)
       .      | 🗑️ ✅ #3 tsdf/sess1/col-max-items-metadata/ci.h~3986551515.p.json
              |    └ ([itemKey: "a], entry data)
-      1.05s  | 📄 file-open-or-create 🆕 #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      .      | 📄 file-open-or-create 🆕 #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data)
-      1.053s | ✍️ #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      1.052s | ✍️ #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
-      1.057s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      1.056s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.15 kb
-      1.059s | end
+      1.058s | end
       "
     `);
 
@@ -248,13 +248,13 @@ describe('async storage efficiency: collection', () => {
              |    └ ([itemKey: "a], entry data)
       .      | 🗑️ ✅ #3 tsdf/sess1/col-expired-during-max-items/ci.h~1374750182.p.json
              |    └ ([itemKey: "b], entry data)
-      1.05s  | 📄 file-open-or-create 🆕 #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+      .      | 📄 file-open-or-create 🆕 #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data)
-      1.053s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+      1.052s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
-      1.057s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+      1.056s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.15 kb
-      1.059s | end
+      1.058s | end
       "
     `);
   });
@@ -307,24 +307,24 @@ describe('async storage efficiency: collection', () => {
              |    └ (namespace index) | 0.15 kb
       1.049s | 🗑️ ✅ #2 tsdf/sess1/col-coalesced-maintenance/ci.h~3986551515.p.json
              |    └ ([itemKey: "a], entry data)
-      1.05s  | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
+      .      | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
              |    └ ([itemKey: "c], entry data)
-      1.053s | ✍️ #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
+      1.052s | ✍️ #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
              |    └ ([itemKey: "c], entry data) | 0.00 kb -> 0.10 kb
-      1.057s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      1.056s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
              ·
       2.14s  | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
       2.143s | 🗑️ ✅ #4 tsdf/sess1/col-coalesced-maintenance/ci.h~1374750182.p.json
              |    └ ([itemKey: "b], entry data)
-      2.144s | 📄 file-open-or-create 🆕 #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
+      .      | 📄 file-open-or-create 🆕 #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data)
-      2.147s | ✍️ #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
+      2.146s | ✍️ #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
-      2.151s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      2.15s  | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
-      2.153s | end
+      2.152s | end
       "
     `);
   });
