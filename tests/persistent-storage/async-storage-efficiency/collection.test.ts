@@ -118,7 +118,7 @@ describe('async storage efficiency: collection', () => {
     `);
   });
 
-  test('maxItems cleanup snapshots the full manifest history', async () => {
+  test('maxItems cleanup snapshots the full manifest history when one flush deletes multiple items', async () => {
     const storeName = 'col-max-items-metadata';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -129,7 +129,11 @@ describe('async storage efficiency: collection', () => {
     });
     await advanceTime(100);
     collectionScope.collection.seedItem('b', {
-      value: { id: 'b', name: 'Newer cached' },
+      value: { id: 'b', name: 'Older cached' },
+    });
+    await advanceTime(100);
+    collectionScope.collection.seedItem('c', {
+      value: { id: 'c', name: 'Newer cached' },
     });
 
     // Startup should only queue the background scan.
@@ -144,16 +148,16 @@ describe('async storage efficiency: collection', () => {
     // Drain the startup-scheduled cleanup before capturing the maxItems flush.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // Adding a third item should capture the write path plus the cleanup sequence.
+    // Adding a fourth item should capture one write plus a two-item cleanup sequence.
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
-    env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Fresh' } });
+    env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fresh' } });
     await advanceTime(1100);
     await flushAllTimers();
     const operationsBreakdown = readCapture.finish().timelineString;
 
     expect(
       collectionScope.collection.listStoredPayloads().sort(),
-    ).toMatchInlineSnapshot(`['b', 'c']`);
+    ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
@@ -162,18 +166,20 @@ describe('async storage efficiency: collection', () => {
       1.002s | 📄 file-open ✅ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index)
       1.003s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
-             |
+             |    └ (namespace index) | 0.21 kb
+             ·
       1.046s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
-      1.049s | 🗑️ ✅ #2 tsdf/sess1/col-max-items-metadata/ci.h~3986551515.p.json
+             |    └ (namespace index) | 0.21 kb
+      1.049s | 🗑️ ✅ #2 tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
+             |    └ ([itemKey: "b], entry data)
+      .      | 🗑️ ✅ #3 tsdf/sess1/col-max-items-metadata/ci.h~3986551515.p.json
              |    └ ([itemKey: "a], entry data)
-      1.05s  | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-max-items-metadata/ci.h~3994120284.p.json
-             |    └ ([itemKey: "c], entry data)
-      1.053s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~3994120284.p.json
-             |    └ ([itemKey: "c], entry data) | 0.00 kb -> 0.10 kb
+      1.05s  | 📄 file-open-or-create 🆕 #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+             |    └ ([itemKey: "d], entry data)
+      1.053s | ✍️ #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+             |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
       1.057s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb -> 0.15 kb
+             |    └ (namespace index) | 0.21 kb -> 0.15 kb
       1.059s | end
       "
     `);
@@ -183,13 +189,77 @@ describe('async storage efficiency: collection', () => {
       ├ sess1 (0.51 kb)
       │ └ col-max-items-metadata (0.50 kb)
       │   ├ ci._i.r.json (0.17 kb)
-      │   ├ ci.h~1374750182.p.json (0.15 kb)
-      │   └ ci.h~3994120284.p.json (0.14 kb)
+      │   ├ ci.h~2103001283.p.json (0.14 kb)
+      │   └ ci.h~3994120284.p.json (0.15 kb)
       └ tsdf._am.g* (0.06 kb)"
     `);
   });
 
-  test('multiple overflowing collection updates before idle maintenance trigger a single cleanup pass', async () => {
+  test('maxItems-triggered flush also prunes expired persisted items', async () => {
+    const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const storeName = 'col-expired-during-max-items';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+    const env = createCollectionEnv({ storeName, sessionKey, maxItems: 3 });
+
+    // Drain startup cleanup first so the later expiration removal is attributable to the maxItems path.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    collectionScope.collection.seedItem(
+      'a',
+      { value: { id: 'a', name: 'Expired oldest' } },
+      { timestamp: expiredTimestamp },
+    );
+    await advanceTime(100);
+    collectionScope.collection.seedItem(
+      'b',
+      { value: { id: 'b', name: 'Expired newer' } },
+      { timestamp: expiredTimestamp },
+    );
+    await advanceTime(100);
+    collectionScope.collection.seedItem('c', {
+      value: { id: 'c', name: 'Fresh cached' },
+    });
+
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fresh' } });
+    await advanceTime(1100);
+    await flushAllTimers();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(
+      collectionScope.collection.listStoredPayloads().sort(),
+    ).toMatchInlineSnapshot(`['c', 'd']`);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time   |
+      1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.001s | 📂 dir-open ✅ tsdf/sess1/col-expired-during-max-items
+             |    └ (store directory)
+      1.002s | 📄 file-open ✅ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+             |    └ (namespace index)
+      1.003s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.21 kb
+             ·
+      1.046s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.21 kb
+      1.049s | 🗑️ ✅ #2 tsdf/sess1/col-expired-during-max-items/ci.h~3986551515.p.json
+             |    └ ([itemKey: "a], entry data)
+      .      | 🗑️ ✅ #3 tsdf/sess1/col-expired-during-max-items/ci.h~1374750182.p.json
+             |    └ ([itemKey: "b], entry data)
+      1.05s  | 📄 file-open-or-create 🆕 #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+             |    └ ([itemKey: "d], entry data)
+      1.053s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+             |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
+      1.057s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.21 kb -> 0.15 kb
+      1.059s | end
+      "
+    `);
+  });
+
+  test('multiple overflowing collection updates', async () => {
     const storeName = 'col-coalesced-maintenance';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -232,7 +302,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (namespace index)
       1.003s | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-             |
+             ·
       1.046s | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
       1.049s | 🗑️ ✅ #2 tsdf/sess1/col-coalesced-maintenance/ci.h~3986551515.p.json
@@ -243,7 +313,7 @@ describe('async storage efficiency: collection', () => {
              |    └ ([itemKey: "c], entry data) | 0.00 kb -> 0.10 kb
       1.057s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
-             |
+             ·
       2.14s  | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
       2.143s | 🗑️ ✅ #4 tsdf/sess1/col-coalesced-maintenance/ci.h~1374750182.p.json
@@ -735,7 +805,7 @@ describe('async storage efficiency: collection', () => {
            |    └ ([itemKey: "1], entry data)
       7ms  | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
            |    └ ([itemKey: "1], entry data) | 0.11 kb
-           |
+           ·
       50ms | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index) | 0.08 kb
       55ms | ✍️ #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
@@ -780,7 +850,7 @@ describe('async storage efficiency: collection', () => {
       "
       time   |
       0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
-             |
+             ·
       1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
              |    └ (store directory)

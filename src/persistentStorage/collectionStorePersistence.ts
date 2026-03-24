@@ -49,6 +49,7 @@ import type {
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 import {
+  ASYNC_STORAGE_MAX_AGE_MS,
   getProtectedKeysFromMetadata,
   serializeProtectedRef,
 } from './asyncStorageAdapter';
@@ -834,8 +835,27 @@ export function setupCollectionPersistence<
             });
           }
 
-          if (candidateEntries.length > maxItems) {
-            candidateEntries.sort(
+          for (const entry of candidateEntries) {
+            if (entry.protected) continue;
+            if (
+              commitTimestamp - entry.lastAccessAt <=
+              ASYNC_STORAGE_MAX_AGE_MS
+            ) {
+              continue;
+            }
+
+            pendingUpserts.delete(entry.itemKey);
+            if (metadataByKey.has(entry.itemKey)) {
+              pendingRemoves.add(entry.itemKey);
+            }
+          }
+
+          const remainingCandidates = candidateEntries.filter(
+            ({ itemKey }) => !pendingRemoves.has(itemKey),
+          );
+
+          if (remainingCandidates.length > maxItems) {
+            remainingCandidates.sort(
               createEvictionComparator(
                 [
                   (entry) => entry.protected,
@@ -846,10 +866,12 @@ export function setupCollectionPersistence<
             );
 
             const keptKeys = new Set(
-              candidateEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+              remainingCandidates
+                .slice(0, maxItems)
+                .map(({ itemKey }) => itemKey),
             );
 
-            for (const { itemKey } of candidateEntries) {
+            for (const { itemKey } of remainingCandidates) {
               if (keptKeys.has(itemKey)) continue;
 
               pendingUpserts.delete(itemKey);

@@ -159,7 +159,7 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (item entry) | ❌ -> 0.09 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
             |    └ (root, namespace, manifest) | ❌ -> 0.12 kb
-            |
+            ·
       3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
             |    └ (root, namespace, manifest) | 0.12 kb
       .     | 🔑[0] ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
@@ -262,7 +262,7 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (item entry) | ❌ -> 0.09 kb
       .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest) | ❌ -> 0.12 kb
-            |
+            ·
       3.62s | 📖 ❌ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
             |    └ (query entry)
       .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
@@ -275,7 +275,7 @@ describe('sync storage efficiency: list-query', () => {
             |    └ (item entry) | ❌ -> 0.09 kb
       .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest) | 0.12 kb -> 0.22 kb
-            |
+            ·
       3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (root, namespace, manifest) | 0.22 kb
       .     | 🔑[0] ✅ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
@@ -506,7 +506,7 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (root, namespace, manifest) | 0.22 kb -> 0.32 kb
-           |
+           ·
       3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (root, namespace, manifest) | 0.32 kb
       .    | 🔑[0] ✅ #3 tsdf.sess1.lq-item-metadata.li."users||1 (item entry)
@@ -810,7 +810,7 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-direct-get-query-state.li."users||1
            |    └ (item entry) | 0.10 kb
-           |
+           ·
       2s   | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
            |    └ (query entry) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
@@ -1200,7 +1200,7 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1
            |    └ (item entry) | 0.10 kb
-           |
+           ·
       2s   | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
            |    └ (query entry) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
@@ -1242,7 +1242,7 @@ describe('sync storage efficiency: list-query', () => {
       time |
       0    | 📖 ✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
            |    └ (query entry) | 0.10 kb
-           |
+           ·
       2s   | 📖 ✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
            |    └ (query entry) | 0.10 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
@@ -1284,7 +1284,7 @@ describe('sync storage efficiency: list-query', () => {
       time  |
       0     | 📖 ❌ #1 tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
             |    └ (query entry)
-            |
+            ·
       1.81s | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #1 tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
@@ -1396,7 +1396,7 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | 📖 ✅ #2 tsdf.sess1.lq-item-remount-flow.li."users||1
            |    └ (item entry) | 0.10 kb
-           |
+           ·
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
@@ -1439,7 +1439,7 @@ describe('sync storage efficiency: list-query', () => {
       time  |
       0     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (root, namespace, manifest)
-            |
+            ·
       1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (root, namespace, manifest)
       .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-remount-no-cache.li."users||1
@@ -1499,7 +1499,7 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | 📖 ✅ #3 tsdf.sess1.lq-multi-item-remount-flow.li."users||2
            |    └ (item entry) | 0.10 kb
-           |
+           ·
       2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (root, namespace, manifest) | 0.22 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
@@ -1571,7 +1571,7 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (root, namespace, manifest) | 0.23 kb
       .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1
            |    └ (item entry) | 0.11 kb
-           |
+           ·
       2s   | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
            |    └ (query entry) | 0.12 kb
       .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}

@@ -270,7 +270,9 @@ function formatPersistentStorageOperation(
   }
 }
 
-function formatTableString(rows: Array<{ cols: string[] }>): string {
+function formatTableString(
+  rows: Array<{ cols: string[]; type?: 'default' | 'gap' }>,
+): string {
   if (rows.length === 0) return '';
 
   const colWidths: number[] = [];
@@ -281,12 +283,14 @@ function formatTableString(rows: Array<{ cols: string[] }>): string {
   }
 
   return rows
-    .map(({ cols }) =>
-      cols
+    .map(({ cols, type }) => {
+      if (type === 'gap') return `${' '.repeat((colWidths[0] ?? 0) + 1)}·`;
+
+      return cols
         .map((col, index) => col.padEnd(colWidths[index] ?? 0))
         .join(' | ')
-        .trimEnd(),
-    )
+        .trimEnd();
+    })
     .join('\n');
 }
 
@@ -770,7 +774,7 @@ function formatTimelineTable(
       previousTime !== undefined &&
       operation.time - previousTime > TIMELINE_GAP_THRESHOLD_MS
     ) {
-      rows.push({ cols: ['', ''] });
+      rows.push({ cols: ['', ''], type: 'gap' });
     }
 
     const [firstLine = '', ...extraLines] = operation.label.split('\n');
@@ -792,7 +796,7 @@ function formatTimelineTable(
       previousTime !== undefined &&
       endTime - previousTime > TIMELINE_GAP_THRESHOLD_MS
     ) {
-      rows.push({ cols: ['', ''] });
+      rows.push({ cols: ['', ''], type: 'gap' });
     }
 
     rows.push({ cols: [formatTimeMs(endTime), 'end'] });
