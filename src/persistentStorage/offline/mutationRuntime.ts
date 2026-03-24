@@ -1,0 +1,69 @@
+import type { OperationInput, OfflineOperationSchemaShape } from './types';
+
+/**
+ * Successful result of an offline-enabled mutation attempt.
+ *
+ * `online` means the direct request completed and returned the server payload.
+ * `queued` means the mutation was durably persisted for offline replay.
+ */
+export type OfflineMutationResult<T> =
+  | { kind: 'online'; data: Awaited<T> }
+  | { kind: 'queued' };
+
+export type PreparedOfflineMutation = {
+  effectiveOffline: boolean;
+  queueMutation: () => Promise<void>;
+  classifyError: (error: unknown) => Promise<boolean>;
+};
+
+export type OfflineAwareMutationController<
+  TOperations extends Record<string, OfflineOperationSchemaShape>,
+> = {
+  canQueueMutation: () => boolean;
+  prepareForMutation: <TName extends keyof TOperations>(args: {
+    operationName: TName;
+    input: OperationInput<TOperations, TName>;
+  }) => Promise<PreparedOfflineMutation>;
+};
+
+export async function runHybridOfflineMutation<
+  T,
+  TOperations extends Record<string, OfflineOperationSchemaShape>,
+  TName extends keyof TOperations,
+>({
+  controller,
+  offline,
+  directMutation,
+}: {
+  controller?: OfflineAwareMutationController<TOperations> | null;
+  offline?:
+    | { operation: TName; input: OperationInput<TOperations, TName> }
+    | undefined;
+  directMutation: () => Promise<T>;
+}): Promise<OfflineMutationResult<T>> {
+  if (!offline || !controller) {
+    return { kind: 'online', data: await directMutation() };
+  }
+
+  const prepared = await controller.prepareForMutation({
+    operationName: offline.operation,
+    input: offline.input,
+  });
+
+  if (prepared.effectiveOffline) {
+    await prepared.queueMutation();
+    return { kind: 'queued' };
+  }
+
+  try {
+    return { kind: 'online', data: await directMutation() };
+  } catch (error) {
+    const shouldQueue = await prepared.classifyError(error);
+    if (!shouldQueue) {
+      throw error;
+    }
+
+    await prepared.queueMutation();
+    return { kind: 'queued' };
+  }
+}

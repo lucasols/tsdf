@@ -22,6 +22,10 @@ import {
   offlineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
 import {
+  type OfflineMutationResult,
+  runHybridOfflineMutation,
+} from '../persistentStorage/offline/mutationRuntime';
+import {
   createOfflineEntityLookup,
   getIsPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
@@ -1505,6 +1509,63 @@ export function createCollectionStore<
     return someItemWasUpdated;
   }
 
+  type CollectionMutationArgs<
+    T,
+    TMutationPayload extends ItemPayload | undefined | null,
+  > = {
+    optimisticUpdate?: (payload: TMutationPayload) => void | boolean;
+    mutation: (payload: TMutationPayload) => Promise<T>;
+    onSuccess?: (response: Awaited<T>, payload: TMutationPayload) => void;
+    revalidateOnSuccess?: boolean;
+    silentErrors?: boolean;
+    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+  };
+
+  type CollectionOnlineMutationArgs<
+    T,
+    TMutationPayload extends ItemPayload | undefined | null,
+  > = CollectionMutationArgs<T, TMutationPayload> & { offline?: undefined };
+
+  type CollectionOfflineMutationArgs<
+    T,
+    TMutationPayload extends ItemPayload | undefined | null,
+  > = CollectionMutationArgs<T, TMutationPayload> & {
+    /**
+     * When provided, the mutation tries the direct request while the session is
+     * online, but degrades into durable offline queueing when the session is
+     * already offline or the failure is classified as offline/outage. Callers
+     * must not assume a successful result always includes the server payload.
+     */
+    offline: TOfflineOperations extends null
+      ? never
+      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
+  };
+
+  async function performMutation<
+    T,
+    TMutationPayload extends ItemPayload | undefined | null,
+  >(
+    payload: TMutationPayload,
+    args: CollectionOnlineMutationArgs<T, TMutationPayload>,
+  ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  async function performMutation<
+    T,
+    TMutationPayload extends ItemPayload | undefined | null,
+  >(
+    payload: TMutationPayload,
+    args: CollectionOfflineMutationArgs<T, TMutationPayload>,
+  ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
+  async function performMutation<
+    T,
+    TMutationPayload extends ItemPayload | undefined | null,
+  >(
+    payload: TMutationPayload,
+    args:
+      | CollectionOnlineMutationArgs<T, TMutationPayload>
+      | CollectionOfflineMutationArgs<T, TMutationPayload>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  >;
   async function performMutation<
     T,
     TMutationPayload extends ItemPayload | undefined | null,
@@ -1518,23 +1579,12 @@ export function createCollectionStore<
       onSuccess,
       debounce: _debounce,
       offline,
-    }: {
-      optimisticUpdate?: (payload: TMutationPayload) => void | boolean;
-      mutation: (payload: TMutationPayload) => Promise<T>;
-      onSuccess?: (response: Awaited<T>, payload: TMutationPayload) => void;
-      revalidateOnSuccess?: boolean;
-      silentErrors?: boolean;
-      debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-      /**
-       * When provided, the mutation is durably queued and replayed by the
-       * offline sync controller. The immediate result only reflects queue
-       * persistence.
-       */
-      offline?: TOfflineOperations extends null
-        ? never
-        : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
-    },
-  ): Promise<ResultType<Awaited<T>, StoreError | true>> {
+    }:
+      | CollectionOnlineMutationArgs<T, TMutationPayload>
+      | CollectionOfflineMutationArgs<T, TMutationPayload>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  > {
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(offlineSessionUnavailableError);
     }
@@ -1545,6 +1595,9 @@ export function createCollectionStore<
       'mutationStart',
       hasPayload ? { mutationId, payload } : { mutationId },
     );
+
+    const directMutation = () => mutation(payload);
+
     const result = await performMutationWithLifecycle({
       startMutation: () =>
         hasPayload ? startMutation(payload) : () => undefined,
@@ -1556,24 +1609,24 @@ export function createCollectionStore<
         : undefined,
       debounce: _debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: async () => {
-        if (offline && offlineController) {
-          await offlineController.queueMutation({
-            operationName: offline.operation,
-            input: offline.input,
-          });
-          return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
-        }
-
-        return mutation(payload);
-      },
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              controller: offlineController,
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
       onSuccess: (result) => {
-        if (hasPayload && revalidateOnSuccess && !offline) {
+        if (hasPayload && revalidateOnSuccess && result.kind === 'online') {
           invalidateItem(payload);
         }
 
-        if (onSuccess && !offline) {
-          onSuccess(result, payload);
+        if (onSuccess && result.kind === 'online') {
+          onSuccess(result.data, payload);
         }
       },
       onError: (exception) => {
@@ -1597,6 +1650,10 @@ export function createCollectionStore<
         ? { mutationId, payload, success: result.ok }
         : { mutationId, success: result.ok },
     );
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
 
     return result;
   }

@@ -4,13 +4,17 @@ import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
+import {
+  type OfflineMutationResult,
+  runHybridOfflineMutation,
+  type OfflineAwareMutationController,
+} from '../persistentStorage/offline/mutationRuntime';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
   OfflineMutationDescriptor,
-  OperationInput,
 } from '../persistentStorage/offline/types';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
 import {
@@ -124,15 +128,9 @@ export type CreateMutationApiOptions<
   emitInvalidateQuery: (event: InvalidateQueryEvent) => void;
   emitInvalidateItem: (event: InvalidateItemEvent) => void;
   blockWindowClose: BlockWindowCloseHandler | null;
-  offlineController?: {
-    canQueueMutation: () => boolean;
-    queueMutation: <
-      TName extends keyof Exclude<TOfflineOperations, null>,
-    >(args: {
-      operationName: TName;
-      input: OperationInput<Exclude<TOfflineOperations, null>, TName>;
-    }) => Promise<void>;
-  } | null;
+  offlineController?: OfflineAwareMutationController<
+    Exclude<TOfflineOperations, null>
+  > | null;
   runWithBroadcastConsistency: <T>(
     consistency: SnapshotConsistency,
     callback: () => T,
@@ -721,6 +719,49 @@ export function createMutationApi<
     itemPendingInvalidationFields.clear();
   }
 
+  type ListQueryMutationArgs<T> = {
+    optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
+    mutation: (payload: MutationPayloadToUse) => Promise<T>;
+    revalidateOnSuccess?: boolean | 'queries';
+    dontRevalidateOnError?: boolean;
+    getRelatedQueries?: FilterQuery;
+    getRevalidateOnSuccessQueries?: FilterQuery;
+    onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
+    onError?: (error: StoreError | true) => void;
+    silentErrors?: boolean;
+    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+  };
+
+  type ListQueryOnlineMutationArgs<T> = ListQueryMutationArgs<T> & {
+    offline?: undefined;
+  };
+
+  type ListQueryOfflineMutationArgs<T> = ListQueryMutationArgs<T> & {
+    /**
+     * When provided, the mutation tries the direct request while the session is
+     * online, but degrades into durable offline queueing when the session is
+     * already offline or the failure is classified as offline/outage. Callers
+     * must not assume a successful result always includes the server payload.
+     */
+    offline: TOfflineOperations extends null
+      ? never
+      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
+  };
+
+  async function performMutation<T>(
+    payload: MutationPayload,
+    args: ListQueryOnlineMutationArgs<T>,
+  ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  async function performMutation<T>(
+    payload: MutationPayload,
+    args: ListQueryOfflineMutationArgs<T>,
+  ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
+  async function performMutation<T>(
+    payload: MutationPayload,
+    args: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  >;
   async function performMutation<T>(
     payload: MutationPayload,
     {
@@ -735,27 +776,10 @@ export function createMutationApi<
       onError,
       debounce,
       offline,
-    }: {
-      optimisticUpdate?: (payload: MutationPayloadToUse) => void | boolean;
-      mutation: (payload: MutationPayloadToUse) => Promise<T>;
-      revalidateOnSuccess?: boolean | 'queries';
-      dontRevalidateOnError?: boolean;
-      getRelatedQueries?: FilterQuery;
-      getRevalidateOnSuccessQueries?: FilterQuery;
-      onSuccess?: (response: Awaited<T>, payload: MutationPayloadToUse) => void;
-      onError?: (error: StoreError | true) => void;
-      silentErrors?: boolean;
-      debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-      /**
-       * When provided, the mutation is durably queued and replayed by the
-       * offline sync controller. The immediate result only reflects queue
-       * persistence.
-       */
-      offline?: TOfflineOperations extends null
-        ? never
-        : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
-    },
-  ): Promise<ResultType<Awaited<T>, StoreError | true>> {
+    }: ListQueryOnlineMutationArgs<T> | ListQueryOfflineMutationArgs<T>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  > {
     const matchAllItems: FilterItem = () => true;
     const payloadToUse: MutationPayloadToUse = payload ?? matchAllItems;
 
@@ -768,6 +792,8 @@ export function createMutationApi<
 
     storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
+    const directMutation = () => mutation(payloadToUse);
+
     const result = await performMutationWithLifecycle({
       startMutation: () => startItemMutation(payloadToUse),
       optimisticUpdate: optimisticUpdate
@@ -778,19 +804,19 @@ export function createMutationApi<
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: async () => {
-        if (offline && offlineController) {
-          await offlineController.queueMutation({
-            operationName: offline.operation,
-            input: offline.input,
-          });
-          return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
-        }
-
-        return mutation(payloadToUse);
-      },
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              controller: offlineController,
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
       onSuccess: (result) => {
-        if (revalidateOnSuccess && !offline) {
+        if (revalidateOnSuccess && result.kind === 'online') {
           invalidateQueryAndItems({
             itemPayload:
               revalidateOnSuccess === 'queries' ? false : payloadToUse,
@@ -798,8 +824,8 @@ export function createMutationApi<
           });
         }
 
-        if (onSuccess && !offline) {
-          onSuccess(result, payloadToUse);
+        if (onSuccess && result.kind === 'online') {
+          onSuccess(result.data, payloadToUse);
         }
       },
       onError: (exception) => {
@@ -829,6 +855,10 @@ export function createMutationApi<
       items: affectedItems,
       success: result.ok,
     });
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
 
     return result;
   }

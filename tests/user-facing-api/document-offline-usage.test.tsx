@@ -403,3 +403,123 @@ test('direct document store offline public api supports the main operation hooks
 
   documentHook.unmount();
 });
+
+type TempDocumentOfflineOperations = DefineDocumentOfflineOperations<
+  DocState,
+  {
+    createTempDoc: DefineOfflineOperation<
+      ValueInput,
+      unknown,
+      { value: number }
+    >;
+  }
+>;
+
+test('document temp entities stay pending on the document key and reconcile after replay', async () => {
+  const network = createOfflineNetworkMock();
+  const sessionKey = 'document-temp-entity-session';
+  network.install();
+
+  let documentState: DocState = { value: 1, label: 'server' };
+
+  const documentStore = createDocumentStore<
+    DocState,
+    TempDocumentOfflineOperations
+  >({
+    id: 'document-temp-entity',
+    getSessionKey: () => sessionKey,
+    fetchFn: async () => {
+      await delay(FETCH_DELAY_MS);
+      return { ...documentState };
+    },
+    errorNormalizer: normalizeError,
+    lowPriorityThrottleMs: 5,
+    baseCoalescingWindowMs: 10,
+    blockWindowClose: null,
+    persistentStorage: {
+      storeName: 'document-temp-entity',
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        network: network.config,
+        operations: {
+          createTempDoc: {
+            inputSchema: setValueInputSchema,
+            tempEntity: {
+              createTempId: (input) => `temp:${input.value}`,
+              buildPendingEntity: (input) => ({
+                value: input.value,
+                label: `pending:${input.value}`,
+              }),
+              reconcileServerEntity: (result) => ({
+                finalPayload: 'document',
+                finalData: {
+                  value: result.value,
+                  label: `server:${result.value}`,
+                },
+              }),
+            },
+            execute: ({ input }) => {
+              documentState = {
+                value: input.value,
+                label: `server:${input.value}`,
+              };
+
+              return { value: input.value };
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const documentHook = renderHook(() => documentStore.useDocument());
+  await flushAllTimers();
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  await act(async () => {
+    await documentStore.performMutation({
+      mutation: () => Promise.resolve({ value: 2 }),
+      offline: { operation: 'createTempDoc', input: { value: 2 } },
+    });
+  });
+
+  expect(documentStore.getOfflineEntities()).toMatchObject([
+    { entityKey: 'document', entityKind: 'document', tempId: 'temp:2' },
+  ]);
+  expect(
+    pick(documentHook.result.current, [
+      'data',
+      'status',
+      'isPendingOfflineSync',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data: { label: 'pending:2', value: 2 }
+    isPendingOfflineSync: '✅'
+    status: 'success'
+  `);
+
+  await act(async () => {
+    network.goOnline();
+    await flushAllTimers();
+  });
+
+  expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(
+    pick(documentHook.result.current, [
+      'data',
+      'status',
+      'isPendingOfflineSync',
+    ]),
+  ).toMatchInlineSnapshot(`
+    data: { label: 'server:2', value: 2 }
+    isPendingOfflineSync: '❌'
+    status: 'success'
+  `);
+
+  documentHook.unmount();
+});
