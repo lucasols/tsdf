@@ -736,6 +736,11 @@ type UntrackedMockOpfsFileOperation = MockOpfsBaseOperation & {
         valueByteSizeAfter: number;
         valueByteSizeBefore: number;
       }
+    | {
+        errorName: string;
+        phase: 'close' | 'createWritable';
+        type: 'writeFileFailed';
+      }
     | { exists: boolean; type: 'deleteFile' }
   );
 
@@ -763,6 +768,11 @@ export type MockOpfsOperation =
             valueChanged: boolean;
             valueByteSizeAfter: number;
             valueByteSizeBefore: number;
+          }
+        | {
+            errorName: string;
+            phase: 'close' | 'createWritable';
+            type: 'writeFileFailed';
           }
       ))
   | (MockOpfsBaseOperation & {
@@ -807,6 +817,7 @@ function enrichRawOperation(
     case 'ensureFile':
     case 'readFile':
     case 'writeFile':
+    case 'writeFileFailed':
     case 'deleteFile': {
       if (operation.type === 'writeFile' || operation.type === 'ensureFile') {
         const nextRaw = mockBrowserOpfs.readFile(operation.path);

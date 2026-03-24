@@ -1008,6 +1008,12 @@ function formatOpfsOperationLabel(
           operation.valueChanged ? '' : ' ⚠️ UNCHANGED'
         }`,
       );
+    case 'writeFileFailed':
+      return formatWrappedOpfsOperationLabel(
+        `✍️ ❌ retryable-${operation.phase}`,
+        formatOpfsOperationPath(operation.path, pathIdMap),
+        `(${formatOpfsFileDescription(operation)}) | ${operation.errorName}`,
+      );
     case 'deleteFile':
       return formatWrappedOpfsOperationLabel(
         `🗑️ ${operation.exists ? '✅' : '❌'}`,
@@ -1050,6 +1056,7 @@ function buildOpfsOperationCaptureResult(
       operation.type === 'ensureFile' ||
       operation.type === 'readFile' ||
       operation.type === 'writeFile' ||
+      operation.type === 'writeFileFailed' ||
       operation.type === 'deleteFile'
         ? stripOpfsRootPrefix(operation.path)
         : null;

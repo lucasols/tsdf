@@ -25,6 +25,37 @@ import {
 
 setupAsyncStorageEfficiencyTestSuite();
 
+async function getCollectionPayloadDeleteTarget(args: {
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>;
+  sessionKey: string;
+  storeName: string;
+}): Promise<{ fileName: string; storeDir: FileSystemDirectoryHandle }> {
+  const fileName = args.mockAdapter.mockBrowserOpfs
+    .listEntries(`tsdf/${args.sessionKey}/${args.storeName}`)
+    .flatMap((entry) =>
+      entry.startsWith('file:') && entry !== 'file:ci._i.r.json'
+        ? [entry.slice('file:'.length)]
+        : [],
+    )[0];
+
+  if (fileName === undefined) {
+    throw new Error('Expected a persisted collection payload file.');
+  }
+
+  const rootDir = await resolveAfterAllTimers(navigator.storage.getDirectory());
+  const tsdfDir = await resolveAfterAllTimers(
+    rootDir.getDirectoryHandle('tsdf'),
+  );
+  const sessionDir = await resolveAfterAllTimers(
+    tsdfDir.getDirectoryHandle(args.sessionKey),
+  );
+  const storeDir = await resolveAfterAllTimers(
+    sessionDir.getDirectoryHandle(args.storeName),
+  );
+
+  return { fileName, storeDir };
+}
+
 describe('async storage efficiency: collection', () => {
   test('expiration cleanup removes expired items through namespace manifests only', async () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
@@ -477,6 +508,172 @@ describe('async storage efficiency: collection', () => {
       1.049s | ✍️ #1 tsdf/sess1/col-mutation-flow/ci._i.r.json
              |    └ (namespace index) | 0.08 kb -> 0.08 kb
       1.051s | end
+      "
+    `);
+  });
+
+  test('updating a hydrated collection item recreates a payload file deleted after hydration without rereading cached entries', async () => {
+    const storeName = 'col-mutation-retry-after-delete';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+
+    collectionScope.collection.seedItem('1', {
+      value: { id: '1', name: 'Cached user' },
+    });
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Hydrate the cached item first so the later write reuses a cached OPFS file handle.
+    await settleStartupBackgroundScan(mockAdapter);
+    renderHook(() =>
+      env.apiStore.useItem('1', { disableRefetchOnMount: true }),
+    );
+    await flushInvalidationPersistence(0);
+
+    const deleteTarget = await getCollectionPayloadDeleteTarget({
+      mockAdapter,
+      sessionKey,
+      storeName,
+    });
+
+    // Simulate another tab deleting the payload file while this tab still holds the old handle.
+    const mutationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    await resolveAfterAllTimers(
+      deleteTarget.storeDir.removeEntry(deleteTarget.fileName),
+    );
+
+    // The next mutation should recreate the payload file through the retry path, not reread storage.
+    act(() => {
+      env.apiStore.updateItemState('1', (draft) => {
+        draft.value.name = 'Edited after delete';
+      });
+    });
+    await flushInvalidationPersistence();
+    const mutationOperations = mutationCapture.finish().timelineString;
+
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-mutation-retry-after-delete/ci.%221.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d:
+        value: { id: '1', name: 'Edited after delete' }
+
+      p: '1'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-mutation-retry-after-delete/ci._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "1: { a: 1735689606158, p: '1' }
+    `);
+    expect(mutationOperations).toMatchInlineSnapshot(`
+      "
+      time   |
+      0      | 🗑️ ✅ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data)
+             ·
+      1.041s | 📖 #2 tsdf/sess1/col-mutation-retry-after-delete/ci._i.r.json
+             |    └ (namespace index) | 0.08 kb
+      1.044s | ✍️ ❌ retryable-createWritable #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data) | NotFoundError
+      1.045s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      1.046s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-after-delete
+             |    └ (store directory)
+      1.047s | 📄 file-open-or-create 🆕 #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data)
+      1.05s  | ✍️ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data) | 0.00 kb -> 0.12 kb
+      1.054s | ✍️ #2 tsdf/sess1/col-mutation-retry-after-delete/ci._i.r.json
+             |    └ (namespace index) | 0.08 kb -> 0.08 kb
+      1.056s | end
+      "
+    `);
+  });
+
+  test('updating a hydrated collection item recreates a payload file deleted during the write race without rereading cached entries', async () => {
+    const storeName = 'col-mutation-retry-during-write';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+
+    collectionScope.collection.seedItem('1', {
+      value: { id: '1', name: 'Cached user' },
+    });
+
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    // Hydrate the cached item first so the later write reuses a cached OPFS file handle.
+    await settleStartupBackgroundScan(mockAdapter);
+    renderHook(() =>
+      env.apiStore.useItem('1', { disableRefetchOnMount: true }),
+    );
+    await flushInvalidationPersistence(0);
+
+    const deleteTarget = await getCollectionPayloadDeleteTarget({
+      mockAdapter,
+      sessionKey,
+      storeName,
+    });
+
+    // Start a normal mutation, then let another tab remove the file after the write begins but before close().
+    const mutationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    act(() => {
+      env.apiStore.updateItemState('1', (draft) => {
+        draft.value.name = 'Edited during write';
+      });
+    });
+    await advanceTime(1045);
+    const deletePromise = deleteTarget.storeDir.removeEntry(
+      deleteTarget.fileName,
+    );
+    await advanceTime(1);
+    await deletePromise;
+    await flushInvalidationPersistence(0);
+    const mutationOperations = mutationCapture.finish().timelineString;
+
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-mutation-retry-during-write/ci.%221.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d:
+        value: { id: '1', name: 'Edited during write' }
+
+      p: '1'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-mutation-retry-during-write/ci._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "1: { a: 1735689606157, p: '1' }
+    `);
+    expect(mutationOperations).toMatchInlineSnapshot(`
+      "
+      time   |
+      1.04s  | 📖 #1 tsdf/sess1/col-mutation-retry-during-write/ci._i.r.json
+             |    └ (namespace index) | 0.08 kb
+      1.045s | 🗑️ ✅ #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data)
+      .      | ✍️ ❌ retryable-close #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data) | NotFoundError
+      1.047s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
+      1.048s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-during-write
+             |    └ (store directory)
+      1.049s | 📄 file-open-or-create 🆕 #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data)
+      1.052s | ✍️ #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+             |    └ ([itemKey: "1], entry data) | 0.00 kb -> 0.12 kb
+      1.056s | ✍️ #1 tsdf/sess1/col-mutation-retry-during-write/ci._i.r.json
+             |    └ (namespace index) | 0.08 kb -> 0.08 kb
+      1.058s | end
       "
     `);
   });

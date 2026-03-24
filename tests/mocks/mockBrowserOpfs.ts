@@ -28,6 +28,11 @@ type MockBrowserOpfsReadWriteOperation = MockBrowserOpfsBaseOperation &
         valueByteSizeAfter: number;
         valueByteSizeBefore: number;
       }
+    | {
+        errorName: string;
+        phase: 'close' | 'createWritable';
+        type: 'writeFileFailed';
+      }
   );
 
 type MockBrowserOpfsDeleteFileOperation = MockBrowserOpfsBaseOperation & {
@@ -770,12 +775,28 @@ export class MockBrowserOpfsEnvironment {
         });
       },
       async createWritable(): Promise<FileSystemWritableFileStream> {
-        const { completionTime } = await waitLatency({
+        const { completionTime, startedTime } = await waitLatency({
           delayMs: MOCK_OPFS_LATENCY_MS.createWritable,
           readyAtRef: cloneReadyAtRef(readyAtRef),
         });
-        const currentNode = getCurrentFileNode();
         const path = joinPath(pathSegments, node.name);
+        let currentNode: MockFileNode;
+        try {
+          currentNode = getCurrentFileNode();
+        } catch (error) {
+          operations.push({
+            startedTime,
+            time: completionTime,
+            type: 'writeFileFailed',
+            path,
+            phase: 'createWritable',
+            errorName:
+              error instanceof DOMException || error instanceof Error
+                ? error.name
+                : 'Error',
+          });
+          throw error;
+        }
         let pendingRaw = currentNode.raw;
         const streamReadyAtRef: ReadyAtRef = { value: completionTime };
 
@@ -797,7 +818,23 @@ export class MockBrowserOpfsEnvironment {
               readyAtRef: streamReadyAtRef,
             });
             readyAtRef.value = streamReadyAtRef.value;
-            const liveNode = getCurrentFileNode();
+            let liveNode: MockFileNode;
+            try {
+              liveNode = getCurrentFileNode();
+            } catch (error) {
+              operations.push({
+                startedTime: writeStartedTime,
+                time: writeCompletionTime,
+                type: 'writeFileFailed',
+                path,
+                phase: 'close',
+                errorName:
+                  error instanceof DOMException || error instanceof Error
+                    ? error.name
+                    : 'Error',
+              });
+              throw error;
+            }
             const valueChanged = liveNode.raw !== pendingRaw;
             const valueByteSizeBefore = getStringByteSize(liveNode.raw);
             liveNode.raw = pendingRaw;
