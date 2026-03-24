@@ -259,8 +259,8 @@ describe('async storage efficiency: collection', () => {
     `);
   });
 
-  test('multiple overflowing collection updates', async () => {
-    const storeName = 'col-coalesced-maintenance';
+  test('repeated overflowing collection updates evict inline without scheduling background maintenance', async () => {
+    const storeName = 'col-inline-overflow-cleanup';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
     const collectionScope = mockAdapter.scope(storeName, sessionKey);
@@ -275,18 +275,19 @@ describe('async storage efficiency: collection', () => {
 
     const env = createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
 
-    // Drain the startup maintenance so the capture only covers the coalesced overflow path.
+    // Drain the startup maintenance so the capture only covers the repeated inline overflow path.
     await settleStartupBackgroundScan(mockAdapter);
 
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
 
-    // First overflow schedules maintenance, but does not run it yet.
+    // The first overflow should evict the oldest cached item in the same debounced commit.
     env.apiStore.addItemToState('c', { value: { id: 'c', name: 'Third' } });
     await advanceTime(1100);
 
-    // A second overflow lands before cleanup fires and should reuse that same pass.
+    // A later overflow should do the same thing again instead of relying on idle cleanup.
     env.apiStore.addItemToState('d', { value: { id: 'd', name: 'Fourth' } });
     await advanceTime(1100);
+    // Drain every pending timer; if background maintenance were scheduled, it would show up here.
     await flushAllTimers();
     const operationsBreakdown = readCapture.finish().timelineString;
 
@@ -297,32 +298,33 @@ describe('async storage efficiency: collection', () => {
       "
       time   |
       1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      1.001s | 📂 dir-open ✅ tsdf/sess1/col-coalesced-maintenance (store directory)
-      1.002s | 📄 file-open ✅ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      1.001s | 📂 dir-open ✅ tsdf/sess1/col-inline-overflow-cleanup
+             |    └ (store directory)
+      1.002s | 📄 file-open ✅ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index)
-      1.003s | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      1.003s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
              ·
-      1.046s | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      1.046s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.049s | 🗑️ ✅ #2 tsdf/sess1/col-coalesced-maintenance/ci.h~3986551515.p.json
+      1.049s | 🗑️ ✅ #2 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
              |    └ ([itemKey: "a], entry data)
-      .      | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
+      .      | 📄 file-open-or-create 🆕 #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ ([itemKey: "c], entry data)
-      1.052s | ✍️ #3 tsdf/sess1/col-coalesced-maintenance/ci.h~3994120284.p.json
+      1.052s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ ([itemKey: "c], entry data) | 0.00 kb -> 0.10 kb
-      1.056s | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      1.056s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
              ·
-      2.14s  | 📖 #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      2.14s  | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      2.143s | 🗑️ ✅ #4 tsdf/sess1/col-coalesced-maintenance/ci.h~1374750182.p.json
+      2.143s | 🗑️ ✅ #4 tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
              |    └ ([itemKey: "b], entry data)
-      .      | 📄 file-open-or-create 🆕 #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
+      .      | 📄 file-open-or-create 🆕 #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data)
-      2.146s | ✍️ #5 tsdf/sess1/col-coalesced-maintenance/ci.h~2103001283.p.json
+      2.146s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ ([itemKey: "d], entry data) | 0.00 kb -> 0.10 kb
-      2.15s  | ✍️ #1 tsdf/sess1/col-coalesced-maintenance/ci._i.r.json
+      2.15s  | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
       2.152s | end
       "
