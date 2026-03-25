@@ -284,7 +284,7 @@ describe('async storage efficiency: document', () => {
 
     expect(getParsedOpfsFileData(metadataPath)).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689604053, o: '✅' }
+        - { a: 1735689603010, o: '✅' }
     `);
     expect(getParsedOpfsFileData(payloadPath)).toMatchInlineSnapshot(`
       d:
@@ -302,9 +302,7 @@ describe('async storage efficiency: document', () => {
              |    └ (namespace index) | 0.09 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-startup-touch-offline-marker/d.e.p.json
              |    └ (entry data) | 0.10 kb -> 0.10 kb ⚠️ UNCHANGED
-      1.049s | ✍️ #1 tsdf/sess1/doc-startup-touch-offline-marker/d._i.r.json
-             |    └ (namespace index) | 0.09 kb -> 0.09 kb
-      1.051s | end
+      1.047s | end
       "
     `);
   });
@@ -345,7 +343,7 @@ describe('async storage efficiency: document', () => {
     expect(getParsedOpfsFileData('tsdf/sess1/doc-mutation-flow/d._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          - a: 1735689607204
+          - a: 1735689600000
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -354,9 +352,7 @@ describe('async storage efficiency: document', () => {
              |    └ (namespace index) | 0.07 kb
       1.045s | ✍️ #2 tsdf/sess1/doc-mutation-flow/d.e.p.json
              |    └ (entry data) | 0.10 kb -> 0.10 kb
-      1.049s | ✍️ #1 tsdf/sess1/doc-mutation-flow/d._i.r.json
-             |    └ (namespace index) | 0.07 kb -> 0.07 kb
-      1.051s | end
+      1.047s | end
       "
     `);
   });
@@ -408,9 +404,7 @@ describe('async storage efficiency: document', () => {
              |    └ (namespace index) | 0.07 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-invalidation-flow/d.e.p.json
              |    └ (entry data) | 0.10 kb -> 0.10 kb
-      1.859s | ✍️ #1 tsdf/sess1/doc-invalidation-flow/d._i.r.json
-             |    └ (namespace index) | 0.07 kb -> 0.07 kb
-      1.861s | end
+      1.857s | end
       "
     `);
   });
@@ -483,9 +477,7 @@ describe('async storage efficiency: document', () => {
              |    └ (namespace index) | 0.07 kb
       1.855s | ✍️ #2 tsdf/sess1/doc-coalesced-invalidations/d.e.p.json
              |    └ (entry data) | 0.10 kb -> 0.11 kb
-      1.859s | ✍️ #1 tsdf/sess1/doc-coalesced-invalidations/d._i.r.json
-             |    └ (namespace index) | 0.07 kb -> 0.07 kb
-      1.861s | end
+      1.857s | end
       "
     `);
   });
@@ -530,7 +522,7 @@ describe('async storage efficiency: document', () => {
       getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d._i.r.json'),
     ).toMatchInlineSnapshot(`
       e:
-        - { a: 1735689608014, o: '✅' }
+        - { a: 1735689600000, o: '✅' }
     `);
     expect(
       getParsedOpfsFileData('tsdf/sess1/doc-offline-marker-flow/d.e.p.json'),

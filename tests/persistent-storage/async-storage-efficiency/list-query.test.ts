@@ -456,8 +456,6 @@ describe('async storage efficiency: list-query', () => {
              |    └ ([itemKey: "users||1], entry data) | 0.10 kb -> 0.16 kb
       1.859s | ✍️ #1 tsdf/sess1/lq-query-becomes-empty/lq._i.r.json
              |    └ (namespace index) | 0.18 kb -> 0.16 kb
-      .      | ✍️ #2 tsdf/sess1/lq-query-becomes-empty/li._i.r.json
-             |    └ (namespace index) | 0.11 kb -> 0.11 kb
       1.861s | end
       "
     `);
@@ -465,7 +463,7 @@ describe('async storage efficiency: list-query', () => {
       getParsedOpfsFileData('tsdf/sess1/lq-query-becomes-empty/li._i.r.json'),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689606971, p: 'users||1' }
+        "users||1: { a: 1735689600000, p: 'users||1' }
     `);
     expect(
       getParsedOpfsFileData(
@@ -481,7 +479,7 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         {tableId:"users"}:
-          a: 1735689606971
+          a: 1735689600000
           i: []
           p: { tableId: 'users' }
     `);
@@ -648,7 +646,7 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         "admins||4: { a: 1735689612163, p: 'admins||4' }
-        "users||3: { a: 1735689612163, p: 'users||3' }
+        "users||3: { a: 1735689607153, p: 'users||3' }
     `);
     expect(
       getParsedOpfsFileData(
@@ -887,14 +885,14 @@ describe('async storage efficiency: list-query', () => {
       .toMatchInlineSnapshot(`
         e:
           {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}:
-            a: 1735689604152
+            a: 1735689601853
             i: []
             p:
               filters:
                 - { field: 'name', op: 'eq', value: 'Alice' }
               tableId: 'users'
           {tableId:"users"}:
-            a: 1735689604152
+            a: 1735689601853
             i: ['"users||2']
             p: { tableId: 'users' }
       `);
@@ -910,14 +908,14 @@ describe('async storage efficiency: list-query', () => {
       .toMatchInlineSnapshot(`
         e:
           {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}:
-            a: 1735689604152
+            a: 1735689601853
             i: []
             p:
               filters:
                 - { field: 'name', op: 'eq', value: 'Alice' }
               tableId: 'users'
           {tableId:"users"}:
-            a: 1735689604152
+            a: 1735689601853
             i: ['"users||2']
             p: { tableId: 'users' }
       `);
@@ -1079,9 +1077,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.11 kb
       1.855s | ✍️ #2 tsdf/sess1/lq-query-invalidation-flow/li.h~228010772.p.json
              |    └ ([itemKey: "users||1], entry data) | 0.10 kb -> 0.16 kb
-      1.859s | ✍️ #1 tsdf/sess1/lq-query-invalidation-flow/li._i.r.json
-             |    └ (namespace index) | 0.11 kb -> 0.11 kb
-      1.861s | end
+      1.857s | end
       "
     `);
   });
@@ -1168,9 +1164,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.11 kb
       1.855s | ✍️ #2 tsdf/sess1/lq-coalesced-invalidations/li.h~228010772.p.json
              |    └ ([itemKey: "users||1], entry data) | 0.10 kb -> 0.16 kb
-      1.859s | ✍️ #1 tsdf/sess1/lq-coalesced-invalidations/li._i.r.json
-             |    └ (namespace index) | 0.11 kb -> 0.11 kb
-      1.861s | end
+      1.857s | end
       "
     `);
   });
@@ -1233,7 +1227,7 @@ describe('async storage efficiency: list-query', () => {
       getParsedOpfsFileData('tsdf/sess1/lq-offline-marker-flow/li._i.r.json'),
     ).toMatchInlineSnapshot(`
       e:
-        "users||1: { a: 1735689606971, o: '✅', p: 'users||1' }
+        "users||1: { a: 1735689600000, o: '✅', p: 'users||1' }
         "users||2: { a: 1735689606971, p: 'users||2' }
     `);
     expect(
@@ -1250,7 +1244,7 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         {tableId:"users"}:
-          a: 1735689606971
+          a: 1735689600000
           i: ['"users||1', '"users||2']
           o: '✅'
           p: { tableId: 'users' }
@@ -1510,9 +1504,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.11 kb
       1.856s | ✍️ #3 tsdf/sess1/lq-item-invalidation-flow/li.h~228010772.p.json
              |    └ ([itemKey: "users||1], entry data) | 0.10 kb -> 0.16 kb
-      1.86s  | ✍️ #2 tsdf/sess1/lq-item-invalidation-flow/li._i.r.json
-             |    └ (namespace index) | 0.11 kb -> 0.11 kb
-      1.862s | end
+      1.858s | end
       "
     `);
   });
@@ -1763,7 +1755,7 @@ describe('async storage efficiency: list-query', () => {
     expect(getParsedOpfsFileData('tsdf/sess1/lq-mutation-flow/li._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          "users||1: { a: 1735689604061, p: 'users||1' }
+          "users||1: { a: 1735689600000, p: 'users||1' }
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -1772,9 +1764,7 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.11 kb
       1.045s | ✍️ #2 tsdf/sess1/lq-mutation-flow/li.h~228010772.p.json
              |    └ ([itemKey: "users||1], entry data) | 0.10 kb -> 0.16 kb
-      1.049s | ✍️ #1 tsdf/sess1/lq-mutation-flow/li._i.r.json
-             |    └ (namespace index) | 0.11 kb -> 0.11 kb
-      1.051s | end
+      1.047s | end
       "
     `);
   });

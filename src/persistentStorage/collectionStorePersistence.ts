@@ -766,8 +766,6 @@ export function setupCollectionPersistence<
       }
 
       let optimizedOverflow = false;
-      let commitTimestamp: number | undefined;
-
       if (
         localStorageAdapter === null &&
         !hasIgnoreItemFilter &&
@@ -776,7 +774,7 @@ export function setupCollectionPersistence<
       ) {
         const sessionKey = config.getSessionKey();
         if (sessionKey !== false) {
-          commitTimestamp = Date.now();
+          const commitTimestamp = Date.now();
           const metadataEntries =
             await listAllPersistentStorageNamespaceMetadata(namespace, {
               order: 'lru-desc',
@@ -887,13 +885,6 @@ export function setupCollectionPersistence<
 
       await namespace.commit({
         removes: [...pendingRemoves],
-        touches:
-          commitTimestamp === undefined
-            ? undefined
-            : [...pendingUpserts.keys()].map((key) => ({
-                key,
-                lastAccessAt: commitTimestamp,
-              })),
         upserts: [...pendingUpserts.entries()].map(([key, entry]) => ({
           data: entry.value,
           key,

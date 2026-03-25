@@ -1,3 +1,4 @@
+import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
 import { runWithNavigatorLock } from './navigatorLocks';
@@ -1136,9 +1137,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
     const setEntries: AsyncStorageDriverSetEntry[] = [];
     const removeEntries = removes.map((key) => getPayloadRecordKey(key));
+    let indexChanged = false;
 
     for (const key of removes) {
-      indexCache.entries.delete(key);
+      indexChanged = indexCache.entries.delete(key) || indexChanged;
     }
 
     const protectedKeysSnapshotSet = getSessionProtectedKeysSnapshot(
@@ -1154,8 +1156,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         existingMetadata?.customMetadata,
         protectedKeysSnapshotSet,
       );
+      const nextLastAccessAt =
+        touchesByKey.get(upsert.key) ?? existingMetadata?.lastAccessAt ?? now;
       const nextMetadata: InternalManagedMetadataRecord = {
-        lastAccessAt: touchesByKey.get(upsert.key) ?? now,
+        lastAccessAt: nextLastAccessAt,
         version: upsert.version,
         ...(customMetadata ? { customMetadata } : {}),
       };
@@ -1164,20 +1168,34 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         key: getPayloadRecordKey(upsert.key),
         value: upsert.value,
       });
-      indexCache.entries.set(upsert.key, nextMetadata);
+
+      if (
+        existingMetadata === undefined ||
+        existingMetadata.lastAccessAt !== nextMetadata.lastAccessAt ||
+        existingMetadata.version !== nextMetadata.version ||
+        !deepEqual(existingMetadata.customMetadata, nextMetadata.customMetadata)
+      ) {
+        indexCache.entries.set(upsert.key, nextMetadata);
+        indexChanged = true;
+      }
     }
 
-    let touchesApplied = false;
-    const upsertKeySet = new Set(upserts.map((upsert) => upsert.key));
-    for (const key of touchedKeys) {
-      if (upsertKeySet.has(key)) continue;
-      const metadata = indexCache.entries.get(key);
-      if (!metadata) continue;
-      indexCache.entries.set(key, {
-        ...metadata,
-        lastAccessAt: touchesByKey.get(key) ?? now,
-      });
-      touchesApplied = true;
+    if (touchedKeys.length > 0) {
+      const upsertKeySet = new Set(upserts.map((upsert) => upsert.key));
+      for (const key of touchedKeys) {
+        if (upsertKeySet.has(key)) continue;
+        const metadata = indexCache.entries.get(key);
+        if (!metadata) continue;
+
+        const nextLastAccessAt = touchesByKey.get(key) ?? now;
+        if (metadata.lastAccessAt === nextLastAccessAt) continue;
+
+        indexCache.entries.set(key, {
+          ...metadata,
+          lastAccessAt: nextLastAccessAt,
+        });
+        indexChanged = true;
+      }
     }
 
     await Promise.all([
@@ -1189,8 +1207,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         : Promise.resolve(),
     ]);
 
-    const indexChanged =
-      removes.length > 0 || upserts.length > 0 || touchesApplied;
     if (indexChanged) {
       indexCache.dirty = true;
       await this.#flushNamespaceIndex(scope);

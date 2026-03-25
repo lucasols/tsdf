@@ -220,6 +220,126 @@ describe('createAsyncStorageAdapter', () => {
     ).toHaveLength(1);
   });
 
+  test('overwriting an existing entry leaves lastAccessAt unchanged until a read touch runs', async () => {
+    const driverState = createNaiveAsyncStorageDriver();
+    const adapter = createAsyncStorageAdapter(driverState.driver);
+    const scope = {
+      sessionKey: 'sess1',
+      storeName: 'write-does-not-touch',
+      kind: 'document',
+    } as const;
+    const namespace = adapter.openNamespace<{ value: string }>(scope);
+
+    // The first persist creates the index entry and stamps its initial recency.
+    const seedCommit = namespace.commit({
+      upserts: [{ key: 'document', value: { value: 'cached' }, version: 1 }],
+    });
+    await advanceTime(40);
+    await seedCommit;
+
+    const seededEntry = await namespace.get('document', { touch: 'never' });
+
+    // Overwriting the payload should not count as a touch for existing entries.
+    await advanceTime(1000);
+    const overwriteCommit = namespace.commit({
+      upserts: [{ key: 'document', value: { value: 'fresh' }, version: 1 }],
+    });
+    await advanceTime(40);
+    await overwriteCommit;
+
+    const overwrittenEntry = await namespace.get('document', {
+      touch: 'never',
+    });
+
+    // A later coarse read outside the current bucket should still advance recency.
+    await advanceTime(6 * 60 * 60 * 1000);
+    const touchedEntryBeforeFlush = await namespace.get('document', {
+      touch: 'coarse',
+    });
+    await advanceTime(40);
+    const touchedEntry = await namespace.get('document', { touch: 'never' });
+
+    expect(seededEntry).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'document'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:document'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'cached' }
+    `);
+    expect(overwrittenEntry).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'document'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:document'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'fresh' }
+    `);
+    expect(touchedEntryBeforeFlush).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'document'
+        lastAccessAt: 1735689600040
+        payloadRef: '__tsdf_payload__:document'
+        version: 1
+        writtenAt: 1735689600040
+
+      value: { value: 'fresh' }
+    `);
+    expect(touchedEntry).toMatchInlineSnapshot(`
+      metadata:
+        customMetadata: {}
+        key: 'document'
+        lastAccessAt: 1735711201080
+        payloadRef: '__tsdf_payload__:document'
+        version: 1
+        writtenAt: 1735711201080
+
+      value: { value: 'fresh' }
+    `);
+    expect(
+      driverState.operations
+        .filter(
+          (operation) =>
+            operation.scope.sessionKey === 'sess1' &&
+            operation.scope.storeName === 'write-does-not-touch' &&
+            operation.scope.kind === 'document',
+        )
+        .map((operation) => {
+          switch (operation.type) {
+            case 'set':
+              return { type: operation.type, key: operation.key };
+            case 'get':
+              return { type: operation.type, key: operation.key };
+            case 'remove':
+              return { type: operation.type, key: operation.key };
+            case 'listKeys':
+              return { type: operation.type, keys: operation.keys };
+            case 'clear':
+              return { type: operation.type };
+          }
+        }),
+    ).toMatchInlineSnapshot(`
+      - { key: '_i', type: 'get' }
+      - { key: '__tsdf_payload__:document', type: 'set' }
+      - { key: '_i', type: 'set' }
+      - { key: '__tsdf_payload__:document', type: 'get' }
+      - { key: '_i', type: 'get' }
+      - { key: '__tsdf_payload__:document', type: 'set' }
+      - { key: '__tsdf_payload__:document', type: 'get' }
+      - { key: '__tsdf_payload__:document', type: 'get' }
+      - { key: '_i', type: 'get' }
+      - { key: '_i', type: 'set' }
+      - { key: '__tsdf_payload__:document', type: 'get' }
+    `);
+  });
+
   test('index parsing accepts both explicit and implicit default version entries', async () => {
     const driverState = createNaiveAsyncStorageDriver();
     const adapter = createAsyncStorageAdapter(driverState.driver);

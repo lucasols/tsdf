@@ -496,7 +496,7 @@ describe('async storage efficiency: collection', () => {
     expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          "1: { a: 1735689606153, p: '1' }
+          "1: { a: 1735689600000, p: '1' }
       `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -505,9 +505,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (namespace index) | 0.08 kb
       1.045s | ✍️ #2 tsdf/sess1/col-mutation-flow/ci.h~3574006234.p.json
              |    └ ([itemKey: "1], entry data) | 0.11 kb -> 0.11 kb
-      1.049s | ✍️ #1 tsdf/sess1/col-mutation-flow/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb -> 0.08 kb
-      1.051s | end
+      1.047s | end
       "
     `);
   });
@@ -569,7 +567,7 @@ describe('async storage efficiency: collection', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "1: { a: 1735689606158, p: '1' }
+        "1: { a: 1735689600000, p: '1' }
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -588,9 +586,7 @@ describe('async storage efficiency: collection', () => {
              |    └ ([itemKey: "1], entry data)
       1.05s  | ✍️ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ ([itemKey: "1], entry data) | 0.00 kb -> 0.12 kb
-      1.054s | ✍️ #2 tsdf/sess1/col-mutation-retry-after-delete/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb -> 0.08 kb
-      1.056s | end
+      1.052s | end
       "
     `);
   });
@@ -653,7 +649,7 @@ describe('async storage efficiency: collection', () => {
       ),
     ).toMatchInlineSnapshot(`
       e:
-        "1: { a: 1735689606157, p: '1' }
+        "1: { a: 1735689600000, p: '1' }
     `);
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
@@ -671,9 +667,7 @@ describe('async storage efficiency: collection', () => {
              |    └ ([itemKey: "1], entry data)
       1.052s | ✍️ #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ ([itemKey: "1], entry data) | 0.00 kb -> 0.12 kb
-      1.056s | ✍️ #1 tsdf/sess1/col-mutation-retry-during-write/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb -> 0.08 kb
-      1.058s | end
+      1.054s | end
       "
     `);
   });
@@ -773,9 +767,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (namespace index) | 0.08 kb
       1.855s | ✍️ #2 tsdf/sess1/col-invalidation-flow/ci.h~3574006234.p.json
              |    └ ([itemKey: "1], entry data) | 0.11 kb -> 0.11 kb
-      1.859s | ✍️ #1 tsdf/sess1/col-invalidation-flow/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb -> 0.08 kb
-      1.861s | end
+      1.857s | end
       "
     `);
   });
@@ -824,7 +816,7 @@ describe('async storage efficiency: collection', () => {
       getParsedOpfsFileData('tsdf/sess1/col-offline-marker-flow/ci._i.r.json'),
     ).toMatchInlineSnapshot(`
       e:
-        "1: { a: 1735689606963, o: '✅', p: '1' }
+        "1: { a: 1735689600000, o: '✅', p: '1' }
     `);
     expect(
       getParsedOpfsFileData(
@@ -912,9 +904,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (namespace index) | 0.08 kb
       1.855s | ✍️ #2 tsdf/sess1/col-coalesced-invalidations/ci.h~3574006234.p.json
              |    └ ([itemKey: "1], entry data) | 0.11 kb -> 0.11 kb
-      1.859s | ✍️ #1 tsdf/sess1/col-coalesced-invalidations/ci._i.r.json
-             |    └ (namespace index) | 0.08 kb -> 0.08 kb
-      1.861s | end
+      1.857s | end
       "
     `);
   });
