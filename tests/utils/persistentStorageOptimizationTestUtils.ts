@@ -1101,6 +1101,14 @@ function formatRecordLabel(
   }
 
   if (scope !== null) {
+    if (record.recordKind === 'payload') {
+      const labelKind = getStorageEntryLabelKind(scope.kind);
+      if (labelKind !== null) {
+        const scopedRecordLabel = formatScopedRecordKeyLabel(scope, record.key);
+        return scopedRecordLabel?.description ?? getPayloadDataLabel(labelKind);
+      }
+    }
+
     if (
       record.recordKind === 'internal' &&
       record.key === ASYNC_NAMESPACE_INDEX_RECORD_KEY

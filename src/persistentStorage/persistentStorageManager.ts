@@ -251,9 +251,13 @@ const defaultLocalStorageValueCodec: LocalStorageValueCodec<unknown> = {
   deserialize: (data) => ('d' in data ? data.d : null),
 };
 
-type AsyncStorageValueCodec<T, TSerialized = unknown> = {
+type AsyncStorageValueCodec<
+  T,
+  TSerialized = unknown,
+  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = {
   serialize(data: T): TSerialized;
-  deserialize(data: TSerialized): T | null;
+  deserialize(data: TSerialized, metadata?: TMetadata): T | null;
 };
 
 function toLocalStorageValueCodec<T>(
@@ -384,7 +388,7 @@ export function createPersistentStorageHandle<T>(
         }
 
         const decoded = valueCodec
-          ? valueCodec.deserialize(entry.value)
+          ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
           : __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [asyncEntryKey] });
@@ -586,7 +590,7 @@ export function createPersistentStorageNamespaceHandle<
     valueCodec,
   }: {
     getManifestMeta?: (data: T, entryKey: string) => TMetadata | undefined;
-    valueCodec?: AsyncStorageValueCodec<T>;
+    valueCodec?: AsyncStorageValueCodec<T, unknown, TMetadata>;
   } = {},
 ): PersistentStorageNamespaceHandle<T, TMetadata> {
   const version = config.version;
@@ -728,7 +732,7 @@ export function createPersistentStorageNamespaceHandle<
         }
 
         const decoded = valueCodec
-          ? valueCodec.deserialize(entry.value)
+          ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
           : __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
@@ -778,7 +782,7 @@ export function createPersistentStorageNamespaceHandle<
         }
 
         const decoded = valueCodec
-          ? valueCodec.deserialize(entry.value)
+          ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
           : __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
@@ -835,7 +839,7 @@ export function createPersistentStorageNamespaceHandle<
             return null;
           }
           const decoded = valueCodec
-            ? valueCodec.deserialize(entry.value)
+            ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
             : __LEGIT_CAST__<T, unknown>(entry.value);
           if (decoded === null) {
             const key = entryKeys[index];

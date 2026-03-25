@@ -265,10 +265,9 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
     ].join('/');
 
     // Exact hashed file paths should still work as-is.
-    expect(getParsedOpfsFileData(exactHashedQueryPath)).toMatchInlineSnapshot(`
-      i: ['"users||1']
-      p: { tableId: 'users' }
-    `);
+    expect(getParsedOpfsFileData(exactHashedQueryPath)).toMatchInlineSnapshot(
+      `i: ['"users||1']`,
+    );
 
     // Encoded logical file paths should keep resolving to the hashed files.
     expect(
@@ -299,10 +298,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       getParsedOpfsFileData(
         'tsdf/sess1/placeholder-paths/lq.<{tableId:"users"}>.p.json',
       ),
-    ).toMatchInlineSnapshot(`
-      i: ['"users||1']
-      p: { tableId: 'users' }
-    `);
+    ).toMatchInlineSnapshot(`i: ['"users||1']`);
     expect(listItem.itemKey).toBe('"users||1');
   });
 });

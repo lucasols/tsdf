@@ -198,12 +198,6 @@ function buildCustomMetadata(
           : 'p' in record
             ? { p: record.p }
             : {}),
-        ...(Array.isArray(record.items)
-          ? { i: record.items }
-          : Array.isArray(record.i)
-            ? { i: record.i }
-            : {}),
-        ...(record.hasMore === true || record.h === true ? { h: true } : {}),
       };
     default:
       return {};
@@ -329,6 +323,7 @@ function normalizeMetadataValue(key: string, value: unknown): unknown {
 function normalizeLogicalPayload(
   scope: AsyncStorageNamespaceScope,
   value: unknown,
+  metadata?: ManagedMetadataRecord | null,
 ): unknown {
   const record = getRecord(value);
   if (record === null) return value;
@@ -351,8 +346,14 @@ function normalizeLogicalPayload(
           }
         : value;
     case 'listQuery.query':
-      return 'p' in record && 'i' in record && Array.isArray(record.i)
-        ? { payload: record.p, items: record.i, hasMore: record.h === true }
+      return Array.isArray(record.i) &&
+        metadata?.customMetadata !== undefined &&
+        'p' in metadata.customMetadata
+        ? {
+            payload: metadata.customMetadata.p,
+            items: record.i,
+            hasMore: record.h === true,
+          }
         : value;
     default:
       return value;
@@ -437,6 +438,22 @@ function writeNamespaceIndex(
   );
 }
 
+function readNamespaceIndexFromSnapshot(
+  fileContentsByPath: ReadonlyMap<string, string>,
+  scope: AsyncStorageNamespaceScope,
+): Map<string, ManagedMetadataRecord> {
+  const raw = fileContentsByPath.get(
+    filePathForRecord(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY),
+  );
+  if (raw === undefined) return new Map<string, ManagedMetadataRecord>();
+
+  return (
+    __LEGIT_CAST__<Map<string, ManagedMetadataRecord> | null, unknown>(
+      parseManagedIndexRecord(safeJsonParse(raw)),
+    ) ?? new Map<string, ManagedMetadataRecord>()
+  );
+}
+
 function listRawKeys(
   mockBrowserOpfs: MockBrowserOpfsEnvironment,
   scope: AsyncStorageNamespaceScope,
@@ -511,7 +528,7 @@ function readLogicalStorageEntry<T>(
 
   return {
     data: __LEGIT_CAST__<T, unknown>(
-      normalizeLogicalPayload(parsed.scope, payload),
+      normalizeLogicalPayload(parsed.scope, payload, metadata),
     ),
     timestamp: metadata.lastAccessAt,
     version: metadata.version,
@@ -949,6 +966,16 @@ function resolveParsedRecordKey(
     }
   }
 
+  for (const entryKey of readNamespaceIndexFromSnapshot(
+    fileContentsByPath,
+    scope,
+  ).keys()) {
+    const payloadRecordKey = getPayloadRecordKey(entryKey);
+    if (buildFileName(scope, payloadRecordKey) === fileName) {
+      return payloadRecordKey;
+    }
+  }
+
   return resolvedRecordKeysByPath.get(path) ?? null;
 }
 
@@ -983,6 +1010,35 @@ function snapshotOpfsFiles(
   const filesByPath = new Map<string, string>();
   snapshotDirectoryFiles(mockBrowserOpfs, OPFS_ROOT_DIR, filesByPath);
   return filesByPath;
+}
+
+function backfillKnownRecords(
+  operations: readonly MockOpfsOperation[],
+): MockOpfsOperation[] {
+  const knownRecordByPath = new Map<string, InstrumentedRecord>();
+
+  for (const operation of operations) {
+    if (
+      !('record' in operation) ||
+      operation.record.recordKind === 'internal'
+    ) {
+      continue;
+    }
+
+    knownRecordByPath.set(operation.path, operation.record);
+  }
+
+  return operations.map((operation) => {
+    if (
+      !('record' in operation) ||
+      operation.record.recordKind !== 'internal'
+    ) {
+      return operation;
+    }
+
+    const knownRecord = knownRecordByPath.get(operation.path);
+    return knownRecord ? { ...operation, record: knownRecord } : operation;
+  });
 }
 
 export type OpfsPersistentStorageTestStore = ReturnType<
@@ -1312,20 +1368,22 @@ export function createOpfsPersistentStorageTestStore(
           queryOptions: StorageSeedOptions & { hasMore?: boolean } = {},
         ) {
           const storageKey = listQueryStorageKey(params);
-          setValue(
-            storageKey,
-            createStorageCacheEntry(
-              {
-                p: params,
-                i: items.map(normalizeQueryItemRef),
-                ...(queryOptions.hasMore === true ? { h: true } : {}),
-              },
-              {
-                timestamp: queryOptions.timestamp,
-                version: queryOptions.version,
-              },
-            ),
+          const entry = createStorageCacheEntry(
+            {
+              i: items.map(normalizeQueryItemRef),
+              ...(queryOptions.hasMore === true ? { h: true } : {}),
+            },
+            {
+              timestamp: queryOptions.timestamp,
+              version: queryOptions.version,
+            },
           );
+          setValue(storageKey, entry);
+          setMetadataValue(mockBrowserOpfs, storageKey, {
+            lastAccessAt: entry.timestamp,
+            version: entry.version,
+            customMetadata: { p: params },
+          });
           return storageKey;
         },
       },
@@ -1391,25 +1449,26 @@ export function createOpfsPersistentStorageTestStore(
   function getCurrentOperations(): MockOpfsOperation[] {
     const fileContentsByPath = new Map(instrumentationFileSnapshot);
     const resolvedRecordKeysByPath = new Map<string, string>();
-    return mockBrowserOpfs.operations
-      .slice(instrumentationStartIndex)
-      .flatMap((operation) => {
-        const enriched = enrichRawOperation(
-          mockBrowserOpfs,
-          operation,
-          fileContentsByPath,
-          resolvedRecordKeysByPath,
-        );
-        return enriched === null ? [] : [enriched];
-      });
+    return backfillKnownRecords(
+      mockBrowserOpfs.operations
+        .slice(instrumentationStartIndex)
+        .flatMap((operation) => {
+          const enriched = enrichRawOperation(
+            mockBrowserOpfs,
+            operation,
+            fileContentsByPath,
+            resolvedRecordKeysByPath,
+          );
+          return enriched === null ? [] : [enriched];
+        }),
+    );
   }
 
   function getCurrentReadOperations(): MockOpfsOperation[] {
     const fileContentsByPath = new Map(readFileSnapshot);
     const resolvedRecordKeysByPath = new Map<string, string>();
-    return mockBrowserOpfs.operations
-      .slice(readStartIndex)
-      .flatMap((operation) => {
+    return backfillKnownRecords(
+      mockBrowserOpfs.operations.slice(readStartIndex).flatMap((operation) => {
         const enriched = enrichRawOperation(
           mockBrowserOpfs,
           operation,
@@ -1417,7 +1476,8 @@ export function createOpfsPersistentStorageTestStore(
           resolvedRecordKeysByPath,
         );
         return enriched === null ? [] : [enriched];
-      });
+      }),
+    );
   }
 
   return {
