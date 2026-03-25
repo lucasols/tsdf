@@ -556,12 +556,14 @@ function resolvePlaceholderHashedOpfsFilePath(filePath: string): string {
   }
 
   const entryPart = parsedFileName.groups.entryPart ?? '';
-  if (!entryPart.includes('<')) return filePath;
+  if (entryPart.startsWith('h~')) return filePath;
 
-  const userKey = entryPart.replace(
-    OPFS_PATH_PLACEHOLDER_REGEX,
-    (_match, value: string) => value,
-  );
+  const userKey = entryPart.includes('<')
+    ? entryPart.replace(
+        OPFS_PATH_PLACEHOLDER_REGEX,
+        (_match, value: string) => value,
+      )
+    : decodePathSegment(entryPart);
 
   return [
     OPFS_ROOT_DIR,

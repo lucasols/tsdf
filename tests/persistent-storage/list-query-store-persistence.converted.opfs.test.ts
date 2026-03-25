@@ -353,10 +353,10 @@ describe('opfs: converted list query store persistence', () => {
     expect(storedQuery).not.toHaveProperty('h');
     expect(getParsedOpfsFileData('tsdf/sess1/lq-opfs-save-error/lq._i.r.json'))
       .toMatchInlineSnapshot(`
-      e:
-        {tableId:"users"}:
-          a: 1735689601859
-          p: { tableId: 'users' }
-    `);
+        e:
+          {tableId:"users"}:
+            a: 1735689601859
+            p: { tableId: 'users' }
+      `);
   });
 });

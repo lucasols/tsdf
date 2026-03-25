@@ -946,10 +946,24 @@ export function setupCollectionPersistence<
     }, SAVE_DEBOUNCE_MS);
   }
 
+  function scheduleAsyncStartupMaintenance(): void {
+    if (localStorageAdapter !== null) return;
+    if (config.maxItems === undefined) return;
+
+    const sessionKey = config.getSessionKey();
+    if (sessionKey === false) return;
+
+    scheduleAsyncStorageMaintenance(
+      `collection:${sessionKey}:${config.storeName}`,
+      evictStoredItems,
+    );
+  }
+
   function attach(
     store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
   ): void {
     syncMaintenanceRegistration();
+    scheduleAsyncStartupMaintenance();
     storeRef = store;
     unsubscribe = store.subscribe(() => {
       if (suppressedPersistedStateFlushes > 0) {
