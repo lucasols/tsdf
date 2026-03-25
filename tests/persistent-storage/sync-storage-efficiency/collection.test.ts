@@ -125,6 +125,75 @@ describe('sync storage efficiency: collection', () => {
     `);
   });
 
+  test('startup cleanup enforces maxItems against preloaded persisted entries', async () => {
+    const storeName = 'collection-startup-max-items';
+    const sessionKey = 'sess1';
+
+    // Seed an over-limit cache so the startup maintenance pass has to trim it.
+    setCachedCollectionItem(storeName, sessionKey, 'a', {
+      value: { id: 'a', name: 'Oldest cached' },
+    });
+    await advanceTime(100);
+    setCachedCollectionItem(storeName, sessionKey, 'b', {
+      value: { id: 'b', name: 'Older cached' },
+    });
+    await advanceTime(100);
+    setCachedCollectionItem(storeName, sessionKey, 'c', {
+      value: { id: 'c', name: 'Newest cached' },
+    });
+
+    // Startup should only schedule the cleanup work.
+    const startupOperationCapture = startPersistentStorageOperationCapture();
+    createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
+    const startupOperationBreakdown =
+      startupOperationCapture.finish().timelineString;
+
+    expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
+
+    // Once the startup pass runs, it should evict only the oldest persisted item.
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(
+      listStoredCollectionItemPayloads(storeName, sessionKey).sort(),
+    ).toMatchInlineSnapshot(`['b', 'c']`);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
+      .    | 🔑[0] ✅ #2 tsdf.sess1.collection-startup-max-items.ci."a
+           |    └ (entry data, <"a>)
+      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
+           |    └ (namespace index)
+      .    | 🔑[2] ✅ #4 tsdf.sess1.collection-startup-max-items.ci."b
+           |    └ (entry data, <"b>)
+      .    | 🔑[3] ✅ #5 tsdf.sess1.collection-startup-max-items.ci."c
+           |    └ (entry data, <"c>)
+      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
+           |    └ (namespace index) | 0.24 kb
+      .    | 🗑️ ✅->❌ #2 tsdf.sess1.collection-startup-max-items.ci."a
+           |    └ (entry data, <"a>)
+      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
+           |    └ (namespace index) | 0.24 kb -> 0.16 kb
+      "
+    `);
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf._m.r.n:sess1.collection-startup-max-items.ci.m',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        - a: 1735689600100
+          k: '"b'
+          p: 'b'
+        - a: 1735689600200
+          k: '"c'
+          p: 'c'
+    `);
+  });
+
   test('maxItems cleanup snapshots the full manifest history', async () => {
     setCachedCollectionItem('col-max-items-metadata', 'sess1', 'a', {
       value: { id: 'a', name: 'Oldest cached' },

@@ -159,6 +159,69 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
+  test('startup cleanup enforces maxQueries against preloaded persisted entries', async () => {
+    const firstQuery = { tableId: 'first' };
+    const secondQuery = { tableId: 'second' };
+    const thirdQuery = { tableId: 'third' };
+    const storeName = 'lq-startup-max-queries';
+    const sessionKey = 'sess1';
+
+    // Seed an over-limit query cache so startup maintenance has to trim it.
+    setCachedQuery(storeName, sessionKey, firstQuery, []);
+    await advanceTime(100);
+    setCachedQuery(storeName, sessionKey, secondQuery, []);
+    await advanceTime(100);
+    setCachedQuery(storeName, sessionKey, thirdQuery, []);
+
+    // Startup should only schedule the cleanup work.
+    const startupOperationCapture = startPersistentStorageOperationCapture();
+    createListQueryEnv({ storeName, sessionKey, maxQueries: 2 });
+    const startupOperationBreakdown =
+      startupOperationCapture.finish().timelineString;
+
+    expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
+
+    // Once the startup pass runs, it should evict only the oldest persisted query.
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`).sort(),
+    ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
+      .    | 🔑[0] ✅ #2 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+           |    └ (query data, <{tableId:"first"}>)
+      .    | 🔑[1] ✅ #3 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
+           |    └ (query data, <{tableId:"second"}>)
+      .    | 🔑[2] ✅ #4 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
+           |    └ (query data, <{tableId:"third"}>)
+      .    | 📖 ✅ #2 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+           |    └ (query data, <{tableId:"first"}>) | 0.10 kb
+      .    | 📖 ✅ #3 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
+           |    └ (query data, <{tableId:"second"}>) | 0.10 kb
+      .    | 📖 ✅ #4 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
+           |    └ (query data, <{tableId:"third"}>) | 0.10 kb
+      .    | 🗑️ ✅->❌ #2 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+           |    └ (query data, <{tableId:"first"}>)
+      .    | 📖 ❌ #5 tsdf._m.r.n:sess1.lq-startup-max-queries.li.m (items index)
+      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      "
+    `);
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600200
+      i: []
+      p: { tableId: 'third' }
+    `);
+  });
+
   test('when maxQueries limit is reached a full store cleanup occurs', async () => {
     const firstQuery = { tableId: 'first' };
     const secondQuery = { tableId: 'second' };

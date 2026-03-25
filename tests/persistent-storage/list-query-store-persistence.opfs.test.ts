@@ -69,6 +69,8 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
+  maxItems?: number;
+  maxQueries?: number;
   maxQuerySize?: number;
   ignoreItems?: string[] | ((payload: string) => boolean);
   serverData?: Tables<Row>;
@@ -88,6 +90,8 @@ function createEnv(options: {
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
+      maxItems: options.maxItems,
+      maxQueries: options.maxQueries,
       maxQuerySize: options.maxQuerySize,
       ignoreItems: options.ignoreItems,
     },
@@ -1007,6 +1011,78 @@ describe('opfs: list query store persistence', () => {
         'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
     ).toMatchObject({ i: [listQueryScope.itemKey('users', 2)] });
+  });
+
+  test('cold persisted query items can be evicted during unrelated maxItems cleanup and later hydrate with missing items filtered out', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-opfs-cold-query-items';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Older cached' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 2, { id: 2, name: 'Newer cached' });
+    listQueryScope.seedQuery(usersQuery, [
+      listQueryScope.itemKey('users', 1),
+      listQueryScope.itemKey('users', 2),
+    ]);
+    const writerEnv = createEnv({ storeName, sessionKey, maxItems: 2 });
+
+    writerEnv.apiStore.addItemToState('users||3', {
+      id: 3,
+      name: 'Fresh standalone',
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
+      ['{tableId:"users"}']
+    `);
+    expect(listQueryScope.listStoredItemKeys().sort()).toMatchInlineSnapshot(`
+      ['"users||2', '"users||3']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-query-items/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      maxItems: 2,
+      serverData: {
+        users: [
+          { id: 1, name: 'Older cached' },
+          { id: 2, name: 'Newer cached' },
+          { id: 3, name: 'Fresh standalone' },
+        ],
+      },
+    });
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ names: []
+      -> status: success ⋅ names: [Newer cached]
+      "
+    `);
+    expect(
+      readerEnv.serverTable.getRequestHistory('all'),
+    ).toMatchInlineSnapshot(`[]`);
   });
 
   test('explicit item preload hydrates only the targeted item', async () => {
