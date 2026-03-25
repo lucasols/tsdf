@@ -78,8 +78,8 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | 🗂️ list-dir tsdf/sess1/docs
            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      5ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (entry data)
-      6ms  | 📄 file-open ✅ #2 tsdf/sess1/docs/d._i.r.json (namespace index)
+      5ms  | 👁️ file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (entry data)
+      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/docs/d._i.r.json (namespace index)
       7ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.10 kb
       12ms | ✍️ #2 tsdf/sess1/docs/d._i.r.json
            |    └ (namespace index) | 0.05 kb -> 0.05 kb
@@ -121,7 +121,7 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       1ms  | 📁 dir-open-or-create ✅ tsdf (root directory)
       2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
-      4ms  | 📄 file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (entry data)
+      4ms  | 👁️ file-open ✅ #1 tsdf/sess1/docs/d.e.p.json (entry data)
       5ms  | 📖 #1 tsdf/sess1/docs/d.e.p.json (entry data) | 0.10 kb
       8ms  | end
       "

@@ -980,13 +980,13 @@ function formatOpfsOperationLabel(
       );
     case 'openFile':
       return formatWrappedOpfsOperationLabel(
-        `📄 file-open ${operation.exists ? '✅' : '❌'}`,
+        `👁️ file-open ${operation.exists ? '✅' : '❌'}`,
         formatOpfsOperationPath(operation.path, pathIdMap),
         `(${formatOpfsFileDescription(operation)})`,
       );
     case 'ensureFile':
       return formatWrappedOpfsOperationLabel(
-        `📄 file-open-or-create ${operation.created ? '🆕' : '✅'}`,
+        `👁️ file-open-or-create ${operation.created ? '🆕' : '✅'}`,
         formatOpfsOperationPath(operation.path, pathIdMap),
         `(${formatOpfsFileDescription(operation)})`,
       );
