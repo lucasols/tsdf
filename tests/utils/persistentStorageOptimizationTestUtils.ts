@@ -9,7 +9,6 @@ import {
   encodePathSegment,
   getPayloadRecordKey,
   OPFS_ROOT_DIR,
-  parseFileName,
   parseFileNameKindAlias,
   parseRecordKey,
   parseRecordKindAlias,
@@ -516,7 +515,6 @@ function compactDocumentOpfsIndexSnapshotValue(
 export function getParsedOpfsFileData<T = unknown>(filePath: string): T | null {
   const raw =
     readMockBrowserOpfsFileForTests(filePath) ??
-    readMockBrowserOpfsFileForTests(resolveHashedOpfsFilePath(filePath)) ??
     readMockBrowserOpfsFileForTests(
       resolvePlaceholderHashedOpfsFilePath(filePath),
     );
@@ -525,39 +523,6 @@ export function getParsedOpfsFileData<T = unknown>(filePath: string): T | null {
   return __LEGIT_CAST__<T | null, unknown>(
     compactDocumentOpfsIndexSnapshotValue(filePath, safeJsonParse(raw) ?? raw),
   );
-}
-
-function resolveHashedOpfsFilePath(filePath: string): string {
-  const pathSegments = filePath.split('/');
-  const fileName = pathSegments.pop();
-  const storeName = pathSegments.pop();
-  const sessionKey = pathSegments.pop();
-  const rootDir = pathSegments.pop();
-  if (
-    fileName === undefined ||
-    storeName === undefined ||
-    sessionKey === undefined ||
-    rootDir !== OPFS_ROOT_DIR
-  ) {
-    return filePath;
-  }
-
-  const parsed = parseFileName(fileName);
-  if (parsed === null) return filePath;
-
-  return [
-    OPFS_ROOT_DIR,
-    encodePathSegment(decodePathSegment(sessionKey)),
-    encodePathSegment(decodePathSegment(storeName)),
-    buildFileName(
-      {
-        sessionKey: decodePathSegment(sessionKey),
-        storeName: decodePathSegment(storeName),
-        kind: parsed.kind,
-      },
-      parsed.key,
-    ),
-  ].join('/');
 }
 
 function resolvePlaceholderHashedOpfsFilePath(filePath: string): string {
