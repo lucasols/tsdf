@@ -253,7 +253,35 @@ describe('startPersistentStorageOperationCapture', () => {
       "
       time |
       0    | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (root, single, manifest) | ❌ -> 0.01 kb
+           |    └ (namespace index) | ❌ -> 0.01 kb
+      "
+    `);
+  });
+
+  test('timelineString uses async-style sync payload and index labels', () => {
+    const capture = startPersistentStorageOperationCapture();
+
+    localStorage.setItem('tsdf.sess1.sync-doc', 'abc');
+    localStorage.setItem('tsdf.sess1.sync-collection.ci."1', 'abc');
+    localStorage.setItem('tsdf.sess1.sync-list.lq.{tableId:"users"}', 'abc');
+    localStorage.setItem('tsdf.sess1.sync-list.li."users||1', 'abc');
+    localStorage.setItem('tsdf._m.r.s:sess1.sync-doc.m', 'abc');
+    localStorage.setItem('tsdf.sess1.sync-offline.oq.job-1', 'abc');
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ ❌->✅ #1 tsdf.sess1.sync-doc (entry data) | ❌ -> 0.01 kb
+      .    | ✍️ ❌->✅ #2 tsdf.sess1.sync-collection.ci."1
+           |    └ (entry data, <"1>) | ❌ -> 0.01 kb
+      .    | ✍️ ❌->✅ #3 tsdf.sess1.sync-list.lq.{tableId:"users"}
+           |    └ (entry data, <{tableId:"users"}>) | ❌ -> 0.01 kb
+      .    | ✍️ ❌->✅ #4 tsdf.sess1.sync-list.li."users||1
+           |    └ (entry data, <"users||1>) | ❌ -> 0.01 kb
+      .    | ✍️ ❌->✅ #5 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | ❌ -> 0.01 kb
+      .    | ✍️ ❌->✅ #6 tsdf.sess1.sync-offline.oq.job-1
+           |    └ (entry data, <job-1>) | ❌ -> 0.01 kb
       "
     `);
   });

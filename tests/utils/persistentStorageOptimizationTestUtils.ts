@@ -38,44 +38,87 @@ function describePersistentStorageKey(key: string): string | null {
   const specialKeyDescription = MANAGED_PERSISTENT_SPECIAL_KEYS[key];
   if (specialKeyDescription !== undefined) return specialKeyDescription;
 
+  const managedKeyDescription = describeManagedPersistentStorageKey(key);
+  if (managedKeyDescription !== null) return managedKeyDescription;
+
+  if (!key.startsWith('tsdf.')) return null;
+
+  const payloadKeyDescription = describePersistentStoragePayloadKey(key);
+  if (payloadKeyDescription !== null) return payloadKeyDescription;
+
+  return withOfflinePrefix(
+    describeEntryKind(key),
+    describeOfflineStorageType(key),
+  );
+}
+
+function describeManagedPersistentStorageKey(key: string): string | null {
   const managedPrefix = MANAGED_PERSISTENT_PREFIXES.find((prefix) =>
     key.startsWith(prefix),
   );
-  if (managedPrefix === undefined) {
-    return key.startsWith('tsdf.')
-      ? withOfflinePrefix(
-          describeEntryKind(key),
-          describeOfflineStorageType(key),
-        )
-      : null;
-  }
+  if (managedPrefix === undefined) return null;
 
   const identity = key.slice(managedPrefix.length);
   if (identity.endsWith('.m') || identity.endsWith('.manifest')) {
-    return withOfflinePrefix(
-      `root, ${describeRootKind(identity)}, manifest`,
-      describeOfflineStorageType(identity),
-    );
+    return 'namespace index';
   }
 
   const manifestMarkerIndex = identity.indexOf(MANIFEST_PART);
   if (manifestMarkerIndex >= 0) {
-    const rootIdentity = identity.slice(0, manifestMarkerIndex);
     const shardIndex = identity.slice(
       manifestMarkerIndex + MANIFEST_PART.length,
     );
-    return withOfflinePrefix(
-      `root, ${describeRootKind(rootIdentity)}, manifest shard ${
-        shardIndex || '?'
-      }`,
-      describeOfflineStorageType(rootIdentity),
-    );
+
+    return `namespace index shard ${shardIndex || '?'}`;
   }
 
   return withOfflinePrefix(
     `root, ${describeRootKind(identity)}`,
     describeOfflineStorageType(identity),
   );
+}
+
+function describePersistentStoragePayloadKey(key: string): string | null {
+  const scopedEntryDescription =
+    formatScopedPersistentStorageEntryDescription(key);
+  if (scopedEntryDescription !== null) return scopedEntryDescription;
+
+  return 'entry data';
+}
+
+function formatScopedPersistentStorageEntryDescription(
+  key: string,
+): string | null {
+  const matchedEntry = matchPersistentStorageEntryKey(key);
+  if (matchedEntry === null) return null;
+
+  const labelKind = getStorageEntryLabelKind(matchedEntry.prefix);
+  if (labelKind === null || matchedEntry.userKey.length === 0) return null;
+
+  return formatStorageEntryDescription(matchedEntry.userKey);
+}
+
+function matchPersistentStorageEntryKey(
+  key: string,
+): { prefix: string; userKey: string } | null {
+  const entryMarkers = [
+    COLLECTION_STORAGE_ENTRY_PREFIX,
+    LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+    LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+    OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+    OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+    OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+  ] as const;
+
+  for (const prefix of entryMarkers) {
+    const marker = `.${prefix}.`;
+    const markerIndex = key.indexOf(marker, 'tsdf.'.length);
+    if (markerIndex === -1) continue;
+
+    return { prefix, userKey: key.slice(markerIndex + marker.length) };
+  }
+
+  return null;
 }
 
 function describeEntryKind(key: string): string {
@@ -553,11 +596,13 @@ function getStorageEntryLabelKind(value: string): StorageEntryLabelKind | null {
   }
 }
 
-function formatStorageEntryLabel(
-  kind: StorageEntryLabelKind,
-  value: string,
-): string {
-  return `[${kind}: ${value}]`;
+function formatStorageEntryLabel(value: string): string {
+  return `<${value}>`;
+}
+
+function formatStorageEntryDescription(value: string): string {
+  const label = formatStorageEntryLabel(value);
+  return `entry data, ${label}`;
 }
 
 function addTreePath(
@@ -909,7 +954,7 @@ function formatScopedRecordKeyLabel(
   const labelKind = getStorageEntryLabelKind(scope.kind);
   if (labelKind === null) return null;
 
-  return formatStorageEntryLabel(labelKind, parsedRecordKey.userKey);
+  return formatStorageEntryLabel(parsedRecordKey.userKey);
 }
 
 function formatRecordLabel(
@@ -931,9 +976,9 @@ function formatRecordLabel(
   if (scope !== null) {
     const compactRecordKeyLabel = formatScopedRecordKeyLabel(scope, record.key);
     if (compactRecordKeyLabel !== null) {
-      return `${compactRecordKeyLabel}, ${
+      return `${
         record.recordKind === 'payload' ? 'entry data' : record.recordKind
-      }`;
+      }, ${compactRecordKeyLabel}`;
     }
   }
 

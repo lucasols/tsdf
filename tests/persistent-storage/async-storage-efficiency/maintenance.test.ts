@@ -534,7 +534,7 @@ describe('async storage efficiency: maintenance', () => {
       2.005s | 📖 #1 tsdf/sess1/orphan-collection/ci._i.r.json
              |    └ (namespace index) | 0.11 kb
       2.008s | 🗑️ ✅ #2 tsdf/sess1/orphan-collection/ci.h~2293725328.p.json
-             |    └ ([itemKey: "orphan-user], entry data)
+             |    └ (entry data, <"orphan-user>)
       2.009s | end
       "
     `);

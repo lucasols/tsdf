@@ -56,13 +56,13 @@ describe('sync storage efficiency: document', () => {
       "
       time |
       0    | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ #2 tsdf.sess1.doc-remount-flow (entry) | 0.10 kb
+           |    └ (namespace index) | 0.05 kb
+      .    | 📖 ✅ #2 tsdf.sess1.doc-remount-flow (entry data) | 0.10 kb
            ·
       2s   | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (root, single, manifest) | 0.05 kb
+           |    └ (namespace index) | 0.05 kb
       .    | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m
-           |    └ (root, single, manifest) | 0.05 kb -> 0.05 kb
+           |    └ (namespace index) | 0.05 kb -> 0.05 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -117,14 +117,13 @@ describe('sync storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time  |
-      0     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
-            |    └ (root, single, manifest)
+      0     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m (namespace index)
             ·
-      1.81s | ✍️ ❌->✅ #2 tsdf.sess1.doc-remount-no-cache (entry) | ❌ -> 0.08 kb
-      .     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
-            |    └ (root, single, manifest)
+      1.81s | ✍️ ❌->✅ #2 tsdf.sess1.doc-remount-no-cache
+            |    └ (entry data) | ❌ -> 0.08 kb
+      .     | 📖 ❌ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m (namespace index)
       .     | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.doc-remount-no-cache.m
-            |    └ (root, single, manifest) | ❌ -> 0.05 kb
+            |    └ (namespace index) | ❌ -> 0.05 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -257,11 +256,12 @@ describe('sync storage efficiency: document', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | ✍️ ✅->✅ #1 tsdf.sess1.doc-mutation-flow (entry) | 0.10 kb -> 0.10 kb
+      1s   | ✍️ ✅->✅ #1 tsdf.sess1.doc-mutation-flow
+           |    └ (entry data) | 0.10 kb -> 0.10 kb
       .    | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-mutation-flow.m
-           |    └ (root, single, manifest) | 0.05 kb
+           |    └ (namespace index) | 0.05 kb
       .    | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-mutation-flow.m
-           |    └ (root, single, manifest) | 0.05 kb -> 0.05 kb
+           |    └ (namespace index) | 0.05 kb -> 0.05 kb
       "
     `);
   });
@@ -310,11 +310,11 @@ describe('sync storage efficiency: document', () => {
       "
       time  |
       1.81s | ✍️ ✅->✅ #1 tsdf.sess1.doc-invalidation-flow
-            |    └ (entry) | 0.10 kb -> 0.10 kb
+            |    └ (entry data) | 0.10 kb -> 0.10 kb
       .     | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-invalidation-flow.m
-            |    └ (root, single, manifest) | 0.05 kb
+            |    └ (namespace index) | 0.05 kb
       .     | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-invalidation-flow.m
-            |    └ (root, single, manifest) | 0.05 kb -> 0.05 kb
+            |    └ (namespace index) | 0.05 kb -> 0.05 kb
       "
     `);
   });
@@ -380,11 +380,11 @@ describe('sync storage efficiency: document', () => {
       "
       time  |
       1.81s | ✍️ ✅->✅ #1 tsdf.sess1.doc-coalesced-invalidations
-            |    └ (entry) | 0.10 kb -> 0.11 kb
+            |    └ (entry data) | 0.10 kb -> 0.11 kb
       .     | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m
-            |    └ (root, single, manifest) | 0.05 kb
+            |    └ (namespace index) | 0.05 kb
       .     | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m
-            |    └ (root, single, manifest) | 0.05 kb -> 0.05 kb
+            |    └ (namespace index) | 0.05 kb -> 0.05 kb
       "
     `);
   });
