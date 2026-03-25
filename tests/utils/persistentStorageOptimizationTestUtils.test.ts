@@ -350,9 +350,9 @@ describe('startPersistentStorageOperationCapture', () => {
       .    | ✍️ ❌->✅ #2 tsdf.sess1.sync-collection.ci."1
            |    └ (entry data, <"1>) | ❌ -> 0.01 kb
       .    | ✍️ ❌->✅ #3 tsdf.sess1.sync-list.lq.{tableId:"users"}
-           |    └ (entry data, <{tableId:"users"}>) | ❌ -> 0.01 kb
+           |    └ (query data, <{tableId:"users"}>) | ❌ -> 0.01 kb
       .    | ✍️ ❌->✅ #4 tsdf.sess1.sync-list.li."users||1
-           |    └ (entry data, <"users||1>) | ❌ -> 0.01 kb
+           |    └ (item data, <"users||1>) | ❌ -> 0.01 kb
       .    | ✍️ ❌->✅ #5 tsdf._m.r.s:sess1.sync-doc.m
            |    └ (namespace index) | ❌ -> 0.01 kb
       .    | ✍️ ❌->✅ #6 tsdf.sess1.sync-offline.oq.job-1

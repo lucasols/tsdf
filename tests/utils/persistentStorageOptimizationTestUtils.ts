@@ -70,8 +70,9 @@ function describeManagedPersistentStorageKey(key: string): string | null {
   if (managedPrefix === undefined) return null;
 
   const identity = key.slice(managedPrefix.length);
+  const labelKind = getManagedStorageEntryLabelKind(identity);
   if (identity.endsWith('.m') || identity.endsWith('.manifest')) {
-    return 'namespace index';
+    return getNamespaceIndexLabel(labelKind);
   }
 
   const manifestMarkerIndex = identity.indexOf(MANIFEST_PART);
@@ -80,7 +81,7 @@ function describeManagedPersistentStorageKey(key: string): string | null {
       manifestMarkerIndex + MANIFEST_PART.length,
     );
 
-    return `namespace index shard ${shardIndex || '?'}`;
+    return `${getNamespaceIndexLabel(labelKind)} shard ${shardIndex || '?'}`;
   }
 
   return withOfflinePrefix(
@@ -106,7 +107,7 @@ function formatScopedPersistentStorageEntryDescription(
   const labelKind = getStorageEntryLabelKind(matchedEntry.prefix);
   if (labelKind === null || matchedEntry.userKey.length === 0) return null;
 
-  return formatStorageEntryDescription(matchedEntry.userKey);
+  return formatStorageEntryDescription(matchedEntry.userKey, labelKind);
 }
 
 function matchPersistentStorageEntryKey(
@@ -633,22 +634,48 @@ function createStorageTreeNode(): StorageTreeNode {
 }
 
 type StorageEntryLabelKind =
-  | 'itemKey'
-  | 'queryKey'
+  | 'collectionItemKey'
+  | 'listQueryItemKey'
+  | 'listQueryQueryKey'
   | 'queueKey'
   | 'conflictKey'
   | 'entityKey';
 
+function getNamespaceIndexLabel(
+  labelKind: StorageEntryLabelKind | null,
+): string {
+  switch (labelKind) {
+    case 'listQueryItemKey':
+      return 'items index';
+    case 'listQueryQueryKey':
+      return 'queries index';
+    default:
+      return 'namespace index';
+  }
+}
+
+function getPayloadDataLabel(labelKind: StorageEntryLabelKind | null): string {
+  switch (labelKind) {
+    case 'listQueryItemKey':
+      return 'item data';
+    case 'listQueryQueryKey':
+      return 'query data';
+    default:
+      return 'entry data';
+  }
+}
+
 function getStorageEntryLabelKind(value: string): StorageEntryLabelKind | null {
   switch (value) {
     case 'collection.item':
-    case 'listQuery.item':
     case 'ci':
+      return 'collectionItemKey';
+    case 'listQuery.item':
     case 'li':
-      return 'itemKey';
+      return 'listQueryItemKey';
     case 'listQuery.query':
     case 'lq':
-      return 'queryKey';
+      return 'listQueryQueryKey';
     case 'offline.queue':
     case 'oq':
       return 'queueKey';
@@ -667,9 +694,36 @@ function formatStorageEntryLabel(value: string): string {
   return `<${value}>`;
 }
 
-function formatStorageEntryDescription(value: string): string {
+function formatStorageEntryDescription(
+  value: string,
+  labelKind: StorageEntryLabelKind | null,
+): string {
   const label = formatStorageEntryLabel(value);
-  return `entry data, ${label}`;
+  return `${getPayloadDataLabel(labelKind)}, ${label}`;
+}
+
+function getManagedStorageEntryLabelKind(
+  identity: string,
+): StorageEntryLabelKind | null {
+  const managedEntryMarkers = [
+    COLLECTION_STORAGE_ENTRY_PREFIX,
+    LIST_QUERY_ITEM_STORAGE_ENTRY_PREFIX,
+    LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
+    OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
+    OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
+    OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
+  ] as const;
+
+  for (const prefix of managedEntryMarkers) {
+    if (
+      identity.includes(`.${prefix}.m`) ||
+      identity.includes(`.${prefix}.manifest.`)
+    ) {
+      return getStorageEntryLabelKind(prefix);
+    }
+  }
+
+  return null;
 }
 
 function addTreePath(
@@ -1014,14 +1068,20 @@ function isPlainDocumentLogicalKey(
 function formatScopedRecordKeyLabel(
   scope: AsyncStorageNamespaceScope,
   recordKey: string,
-): string | null {
+): { description: string; userKey: string } | null {
   const parsedRecordKey = parseRecordKey(recordKey);
   if (parsedRecordKey.recordKind === 'raw') return null;
 
   const labelKind = getStorageEntryLabelKind(scope.kind);
   if (labelKind === null) return null;
 
-  return formatStorageEntryLabel(parsedRecordKey.userKey);
+  return {
+    description: formatStorageEntryDescription(
+      parsedRecordKey.userKey,
+      labelKind,
+    ),
+    userKey: parsedRecordKey.userKey,
+  };
 }
 
 function formatRecordLabel(
@@ -1041,11 +1101,18 @@ function formatRecordLabel(
   }
 
   if (scope !== null) {
-    const compactRecordKeyLabel = formatScopedRecordKeyLabel(scope, record.key);
-    if (compactRecordKeyLabel !== null) {
-      return `${
-        record.recordKind === 'payload' ? 'entry data' : record.recordKind
-      }, ${compactRecordKeyLabel}`;
+    if (
+      record.recordKind === 'internal' &&
+      record.key === ASYNC_NAMESPACE_INDEX_RECORD_KEY
+    ) {
+      return getNamespaceIndexLabel(getStorageEntryLabelKind(scope.kind));
+    }
+
+    const scopedRecordLabel = formatScopedRecordKeyLabel(scope, record.key);
+    if (scopedRecordLabel !== null) {
+      return record.recordKind === 'payload'
+        ? scopedRecordLabel.description
+        : `${record.recordKind}, ${formatStorageEntryLabel(scopedRecordLabel.userKey)}`;
     }
   }
 
