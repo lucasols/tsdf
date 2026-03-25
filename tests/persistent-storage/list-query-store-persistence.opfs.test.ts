@@ -988,7 +988,7 @@ describe('opfs: list query store persistence', () => {
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(true);
     expect(
       getParsedOpfsFileData(
-        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.%7BtableId%3A%22users%22%7D.p.json',
+        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
     ).toMatchObject({
       i: [
@@ -1004,7 +1004,7 @@ describe('opfs: list query store persistence', () => {
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
     expect(
       getParsedOpfsFileData(
-        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.%7BtableId%3A%22users%22%7D.p.json',
+        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
       ),
     ).toMatchObject({ i: [listQueryScope.itemKey('users', 2)] });
   });

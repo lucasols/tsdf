@@ -139,7 +139,7 @@ describe('async storage efficiency: collection', () => {
     `);
     expect(
       getParsedOpfsFileData(
-        'tsdf/sess1/collection-expiration/ci.%22fresh-user.p.json',
+        'tsdf/sess1/collection-expiration/ci.<"fresh-user>.p.json',
       ),
     ).toMatchInlineSnapshot(`
       d:
@@ -486,7 +486,7 @@ describe('async storage efficiency: collection', () => {
     await flushInvalidationPersistence();
     const mutationOperations = mutationCapture.finish().timelineString;
 
-    expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.%221.p.json'))
+    expect(getParsedOpfsFileData('tsdf/sess1/col-mutation-flow/ci.<"1>.p.json'))
       .toMatchInlineSnapshot(`
         d:
           value: { id: '1', name: 'Edited user' }
@@ -553,7 +553,7 @@ describe('async storage efficiency: collection', () => {
 
     expect(
       getParsedOpfsFileData(
-        'tsdf/sess1/col-mutation-retry-after-delete/ci.%221.p.json',
+        'tsdf/sess1/col-mutation-retry-after-delete/ci.<"1>.p.json',
       ),
     ).toMatchInlineSnapshot(`
       d:

@@ -6,6 +6,7 @@ import { localPersistentStorage } from '../../../src/persistentStorage/storageAd
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
+  getLocalStorageTree,
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -108,6 +109,53 @@ describe('sync storage efficiency: list-query', () => {
       .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m
            |    └ (namespace index) | 0.27 kb -> 0.14 kb
       "
+    `);
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.64 kb)
+      ├ _m (0.25 kb)
+      │ ├ g (0.04 kb)
+      │ └ r (0.20 kb)
+      │   └ n:sess1 (0.20 kb)
+      │     └ list-query-expiration (0.19 kb)
+      │       └ li (0.14 kb)
+      │         └ m (0.14 kb)
+      └ sess1 (0.38 kb)
+        └ list-query-expiration (0.38 kb)
+          ├ li (0.14 kb)
+          │ └ "fresh-users||2 (0.14 kb)
+          └ lq (0.19 kb)
+            └ {tableId:"fresh-users"} (0.19 kb)"
+    `);
+
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf._m.r.n:sess1.list-query-expiration.li.m',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        - a: 1735689600000
+          k: '"fresh-users||2'
+          p: 'fresh-users||2'
+    `);
+
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.list-query-expiration.li."fresh-users||2',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 2, name: 'Fresh Item' }
+      p: 'fresh-users||2'
+    `);
+
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600000
+      i: ['"fresh-users||2']
+      p: { tableId: 'fresh-users' }
     `);
   });
 

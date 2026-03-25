@@ -7,9 +7,12 @@ import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
+  getPayloadRecordKey,
   OPFS_ROOT_DIR,
   parseFileName,
+  parseFileNameKindAlias,
   parseRecordKey,
+  parseRecordKindAlias,
 } from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { readMockBrowserOpfsFileForTests } from '../mocks/mockBrowserOpfs';
@@ -33,6 +36,14 @@ const MANAGED_PERSISTENT_SPECIAL_KEYS: Readonly<Record<string, string>> = {
   [ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY]: 'async global maintenance',
 } as const;
 const MANIFEST_PART = '.manifest.';
+const OPFS_FILE_NAME_REGEX =
+  /^(?<kindPart>[^.]+)\.(?<entryPart>.+)\.(?<recordPart>[^.]+)\.json$/u;
+const OPFS_PATH_PLACEHOLDER_REGEX = /<([^<>]*)>/gu;
+const HASHED_OPFS_SCOPE_KINDS = new Set<AsyncStorageNamespaceScope['kind']>([
+  'collection.item',
+  'listQuery.item',
+  'listQuery.query',
+]);
 
 function describePersistentStorageKey(key: string): string | null {
   const specialKeyDescription = MANAGED_PERSISTENT_SPECIAL_KEYS[key];
@@ -504,7 +515,10 @@ function compactDocumentOpfsIndexSnapshotValue(
 export function getParsedOpfsFileData<T = unknown>(filePath: string): T | null {
   const raw =
     readMockBrowserOpfsFileForTests(filePath) ??
-    readMockBrowserOpfsFileForTests(resolveHashedOpfsFilePath(filePath));
+    readMockBrowserOpfsFileForTests(resolveHashedOpfsFilePath(filePath)) ??
+    readMockBrowserOpfsFileForTests(
+      resolvePlaceholderHashedOpfsFilePath(filePath),
+    );
   if (raw === null) return null;
 
   return __LEGIT_CAST__<T | null, unknown>(
@@ -541,6 +555,59 @@ function resolveHashedOpfsFilePath(filePath: string): string {
         kind: parsed.kind,
       },
       parsed.key,
+    ),
+  ].join('/');
+}
+
+function resolvePlaceholderHashedOpfsFilePath(filePath: string): string {
+  const pathSegments = filePath.split('/');
+  const fileName = pathSegments.pop();
+  const storeName = pathSegments.pop();
+  const sessionKey = pathSegments.pop();
+  const rootDir = pathSegments.pop();
+  if (
+    fileName === undefined ||
+    storeName === undefined ||
+    sessionKey === undefined ||
+    rootDir !== OPFS_ROOT_DIR
+  ) {
+    return filePath;
+  }
+
+  const parsedFileName = OPFS_FILE_NAME_REGEX.exec(fileName);
+  if (parsedFileName?.groups === undefined) return filePath;
+
+  const kind = parseFileNameKindAlias(parsedFileName.groups.kindPart ?? '');
+  const recordKind = parseRecordKindAlias(
+    parsedFileName.groups.recordPart ?? '',
+  );
+  if (
+    kind === null ||
+    recordKind !== 'payload' ||
+    !HASHED_OPFS_SCOPE_KINDS.has(kind)
+  ) {
+    return filePath;
+  }
+
+  const entryPart = parsedFileName.groups.entryPart ?? '';
+  if (!entryPart.includes('<')) return filePath;
+
+  const userKey = entryPart.replace(
+    OPFS_PATH_PLACEHOLDER_REGEX,
+    (_match, value: string) => value,
+  );
+
+  return [
+    OPFS_ROOT_DIR,
+    encodePathSegment(decodePathSegment(sessionKey)),
+    encodePathSegment(decodePathSegment(storeName)),
+    buildFileName(
+      {
+        sessionKey: decodePathSegment(sessionKey),
+        storeName: decodePathSegment(storeName),
+        kind,
+      },
+      getPayloadRecordKey(userKey),
     ),
   ].join('/');
 }

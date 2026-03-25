@@ -339,14 +339,14 @@ describe('opfs: converted list query store persistence', () => {
     expect(onPersistentStorageError).toHaveBeenCalledTimes(1);
     expect(
       getParsedOpfsFileData(
-        'tsdf/sess1/lq-opfs-save-error/li.%22users%7C%7C1.p.json',
+        'tsdf/sess1/lq-opfs-save-error/li.<"users||1>.p.json',
       ),
     ).toMatchInlineSnapshot(`
       d: { label: 'Cached', rowId: 1 }
       p: 'users||1'
     `);
     const storedQuery = getParsedOpfsFileData(
-      'tsdf/sess1/lq-opfs-save-error/lq.%7BtableId%3A%22users%22%7D.p.json',
+      'tsdf/sess1/lq-opfs-save-error/lq.<{tableId:"users"}>.p.json',
     );
     expect(storedQuery).toMatchObject({
       i: [usersItemKey],

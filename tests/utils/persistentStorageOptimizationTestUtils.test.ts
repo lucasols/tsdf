@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+  buildFileName,
+  getPayloadRecordKey,
+} from '../../src/persistentStorage/opfsFileNaming';
 import type { AsyncStorageNamespaceScope } from '../../src/persistentStorage/types';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
 import { resolveAfterAllTimers } from './genericTestUtils';
@@ -229,6 +233,77 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       lastSuccessfulCleanupAt: 123
       startupCleanupLease: null
     `);
+  });
+
+  test('OPFS inspection helpers accept exact, encoded, and placeholder hashed payload paths', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const storeScope = mockAdapter.scope('placeholder-paths', 'sess1');
+
+    const collectionPayload = 'user.1';
+    const listItem = storeScope.listQuery.seedItem('users', 1, {
+      id: 1,
+      name: 'Alice',
+    });
+    storeScope.collection.seedItem(collectionPayload, {
+      id: collectionPayload,
+      name: 'Collection item',
+    });
+    storeScope.listQuery.seedQuery({ tableId: 'users' }, [
+      { tableId: 'users', id: 1 },
+    ]);
+
+    const exactHashedQueryPath = [
+      'tsdf',
+      'sess1',
+      'placeholder-paths',
+      buildFileName(
+        storeScope.listQuery.queryNamespace,
+        getPayloadRecordKey(
+          storeScope.listQuery.queryKey({ tableId: 'users' }),
+        ),
+      ),
+    ].join('/');
+
+    // Exact hashed file paths should still work as-is.
+    expect(getParsedOpfsFileData(exactHashedQueryPath)).toMatchInlineSnapshot(`
+      i: ['"users||1']
+      p: { tableId: 'users' }
+    `);
+
+    // Encoded logical file paths should keep resolving to the hashed files.
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/placeholder-paths/li.%22users%7C%7C1.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Alice' }
+      p: 'users||1'
+    `);
+
+    // Placeholder file paths should resolve to the same hashed payload files.
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/placeholder-paths/ci.<"user.1>.p.json'),
+    ).toMatchInlineSnapshot(`
+      d: { id: 'user.1', name: 'Collection item' }
+      p: 'user.1'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/placeholder-paths/li.<"users||1>.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Alice' }
+      p: 'users||1'
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/placeholder-paths/lq.<{tableId:"users"}>.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"users||1']
+      p: { tableId: 'users' }
+    `);
+    expect(listItem.itemKey).toBe('"users||1');
   });
 });
 

@@ -2,8 +2,14 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, expect, test } from 'vitest';
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../../utils/opfsPersistentStorageTestStore';
 import {
+  getOpfsDirTree,
   getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -18,11 +24,6 @@ import {
   storeItemKey,
   waitForScheduledCleanup,
 } from './shared';
-import {
-  advanceTime,
-  flushAllTimers,
-  resolveAfterAllTimers,
-} from '../../utils/genericTestUtils';
 
 setupAsyncStorageEfficiencyTestSuite();
 
@@ -103,6 +104,50 @@ describe('async storage efficiency: list-query', () => {
              |    └ (namespace index) | 0.43 kb -> 0.21 kb
       2.016s | end
       "
+    `);
+
+    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+      "tsdf (0.82 kb)
+      ├ sess1 (0.75 kb)
+      │ └ list-query-expiration (0.74 kb)
+      │   ├ li._i.r.json (0.15 kb)
+      │   ├ li.h~3303896864.p.json (0.15 kb)
+      │   ├ lq._i.r.json (0.24 kb)
+      │   └ lq.h~2161479472.p.json (0.15 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
+
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/list-query-expiration/li._i.r.json'),
+    ).toMatchInlineSnapshot(`
+      e:
+        "fresh-users||2: { a: 1735689600000, p: 'fresh-users||2' }
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/list-query-expiration/li.<"fresh-users||2>.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 2, name: 'Fresh Item' }
+      p: 'fresh-users||2'
+    `);
+
+    expect(
+      getParsedOpfsFileData('tsdf/sess1/list-query-expiration/lq._i.r.json'),
+    ).toMatchInlineSnapshot(`
+      e:
+        {tableId:"fresh-users"}:
+          a: 1735689600000
+          i: ['"fresh-users||2']
+          p: { tableId: 'fresh-users' }
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/list-query-expiration/lq.<{tableId:"fresh-users"}>.p.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      i: ['"fresh-users||2']
+      p: { tableId: 'fresh-users' }
     `);
   });
 
@@ -185,7 +230,7 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(
       getParsedOpfsFileData(
-        'tsdf/sess1/lq-query-metadata/li.%22third%7C%7C1.p.json',
+        'tsdf/sess1/lq-query-metadata/li.<"third||1>.p.json',
       ),
     ).toMatchInlineSnapshot(`
       d: { id: 1, name: 'Third' }
@@ -205,7 +250,7 @@ describe('async storage efficiency: list-query', () => {
       `);
     expect(
       getParsedOpfsFileData(
-        'tsdf/sess1/lq-query-metadata/lq.%7BtableId%3A%22third%22%7D.p.json',
+        'tsdf/sess1/lq-query-metadata/lq.<{tableId:"third"}>.p.json',
       ),
     ).toMatchInlineSnapshot(`
       i: ['"third||1']
