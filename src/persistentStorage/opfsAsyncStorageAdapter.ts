@@ -5,12 +5,12 @@ import {
   buildFileName,
   decodePathSegment,
   encodePathSegment,
-  getPayloadRecordKey,
   getNamespaceId,
-  parseFileNameInfo,
-  resolveHashedPayloadRecordKeyFromValue,
+  getPayloadRecordKey,
   joinPath,
   OPFS_ROOT_DIR,
+  parseFileNameInfo,
+  resolveHashedPayloadRecordKeyFromValue,
 } from './opfsFileNaming';
 import type {
   AsyncStorageDiscoveredScope,
@@ -166,6 +166,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         knownRemainingEntryCountByStorePath: new Map(),
         knownStorePathsBySessionPath: new Map(),
       },
+      // cloning cache instead of reusing because cleanup does a full scan of storage, which would populate the cache with items that might not be relevant to the current app usage
       dirCache: this.#mainCacheContext.dirCache.clone(),
       fileCache: this.#mainCacheContext.fileCache.clone(),
       readValueCache: new Map(),
