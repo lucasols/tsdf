@@ -184,32 +184,27 @@ function describeOfflineStorageType(value: string): string | null {
   return null;
 }
 
-function formatPersistentStorageKey(
-  key: string | null,
-  keyId: number | undefined,
-): string {
+function formatPersistentStorageKey(key: string | null): string {
   if (typeof key !== 'string') return '<non-string>';
 
-  const idPrefix = keyId !== undefined ? `#${keyId} ` : '';
   const description = describePersistentStorageKey(key);
-  if (description === null) return `${idPrefix}${key}`;
+  if (description === null) return key;
 
-  return `${idPrefix}${key} (${description})`;
+  return `${key} (${description})`;
 }
 
-function formatPersistentStorageKeyParts(
-  key: string | null,
-  keyId: number | undefined,
-): { main: string; detail?: string } {
+function formatPersistentStorageKeyParts(key: string | null): {
+  main: string;
+  detail?: string;
+} {
   if (typeof key !== 'string') {
-    return { main: formatPersistentStorageKey(key, keyId) };
+    return { main: formatPersistentStorageKey(key) };
   }
 
-  const idPrefix = keyId !== undefined ? `#${keyId} ` : '';
   const description = describePersistentStorageKey(key);
-  if (description === null) return { main: `${idPrefix}${key}` };
+  if (description === null) return { main: key };
 
-  return { main: `${idPrefix}${key}`, detail: `(${description})` };
+  return { main: key, detail: `(${description})` };
 }
 
 function formatByteSize(byteSize: number): string {
@@ -354,10 +349,11 @@ function formatPersistentStorageOperation(
 
   switch (operation.type) {
     case 'getItem': {
-      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
+      const keyParts = formatPersistentStorageKeyParts(operation.key);
       if (operation.valueByteSize !== null) {
         return formatWrappedPersistentStorageOperationLabel(
           `📖 ${operation.exists ? '✅' : '❌'}`,
+          keyId,
           keyParts.main,
           appendTimelineWarning(
             `${keyParts.detail ?? ''} | ${formatByteSize(operation.valueByteSize)}`.trim(),
@@ -367,19 +363,21 @@ function formatPersistentStorageOperation(
       }
       return formatWrappedPersistentStorageOperationLabel(
         `📖 ${operation.exists ? '✅' : '❌'}`,
+        keyId,
         keyParts.main,
         appendTimelineWarning(keyParts.detail, warning),
       );
     }
     case 'setItem': {
       const unchangedFlag = !operation.valueChanged ? ' ⚠️ UNCHANGED' : '';
-      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
+      const keyParts = formatPersistentStorageKeyParts(operation.key);
       const before =
         operation.valueByteSizeBefore !== null
           ? formatByteSize(operation.valueByteSizeBefore)
           : '❌';
       return formatWrappedPersistentStorageOperationLabel(
         `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅`,
+        keyId,
         keyParts.main,
         appendTimelineWarning(
           `${keyParts.detail ?? ''} | ${before} -> ${formatByteSize(
@@ -390,17 +388,19 @@ function formatPersistentStorageOperation(
       );
     }
     case 'removeItem': {
-      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
+      const keyParts = formatPersistentStorageKeyParts(operation.key);
       return formatWrappedPersistentStorageOperationLabel(
         `🗑️ ${operation.existsBefore ? '✅' : '❌'}->❌`,
+        keyId,
         keyParts.main,
         keyParts.detail,
       );
     }
     case 'key': {
-      const keyParts = formatPersistentStorageKeyParts(operation.key, keyId);
+      const keyParts = formatPersistentStorageKeyParts(operation.key);
       return formatWrappedPersistentStorageOperationLabel(
         `🔑[${operation.index}] ${operation.key === null ? '❌' : '✅'}`,
+        keyId,
         keyParts.main,
         keyParts.detail,
       );
@@ -509,16 +509,32 @@ const TIMELINE_GAP_THRESHOLD_MS = 20;
 
 function formatWrappedPersistentStorageOperationLabel(
   prefix: string,
+  id: number | undefined,
   value: string,
   detail?: string,
 ): string {
-  const mainLine = `${prefix} ${value}`;
+  const mainLine = formatWrappedOperationMainLine(prefix, id, value);
   if (detail === undefined) return mainLine;
 
   const fullLine = `${mainLine} ${detail}`;
   return fullLine.length > PERSISTENT_TIMELINE_WRAP_AT
     ? `${mainLine}\n${PERSISTENT_TIMELINE_DETAIL_PREFIX}${detail}`
     : fullLine;
+}
+
+function formatWrappedOperationMainLine(
+  prefix: string,
+  id: number | undefined,
+  value: string,
+): string {
+  if (id === undefined) return `${prefix} ${value}`;
+
+  const [icon, ...rest] = prefix.split(' ');
+  const prefixAfterId = rest.join(' ').trim();
+
+  return prefixAfterId.length > 0
+    ? `${icon} #${id} ${prefixAfterId} ${value}`
+    : `${icon} #${id} ${value}`;
 }
 
 export type PersistentStorageOperationCapture = {
@@ -1087,10 +1103,11 @@ function getOpfsPersistentStorageOperationTimelineString(
 
 function formatWrappedOpfsOperationLabel(
   prefix: string,
+  id: number | undefined,
   value: string,
   detail?: string,
 ): string {
-  const mainLine = `${prefix} ${value}`;
+  const mainLine = formatWrappedOperationMainLine(prefix, id, value);
   if (detail === undefined) return mainLine;
 
   const fullLine = `${mainLine} ${detail}`;
@@ -1099,13 +1116,8 @@ function formatWrappedOpfsOperationLabel(
     : fullLine;
 }
 
-function formatOpfsOperationPath(
-  path: string,
-  pathIdMap?: Map<string, number>,
-): string {
-  const normalizedPath = stripOpfsRootPrefix(path);
-  const pathId = pathIdMap?.get(normalizedPath);
-  return pathId === undefined ? normalizedPath : `#${pathId} ${normalizedPath}`;
+function formatOpfsOperationPath(path: string): string {
+  return stripOpfsRootPrefix(path);
 }
 
 function stripOpfsRootPrefix(path: string): string {
@@ -1250,10 +1262,21 @@ function formatOpfsOperationLabel(
   pathIdMap: Map<string, number>,
   warning?: string,
 ): string {
+  const pathId =
+    operation.type === 'openFile' ||
+    operation.type === 'ensureFile' ||
+    operation.type === 'readFile' ||
+    operation.type === 'writeFile' ||
+    operation.type === 'writeFileFailed' ||
+    operation.type === 'deleteFile'
+      ? pathIdMap.get(stripOpfsRootPrefix(operation.path))
+      : undefined;
+
   switch (operation.type) {
     case 'openDir':
       return formatWrappedOpfsOperationLabel(
         `📂 dir-open ${operation.exists ? '✅' : '❌'}`,
+        undefined,
         formatOpfsOperationPath(operation.path),
         appendTimelineWarning(
           `(${describeOpfsDirectoryPath(operation.path)})`,
@@ -1263,6 +1286,7 @@ function formatOpfsOperationLabel(
     case 'ensureDir':
       return formatWrappedOpfsOperationLabel(
         `📁 dir-open-or-create ${operation.created ? '🆕' : '✅'}`,
+        undefined,
         formatOpfsOperationPath(operation.path),
         appendTimelineWarning(
           `(${describeOpfsDirectoryPath(operation.path)})`,
@@ -1272,7 +1296,8 @@ function formatOpfsOperationLabel(
     case 'openFile':
       return formatWrappedOpfsOperationLabel(
         `👁️ file-open ${operation.exists ? '✅' : '❌'}`,
-        formatOpfsOperationPath(operation.path, pathIdMap),
+        pathId,
+        formatOpfsOperationPath(operation.path),
         appendTimelineWarning(
           `(${formatOpfsFileDescription(operation)})`,
           warning,
@@ -1281,7 +1306,8 @@ function formatOpfsOperationLabel(
     case 'ensureFile':
       return formatWrappedOpfsOperationLabel(
         `👁️ file-open-or-create ${operation.created ? '🆕' : '✅'}`,
-        formatOpfsOperationPath(operation.path, pathIdMap),
+        pathId,
+        formatOpfsOperationPath(operation.path),
         appendTimelineWarning(
           `(${formatOpfsFileDescription(operation)})`,
           warning,
@@ -1290,7 +1316,8 @@ function formatOpfsOperationLabel(
     case 'readFile':
       return formatWrappedOpfsOperationLabel(
         '📖',
-        formatOpfsOperationPath(operation.path, pathIdMap),
+        pathId,
+        formatOpfsOperationPath(operation.path),
         appendTimelineWarning(
           `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
             operation.valueByteSize,
@@ -1301,7 +1328,8 @@ function formatOpfsOperationLabel(
     case 'writeFile':
       return formatWrappedOpfsOperationLabel(
         '✍️',
-        formatOpfsOperationPath(operation.path, pathIdMap),
+        pathId,
+        formatOpfsOperationPath(operation.path),
         appendTimelineWarning(
           `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
             operation.valueByteSizeBefore,
@@ -1314,18 +1342,21 @@ function formatOpfsOperationLabel(
     case 'writeFileFailed':
       return formatWrappedOpfsOperationLabel(
         `✍️ ❌ retryable-${operation.phase}`,
-        formatOpfsOperationPath(operation.path, pathIdMap),
+        pathId,
+        formatOpfsOperationPath(operation.path),
         `(${formatOpfsFileDescription(operation)}) | ${operation.errorName}`,
       );
     case 'deleteFile':
       return formatWrappedOpfsOperationLabel(
         `🗑️ ${operation.exists ? '✅' : '❌'}`,
-        formatOpfsOperationPath(operation.path, pathIdMap),
+        pathId,
+        formatOpfsOperationPath(operation.path),
         `(${formatOpfsFileDescription(operation)})`,
       );
     case 'listDir':
       return formatWrappedOpfsOperationLabel(
-        '🗂️ list-dir',
+        `🗂️ list-dir-${operation.method}`,
+        undefined,
         formatOpfsOperationPath(operation.path),
         `(${describeOpfsDirectoryPath(operation.path)}) entries=${JSON.stringify(
           operation.entries,
@@ -1334,6 +1365,7 @@ function formatOpfsOperationLabel(
     case 'deleteDir':
       return formatWrappedOpfsOperationLabel(
         `🧹 del-dir${operation.recursive ? ' recursive' : ''} ${operation.deleted ? '✅' : '❌'}`,
+        undefined,
         formatOpfsOperationPath(operation.path),
         `(${describeOpfsDirectoryPath(operation.path)})`,
       );

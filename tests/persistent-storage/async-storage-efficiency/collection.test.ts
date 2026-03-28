@@ -112,9 +112,9 @@ describe('async storage efficiency: collection', () => {
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~135684128.p.json","file:ci.h~1699496642.p.json","file:ci.h~2755408287.p.json"]
       2.005s | 📖 #1 tsdf/sess1/collection-expiration/ci._i.r.json
              |    └ (namespace index) | 0.34 kb
-      2.008s | 🗑️ ✅ #2 tsdf/sess1/collection-expiration/ci.h~2755408287.p.json
+      2.008s | 🗑️ #2 ✅ tsdf/sess1/collection-expiration/ci.h~2755408287.p.json
              |    └ (entry data, <"expired-user>)
-      .      | 🗑️ ✅ #3 tsdf/sess1/collection-expiration/ci.h~1699496642.p.json
+      .      | 🗑️ #3 ✅ tsdf/sess1/collection-expiration/ci.h~1699496642.p.json
              |    └ (entry data, <"expired-user-2>)
       2.011s | ✍️ #1 tsdf/sess1/collection-expiration/ci._i.r.json
              |    └ (namespace index) | 0.34 kb -> 0.12 kb
@@ -197,7 +197,7 @@ describe('async storage efficiency: collection', () => {
              |    └ (store directory)
       2.004s | 🗂️ list-dir tsdf/sess1/collection-startup-max-items
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1374750182.p.json","file:ci.h~3986551515.p.json","file:ci.h~3994120284.p.json"]
-      .      | 👁️ file-open ✅ #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
+      .      | 👁️ #1 file-open ✅ tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index)
       2.005s | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb
@@ -206,7 +206,7 @@ describe('async storage efficiency: collection', () => {
              ·
       2.048s | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb
-      2.051s | 🗑️ ✅ #2 tsdf/sess1/collection-startup-max-items/ci.h~3986551515.p.json
+      2.051s | 🗑️ #2 ✅ tsdf/sess1/collection-startup-max-items/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       2.054s | ✍️ #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.15 kb
@@ -269,9 +269,9 @@ describe('async storage efficiency: collection', () => {
       time   |
       1.04s  | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.043s | 🗑️ ✅ #2 tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
+      1.043s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
-      .      | 👁️ file-open-or-create 🆕 #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
       1.046s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
@@ -334,11 +334,11 @@ describe('async storage efficiency: collection', () => {
       1.04s  | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.041s | 📁 dir-open-or-create ✅ tsdf/sess1/col-expired-during-max-items
              |    └ (store directory)
-      1.042s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+      1.042s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
       1.045s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
-      1.047s | 👁️ file-open-or-create ✅ #2 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+      1.047s | 👁️ #2 file-open-or-create ✅ tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index)
       1.05s  | ✍️ #2 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.08 kb
@@ -387,9 +387,9 @@ describe('async storage efficiency: collection', () => {
       time   |
       1.04s  | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.043s | 🗑️ ✅ #2 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
+      1.043s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
-      .      | 👁️ file-open-or-create 🆕 #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
+      .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>)
       1.046s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>) | 0.00 kb -> 0.10 kb
@@ -398,9 +398,9 @@ describe('async storage efficiency: collection', () => {
              ·
       2.14s  | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      2.143s | 🗑️ ✅ #4 tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
+      2.143s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
-      .      | 👁️ file-open-or-create 🆕 #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
+      .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
       2.146s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
@@ -446,15 +446,15 @@ describe('async storage efficiency: collection', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/col-direct-get-item-state (store directory)
-      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/col-direct-get-item-state/ci._i.r.json
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci._i.r.json
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/col-direct-get-item-state/ci._i.r.json
            |    └ (namespace index) | 0.15 kb
-      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.11 kb
-      10ms | 👁️ file-open ✅ #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
+      10ms | 👁️ #3 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
            |    └ (entry data, <"2>)
       11ms | 📖 #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
            |    └ (entry data, <"2>) | 0.12 kb
@@ -621,17 +621,17 @@ describe('async storage efficiency: collection', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time   |
-      0      | 🗑️ ✅ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+      0      | 🗑️ #1 ✅ tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
              ·
       1.041s | 📖 #2 tsdf/sess1/col-mutation-retry-after-delete/ci._i.r.json
              |    └ (namespace index) | 0.08 kb
-      1.044s | ✍️ ❌ retryable-createWritable #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+      1.044s | ✍️ #1 ❌ retryable-createWritable tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | NotFoundError
       1.045s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.046s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-after-delete
              |    └ (store directory)
-      1.047s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
+      1.047s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
       1.05s  | ✍️ #1 tsdf/sess1/col-mutation-retry-after-delete/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.00 kb -> 0.12 kb
@@ -705,14 +705,14 @@ describe('async storage efficiency: collection', () => {
       time   |
       1.04s  | 📖 #1 tsdf/sess1/col-mutation-retry-during-write/ci._i.r.json
              |    └ (namespace index) | 0.08 kb
-      1.045s | 🗑️ ✅ #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+      1.045s | 🗑️ #2 ✅ tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
-      .      | ✍️ ❌ retryable-close #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+      .      | ✍️ #2 ❌ retryable-close tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | NotFoundError
       1.047s | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
       1.048s | 📁 dir-open-or-create ✅ tsdf/sess1/col-mutation-retry-during-write
              |    └ (store directory)
-      1.049s | 👁️ file-open-or-create 🆕 #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
+      1.049s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
       1.052s | ✍️ #2 tsdf/sess1/col-mutation-retry-during-write/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.00 kb -> 0.12 kb
@@ -753,7 +753,7 @@ describe('async storage efficiency: collection', () => {
       time   |
       1.04s  | 📖 #1 tsdf/sess1/col-delete-flow/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.043s | 🗑️ ✅ #2 tsdf/sess1/col-delete-flow/ci.h~3574006234.p.json
+      1.043s | 🗑️ #2 ✅ tsdf/sess1/col-delete-flow/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
       1.046s | ✍️ #1 tsdf/sess1/col-delete-flow/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.08 kb
@@ -998,11 +998,11 @@ describe('async storage efficiency: collection', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/col-remount-flow (store directory)
-      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/col-remount-flow/ci._i.r.json
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-remount-flow/ci._i.r.json
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/col-remount-flow/ci._i.r.json
            |    └ (namespace index) | 0.08 kb
-      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/col-remount-flow/ci.h~3574006234.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-remount-flow/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-remount-flow/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.11 kb
@@ -1049,11 +1049,11 @@ describe('async storage efficiency: collection', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/col-remount-stale-touch (store directory)
-      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/col-remount-stale-touch/ci._i.r.json
            |    └ (namespace index) | 0.08 kb
-      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-remount-stale-touch/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.11 kb
@@ -1107,11 +1107,11 @@ describe('async storage efficiency: collection', () => {
              |    └ (session directory) ⚠️ DUPLICATE OPEN
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
              |    └ (store directory)
-      1.853s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
+      1.853s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
              |    └ (entry data, <"1>)
       1.856s | ✍️ #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json
              |    └ (entry data, <"1>) | 0.00 kb -> 0.11 kb
-      1.858s | 👁️ file-open-or-create 🆕 #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
+      1.858s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/col-remount-no-cache/ci._i.r.json
              |    └ (namespace index)
       1.861s | ✍️ #2 tsdf/sess1/col-remount-no-cache/ci._i.r.json
              |    └ (namespace index) | 0.00 kb -> 0.08 kb
@@ -1160,13 +1160,13 @@ describe('async storage efficiency: collection', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/col-multi-remount-flow (store directory)
-      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/col-multi-remount-flow/ci._i.r.json
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci._i.r.json
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/col-multi-remount-flow/ci._i.r.json
            |    └ (namespace index) | 0.15 kb
-      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
-      .    | 👁️ file-open ✅ #3 tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
+      .    | 👁️ #3 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
            |    └ (entry data, <"2>)
       7ms  | 📖 #2 tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.11 kb
@@ -1250,11 +1250,11 @@ describe('async storage efficiency: collection', () => {
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/collection-opfs-efficiency
            |    └ (store directory)
-      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/collection-opfs-efficiency/ci._i.r.json
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/collection-opfs-efficiency/ci._i.r.json
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/collection-opfs-efficiency/ci._i.r.json
            |    └ (namespace index) | 0.15 kb
-      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/collection-opfs-efficiency/ci.h~3574006234.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/collection-opfs-efficiency/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/collection-opfs-efficiency/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.09 kb

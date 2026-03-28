@@ -70,11 +70,11 @@ describe('async storage efficiency: document', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-flow (store directory)
-      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/doc-remount-flow/d._i.r.json
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/doc-remount-flow/d._i.r.json
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/doc-remount-flow/d._i.r.json
            |    └ (namespace index) | 0.07 kb
-      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/doc-remount-flow/d.e.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-flow/d.e.p.json
            |    └ (entry data)
       7ms  | 📖 #2 tsdf/sess1/doc-remount-flow/d.e.p.json (entry data) | 0.10 kb
       10ms | end
@@ -140,11 +140,11 @@ describe('async storage efficiency: document', () => {
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
       1ms  | 📂 dir-open ✅ tsdf/sess1/doc-remount-stale-touch (store directory)
-      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index)
       3ms  | 📖 #1 tsdf/sess1/doc-remount-stale-touch/d._i.r.json
            |    └ (namespace index) | 0.07 kb
-      6ms  | 👁️ file-open ✅ #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (entry data)
       7ms  | 📖 #2 tsdf/sess1/doc-remount-stale-touch/d.e.p.json
            |    └ (entry data) | 0.10 kb
@@ -194,11 +194,11 @@ describe('async storage efficiency: document', () => {
              |    └ (session directory) ⚠️ DUPLICATE OPEN
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache
              |    └ (store directory)
-      1.853s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
+      1.853s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (entry data)
       1.856s | ✍️ #1 tsdf/sess1/doc-remount-no-cache/d.e.p.json
              |    └ (entry data) | 0.00 kb -> 0.08 kb
-      1.858s | 👁️ file-open-or-create 🆕 #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
+      1.858s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index)
       1.861s | ✍️ #2 tsdf/sess1/doc-remount-no-cache/d._i.r.json
              |    └ (namespace index) | 0.00 kb -> 0.07 kb

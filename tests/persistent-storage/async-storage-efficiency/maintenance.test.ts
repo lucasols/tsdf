@@ -77,8 +77,8 @@ describe('async storage efficiency: maintenance', () => {
     expect(localStorageOperations).toMatchInlineSnapshot(`
       "
       time   |
-      2s     | 📖 ❌ #1 tsdf._am.g (async global maintenance)
-      2.009s | ✍️ ❌->✅ #1 tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
+      2s     | 📖 #1 ❌ tsdf._am.g (async global maintenance)
+      2.009s | ✍️ #1 ❌->✅ tsdf._am.g (async global maintenance) | ❌ -> 0.04 kb
       "
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
@@ -242,20 +242,20 @@ describe('async storage efficiency: maintenance', () => {
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
       2.002s | 🗂️ list-dir tsdf
              |    └ (root directory) entries=["dir:sess1","file:root-junk.txt"]
-      2.003s | 🗑️ ✅ #1 tsdf/root-junk.txt (untracked root file)
+      2.003s | 🗑️ #1 ✅ tsdf/root-junk.txt (untracked root file)
       2.004s | 🗂️ list-dir tsdf/sess1
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc","dir:invalid-only-store","file:session-junk.txt"]
-      2.005s | 🗑️ ✅ #2 tsdf/sess1/session-junk.txt (untracked session file)
+      2.005s | 🗑️ #2 ✅ tsdf/sess1/session-junk.txt (untracked session file)
       2.006s | 🗂️ list-dir tsdf/sess1/expired-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:store-junk.txt"]
       .      | 🗂️ list-dir tsdf/sess1/fresh-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:store-junk.txt"]
       .      | 🗂️ list-dir tsdf/sess1/invalid-only-store
              |    └ (store directory) entries=["file:store-junk.txt"]
-      2.007s | 🗑️ ✅ #3 tsdf/sess1/expired-doc/store-junk.txt
+      2.007s | 🗑️ #3 ✅ tsdf/sess1/expired-doc/store-junk.txt
              |    └ (untracked store file)
-      2.008s | 🗑️ ✅ #4 tsdf/sess1/fresh-doc/store-junk.txt (untracked store file)
-      2.009s | 🗑️ ✅ #5 tsdf/sess1/invalid-only-store/store-junk.txt
+      2.008s | 🗑️ #4 ✅ tsdf/sess1/fresh-doc/store-junk.txt (untracked store file)
+      2.009s | 🗑️ #5 ✅ tsdf/sess1/invalid-only-store/store-junk.txt
              |    └ (untracked store file)
       2.01s  | 🧹 del-dir recursive ✅ tsdf/sess1/invalid-only-store
              |    └ (store directory)
@@ -533,7 +533,7 @@ describe('async storage efficiency: maintenance', () => {
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1706329294.p.json","file:ci.h~2293725328.p.json"]
       2.005s | 📖 #1 tsdf/sess1/orphan-collection/ci._i.r.json
              |    └ (namespace index) | 0.11 kb
-      2.008s | 🗑️ ✅ #2 tsdf/sess1/orphan-collection/ci.h~2293725328.p.json
+      2.008s | 🗑️ #2 ✅ tsdf/sess1/orphan-collection/ci.h~2293725328.p.json
              |    └ (entry data, <"orphan-user>)
       2.009s | end
       "
@@ -699,8 +699,8 @@ describe('async storage efficiency: maintenance', () => {
     expect(localStorageOperations).toMatchInlineSnapshot(`
       "
       time  |
-      130ms | 📖 ✅ #1 tsdf._am.g (async global maintenance) | 0.04 kb
-      139ms | ✍️ ✅->✅ #1 tsdf._am.g
+      130ms | 📖 #1 ✅ tsdf._am.g (async global maintenance) | 0.04 kb
+      139ms | ✍️ #1 ✅->✅ tsdf._am.g
             |    └ (async global maintenance) | 0.04 kb -> 0.04 kb
       "
     `);

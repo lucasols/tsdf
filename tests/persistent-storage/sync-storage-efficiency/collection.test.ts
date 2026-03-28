@@ -70,23 +70,23 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.collection-expiration.ci."expired-user
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.collection-expiration.ci."expired-user
            |    └ (entry data, <"expired-user>)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.collection-expiration.ci.m
+      .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
            |    └ (namespace index)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.collection-expiration.ci."expired-user-2
+      .    | 🔑[2] #4 ✅ tsdf.sess1.collection-expiration.ci."expired-user-2
            |    └ (entry data, <"expired-user-2>)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.collection-expiration.ci."fresh-user
+      .    | 🔑[3] #5 ✅ tsdf.sess1.collection-expiration.ci."fresh-user
            |    └ (entry data, <"fresh-user>)
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.collection-expiration.ci.m
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
            |    └ (namespace index) | 0.37 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.collection-expiration.ci."expired-user
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user
            |    └ (entry data, <"expired-user>)
-      .    | 🗑️ ✅->❌ #4 tsdf.sess1.collection-expiration.ci."expired-user-2
+      .    | 🗑️ #4 ✅->❌ tsdf.sess1.collection-expiration.ci."expired-user-2
            |    └ (entry data, <"expired-user-2>)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.collection-expiration.ci.m
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-expiration.ci.m
            |    └ (namespace index) | 0.37 kb -> 0.12 kb
       "
     `);
@@ -161,21 +161,21 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.collection-startup-max-items.ci."a
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.collection-startup-max-items.ci."a
            |    └ (entry data, <"a>)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
+      .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
            |    └ (namespace index)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.collection-startup-max-items.ci."b
+      .    | 🔑[2] #4 ✅ tsdf.sess1.collection-startup-max-items.ci."b
            |    └ (entry data, <"b>)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.collection-startup-max-items.ci."c
+      .    | 🔑[3] #5 ✅ tsdf.sess1.collection-startup-max-items.ci."c
            |    └ (entry data, <"c>)
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
            |    └ (namespace index) | 0.24 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.collection-startup-max-items.ci."a
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.collection-startup-max-items.ci."a
            |    └ (entry data, <"a>)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.collection-startup-max-items.ci.m
            |    └ (namespace index) | 0.24 kb -> 0.16 kb
       "
     `);
@@ -235,18 +235,18 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (namespace index) | 0.16 kb
-      .    | ✍️ ❌->✅ #2 tsdf.sess1.col-max-items-metadata.ci."c
+      .    | ✍️ #2 ❌->✅ tsdf.sess1.col-max-items-metadata.ci."c
            |    └ (entry data, <"c>) | ❌ -> 0.10 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (namespace index) | 0.16 kb -> 0.24 kb
            ·
-      3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+      3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (namespace index) | 0.24 kb
-      .    | 🗑️ ✅->❌ #3 tsdf.sess1.col-max-items-metadata.ci."a
+      .    | 🗑️ #3 ✅->❌ tsdf.sess1.col-max-items-metadata.ci."a
            |    └ (entry data, <"a>)
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-max-items-metadata.ci.m
            |    └ (namespace index) | 0.24 kb -> 0.16 kb
       "
     `);
@@ -310,27 +310,27 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (namespace index) | 0.16 kb
-      .    | ✍️ ❌->✅ #2 tsdf.sess1.col-coalesced-maintenance.ci."c
+      .    | ✍️ #2 ❌->✅ tsdf.sess1.col-coalesced-maintenance.ci."c
            |    └ (entry data, <"c>) | ❌ -> 0.10 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (namespace index) | 0.16 kb -> 0.24 kb
            ·
-      2.1s | ✍️ ❌->✅ #3 tsdf.sess1.col-coalesced-maintenance.ci."d
+      2.1s | ✍️ #3 ❌->✅ tsdf.sess1.col-coalesced-maintenance.ci."d
            |    └ (entry data, <"d>) | ❌ -> 0.10 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (namespace index) | 0.24 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (namespace index) | 0.24 kb -> 0.31 kb
            ·
-      3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+      3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (namespace index) | 0.31 kb
-      .    | 🗑️ ✅->❌ #4 tsdf.sess1.col-coalesced-maintenance.ci."b
+      .    | 🗑️ #4 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."b
            |    └ (entry data, <"b>)
-      .    | 🗑️ ✅->❌ #5 tsdf.sess1.col-coalesced-maintenance.ci."a
+      .    | 🗑️ #5 ✅->❌ tsdf.sess1.col-coalesced-maintenance.ci."a
            |    └ (entry data, <"a>)
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-maintenance.ci.m
            |    └ (namespace index) | 0.31 kb -> 0.16 kb
       "
     `);
@@ -371,14 +371,14 @@ describe('sync storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
+      0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
            |    └ (namespace index) | 0.09 kb
-      .    | 📖 ✅ #2 tsdf.sess1.col-direct-get-item-state.ci."1
+      .    | 📖 #2 ✅ tsdf.sess1.col-direct-get-item-state.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
            ·
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
+      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
            |    └ (namespace index) | 0.09 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-direct-get-item-state.ci.m
            |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
@@ -479,11 +479,11 @@ describe('sync storage efficiency: collection', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-mutation-flow.ci.m
+      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
            |    └ (namespace index) | 0.09 kb
-      .    | ✍️ ✅->✅ #2 tsdf.sess1.col-mutation-flow.ci."1
+      .    | ✍️ #2 ✅->✅ tsdf.sess1.col-mutation-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-mutation-flow.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-mutation-flow.ci.m
            |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
@@ -518,10 +518,10 @@ describe('sync storage efficiency: collection', () => {
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 🗑️ ✅->❌ #1 tsdf.sess1.col-delete-flow.ci."1 (entry data, <"1>)
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.col-delete-flow.ci.m
+      1s   | 🗑️ #1 ✅->❌ tsdf.sess1.col-delete-flow.ci."1 (entry data, <"1>)
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
            |    └ (namespace index) | 0.16 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.col-delete-flow.ci.m
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.col-delete-flow.ci.m
            |    └ (namespace index) | 0.16 kb -> 0.09 kb
       "
     `);
@@ -573,11 +573,11 @@ describe('sync storage efficiency: collection', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
             |    └ (namespace index) | 0.09 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.col-invalidation-flow.ci."1
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.col-invalidation-flow.ci."1
             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-invalidation-flow.ci.m
             |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
@@ -717,11 +717,11 @@ describe('sync storage efficiency: collection', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
             |    └ (namespace index) | 0.09 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.col-coalesced-invalidations.ci."1
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.col-coalesced-invalidations.ci."1
             |    └ (entry data, <"1>) | 0.11 kb -> 0.11 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-coalesced-invalidations.ci.m
             |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
@@ -755,14 +755,14 @@ describe('sync storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
+      0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
            |    └ (namespace index) | 0.09 kb
-      .    | 📖 ✅ #2 tsdf.sess1.col-remount-flow.ci."1
+      .    | 📖 #2 ✅ tsdf.sess1.col-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
            ·
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
+      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
            |    └ (namespace index) | 0.09 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-remount-flow.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-remount-flow.ci.m
            |    └ (namespace index) | 0.09 kb -> 0.09 kb
       "
     `);
@@ -798,14 +798,14 @@ describe('sync storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time  |
-      0     | 📖 ❌ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+      0     | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (namespace index)
             ·
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (namespace index)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.col-remount-no-cache.ci."1
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.col-remount-no-cache.ci."1
             |    └ (entry data, <"1>) | ❌ -> 0.11 kb
-      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (namespace index) | ❌ -> 0.09 kb
       "
     `);
@@ -845,22 +845,22 @@ describe('sync storage efficiency: collection', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
+      0    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (namespace index) | 0.16 kb
-      .    | 📖 ✅ #2 tsdf.sess1.col-multi-remount-flow.ci."1
+      .    | 📖 #2 ✅ tsdf.sess1.col-multi-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (namespace index) | 0.16 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .    | 📖 ✅ #3 tsdf.sess1.col-multi-remount-flow.ci."2
+      .    | 📖 #3 ✅ tsdf.sess1.col-multi-remount-flow.ci."2
            |    └ (entry data, <"2>) | 0.11 kb
            ·
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
+      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (namespace index) | 0.16 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (namespace index) | 0.16 kb -> 0.16 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (namespace index) | 0.16 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
            |    └ (namespace index) | 0.16 kb -> 0.16 kb
       "
     `);

@@ -803,6 +803,7 @@ export type MockOpfsOperation =
   | UntrackedMockOpfsFileOperation
   | (MockOpfsBaseOperation & {
       entries: string[];
+      method: 'entries' | 'keys' | 'values';
       scope: AsyncStorageNamespaceScope | null;
       type: 'listDir';
     })

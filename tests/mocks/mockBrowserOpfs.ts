@@ -43,6 +43,7 @@ type MockBrowserOpfsDeleteFileOperation = MockBrowserOpfsBaseOperation & {
 
 type MockBrowserOpfsListDirOperation = MockBrowserOpfsBaseOperation & {
   entries: string[];
+  method: 'entries' | 'keys' | 'values';
   type: 'listDir';
 };
 
@@ -422,7 +423,9 @@ export class MockBrowserOpfsEnvironment {
       return entries;
     }
 
-    async function loadDirectoryEntries(): Promise<
+    async function loadDirectoryEntries(
+      method: MockBrowserOpfsListDirOperation['method'],
+    ): Promise<
       Array<[string, FileSystemDirectoryHandle | FileSystemFileHandle]>
     > {
       const { completionTime, startedTime } = await waitLatency({
@@ -435,6 +438,7 @@ export class MockBrowserOpfsEnvironment {
         startedTime,
         time: completionTime,
         type: 'listDir',
+        method,
         path: currentPath,
         entries: entries.map(
           ([name, childHandle]) =>
@@ -638,7 +642,7 @@ export class MockBrowserOpfsEnvironment {
         FileSystemDirectoryHandle | FileSystemFileHandle
       > {
         return createAsyncIterator(
-          loadDirectoryEntries().then((entries) =>
+          loadDirectoryEntries('values').then((entries) =>
             entries.map(([, childHandle]) => childHandle),
           ),
         );
@@ -646,11 +650,11 @@ export class MockBrowserOpfsEnvironment {
       entries(): FileSystemDirectoryHandleAsyncIterator<
         [string, FileSystemDirectoryHandle | FileSystemFileHandle]
       > {
-        return createAsyncIterator(loadDirectoryEntries());
+        return createAsyncIterator(loadDirectoryEntries('entries'));
       },
       keys(): FileSystemDirectoryHandleAsyncIterator<string> {
         return createAsyncIterator(
-          loadDirectoryEntries().then((entries) =>
+          loadDirectoryEntries('keys').then((entries) =>
             entries.map(([entryName]) => entryName),
           ),
         );

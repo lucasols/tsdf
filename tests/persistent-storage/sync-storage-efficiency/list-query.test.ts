@@ -84,29 +84,29 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.list-query-expiration.li."expired-users||1
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.list-query-expiration.li."expired-users||1
            |    └ (item data, <"expired-users||1>)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m
+      .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
            |    └ (items index)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
+      .    | 🔑[2] #4 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
            |    └ (query data, <{tableId:"expired-users"}>)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.list-query-expiration.li."fresh-users||2
+      .    | 🔑[3] #5 ✅ tsdf.sess1.list-query-expiration.li."fresh-users||2
            |    └ (item data, <"fresh-users||2>)
-      .    | 🔑[4] ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
+      .    | 🔑[4] #6 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
            |    └ (query data, <{tableId:"fresh-users"}>)
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
            |    └ (items index) | 0.27 kb
-      .    | 📖 ✅ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
+      .    | 📖 #4 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
            |    └ (query data, <{tableId:"expired-users"}>) | 0.15 kb
-      .    | 📖 ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
+      .    | 📖 #6 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
            |    └ (query data, <{tableId:"fresh-users"}>) | 0.14 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.list-query-expiration.li."expired-users||1
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.list-query-expiration.li."expired-users||1
            |    └ (item data, <"expired-users||1>)
-      .    | 🗑️ ✅->❌ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
+      .    | 🗑️ #4 ✅->❌ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
            |    └ (query data, <{tableId:"expired-users"}>)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
            |    └ (items index) | 0.27 kb -> 0.14 kb
       "
     `);
@@ -192,23 +192,23 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
            |    └ (query data, <{tableId:"first"}>)
-      .    | 🔑[1] ✅ #3 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
+      .    | 🔑[1] #3 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
            |    └ (query data, <{tableId:"second"}>)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
+      .    | 🔑[2] #4 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
            |    └ (query data, <{tableId:"third"}>)
-      .    | 📖 ✅ #2 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+      .    | 📖 #2 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
            |    └ (query data, <{tableId:"first"}>) | 0.10 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
+      .    | 📖 #3 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
            |    └ (query data, <{tableId:"second"}>) | 0.10 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
+      .    | 📖 #4 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
            |    └ (query data, <{tableId:"third"}>) | 0.10 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
            |    └ (query data, <{tableId:"first"}>)
-      .    | 📖 ❌ #5 tsdf._m.r.n:sess1.lq-startup-max-queries.li.m (items index)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | 📖 #5 ❌ tsdf._m.r.n:sess1.lq-startup-max-queries.li.m (items index)
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       "
     `);
     expect(
@@ -258,36 +258,36 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
-      .     | 📖 ❌ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
+      .     | 📖 #2 ❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>) | ❌ -> 0.12 kb
-      .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
-      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-metadata.li."third||1
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
+      .     | ✍️ #3 ❌->✅ tsdf.sess1.lq-query-metadata.li."third||1
             |    └ (item data, <"third||1>) | ❌ -> 0.09 kb
-      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m
             |    └ (items index) | ❌ -> 0.12 kb
             ·
-      3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m
+      3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m
             |    └ (items index) | 0.12 kb
-      .     | 🔑[0] ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
+      .     | 🔑[0] #4 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
-      .     | 🔑[1] ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"}
+      .     | 🔑[1] #5 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"}
             |    └ (query data, <{tableId:"second"}>)
-      .     | 🔑[2] ✅ #6 tsdf._m.g (global maintenance)
-      .     | 🔑[3] ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+      .     | 🔑[2] #6 ✅ tsdf._m.g (global maintenance)
+      .     | 🔑[3] #2 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>)
-      .     | 🔑[4] ✅ #3 tsdf.sess1.lq-query-metadata.li."third||1
+      .     | 🔑[4] #3 ✅ tsdf.sess1.lq-query-metadata.li."third||1
             |    └ (item data, <"third||1>)
-      .     | 🔑[5] ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
-      .     | 📖 ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
+      .     | 🔑[5] #1 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
+      .     | 📖 #4 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>) | 0.10 kb
-      .     | 📖 ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"}
+      .     | 📖 #5 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"}
             |    └ (query data, <{tableId:"second"}>) | 0.10 kb
-      .     | 📖 ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+      .     | 📖 #2 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>) | 0.12 kb
-      .     | 🗑️ ✅->❌ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
+      .     | 🗑️ #4 ✅->❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
       "
     `);
@@ -359,60 +359,60 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index)
-      .     | 📖 ❌ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+      .     | 📖 #2 ❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>) | ❌ -> 0.12 kb
-      .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index)
-      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
+      .     | ✍️ #3 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
             |    └ (item data, <"third||1>) | ❌ -> 0.09 kb
-      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index) | ❌ -> 0.12 kb
             ·
-      3.62s | 📖 ❌ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+      3.62s | 📖 #4 ❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
             |    └ (query data, <{tableId:"fourth"}>)
-      .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+      .     | ✍️ #4 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
             |    └ (query data, <{tableId:"fourth"}>) | ❌ -> 0.13 kb
-      .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
+      .     | ✍️ #3 ✅->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
             |    └ (item data, <"third||1>) | 0.09 kb -> 0.15 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index) | 0.12 kb
-      .     | ✍️ ❌->✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
+      .     | ✍️ #5 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
             |    └ (item data, <"fourth||2>) | ❌ -> 0.09 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index) | 0.12 kb -> 0.22 kb
             ·
-      3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+      3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index) | 0.22 kb
-      .     | 🔑[0] ✅ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
+      .     | 🔑[0] #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
-      .     | 🔑[1] ✅ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
+      .     | 🔑[1] #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
             |    └ (query data, <{tableId:"second"}>)
-      .     | 🔑[2] ✅ #8 tsdf._m.g (global maintenance)
-      .     | 🔑[3] ✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+      .     | 🔑[2] #8 ✅ tsdf._m.g (global maintenance)
+      .     | 🔑[3] #2 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>)
-      .     | 🔑[4] ✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
+      .     | 🔑[4] #3 ✅ tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
             |    └ (item data, <"third||1>)
-      .     | 🔑[5] ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+      .     | 🔑[5] #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
             |    └ (items index)
-      .     | 🔑[6] ✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+      .     | 🔑[6] #4 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
             |    └ (query data, <{tableId:"fourth"}>)
-      .     | 🔑[7] ✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
+      .     | 🔑[7] #5 ✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
             |    └ (item data, <"fourth||2>)
-      .     | 📖 ✅ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
+      .     | 📖 #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>) | 0.10 kb
-      .     | 📖 ✅ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
+      .     | 📖 #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
             |    └ (query data, <{tableId:"second"}>) | 0.10 kb
-      .     | 📖 ✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+      .     | 📖 #2 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
             |    └ (query data, <{tableId:"third"}>) | 0.12 kb
-      .     | 📖 ✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+      .     | 📖 #4 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
             |    └ (query data, <{tableId:"fourth"}>) | 0.13 kb
-      .     | 🗑️ ✅->❌ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
+      .     | 🗑️ #7 ✅->❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
             |    └ (query data, <{tableId:"second"}>)
-      .     | 🗑️ ✅->❌ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
+      .     | 🗑️ #6 ✅->❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
             |    └ (query data, <{tableId:"first"}>)
       "
     `);
@@ -456,10 +456,10 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-empty-query-manifest.li.m (items index)
-      .     | 📖 ❌ #2 tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-empty-query-manifest.li.m (items index)
+      .     | 📖 #2 ❌ tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>) | ❌ -> 0.22 kb
       "
     `);
@@ -548,17 +548,17 @@ describe('sync storage efficiency: list-query', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (items index) | 0.12 kb
-      .     | 📖 ✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
+      .     | 📖 #2 ✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.10 kb
-      .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-query-becomes-empty.li."users||1
+      .     | ✍️ #3 ✅->✅ tsdf.sess1.lq-query-becomes-empty.li."users||1
             |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
             |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -604,34 +604,34 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
+      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.22 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.22 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .    | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-metadata.li."users||3
+      .    | ✍️ #2 ❌->✅ tsdf.sess1.lq-item-metadata.li."users||3
            |    └ (item data, <"users||3>) | ❌ -> 0.09 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.22 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.22 kb -> 0.32 kb
            ·
-      3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
+      3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.32 kb
-      .    | 🔑[0] ✅ #3 tsdf.sess1.lq-item-metadata.li."users||1
+      .    | 🔑[0] #3 ✅ tsdf.sess1.lq-item-metadata.li."users||1
            |    └ (item data, <"users||1>)
-      .    | 🔑[1] ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (items index)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.lq-item-metadata.li."users||2
+      .    | 🔑[1] #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (items index)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.lq-item-metadata.li."users||2
            |    └ (item data, <"users||2>)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
+      .    | 🔑[3] #5 ✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>)
-      .    | 🔑[4] ✅ #6 tsdf._m.g (global maintenance)
-      .    | 🔑[5] ✅ #2 tsdf.sess1.lq-item-metadata.li."users||3
+      .    | 🔑[4] #6 ✅ tsdf._m.g (global maintenance)
+      .    | 🔑[5] #2 ✅ tsdf.sess1.lq-item-metadata.li."users||3
            |    └ (item data, <"users||3>)
-      .    | 📖 ✅ #5 tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
+      .    | 📖 #5 ✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.15 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.lq-item-metadata.li."users||3
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.lq-item-metadata.li."users||3
            |    └ (item data, <"users||3>)
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.32 kb -> 0.22 kb
       "
     `);
@@ -723,31 +723,31 @@ describe('sync storage efficiency: list-query', () => {
     expect(cleanupOperations).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.lq-shared-item-cleanup.li."users||1
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||1
            |    └ (item data, <"users||1>)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+      .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
            |    └ (items index)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.lq-shared-item-cleanup.li."users||2
+      .    | 🔑[2] #4 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||2
            |    └ (item data, <"users||2>)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.lq-shared-item-cleanup.li."users||3
+      .    | 🔑[3] #5 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||3
            |    └ (item data, <"users||3>)
-      .    | 🔑[4] ✅ #6 tsdf.sess1.lq-shared-item-cleanup.li."users||4
+      .    | 🔑[4] #6 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||4
            |    └ (item data, <"users||4>)
-      .    | 🔑[5] ✅ #7 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+      .    | 🔑[5] #7 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>)
-      .    | 🔑[6] ✅ #8 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
+      .    | 🔑[6] #8 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>)
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
            |    └ (items index) | 0.42 kb
-      .    | 📖 ✅ #7 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+      .    | 📖 #7 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb
-      .    | 📖 ✅ #8 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
+      .    | 📖 #8 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb
-      .    | 🗑️ ✅->❌ #6 tsdf.sess1.lq-shared-item-cleanup.li."users||4
+      .    | 🗑️ #6 ✅->❌ tsdf.sess1.lq-shared-item-cleanup.li."users||4
            |    └ (item data, <"users||4>)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
            |    └ (items index) | 0.42 kb -> 0.32 kb
       "
     `);
@@ -821,21 +821,21 @@ describe('sync storage efficiency: list-query', () => {
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
+      1s   | 📖 #1 ✅ tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.15 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+      .    | 📖 #2 ✅ tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.23 kb
-      .    | ✍️ ✅->✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+      .    | ✍️ #2 ✅->✅ tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.23 kb -> 0.21 kb
-      .    | 🗑️ ✅->❌ #3 tsdf.sess1.lq-delete-flow.li."users||1
+      .    | 🗑️ #3 ✅->❌ tsdf.sess1.lq-delete-flow.li."users||1
            |    └ (item data, <"users||1>)
-      .    | 📖 ✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m
+      .    | 📖 #4 ✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
            |    └ (items index) | 0.22 kb
-      .    | ✍️ ✅->✅ #5 tsdf.sess1.lq-delete-flow.li."users||2
+      .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-delete-flow.li."users||2
            |    └ (item data, <"users||2>) | 0.08 kb -> 0.15 kb
-      .    | ✍️ ✅->✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m
+      .    | ✍️ #4 ✅->✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
            |    └ (items index) | 0.22 kb -> 0.12 kb
       "
     `);
@@ -916,20 +916,20 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
+      0    | 📖 #1 ✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
            |    └ (items index) | 0.12 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-direct-get-query-state.li."users||1
+      .    | 📖 #3 ✅ tsdf.sess1.lq-direct-get-query-state.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
            ·
-      2s   | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
            |    └ (items index) | 0.12 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -1073,13 +1073,13 @@ describe('sync storage efficiency: list-query', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-invalidation-flow.li."users||1
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-query-invalidation-flow.li."users||1
             |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -1160,13 +1160,13 @@ describe('sync storage efficiency: list-query', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (items index) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-coalesced-invalidations.li."users||1
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-coalesced-invalidations.li."users||1
             |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
             |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -1306,20 +1306,20 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
+      0    | 📖 #1 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
            |    └ (items index) | 0.12 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1
+      .    | 📖 #3 ✅ tsdf.sess1.lq-remount-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
            ·
-      2s   | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
            |    └ (items index) | 0.12 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -1352,12 +1352,12 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+      0    | 📖 #1 ✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.10 kb
            ·
-      2s   | 📖 ✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.10 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.10 kb -> 0.10 kb
       "
     `);
@@ -1394,18 +1394,18 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time  |
-      0     | 📖 ❌ #1 tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+      0     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>)
             ·
-      1.81s | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+      1.81s | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (items index)
-      .     | ✍️ ❌->✅ #1 tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+      .     | ✍️ #1 ❌->✅ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>) | ❌ -> 0.12 kb
-      .     | 📖 ❌ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+      .     | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (items index)
-      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-remount-no-cache.li."users||1
+      .     | ✍️ #3 ❌->✅ tsdf.sess1.lq-query-remount-no-cache.li."users||1
             |    └ (item data, <"users||1>) | ❌ -> 0.10 kb
-      .     | ✍️ ❌->✅ #2 tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+      .     | ✍️ #2 ❌->✅ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (items index) | ❌ -> 0.12 kb
       "
     `);
@@ -1462,13 +1462,13 @@ describe('sync storage efficiency: list-query', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-item-invalidation-flow.li."users||1
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-item-invalidation-flow.li."users||1
             |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
             |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -1504,14 +1504,14 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
+      0    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
            |    └ (items index) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-item-remount-flow.li."users||1
+      .    | 📖 #2 ✅ tsdf.sess1.lq-item-remount-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
            ·
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
+      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
            |    └ (items index) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
@@ -1549,16 +1549,16 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time  |
-      0     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+      0     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
             ·
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-remount-no-cache.li."users||1
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-item-remount-no-cache.li."users||1
             |    └ (item data, <"users||1>) | ❌ -> 0.10 kb
-      .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
-      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index) | ❌ -> 0.12 kb
       "
     `);
@@ -1603,22 +1603,22 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+      0    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (items index) | 0.22 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-multi-item-remount-flow.li."users||1
+      .    | 📖 #2 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (items index) | 0.22 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .    | 📖 ✅ #3 tsdf.sess1.lq-multi-item-remount-flow.li."users||2
+      .    | 📖 #3 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2
            |    └ (item data, <"users||2>) | 0.10 kb
            ·
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (items index) | 0.22 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (items index) | 0.22 kb -> 0.22 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (items index) | 0.22 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
            |    └ (items index) | 0.22 kb -> 0.22 kb
       "
     `);
@@ -1671,34 +1671,34 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
+      0    | 📖 #1 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (items index) | 0.23 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-multi-query-remount-flow.li."users||1
+      .    | 📖 #3 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
+      .    | 📖 #4 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
            |    └ (query data, <{tableId:"projects"}>) | 0.13 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (items index) | 0.23 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1
+      .    | 📖 #5 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1
            |    └ (item data, <"projects||1>) | 0.11 kb
            ·
-      2s   | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (items index) | 0.23 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (items index) | 0.23 kb -> 0.23 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
+      .    | 📖 #4 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
            |    └ (query data, <{tableId:"projects"}>) | 0.13 kb
-      .    | ✍️ ✅->✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
+      .    | ✍️ #4 ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
            |    └ (query data, <{tableId:"projects"}>) | 0.13 kb -> 0.13 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (items index) | 0.23 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
            |    └ (items index) | 0.23 kb -> 0.23 kb
       "
     `);
@@ -1749,13 +1749,13 @@ describe('sync storage efficiency: list-query', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m
+      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (items index) | 0.12 kb
-      .    | ✍️ ✅->✅ #2 tsdf.sess1.lq-mutation-flow.li."users||1
+      .    | ✍️ #2 ✅->✅ tsdf.sess1.lq-mutation-flow.li."users||1
            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
