@@ -385,28 +385,34 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.04s  | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      1s     | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.043s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
+             ·
+      1.043s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+             |    └ (namespace index) | 0.15 kb
+      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>)
-      1.046s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
+      1.049s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>) | 0.00 kb -> 0.10 kb
-      1.05s  | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      1.053s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
              ·
-      2.14s  | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      2.1s   | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      2.143s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
+             ·
+      2.143s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+             |    └ (namespace index) | 0.15 kb
+      2.146s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
-      2.146s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
+      2.149s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
-      2.15s  | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      2.153s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
-      2.152s | end
+      2.155s | end
       "
     `);
   });
