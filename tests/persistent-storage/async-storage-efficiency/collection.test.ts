@@ -1159,11 +1159,18 @@ describe('async storage efficiency: collection', () => {
       "
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      .    | 📂 dir-open ✅ tsdf/sess1 (session directory) ⚠️ DUPLICATE OPEN
       1ms  | 📂 dir-open ✅ tsdf/sess1/col-multi-remount-flow (store directory)
+      .    | 📂 dir-open ✅ tsdf/sess1/col-multi-remount-flow
+           |    └ (store directory) ⚠️ DUPLICATE OPEN
       2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci._i.r.json
            |    └ (namespace index)
+      .    | 👁️ #1 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci._i.r.json
+           |    └ (namespace index) ⚠️ DUPLICATE OPEN
       3ms  | 📖 #1 tsdf/sess1/col-multi-remount-flow/ci._i.r.json
            |    └ (namespace index) | 0.15 kb
+      .    | 📖 #1 tsdf/sess1/col-multi-remount-flow/ci._i.r.json
+           |    └ (namespace index) | 0.15 kb ⚠️ REPEATED READ <10ms UNCHANGED
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       .    | 👁️ #3 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
