@@ -454,11 +454,13 @@ describe('async storage efficiency: collection', () => {
            |    └ (entry data, <"1>)
       7ms  | 📖 #2 tsdf/sess1/col-direct-get-item-state/ci.h~3574006234.p.json
            |    └ (entry data, <"1>) | 0.11 kb
-      10ms | 👁️ #3 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
+      10ms | 📖 #1 tsdf/sess1/col-direct-get-item-state/ci._i.r.json
+           |    └ (namespace index) | 0.15 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      13ms | 👁️ #3 file-open ✅ tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
            |    └ (entry data, <"2>)
-      11ms | 📖 #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
+      14ms | 📖 #3 tsdf/sess1/col-direct-get-item-state/ci.h~1409323532.p.json
            |    └ (entry data, <"2>) | 0.12 kb
-      14ms | end
+      17ms | end
       "
     `);
 
