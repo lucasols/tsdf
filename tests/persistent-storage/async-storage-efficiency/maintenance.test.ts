@@ -85,12 +85,12 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1"]
-      2.003s | 🗂️ list-dir tsdf/sess1
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
-      2.004s | 🗂️ list-dir tsdf/sess1/expired-doc
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/expired-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      .      | 🗂️ list-dir tsdf/sess1/fresh-doc
+      .      | 🗂️ list-dir-entries tsdf/sess1/fresh-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.005s | 📖 #1 tsdf/sess1/expired-doc/d._i.r.json (namespace index) | 0.07 kb
       .      | 📖 #2 tsdf/sess1/fresh-doc/d._i.r.json (namespace index) | 0.07 kb
@@ -146,12 +146,12 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1"]
-      2.003s | 🗂️ list-dir tsdf/sess1
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:corrupted","dir:trigger"]
-      2.004s | 🗂️ list-dir tsdf/sess1/corrupted
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/corrupted
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      .      | 🗂️ list-dir tsdf/sess1/trigger
+      .      | 🗂️ list-dir-entries tsdf/sess1/trigger
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.005s | 📖 #1 tsdf/sess1/corrupted/d._i.r.json (namespace index) | 0.02 kb
       .      | 📖 #2 tsdf/sess1/trigger/d._i.r.json (namespace index) | 0.07 kb
@@ -240,17 +240,17 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf
+      2.002s | 🗂️ list-dir-values tsdf
              |    └ (root directory) entries=["dir:sess1","file:root-junk.txt"]
       2.003s | 🗑️ #1 ✅ tsdf/root-junk.txt (untracked root file)
-      2.004s | 🗂️ list-dir tsdf/sess1
+      2.004s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc","dir:invalid-only-store","file:session-junk.txt"]
       2.005s | 🗑️ #2 ✅ tsdf/sess1/session-junk.txt (untracked session file)
-      2.006s | 🗂️ list-dir tsdf/sess1/expired-doc
+      2.006s | 🗂️ list-dir-entries tsdf/sess1/expired-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:store-junk.txt"]
-      .      | 🗂️ list-dir tsdf/sess1/fresh-doc
+      .      | 🗂️ list-dir-entries tsdf/sess1/fresh-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:store-junk.txt"]
-      .      | 🗂️ list-dir tsdf/sess1/invalid-only-store
+      .      | 🗂️ list-dir-entries tsdf/sess1/invalid-only-store
              |    └ (store directory) entries=["file:store-junk.txt"]
       2.007s | 🗑️ #3 ✅ tsdf/sess1/expired-doc/store-junk.txt
              |    └ (untracked store file)
@@ -308,16 +308,17 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1","dir:sess2"]
-      2.003s | 🗂️ list-dir tsdf/sess1
+      2.002s | 🗂️ list-dir-values tsdf
+             |    └ (root directory) entries=["dir:sess1","dir:sess2"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:expired-doc"]
-      2.004s | 🗂️ list-dir tsdf/sess1/expired-doc
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/expired-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      2.005s | 🗂️ list-dir tsdf/sess2
+      2.005s | 🗂️ list-dir-values tsdf/sess2
              |    └ (session directory) entries=["dir:expired-doc","dir:fresh-doc"]
-      2.006s | 🗂️ list-dir tsdf/sess2/expired-doc
+      2.006s | 🗂️ list-dir-entries tsdf/sess2/expired-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      .      | 🗂️ list-dir tsdf/sess2/fresh-doc
+      .      | 🗂️ list-dir-entries tsdf/sess2/fresh-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.007s | 📖 #1 tsdf/sess1/expired-doc/d._i.r.json (namespace index) | 0.07 kb
       .      | 📖 #2 tsdf/sess2/expired-doc/d._i.r.json (namespace index) | 0.07 kb
@@ -367,15 +368,15 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf
+      2.002s | 🗂️ list-dir-values tsdf
              |    └ (root directory) entries=["dir:sess-fail","dir:sess-sibling"]
-      2.003s | 🗂️ list-dir tsdf/sess-fail
+      2.003s | 🗂️ list-dir-values tsdf/sess-fail
              |    └ (session directory) entries=["dir:failed-doc"]
-      2.004s | 🗂️ list-dir tsdf/sess-fail/failed-doc
+      2.004s | 🗂️ list-dir-entries tsdf/sess-fail/failed-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      2.005s | 🗂️ list-dir tsdf/sess-sibling
+      2.005s | 🗂️ list-dir-values tsdf/sess-sibling
              |    └ (session directory) entries=["dir:sibling-doc"]
-      2.006s | 🗂️ list-dir tsdf/sess-sibling/sibling-doc
+      2.006s | 🗂️ list-dir-entries tsdf/sess-sibling/sibling-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.007s | 📖 #1 tsdf/sess-fail/failed-doc/d._i.r.json
              |    └ (namespace index) | 0.07 kb
@@ -413,10 +414,10 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess-fail"]
-      2.003s | 🗂️ list-dir tsdf/sess-fail
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess-fail"]
+      2.003s | 🗂️ list-dir-values tsdf/sess-fail
              |    └ (session directory) entries=["dir:failed-doc"]
-      2.004s | 🗂️ list-dir tsdf/sess-fail/failed-doc
+      2.004s | 🗂️ list-dir-entries tsdf/sess-fail/failed-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.005s | 📖 #1 tsdf/sess-fail/failed-doc/d._i.r.json
              |    └ (namespace index) | 0.07 kb
@@ -467,14 +468,14 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1"]
-      2.003s | 🗂️ list-dir tsdf/sess1
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:invalid-metadata","dir:missing-payload","dir:valid-doc"]
-      2.004s | 🗂️ list-dir tsdf/sess1/invalid-metadata
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/invalid-metadata
              |    └ (store directory) entries=["file:d.e.p.json"]
-      .      | 🗂️ list-dir tsdf/sess1/missing-payload
+      .      | 🗂️ list-dir-entries tsdf/sess1/missing-payload
              |    └ (store directory) entries=["file:d._i.r.json"]
-      .      | 🗂️ list-dir tsdf/sess1/valid-doc
+      .      | 🗂️ list-dir-entries tsdf/sess1/valid-doc
              |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       2.005s | 📖 #1 tsdf/sess1/missing-payload/d._i.r.json
              |    └ (namespace index) | 0.07 kb
@@ -526,10 +527,10 @@ describe('async storage efficiency: maintenance', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1"]
-      2.003s | 🗂️ list-dir tsdf/sess1
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:orphan-collection"]
-      2.004s | 🗂️ list-dir tsdf/sess1/orphan-collection
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/orphan-collection
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1706329294.p.json","file:ci.h~2293725328.p.json"]
       2.005s | 📖 #1 tsdf/sess1/orphan-collection/ci._i.r.json
              |    └ (namespace index) | 0.11 kb
@@ -707,21 +708,21 @@ describe('async storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      130ms | 🗂️ list-dir tsdf
+      130ms | 🗂️ list-dir-values tsdf
             |    └ (root directory) entries=["dir:sess-trigger","dir:user%40example.com"]
-      131ms | 🗂️ list-dir tsdf/sess-trigger
+      131ms | 🗂️ list-dir-values tsdf/sess-trigger
             |    └ (session directory) entries=["dir:trigger-doc"]
-      132ms | 🗂️ list-dir tsdf/sess-trigger/trigger-doc
+      132ms | 🗂️ list-dir-entries tsdf/sess-trigger/trigger-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      133ms | 🗂️ list-dir tsdf/user%40example.com
+      133ms | 🗂️ list-dir-values tsdf/user%40example.com
             |    └ (session directory) entries=["dir:_o_.s","dir:invalid-stray","dir:protected-doc","dir:unprotected-doc"]
-      134ms | 🗂️ list-dir tsdf/user%40example.com/_o_.s
+      134ms | 🗂️ list-dir-entries tsdf/user%40example.com/_o_.s
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      .     | 🗂️ list-dir tsdf/user%40example.com/invalid-stray
+      .     | 🗂️ list-dir-entries tsdf/user%40example.com/invalid-stray
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      .     | 🗂️ list-dir tsdf/user%40example.com/protected-doc
+      .     | 🗂️ list-dir-entries tsdf/user%40example.com/protected-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:oq._i.r.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
-      .     | 🗂️ list-dir tsdf/user%40example.com/unprotected-doc
+      .     | 🗂️ list-dir-entries tsdf/user%40example.com/unprotected-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       135ms | 📖 #1 tsdf/sess-trigger/trigger-doc/d._i.r.json
             |    └ (namespace index) | 0.07 kb
