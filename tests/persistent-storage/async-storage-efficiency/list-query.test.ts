@@ -760,6 +760,19 @@ describe('async storage efficiency: list-query', () => {
       1.865s | end
       "
     `);
+
+    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+      "tsdf (1.21 kb)
+      ├ sess1 (1.14 kb)
+      │ └ lq-expired-during-max-items (1.13 kb)
+      │   ├ li._i.r.json (0.23 kb)
+      │   ├ li.h~2792428996.p.json (0.17 kb)
+      │   ├ li.h~3224064498.p.json (0.21 kb)
+      │   ├ lq._i.r.json (0.30 kb)
+      │   ├ lq.h~2316387135.p.json (0.08 kb)
+      │   └ lq.h~2902406637.p.json (0.08 kb)
+      └ tsdf._am.g* (0.06 kb)"
+    `);
   });
 
   test('item flush preserves fresh standalone entries that were persisted before the store noticed them', async () => {
