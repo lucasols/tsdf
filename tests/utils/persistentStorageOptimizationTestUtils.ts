@@ -245,6 +245,7 @@ export type PersistentStorageOperation =
       type: 'getItem';
       exists: boolean;
       key: string | null;
+      rawValue: string | null;
       valueByteSize: number | null;
     }
   | {
@@ -253,6 +254,7 @@ export type PersistentStorageOperation =
       existsBefore: boolean;
       valueChanged: boolean;
       key: string;
+      rawValueAfter: string;
       valueByteSizeBefore: number | null;
       valueByteSizeAfter: number;
     }
@@ -265,9 +267,87 @@ function getOperationKey(operation: PersistentStorageOperation): string | null {
   return operation.key;
 }
 
+const TIMELINE_DUPLICATE_OPERATION_THRESHOLD_MS = 10;
+const REPEATED_UNCHANGED_READ_WARNING = '⚠️ REPEATED READ <10ms UNCHANGED';
+const DUPLICATE_UNNECESSARY_WRITE_WARNING =
+  '⚠️ DUPLICATE WRITE <10ms UNCHANGED';
+const DUPLICATE_OPEN_WARNING = '⚠️ DUPLICATE OPEN';
+
+type ReadTimelineSnapshot = {
+  rawValue: string | null;
+  target: string | null;
+  time: number;
+};
+
+function getRepeatedReadWarning(
+  readWindow: readonly ReadTimelineSnapshot[],
+  currentRead: ReadTimelineSnapshot | null,
+): string | undefined {
+  if (currentRead === null || currentRead.target === null) return undefined;
+  if (currentRead.rawValue === null) return undefined;
+
+  const hasMatchingRead = readWindow.some(
+    (previousRead) =>
+      previousRead.target === currentRead.target &&
+      previousRead.rawValue !== null &&
+      previousRead.rawValue === currentRead.rawValue &&
+      currentRead.time - previousRead.time <
+        TIMELINE_DUPLICATE_OPERATION_THRESHOLD_MS,
+  );
+  if (!hasMatchingRead) return undefined;
+
+  return REPEATED_UNCHANGED_READ_WARNING;
+}
+
+type WriteTimelineSnapshot = {
+  rawValueAfter: string;
+  target: string | null;
+  time: number;
+  valueChanged: boolean;
+};
+
+function getDuplicateWriteWarning(
+  writeWindow: readonly WriteTimelineSnapshot[],
+  currentWrite: WriteTimelineSnapshot | null,
+): string | undefined {
+  if (currentWrite === null || currentWrite.target === null) return undefined;
+  if (currentWrite.valueChanged) return undefined;
+
+  const hasMatchingWrite = writeWindow.some(
+    (previousWrite) =>
+      previousWrite.target === currentWrite.target &&
+      previousWrite.rawValueAfter === currentWrite.rawValueAfter &&
+      currentWrite.time - previousWrite.time <
+        TIMELINE_DUPLICATE_OPERATION_THRESHOLD_MS,
+  );
+  if (!hasMatchingWrite) return undefined;
+
+  return DUPLICATE_UNNECESSARY_WRITE_WARNING;
+}
+
+function getSnapshotsInWindow<T extends { time: number }>(
+  window: readonly T[],
+  currentTime: number,
+): T[] {
+  return window.filter(
+    (entry) =>
+      currentTime - entry.time < TIMELINE_DUPLICATE_OPERATION_THRESHOLD_MS,
+  );
+}
+
+function appendTimelineWarning(
+  detail: string | undefined,
+  warning: string | undefined,
+): string | undefined {
+  if (warning === undefined) return detail;
+  if (detail === undefined) return warning;
+  return `${detail} ${warning}`;
+}
+
 function formatPersistentStorageOperation(
   operation: PersistentStorageOperation,
   keyIdMap: Map<string, number>,
+  warning?: string,
 ): string {
   const key = getOperationKey(operation);
   const keyId = key !== null ? keyIdMap.get(key) : undefined;
@@ -279,13 +359,16 @@ function formatPersistentStorageOperation(
         return formatWrappedPersistentStorageOperationLabel(
           `📖 ${operation.exists ? '✅' : '❌'}`,
           keyParts.main,
-          `${keyParts.detail ?? ''} | ${formatByteSize(operation.valueByteSize)}`.trim(),
+          appendTimelineWarning(
+            `${keyParts.detail ?? ''} | ${formatByteSize(operation.valueByteSize)}`.trim(),
+            warning,
+          ),
         );
       }
       return formatWrappedPersistentStorageOperationLabel(
         `📖 ${operation.exists ? '✅' : '❌'}`,
         keyParts.main,
-        keyParts.detail,
+        appendTimelineWarning(keyParts.detail, warning),
       );
     }
     case 'setItem': {
@@ -298,9 +381,12 @@ function formatPersistentStorageOperation(
       return formatWrappedPersistentStorageOperationLabel(
         `✍️ ${operation.existsBefore ? '✅' : '❌'}->✅`,
         keyParts.main,
-        `${keyParts.detail ?? ''} | ${before} -> ${formatByteSize(
-          operation.valueByteSizeAfter,
-        )}${unchangedFlag}`.trim(),
+        appendTimelineWarning(
+          `${keyParts.detail ?? ''} | ${before} -> ${formatByteSize(
+            operation.valueByteSizeAfter,
+          )}${unchangedFlag}`.trim(),
+          warning,
+        ),
       );
     }
     case 'removeItem': {
@@ -348,6 +434,8 @@ function formatTableString(
     .join('\n');
 }
 
+type TimelineLabel = { endTime: number; label: string; time: number };
+
 export function getPersistentStorageOperationTimelineString(
   operations: readonly PersistentStorageOperation[],
 ): string {
@@ -363,14 +451,56 @@ export function getPersistentStorageOperationTimelineString(
     }
   }
 
-  return getTimelineString(
-    operations.map((operation) => ({
-      time: operation.time,
+  const timelineEntries: TimelineLabel[] = [];
+  let readWindow: ReadTimelineSnapshot[] = [];
+  let writeWindow: WriteTimelineSnapshot[] = [];
+
+  for (const operation of operations) {
+    const currentRead =
+      operation.type === 'getItem'
+        ? {
+            rawValue: operation.rawValue,
+            target: operation.key,
+            time: operation.time,
+          }
+        : null;
+    const currentWrite =
+      operation.type === 'setItem'
+        ? {
+            rawValueAfter: operation.rawValueAfter,
+            target: operation.key,
+            time: operation.time,
+            valueChanged: operation.valueChanged,
+          }
+        : null;
+    const warning =
+      operation.type === 'getItem'
+        ? getRepeatedReadWarning(readWindow, currentRead)
+        : operation.type === 'setItem'
+          ? getDuplicateWriteWarning(writeWindow, currentWrite)
+          : undefined;
+
+    timelineEntries.push({
       endTime: operation.time,
-      label: formatPersistentStorageOperation(operation, keyIdMap),
-    })),
-    { showEndMarker: false },
-  );
+      label: formatPersistentStorageOperation(operation, keyIdMap, warning),
+      time: operation.time,
+    });
+
+    if (currentRead !== null) {
+      readWindow = [
+        ...getSnapshotsInWindow(readWindow, currentRead.time),
+        currentRead,
+      ];
+    }
+    if (currentWrite !== null) {
+      writeWindow = [
+        ...getSnapshotsInWindow(writeWindow, currentWrite.time),
+        currentWrite,
+      ];
+    }
+  }
+
+  return getTimelineString(timelineEntries, { showEndMarker: false });
 }
 
 const PERSISTENT_TIMELINE_WRAP_AT = 68;
@@ -423,6 +553,7 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
       type: 'getItem',
       key,
       exists: value !== null,
+      rawValue: value,
       valueByteSize: value !== null ? value.length * 2 : null,
     });
     return value;
@@ -434,6 +565,7 @@ export function startPersistentStorageOperationCapture(): PersistentStorageOpera
       type: 'setItem',
       key,
       existsBefore: existingValue !== null,
+      rawValueAfter: value,
       valueChanged: existingValue !== value,
       valueByteSizeBefore:
         existingValue !== null ? existingValue.length * 2 : null,
@@ -879,18 +1011,16 @@ export function getOpfsDirTree(
   return getStorageTreeString(root);
 }
 
-type TimelineLabel = { endTime: number; label: string; time: number };
-
-function sortTimedLabels(
-  operations: readonly TimelineLabel[],
-): TimelineLabel[] {
+function sortTimedEntries<T extends { endTime: number; time: number }>(
+  operations: readonly T[],
+): T[] {
   return operations
-    .map((operation, index) => ({ ...operation, index }))
-    .sort((left, right) => {
+    .map((operation, index) => [operation, index] as const)
+    .sort(([left, leftIndex], [right, rightIndex]) => {
       if (left.time !== right.time) return left.time - right.time;
-      return left.index - right.index;
+      return leftIndex - rightIndex;
     })
-    .map(({ endTime, time, label }) => ({ endTime, time, label }));
+    .map(([operation]) => operation);
 }
 
 function formatTimelineTable(
@@ -1118,49 +1248,68 @@ function formatOpfsFileDescription(operation: MockOpfsOperation): string {
 function formatOpfsOperationLabel(
   operation: MockOpfsOperation,
   pathIdMap: Map<string, number>,
+  warning?: string,
 ): string {
   switch (operation.type) {
     case 'openDir':
       return formatWrappedOpfsOperationLabel(
         `📂 dir-open ${operation.exists ? '✅' : '❌'}`,
         formatOpfsOperationPath(operation.path),
-        `(${describeOpfsDirectoryPath(operation.path)})`,
+        appendTimelineWarning(
+          `(${describeOpfsDirectoryPath(operation.path)})`,
+          warning,
+        ),
       );
     case 'ensureDir':
       return formatWrappedOpfsOperationLabel(
         `📁 dir-open-or-create ${operation.created ? '🆕' : '✅'}`,
         formatOpfsOperationPath(operation.path),
-        `(${describeOpfsDirectoryPath(operation.path)})`,
+        appendTimelineWarning(
+          `(${describeOpfsDirectoryPath(operation.path)})`,
+          warning,
+        ),
       );
     case 'openFile':
       return formatWrappedOpfsOperationLabel(
         `👁️ file-open ${operation.exists ? '✅' : '❌'}`,
         formatOpfsOperationPath(operation.path, pathIdMap),
-        `(${formatOpfsFileDescription(operation)})`,
+        appendTimelineWarning(
+          `(${formatOpfsFileDescription(operation)})`,
+          warning,
+        ),
       );
     case 'ensureFile':
       return formatWrappedOpfsOperationLabel(
         `👁️ file-open-or-create ${operation.created ? '🆕' : '✅'}`,
         formatOpfsOperationPath(operation.path, pathIdMap),
-        `(${formatOpfsFileDescription(operation)})`,
+        appendTimelineWarning(
+          `(${formatOpfsFileDescription(operation)})`,
+          warning,
+        ),
       );
     case 'readFile':
       return formatWrappedOpfsOperationLabel(
         '📖',
         formatOpfsOperationPath(operation.path, pathIdMap),
-        `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
-          operation.valueByteSize,
-        )}`,
+        appendTimelineWarning(
+          `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
+            operation.valueByteSize,
+          )}`,
+          warning,
+        ),
       );
     case 'writeFile':
       return formatWrappedOpfsOperationLabel(
         '✍️',
         formatOpfsOperationPath(operation.path, pathIdMap),
-        `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
-          operation.valueByteSizeBefore,
-        )} -> ${formatByteSize(operation.valueByteSizeAfter)}${
-          operation.valueChanged ? '' : ' ⚠️ UNCHANGED'
-        }`,
+        appendTimelineWarning(
+          `(${formatOpfsFileDescription(operation)}) | ${formatByteSize(
+            operation.valueByteSizeBefore,
+          )} -> ${formatByteSize(operation.valueByteSizeAfter)}${
+            operation.valueChanged ? '' : ' ⚠️ UNCHANGED'
+          }`,
+          warning,
+        ),
       );
     case 'writeFileFailed':
       return formatWrappedOpfsOperationLabel(
@@ -1200,7 +1349,14 @@ function buildOpfsOperationCaptureResult(
   mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
   captureStartedAt: number,
 ): OpfsPersistentStorageOperationCaptureResult {
-  const verboseTimelineEntries: TimelineLabel[] = [];
+  const verboseTimelineEntries: Array<{
+    endTime: number;
+    operation: MockOpfsOperation;
+    openKey: string | null;
+    readSnapshot: ReadTimelineSnapshot | null;
+    time: number;
+    writeSnapshot: WriteTimelineSnapshot | null;
+  }> = [];
   const pathIdMap = new Map<string, number>();
   let nextPathId = 1;
 
@@ -1221,16 +1377,78 @@ function buildOpfsOperationCaptureResult(
 
     verboseTimelineEntries.push({
       endTime: Math.max(0, operation.time - captureStartedAt),
+      openKey:
+        operation.type === 'openDir' || operation.type === 'ensureDir'
+          ? `dir:${stripOpfsRootPrefix(operation.path)}`
+          : operation.type === 'openFile' || operation.type === 'ensureFile'
+            ? `file:${stripOpfsRootPrefix(operation.path)}`
+            : null,
+      operation,
+      readSnapshot:
+        operation.type === 'readFile'
+          ? {
+              rawValue: operation.readRaw,
+              target: stripOpfsRootPrefix(operation.path),
+              time: Math.max(0, operation.startedTime - captureStartedAt),
+            }
+          : null,
       time: Math.max(0, operation.startedTime - captureStartedAt),
-      label: formatOpfsOperationLabel(operation, pathIdMap),
+      writeSnapshot:
+        operation.type === 'writeFile'
+          ? {
+              rawValueAfter: operation.writeRaw,
+              target: stripOpfsRootPrefix(operation.path),
+              time: Math.max(0, operation.startedTime - captureStartedAt),
+              valueChanged: operation.valueChanged,
+            }
+          : null,
     });
   }
 
-  const sortedVerboseTimelineEntries = sortTimedLabels(verboseTimelineEntries);
-  const operations = sortedVerboseTimelineEntries.map((entry) => entry.label);
-  const timelineString = getOpfsPersistentStorageOperationTimelineString(
-    sortedVerboseTimelineEntries,
-  );
+  const sortedVerboseTimelineEntries = sortTimedEntries(verboseTimelineEntries);
+  const timelineEntries: TimelineLabel[] = [];
+  const seenOpenKeys = new Set<string>();
+  let readWindow: ReadTimelineSnapshot[] = [];
+  let writeWindow: WriteTimelineSnapshot[] = [];
+
+  for (const entry of sortedVerboseTimelineEntries) {
+    const warning =
+      entry.openKey !== null
+        ? seenOpenKeys.has(entry.openKey)
+          ? DUPLICATE_OPEN_WARNING
+          : undefined
+        : entry.operation.type === 'readFile'
+          ? getRepeatedReadWarning(readWindow, entry.readSnapshot)
+          : entry.operation.type === 'writeFile'
+            ? getDuplicateWriteWarning(writeWindow, entry.writeSnapshot)
+            : undefined;
+
+    timelineEntries.push({
+      endTime: entry.endTime,
+      label: formatOpfsOperationLabel(entry.operation, pathIdMap, warning),
+      time: entry.time,
+    });
+
+    if (entry.openKey !== null) {
+      seenOpenKeys.add(entry.openKey);
+    }
+    if (entry.readSnapshot !== null) {
+      readWindow = [
+        ...getSnapshotsInWindow(readWindow, entry.readSnapshot.time),
+        entry.readSnapshot,
+      ];
+    }
+    if (entry.writeSnapshot !== null) {
+      writeWindow = [
+        ...getSnapshotsInWindow(writeWindow, entry.writeSnapshot.time),
+        entry.writeSnapshot,
+      ];
+    }
+  }
+
+  const operations = timelineEntries.map((entry) => entry.label);
+  const timelineString =
+    getOpfsPersistentStorageOperationTimelineString(timelineEntries);
 
   return { operations, timelineString };
 }

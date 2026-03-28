@@ -196,7 +196,7 @@ describe('async storage efficiency: list-query', () => {
       2.005s | 📖 #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
              |    └ (queries index) | 0.40 kb
       .      | 📖 #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
-             |    └ (queries index) | 0.40 kb
+             |    └ (queries index) | 0.40 kb ⚠️ REPEATED READ <10ms UNCHANGED
              ·
       2.048s | 📖 #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
              |    └ (queries index) | 0.40 kb
@@ -271,7 +271,7 @@ describe('async storage efficiency: list-query', () => {
       .      | ✍️ #2 tsdf/sess1/lq-query-metadata/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.00 kb -> 0.09 kb
       1.856s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/lq-query-metadata/li._i.r.json
-             |    └ (items index)
+             |    └ (items index) ⚠️ DUPLICATE OPEN
       1.857s | ✍️ #5 tsdf/sess1/lq-query-metadata/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
       1.859s | ✍️ #1 tsdf/sess1/lq-query-metadata/li._i.r.json
@@ -372,7 +372,7 @@ describe('async storage efficiency: list-query', () => {
       .      | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.00 kb -> 0.09 kb
       1.856s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
-             |    └ (items index)
+             |    └ (items index) ⚠️ DUPLICATE OPEN
       1.857s | ✍️ #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
       1.859s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
@@ -443,7 +443,8 @@ describe('async storage efficiency: list-query', () => {
       time   |
       1.81s  | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1
+             |    └ (session directory) ⚠️ DUPLICATE OPEN
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/lq-empty-query-manifest
              |    └ (store directory)
       1.853s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/lq-empty-query-manifest/lq.h~1731990418.p.json
@@ -862,9 +863,9 @@ describe('async storage efficiency: list-query', () => {
       2.008s | 👁️ file-open ✅ #2 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
              |    └ (items index)
       .      | 📖 #1 tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json
-             |    └ (queries index) | 0.69 kb
+             |    └ (queries index) | 0.69 kb ⚠️ REPEATED READ <10ms UNCHANGED
       2.009s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
-             |    └ (items index) | 0.39 kb
+             |    └ (items index) | 0.39 kb ⚠️ REPEATED READ <10ms UNCHANGED
              ·
       2.052s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
              |    └ (items index) | 0.39 kb

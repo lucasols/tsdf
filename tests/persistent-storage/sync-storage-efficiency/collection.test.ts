@@ -850,7 +850,7 @@ describe('sync storage efficiency: collection', () => {
       .    | 📖 ✅ #2 tsdf.sess1.col-multi-remount-flow.ci."1
            |    └ (entry data, <"1>) | 0.11 kb
       .    | 📖 ✅ #1 tsdf._m.r.n:sess1.col-multi-remount-flow.ci.m
-           |    └ (namespace index) | 0.16 kb
+           |    └ (namespace index) | 0.16 kb ⚠️ REPEATED READ <10ms UNCHANGED
       .    | 📖 ✅ #3 tsdf.sess1.col-multi-remount-flow.ci."2
            |    └ (entry data, <"2>) | 0.11 kb
            ·

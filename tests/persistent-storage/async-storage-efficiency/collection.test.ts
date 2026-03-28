@@ -202,7 +202,7 @@ describe('async storage efficiency: collection', () => {
       2.005s | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb
       .      | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
+             |    └ (namespace index) | 0.21 kb ⚠️ REPEATED READ <10ms UNCHANGED
              ·
       2.048s | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb
@@ -1103,7 +1103,8 @@ describe('async storage efficiency: collection', () => {
       time   |
       0      | 📂 dir-open ❌ tsdf/sess1 (session directory)
              ·
-      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1 (session directory)
+      1.851s | 📁 dir-open-or-create 🆕 tsdf/sess1
+             |    └ (session directory) ⚠️ DUPLICATE OPEN
       1.852s | 📁 dir-open-or-create 🆕 tsdf/sess1/col-remount-no-cache
              |    └ (store directory)
       1.853s | 👁️ file-open-or-create 🆕 #1 tsdf/sess1/col-remount-no-cache/ci.h~3574006234.p.json

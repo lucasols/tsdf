@@ -746,8 +746,9 @@ type UntrackedMockOpfsFileOperation = MockOpfsBaseOperation & {
   scope: null;
 } & (
     | { created: boolean; exists: boolean; type: 'ensureFile' | 'openFile' }
-    | { type: 'readFile'; valueByteSize: number }
+    | { readRaw: string; type: 'readFile'; valueByteSize: number }
     | {
+        writeRaw: string;
         type: 'writeFile';
         valueChanged: boolean;
         valueByteSizeAfter: number;
@@ -779,8 +780,9 @@ export type MockOpfsOperation =
       record: InstrumentedRecord;
       scope: AsyncStorageNamespaceScope;
     } & (
-        | { type: 'readFile'; valueByteSize: number }
+        | { readRaw: string; type: 'readFile'; valueByteSize: number }
         | {
+            writeRaw: string;
             type: 'writeFile';
             valueChanged: boolean;
             valueByteSizeAfter: number;

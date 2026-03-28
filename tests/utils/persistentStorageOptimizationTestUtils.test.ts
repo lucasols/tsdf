@@ -12,6 +12,7 @@ import {
   getOpfsDirTree,
   getParsedOpfsFileData,
   getParsedOpfsNamespaceValue,
+  getPersistentStorageOperationTimelineString,
   startPersistentStorageOperationCapture,
   startOpfsPersistentStorageOperationCapture,
 } from './persistentStorageOptimizationTestUtils';
@@ -164,6 +165,476 @@ describe('startOpfsPersistentStorageOperationCapture', () => {
       2ms  | 📂 dir-open ✅ tsdf/sess1 (session directory)
       3ms  | 📂 dir-open ✅ tsdf/sess1/docs (store directory)
       4ms  | end
+      "
+    `);
+  });
+
+  test('timelineString warns for duplicate file-open operations across the full OPFS history', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        created: false,
+        exists: true,
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'openFile',
+      },
+      {
+        created: false,
+        exists: true,
+        path,
+        startedTime: 2000,
+        time: 2001,
+        type: 'openFile',
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time   |
+      0      | 👁️ file-open ✅ #1 tsdf/sess1/docs/d._i.r.json (namespace index)
+             ·
+      2s     | 👁️ file-open ✅ #1 tsdf/sess1/docs/d._i.r.json
+             |    └ (namespace index) ⚠️ DUPLICATE OPEN
+      2.001s | end
+      "
+    `);
+  });
+
+  test('timelineString treats ensureFile and openFile as duplicate opens of the same cached handle', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        created: false,
+        exists: true,
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'ensureFile',
+      },
+      {
+        created: false,
+        exists: true,
+        path,
+        startedTime: 2,
+        time: 3,
+        type: 'openFile',
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 👁️ file-open-or-create ✅ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index)
+      2ms  | 👁️ file-open ✅ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) ⚠️ DUPLICATE OPEN
+      3ms  | end
+      "
+    `);
+  });
+
+  test('timelineString warns for consecutive unchanged OPFS reads within 10ms', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const readRaw = mockAdapter.mockBrowserOpfs.readFile(path);
+    if (readRaw === null) {
+      throw new Error(`Expected OPFS file at "${path}".`);
+    }
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        readRaw,
+        startedTime: 0,
+        time: 1,
+        type: 'readFile',
+        valueByteSize: readRaw.length * 2,
+      },
+      {
+        path,
+        readRaw,
+        startedTime: 9,
+        time: 10,
+        type: 'readFile',
+        valueByteSize: readRaw.length * 2,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.05 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      10ms | end
+      "
+    `);
+  });
+
+  test('timelineString does not warn at the 10ms OPFS boundary', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const readRaw = mockAdapter.mockBrowserOpfs.readFile(path);
+    if (readRaw === null) {
+      throw new Error(`Expected OPFS file at "${path}".`);
+    }
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        readRaw,
+        startedTime: 0,
+        time: 1,
+        type: 'readFile',
+        valueByteSize: readRaw.length * 2,
+      },
+      {
+        path,
+        readRaw,
+        startedTime: 10,
+        time: 11,
+        type: 'readFile',
+        valueByteSize: readRaw.length * 2,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      10ms | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      11ms | end
+      "
+    `);
+  });
+
+  test('timelineString does not warn when consecutive OPFS reads changed data', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const firstReadRaw = mockAdapter.mockBrowserOpfs.readFile(path);
+    if (firstReadRaw === null) {
+      throw new Error(`Expected OPFS file at "${path}".`);
+    }
+
+    const secondReadRaw = JSON.stringify({ e: [{ a: 123 }] });
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        readRaw: firstReadRaw,
+        startedTime: 0,
+        time: 1,
+        type: 'readFile',
+        valueByteSize: firstReadRaw.length * 2,
+      },
+      {
+        path,
+        readRaw: secondReadRaw,
+        startedTime: 9,
+        time: 10,
+        type: 'readFile',
+        valueByteSize: secondReadRaw.length * 2,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.03 kb
+      10ms | end
+      "
+    `);
+  });
+
+  test('timelineString warns when matching OPFS reads stay within the 10ms window despite interleaving operations', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const readRaw = mockAdapter.mockBrowserOpfs.readFile(path);
+    if (readRaw === null) {
+      throw new Error(`Expected OPFS file at "${path}".`);
+    }
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        readRaw,
+        startedTime: 0,
+        time: 1,
+        type: 'readFile',
+        valueByteSize: readRaw.length * 2,
+      },
+      {
+        created: false,
+        exists: true,
+        path,
+        startedTime: 5,
+        time: 6,
+        type: 'openFile',
+      },
+      {
+        path,
+        readRaw,
+        startedTime: 9,
+        time: 10,
+        type: 'readFile',
+        valueByteSize: readRaw.length * 2,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 #1 tsdf/sess1/docs/d._i.r.json (namespace index) | 0.05 kb
+      5ms  | 👁️ file-open ✅ #1 tsdf/sess1/docs/d._i.r.json (namespace index)
+      9ms  | 📖 #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.05 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      10ms | end
+      "
+    `);
+  });
+
+  test('timelineString warns for consecutive duplicated unnecessary OPFS writes within 10ms', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const firstWriteRaw = JSON.stringify({ e: [{ a: 123 }] });
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'writeFile',
+        valueByteSizeAfter: firstWriteRaw.length * 2,
+        valueByteSizeBefore: 50,
+        valueChanged: true,
+        writeRaw: firstWriteRaw,
+      },
+      {
+        path,
+        startedTime: 9,
+        time: 10,
+        type: 'writeFile',
+        valueByteSizeAfter: firstWriteRaw.length * 2,
+        valueByteSizeBefore: firstWriteRaw.length * 2,
+        valueChanged: false,
+        writeRaw: firstWriteRaw,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.05 kb -> 0.03 kb
+      9ms  | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.03 kb -> 0.03 kb ⚠️ UNCHANGED ⚠️ DUPLICATE WRITE <10ms UNCHANGED
+      10ms | end
+      "
+    `);
+  });
+
+  test('timelineString does not warn at the 10ms OPFS write boundary', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const writeRaw = JSON.stringify({ e: [{ a: 123 }] });
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'writeFile',
+        valueByteSizeAfter: writeRaw.length * 2,
+        valueByteSizeBefore: 50,
+        valueChanged: true,
+        writeRaw,
+      },
+      {
+        path,
+        startedTime: 10,
+        time: 11,
+        type: 'writeFile',
+        valueByteSizeAfter: writeRaw.length * 2,
+        valueByteSizeBefore: writeRaw.length * 2,
+        valueChanged: false,
+        writeRaw,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.05 kb -> 0.03 kb
+      10ms | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.03 kb -> 0.03 kb ⚠️ UNCHANGED
+      11ms | end
+      "
+    `);
+  });
+
+  test('timelineString does not warn when consecutive OPFS writes changed data', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const firstWriteRaw = JSON.stringify({ e: [{ a: 123 }] });
+    const secondWriteRaw = JSON.stringify({ e: [{ a: 124 }] });
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'writeFile',
+        valueByteSizeAfter: firstWriteRaw.length * 2,
+        valueByteSizeBefore: 50,
+        valueChanged: true,
+        writeRaw: firstWriteRaw,
+      },
+      {
+        path,
+        startedTime: 9,
+        time: 10,
+        type: 'writeFile',
+        valueByteSizeAfter: secondWriteRaw.length * 2,
+        valueByteSizeBefore: firstWriteRaw.length * 2,
+        valueChanged: true,
+        writeRaw: secondWriteRaw,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.05 kb -> 0.03 kb
+      9ms  | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.03 kb -> 0.03 kb
+      10ms | end
+      "
+    `);
+  });
+
+  test('timelineString warns when matching OPFS writes stay within the 10ms window despite interleaving operations', () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const documentScope = mockAdapter.scope('docs', 'sess1');
+
+    documentScope.document.seed({
+      value: { name: 'Cached document', value: 1 },
+    });
+
+    const capture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const path = 'tsdf/sess1/docs/d._i.r.json';
+    const writeRaw = JSON.stringify({ e: [{ a: 123 }] });
+
+    mockAdapter.mockBrowserOpfs.operations.push(
+      {
+        path,
+        startedTime: 0,
+        time: 1,
+        type: 'writeFile',
+        valueByteSizeAfter: writeRaw.length * 2,
+        valueByteSizeBefore: 50,
+        valueChanged: true,
+        writeRaw,
+      },
+      {
+        created: false,
+        exists: true,
+        path,
+        startedTime: 5,
+        time: 6,
+        type: 'openFile',
+      },
+      {
+        path,
+        startedTime: 9,
+        time: 10,
+        type: 'writeFile',
+        valueByteSizeAfter: writeRaw.length * 2,
+        valueByteSizeBefore: writeRaw.length * 2,
+        valueChanged: false,
+        writeRaw,
+      },
+    );
+
+    expect(capture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.05 kb -> 0.03 kb
+      5ms  | 👁️ file-open ✅ #1 tsdf/sess1/docs/d._i.r.json (namespace index)
+      9ms  | ✍️ #1 tsdf/sess1/docs/d._i.r.json
+           |    └ (namespace index) | 0.03 kb -> 0.03 kb ⚠️ UNCHANGED ⚠️ DUPLICATE WRITE <10ms UNCHANGED
+      10ms | end
       "
     `);
   });
@@ -353,6 +824,268 @@ describe('startPersistentStorageOperationCapture', () => {
            |    └ (namespace index) | ❌ -> 0.01 kb
       .    | ✍️ ❌->✅ #6 tsdf.sess1.sync-offline.oq.job-1
            |    └ (entry data, <job-1>) | ❌ -> 0.01 kb
+      "
+    `);
+  });
+
+  test('timelineString warns for consecutive unchanged localStorage reads within 10ms', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abc',
+          time: 0,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abc',
+          time: 9,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index) | 0.01 kb
+      9ms  | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | 0.01 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      "
+    `);
+  });
+
+  test('timelineString does not warn at the 10ms localStorage boundary', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abc',
+          time: 0,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abc',
+          time: 10,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index) | 0.01 kb
+      10ms | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index) | 0.01 kb
+      "
+    `);
+  });
+
+  test('timelineString does not warn when consecutive localStorage reads changed data', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abc',
+          time: 0,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abd',
+          time: 9,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index) | 0.01 kb
+      9ms  | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index) | 0.01 kb
+      "
+    `);
+  });
+
+  test('timelineString warns when matching localStorage reads stay within the 10ms window despite interleaving operations', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abc',
+          time: 0,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+        { index: 0, key: 'tsdf._m.r.s:sess1.sync-doc.m', time: 5, type: 'key' },
+        {
+          exists: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValue: 'abc',
+          time: 9,
+          type: 'getItem',
+          valueByteSize: 6,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index) | 0.01 kb
+      5ms  | 🔑[0] ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index)
+      9ms  | 📖 ✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | 0.01 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      "
+    `);
+  });
+
+  test('timelineString warns for consecutive duplicated unnecessary localStorage writes within 10ms', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          existsBefore: false,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abc',
+          time: 0,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: null,
+          valueChanged: true,
+        },
+        {
+          existsBefore: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abc',
+          time: 9,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: 6,
+          valueChanged: false,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | ❌ -> 0.01 kb
+      9ms  | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | 0.01 kb -> 0.01 kb ⚠️ UNCHANGED ⚠️ DUPLICATE WRITE <10ms UNCHANGED
+      "
+    `);
+  });
+
+  test('timelineString does not warn at the 10ms localStorage write boundary', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          existsBefore: false,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abc',
+          time: 0,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: null,
+          valueChanged: true,
+        },
+        {
+          existsBefore: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abc',
+          time: 10,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: 6,
+          valueChanged: false,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | ❌ -> 0.01 kb
+      10ms | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | 0.01 kb -> 0.01 kb ⚠️ UNCHANGED
+      "
+    `);
+  });
+
+  test('timelineString does not warn when consecutive localStorage writes changed data', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          existsBefore: false,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abc',
+          time: 0,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: null,
+          valueChanged: true,
+        },
+        {
+          existsBefore: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abd',
+          time: 9,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: 6,
+          valueChanged: true,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | ❌ -> 0.01 kb
+      9ms  | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | 0.01 kb -> 0.01 kb
+      "
+    `);
+  });
+
+  test('timelineString warns when matching localStorage writes stay within the 10ms window despite interleaving operations', () => {
+    expect(
+      getPersistentStorageOperationTimelineString([
+        {
+          existsBefore: false,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abc',
+          time: 0,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: null,
+          valueChanged: true,
+        },
+        { index: 0, key: 'tsdf._m.r.s:sess1.sync-doc.m', time: 5, type: 'key' },
+        {
+          existsBefore: true,
+          key: 'tsdf._m.r.s:sess1.sync-doc.m',
+          rawValueAfter: 'abc',
+          time: 9,
+          type: 'setItem',
+          valueByteSizeAfter: 6,
+          valueByteSizeBefore: 6,
+          valueChanged: false,
+        },
+      ]),
+    ).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | ✍️ ❌->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | ❌ -> 0.01 kb
+      5ms  | 🔑[0] ✅ #1 tsdf._m.r.s:sess1.sync-doc.m (namespace index)
+      9ms  | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.sync-doc.m
+           |    └ (namespace index) | 0.01 kb -> 0.01 kb ⚠️ UNCHANGED ⚠️ DUPLICATE WRITE <10ms UNCHANGED
       "
     `);
   });

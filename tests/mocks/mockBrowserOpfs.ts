@@ -21,8 +21,9 @@ type MockBrowserOpfsFileOperation = MockBrowserOpfsBaseOperation & {
 
 type MockBrowserOpfsReadWriteOperation = MockBrowserOpfsBaseOperation &
   (
-    | { type: 'readFile'; valueByteSize: number }
+    | { readRaw: string; type: 'readFile'; valueByteSize: number }
     | {
+        writeRaw: string;
         type: 'writeFile';
         valueChanged: boolean;
         valueByteSizeAfter: number;
@@ -763,6 +764,7 @@ export class MockBrowserOpfsEnvironment {
             operations.push({
               // Model the visible read as starting when the file snapshot
               // acquisition began, since getFile() is part of the effective read.
+              readRaw: snapshotRaw,
               startedTime: getFileStartedTime,
               time: textCompletionTime,
               type: 'readFile',
@@ -844,6 +846,7 @@ export class MockBrowserOpfsEnvironment {
               time: writeCompletionTime,
               type: 'writeFile',
               path,
+              writeRaw: liveNode.raw,
               valueChanged,
               valueByteSizeBefore,
               valueByteSizeAfter: getStringByteSize(liveNode.raw),
