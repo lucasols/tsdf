@@ -147,11 +147,12 @@ When adding a new feature, or adjust a existing one:
 
 When applying an optimization:
 
-1. confirm what the optimization is improving and which concrete paths are affected, so the change is grounded in real behavior rather than guesswork.
-2. be proactive about expanding the optimization to the full affected surface area when the same performance pattern is clearly present elsewhere. In this repo, do not stop at a single store or code path if the same optimization obviously also applies to `DocumentStore`, `CollectionStore`, `ListQueryStore`, sync/async variants, or closely related persistence flows.
-3. after optimizing one concrete case, actively inspect sibling implementations for the same opportunity instead of waiting for the user to ask.
-4. if applying the optimization more broadly has non-obvious tradeoffs, risks changing intended behavior, or could make one path less clear or maintainable, pause and surface those tradeoffs explicitly before proceeding.
-5. verify that the optimization does not introduce behavioral regressions, and check whether the broader version of the optimization is still simple, direct, and worth keeping.
+1. confirm that the optimization will not introduce correctness problems. Optimizations should not come at the cost of correctness, and any tradeoffs must be explicitly acknowledged and justified.
+2. confirm what the optimization is improving and which concrete paths are affected, so the change is grounded in real behavior rather than guesswork.
+3. be proactive about expanding the optimization to the full affected surface area when the same performance pattern is clearly present elsewhere. In this repo, do not stop at a single store or code path if the same optimization obviously also applies to `DocumentStore`, `CollectionStore`, `ListQueryStore`, sync/async variants, or closely related persistence flows.
+4. after optimizing one concrete case, actively inspect sibling implementations for the same opportunity instead of waiting for the user to ask.
+5. if applying the optimization more broadly has non-obvious tradeoffs, risks changing intended behavior, or could make one path less clear or maintainable, pause and surface those tradeoffs explicitly before proceeding.
+6. verify that the optimization does not introduce behavioral regressions, and check whether the broader version of the optimization is still simple, direct, and worth keeping.
 
 ## Bug fix instructions
 

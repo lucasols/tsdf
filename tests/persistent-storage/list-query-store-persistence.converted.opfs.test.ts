@@ -355,7 +355,7 @@ describe('opfs: converted list query store persistence', () => {
       .toMatchInlineSnapshot(`
         e:
           {tableId:"users"}:
-            a: 1735689601859
+            a: 1735689601860
             p: { tableId: 'users' }
       `);
   });

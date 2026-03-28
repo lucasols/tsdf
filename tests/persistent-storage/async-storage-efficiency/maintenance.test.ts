@@ -745,7 +745,7 @@ describe('async storage efficiency: maintenance', () => {
     `);
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
-    ).toMatchInlineSnapshot(`lca: 1736985605680`);
+    ).toMatchInlineSnapshot(`lca: 1736985605681`);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.m.json'),
     ).toMatchInlineSnapshot(`null`);
