@@ -11,6 +11,7 @@ import {
   test,
   vi,
 } from 'vitest';
+import { resetExpirationScanTracking } from '../../src/persistentStorage/persistentStorageManager';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedCollectionItemData,
@@ -18,13 +19,13 @@ import type {
 } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -91,6 +92,7 @@ beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
   resetMockBrowserOpfsForTests();
   opfsPersistentStorage.resetForTests?.();
+  resetExpirationScanTracking();
 });
 
 afterEach(() => {
@@ -98,6 +100,7 @@ afterEach(() => {
   localStorage.clear();
   resetMockBrowserOpfsForTests();
   opfsPersistentStorage.resetForTests?.();
+  resetExpirationScanTracking();
 });
 
 describe('opfs: collection store persistence', () => {
@@ -368,7 +371,7 @@ describe('opfs: collection store persistence', () => {
   test('deleteItemState removes deleted items from persisted storage', async () => {
     const mockAdapter = createOpfsPersistentStorageTestStore({});
     const storeName = 'col-opfs-delete-persisted-item';
-    const sessionKey = 'sess1';
+    const sessionKey = 'sess-delete';
     const deletedItemStorageKey = itemStorageKey(storeName, sessionKey, '1');
     const keptItemStorageKey = itemStorageKey(storeName, sessionKey, '2');
 

@@ -171,8 +171,12 @@ describe('createAsyncStorageAdapter', () => {
       - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'set' }
       - { key: '_i', type: 'set' }
+      - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'get' }
+      - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'get' }
+      - { key: '_i', type: 'get' }
+      - { key: '_i', type: 'get' }
       - type: 'clear'
     `);
   });
@@ -329,13 +333,17 @@ describe('createAsyncStorageAdapter', () => {
       - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'set' }
       - { key: '_i', type: 'set' }
+      - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'get' }
       - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'set' }
+      - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'get' }
+      - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'get' }
       - { key: '_i', type: 'get' }
       - { key: '_i', type: 'set' }
+      - { key: '_i', type: 'get' }
       - { key: '__tsdf_payload__:document', type: 'get' }
     `);
   });

@@ -721,7 +721,7 @@ describe('async storage efficiency: maintenance', () => {
       .     | 🗂️ list-dir-entries tsdf/user%40example.com/invalid-stray
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       .     | 🗂️ list-dir-entries tsdf/user%40example.com/protected-doc
-            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:oq._i.r.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
+            |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json","file:oe._i.r.json","file:oe.document.p.json","file:oq._i.r.json","file:oq.protected-doc%3A1736985603621%3A4fzzzxjy.p.json"]
       .     | 🗂️ list-dir-entries tsdf/user%40example.com/unprotected-doc
             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
       135ms | 📖 #1 tsdf/sess-trigger/trigger-doc/d._i.r.json
@@ -732,9 +732,11 @@ describe('async storage efficiency: maintenance', () => {
             |    └ (namespace index) | 0.02 kb
       .     | 📖 #4 tsdf/user%40example.com/protected-doc/d._i.r.json
             |    └ (namespace index) | 0.09 kb
-      .     | 📖 #5 tsdf/user%40example.com/protected-doc/oq._i.r.json
+      .     | 📖 #5 tsdf/user%40example.com/protected-doc/oe._i.r.json
+            |    └ (namespace index) | 0.07 kb
+      .     | 📖 #6 tsdf/user%40example.com/protected-doc/oq._i.r.json
             |    └ (namespace index) | 0.13 kb
-      .     | 📖 #6 tsdf/user%40example.com/unprotected-doc/d._i.r.json
+      .     | 📖 #7 tsdf/user%40example.com/unprotected-doc/d._i.r.json
             |    └ (namespace index) | 0.07 kb
       138ms | 🧹 del-dir recursive ✅ tsdf/user%40example.com/invalid-stray
             |    └ (store directory)
