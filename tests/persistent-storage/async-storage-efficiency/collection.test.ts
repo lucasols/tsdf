@@ -105,10 +105,10 @@ describe('async storage efficiency: collection', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1"]
-      2.003s | 🗂️ list-dir tsdf/sess1
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:collection-expiration"]
-      2.004s | 🗂️ list-dir tsdf/sess1/collection-expiration
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/collection-expiration
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~135684128.p.json","file:ci.h~1699496642.p.json","file:ci.h~2755408287.p.json"]
       2.005s | 📖 #1 tsdf/sess1/collection-expiration/ci._i.r.json
              |    └ (namespace index) | 0.34 kb
