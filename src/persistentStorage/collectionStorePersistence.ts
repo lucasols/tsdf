@@ -691,7 +691,6 @@ export function setupCollectionPersistence<
       }
 
       const nextPersistedKeys = new Set<string>();
-      const previousPersistedKeys = await ensureKnownPersistedKeys();
       const pendingRemoves = new Set<string>();
       const pendingUpserts = new Map<
         string,
@@ -716,11 +715,34 @@ export function setupCollectionPersistence<
         if (hydratedItem === undefined) continue;
         stateEntries.push([itemKey, hydratedItem]);
       }
+      const previousOverflowMetadataEntries =
+        knownPersistedKeys === null &&
+        localStorageAdapter === null &&
+        config.maxItems !== undefined
+          ? await listAllPersistentStorageNamespaceMetadata(namespace, {
+              order: 'lru-desc',
+            })
+          : null;
+      const previousPersistedKeys =
+        knownPersistedKeys !== null
+          ? new Set(knownPersistedKeys)
+          : previousOverflowMetadataEntries !== null
+            ? new Set(previousOverflowMetadataEntries.map((entry) => entry.key))
+            : localStorageAdapter !== null ||
+                config.maxItems !== undefined ||
+                stateEntries.some(([itemKey, item]) => {
+                  if (hydratedPersistedKeys.has(itemKey)) return false;
+                  return !item?.data || shouldIgnoreItem(item.payload);
+                })
+              ? new Set(await ensureKnownPersistedKeys())
+              : null;
+      const previousKnownLocalPersistedKeys =
+        previousPersistedKeys ?? new Set(hydratedPersistedKeys);
 
       for (const [itemKey, item] of stateEntries) {
         if (!item?.data) {
           if (
-            previousPersistedKeys.has(itemKey) &&
+            previousKnownLocalPersistedKeys.has(itemKey) &&
             hydratedPersistedKeys.has(itemKey)
           ) {
             pendingRemoves.add(itemKey);
@@ -729,7 +751,7 @@ export function setupCollectionPersistence<
         }
 
         if (shouldIgnoreItem(item.payload)) {
-          if (previousPersistedKeys.has(itemKey)) {
+          if (previousKnownLocalPersistedKeys.has(itemKey)) {
             pendingRemoves.add(itemKey);
           }
           continue;
@@ -747,7 +769,7 @@ export function setupCollectionPersistence<
 
         if (
           persistedSnapshotByKey.get(itemKey) === nextSnapshot &&
-          previousPersistedKeys.has(itemKey)
+          previousKnownLocalPersistedKeys.has(itemKey)
         ) {
           continue;
         }
@@ -758,7 +780,7 @@ export function setupCollectionPersistence<
         });
       }
 
-      for (const itemKey of previousPersistedKeys) {
+      for (const itemKey of previousKnownLocalPersistedKeys) {
         if (nextPersistedKeys.has(itemKey)) continue;
         if (!hydratedPersistedKeys.has(itemKey)) continue;
 
@@ -769,6 +791,7 @@ export function setupCollectionPersistence<
       if (
         localStorageAdapter === null &&
         !hasIgnoreItemFilter &&
+        previousPersistedKeys !== null &&
         previousPersistedKeys.size - pendingRemoves.size + pendingUpserts.size >
           maxItems
       ) {
@@ -776,9 +799,10 @@ export function setupCollectionPersistence<
         if (sessionKey !== false) {
           const commitTimestamp = Date.now();
           const metadataEntries =
-            await listAllPersistentStorageNamespaceMetadata(namespace, {
+            previousOverflowMetadataEntries ??
+            (await listAllPersistentStorageNamespaceMetadata(namespace, {
               order: 'lru-desc',
-            });
+            }));
           const metadataByKey = new Map(
             metadataEntries.map((entry) => [entry.key, entry] as const),
           );
@@ -899,16 +923,23 @@ export function setupCollectionPersistence<
         hydratedPersistedKeys.add(itemKey);
         knownMissingPersistedKeys.delete(itemKey);
       }
-      knownPersistedKeys = new Set(previousPersistedKeys);
-      for (const itemKey of pendingRemoves) {
-        knownPersistedKeys.delete(itemKey);
-      }
-      for (const itemKey of pendingUpserts.keys()) {
-        knownPersistedKeys.add(itemKey);
+      if (previousPersistedKeys !== null) {
+        knownPersistedKeys = new Set(previousPersistedKeys);
+        for (const itemKey of pendingRemoves) {
+          knownPersistedKeys.delete(itemKey);
+        }
+        for (const itemKey of pendingUpserts.keys()) {
+          knownPersistedKeys.add(itemKey);
+        }
+      } else {
+        knownPersistedKeys = null;
       }
 
       if (localStorageAdapter !== null && maintenanceManifestKey !== null) {
-        if (hasIgnoreItemFilter || knownPersistedKeys.size > maxItems) {
+        if (
+          hasIgnoreItemFilter ||
+          (knownPersistedKeys !== null && knownPersistedKeys.size > maxItems)
+        ) {
           scheduleLocalStorageMaintenance({
             forceManifestKeys: [maintenanceManifestKey],
           });
@@ -920,7 +951,9 @@ export function setupCollectionPersistence<
       if (sessionKey !== false && localStorageAdapter === null) {
         if (
           hasIgnoreItemFilter ||
-          (!optimizedOverflow && knownPersistedKeys.size > maxItems)
+          (!optimizedOverflow &&
+            knownPersistedKeys !== null &&
+            knownPersistedKeys.size > maxItems)
         ) {
           scheduleAsyncStorageMaintenance(
             `collection:${sessionKey}:${config.storeName}`,

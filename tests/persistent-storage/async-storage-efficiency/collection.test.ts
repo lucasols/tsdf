@@ -189,13 +189,13 @@ describe('async storage efficiency: collection', () => {
       "
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir tsdf (root directory) entries=["dir:sess1"]
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
       .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      2.003s | 🗂️ list-dir tsdf/sess1
+      2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:collection-startup-max-items"]
       .      | 📂 dir-open ✅ tsdf/sess1/collection-startup-max-items
              |    └ (store directory)
-      2.004s | 🗂️ list-dir tsdf/sess1/collection-startup-max-items
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/collection-startup-max-items
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1374750182.p.json","file:ci.h~3986551515.p.json","file:ci.h~3994120284.p.json"]
       .      | 👁️ #1 file-open ✅ tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index)
@@ -267,17 +267,20 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.04s  | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      1s     | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.043s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
+             ·
+      1.043s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+             |    └ (namespace index) | 0.15 kb
+      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
-      1.046s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      1.049s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
-      1.05s  | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      1.053s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
-      1.052s | end
+      1.055s | end
       "
     `);
 
@@ -327,22 +330,31 @@ describe('async storage efficiency: collection', () => {
 
     expect(
       collectionScope.collection.listStoredPayloads().sort(),
-    ).toMatchInlineSnapshot(`['d']`);
+    ).toMatchInlineSnapshot(`['c', 'd']`);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.04s  | 📁 dir-open-or-create ✅ tsdf/sess1 (session directory)
-      1.041s | 📁 dir-open-or-create ✅ tsdf/sess1/col-expired-during-max-items
+      1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.001s | 📂 dir-open ✅ tsdf/sess1/col-expired-during-max-items
              |    └ (store directory)
-      1.042s | 👁️ #1 file-open-or-create 🆕 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
-             |    └ (entry data, <"d>)
-      1.045s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
-             |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
-      1.047s | 👁️ #2 file-open-or-create ✅ tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+      1.002s | 👁️ #1 file-open ✅ tsdf/sess1/col-expired-during-max-items/ci._i.r.json
              |    └ (namespace index)
-      1.05s  | ✍️ #2 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb -> 0.08 kb
-      1.052s | end
+      1.003s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.21 kb
+             ·
+      1.046s | 📖 #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.21 kb
+      1.049s | 🗑️ #2 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~3986551515.p.json
+             |    └ (entry data, <"a>)
+      .      | 🗑️ #3 ✅ tsdf/sess1/col-expired-during-max-items/ci.h~1374750182.p.json
+             |    └ (entry data, <"b>)
+      .      | 👁️ #4 file-open-or-create 🆕 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+             |    └ (entry data, <"d>)
+      1.052s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
+             |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
+      1.056s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.21 kb -> 0.15 kb
+      1.058s | end
       "
     `);
   });

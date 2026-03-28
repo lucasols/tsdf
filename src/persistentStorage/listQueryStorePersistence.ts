@@ -1548,8 +1548,6 @@ export function setupListQueryPersistence<
     if (!storeRef) return;
 
     const state = storeRef.state;
-    const previousItemKeys = await ensureKnownPersistedItemKeys();
-    const previousQueryKeys = await ensureKnownPersistedQueryKeys();
     syncMaintenanceRegistration();
     const queryEntries = Object.entries(state.queries);
     const knownQueryKeys = new Set(queryEntries.map(([queryKey]) => queryKey));
@@ -1573,6 +1571,57 @@ export function setupListQueryPersistence<
       if (hydratedItem === undefined) continue;
       itemEntries.push([itemKey, hydratedItem.item]);
     }
+    const previousItemOverflowMetadataEntries =
+      knownPersistedItemKeys === null &&
+      localStorageAdapter === null &&
+      config.maxItems !== undefined
+        ? await listAllPersistentStorageNamespaceMetadata(itemNamespace, {
+            order: 'lru-desc',
+          })
+        : null;
+    const previousQueryOverflowMetadataEntries =
+      knownPersistedQueryKeys === null &&
+      localStorageAdapter === null &&
+      config.maxQueries !== undefined
+        ? await listAllPersistentStorageNamespaceMetadata(queryNamespace, {
+            order: 'lru-desc',
+          })
+        : null;
+    const previousItemKeys =
+      knownPersistedItemKeys !== null
+        ? new Set(knownPersistedItemKeys)
+        : previousItemOverflowMetadataEntries !== null
+          ? new Set(
+              previousItemOverflowMetadataEntries.map((entry) => entry.key),
+            )
+          : localStorageAdapter !== null ||
+              config.maxItems !== undefined ||
+              itemEntries.some(([itemKey, item]) => {
+                if (hydratedPersistedItemKeys.has(itemKey)) return false;
+                const itemQuery = state.itemQueries[itemKey];
+
+                return (
+                  item === null ||
+                  itemQuery == null ||
+                  shouldIgnoreItem(itemQuery.payload)
+                );
+              })
+            ? new Set(await ensureKnownPersistedItemKeys())
+            : null;
+    const previousQueryKeys =
+      knownPersistedQueryKeys !== null
+        ? new Set(knownPersistedQueryKeys)
+        : previousQueryOverflowMetadataEntries !== null
+          ? new Set(
+              previousQueryOverflowMetadataEntries.map((entry) => entry.key),
+            )
+          : localStorageAdapter !== null || config.maxQueries !== undefined
+            ? new Set(await ensureKnownPersistedQueryKeys())
+            : null;
+    const previousKnownLocalItemKeys =
+      previousItemKeys ?? new Set(hydratedPersistedItemKeys);
+    const previousKnownLocalQueryKeys =
+      previousQueryKeys ?? new Set(hydratedPersistedQueryKeys);
 
     if (localStorageAdapter !== null || hasIgnoreItemFilter) {
       const tasks: Promise<void>[] = [];
@@ -1631,7 +1680,7 @@ export function setupListQueryPersistence<
         const nextSnapshot = JSON.stringify(nextValue);
         if (
           querySnapshotByKey.get(queryKey) === nextSnapshot &&
-          previousQueryKeys.has(queryKey)
+          previousKnownLocalQueryKeys.has(queryKey)
         ) {
           continue;
         }
@@ -1645,7 +1694,7 @@ export function setupListQueryPersistence<
         );
       }
 
-      for (const queryKey of previousQueryKeys) {
+      for (const queryKey of previousKnownLocalQueryKeys) {
         if (nextQueryKeys.has(queryKey)) continue;
         if (!hydratedPersistedQueryKeys.has(queryKey)) {
           continue;
@@ -1674,7 +1723,7 @@ export function setupListQueryPersistence<
           : hydratedItem?.loadedFields;
 
         if (item === null || itemQuery == null) {
-          if (previousItemKeys.has(itemKey)) {
+          if (previousKnownLocalItemKeys.has(itemKey)) {
             tasks.push(itemNamespace.remove(itemKey));
             forgetPersistedItem(itemKey);
             removedItemKeys.add(itemKey);
@@ -1683,7 +1732,7 @@ export function setupListQueryPersistence<
         }
 
         if (shouldIgnoreItem(itemQuery.payload)) {
-          if (previousItemKeys.has(itemKey)) {
+          if (previousKnownLocalItemKeys.has(itemKey)) {
             tasks.push(itemNamespace.remove(itemKey));
             forgetPersistedItem(itemKey);
             removedItemKeys.add(itemKey);
@@ -1693,7 +1742,7 @@ export function setupListQueryPersistence<
 
         const isQueryReferenced = queryReferencedItemKeys.has(itemKey);
         if (isQueryReferenced && !persistedQueryItemKeys.has(itemKey)) {
-          if (previousItemKeys.has(itemKey)) {
+          if (previousKnownLocalItemKeys.has(itemKey)) {
             tasks.push(itemNamespace.remove(itemKey));
             forgetPersistedItem(itemKey);
             removedItemKeys.add(itemKey);
@@ -1716,7 +1765,7 @@ export function setupListQueryPersistence<
         const nextSnapshot = JSON.stringify(nextValue);
         if (
           itemSnapshotByKey.get(itemKey) === nextSnapshot &&
-          previousItemKeys.has(itemKey)
+          previousKnownLocalItemKeys.has(itemKey)
         ) {
           continue;
         }
@@ -1727,7 +1776,7 @@ export function setupListQueryPersistence<
         tasks.push(itemNamespace.save(itemKey, nextValue));
       }
 
-      for (const itemKey of previousItemKeys) {
+      for (const itemKey of previousKnownLocalItemKeys) {
         if (nextItemKeys.has(itemKey)) continue;
         if (!hydratedPersistedItemKeys.has(itemKey)) continue;
 
@@ -1738,27 +1787,37 @@ export function setupListQueryPersistence<
 
       await Promise.all(tasks);
 
-      knownPersistedItemKeys = new Set(previousItemKeys);
-      for (const itemKey of removedItemKeys) {
-        knownPersistedItemKeys.delete(itemKey);
+      if (previousItemKeys !== null) {
+        knownPersistedItemKeys = new Set(previousItemKeys);
+        for (const itemKey of removedItemKeys) {
+          knownPersistedItemKeys.delete(itemKey);
+        }
+        for (const itemKey of nextItemKeys) {
+          knownPersistedItemKeys.add(itemKey);
+        }
+      } else {
+        knownPersistedItemKeys = null;
       }
-      for (const itemKey of nextItemKeys) {
-        knownPersistedItemKeys.add(itemKey);
-      }
-      knownPersistedQueryKeys = new Set(previousQueryKeys);
-      for (const queryKey of removedQueryKeys) {
-        knownPersistedQueryKeys.delete(queryKey);
-      }
-      for (const queryKey of nextQueryKeys) {
-        knownPersistedQueryKeys.add(queryKey);
+      if (previousQueryKeys !== null) {
+        knownPersistedQueryKeys = new Set(previousQueryKeys);
+        for (const queryKey of removedQueryKeys) {
+          knownPersistedQueryKeys.delete(queryKey);
+        }
+        for (const queryKey of nextQueryKeys) {
+          knownPersistedQueryKeys.add(queryKey);
+        }
+      } else {
+        knownPersistedQueryKeys = null;
       }
 
       if (localStorageAdapter !== null) {
         if (
           maintenanceCallbackKey !== null &&
           (hasIgnoreItemFilter ||
-            knownPersistedItemKeys.size > maxItems ||
-            knownPersistedQueryKeys.size > maxQueries)
+            (knownPersistedItemKeys !== null &&
+              knownPersistedItemKeys.size > maxItems) ||
+            (knownPersistedQueryKeys !== null &&
+              knownPersistedQueryKeys.size > maxQueries))
         ) {
           scheduleLocalStorageMaintenance({
             forceManifestKeys: [maintenanceCallbackKey],
@@ -1771,8 +1830,10 @@ export function setupListQueryPersistence<
       if (sessionKey !== false) {
         if (
           hasIgnoreItemFilter ||
-          knownPersistedItemKeys.size > maxItems ||
-          knownPersistedQueryKeys.size > maxQueries
+          (knownPersistedItemKeys !== null &&
+            knownPersistedItemKeys.size > maxItems) ||
+          (knownPersistedQueryKeys !== null &&
+            knownPersistedQueryKeys.size > maxQueries)
         ) {
           scheduleAsyncStorageMaintenance(
             `list-query:${sessionKey}:${config.storeName}`,
@@ -1789,7 +1850,7 @@ export function setupListQueryPersistence<
     const protectedRefs = getSessionProtectedKeysSnapshot(sessionKey);
     const finalQueryDataByKey = new Map<string, PersistedListQueryData>();
     const queryReferencedItemKeys = new Set<string>();
-    const finalPersistedQueryKeys = new Set(previousQueryKeys);
+    const finalPersistedQueryKeys = new Set(previousKnownLocalQueryKeys);
 
     for (const [queryKey, query] of queryEntries) {
       if (query.status !== 'success' && !query.wasLoaded) continue;
@@ -1827,18 +1888,22 @@ export function setupListQueryPersistence<
       finalPersistedQueryKeys.add(queryKey);
     }
 
-    for (const queryKey of previousQueryKeys) {
+    for (const queryKey of previousKnownLocalQueryKeys) {
       if (finalQueryDataByKey.has(queryKey)) continue;
       if (!hydratedPersistedQueryKeys.has(queryKey)) continue;
       finalPersistedQueryKeys.delete(queryKey);
     }
 
-    if (finalPersistedQueryKeys.size > maxQueries) {
+    if (
+      previousQueryKeys !== null &&
+      finalPersistedQueryKeys.size > maxQueries
+    ) {
       const commitTimestamp = Date.now();
-      const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
-        queryNamespace,
-        { order: 'lru-desc' },
-      );
+      const metadataEntries =
+        previousQueryOverflowMetadataEntries ??
+        (await listAllPersistentStorageNamespaceMetadata(queryNamespace, {
+          order: 'lru-desc',
+        }));
       const protectedQueryKeys = getProtectedKeysFromMetadata(metadataEntries);
       const candidateEntries: Array<{
         lastAccessAt: number;
@@ -1920,7 +1985,7 @@ export function setupListQueryPersistence<
       string,
       PersistedListQueryItemData<ItemState | StorageState>
     >();
-    const finalPersistedItemKeys = new Set(previousItemKeys);
+    const finalPersistedItemKeys = new Set(previousKnownLocalItemKeys);
 
     for (const [itemKey, item] of itemEntries) {
       const hasItemQueryInState = Object.hasOwn(state.itemQueries, itemKey);
@@ -1940,7 +2005,7 @@ export function setupListQueryPersistence<
         : hydratedItem?.loadedFields;
 
       if (item === null || itemQuery == null) {
-        if (previousItemKeys.has(itemKey)) {
+        if (previousKnownLocalItemKeys.has(itemKey)) {
           finalPersistedItemKeys.delete(itemKey);
         }
         continue;
@@ -1948,7 +2013,7 @@ export function setupListQueryPersistence<
 
       const isQueryReferenced = queryReferencedItemKeys.has(itemKey);
       if (isQueryReferenced && !persistedQueryItemKeys.has(itemKey)) {
-        if (previousItemKeys.has(itemKey)) {
+        if (previousKnownLocalItemKeys.has(itemKey)) {
           finalPersistedItemKeys.delete(itemKey);
         }
         continue;
@@ -1968,17 +2033,18 @@ export function setupListQueryPersistence<
       finalPersistedItemKeys.add(itemKey);
     }
 
-    for (const itemKey of previousItemKeys) {
+    for (const itemKey of previousKnownLocalItemKeys) {
       if (finalItemDataByKey.has(itemKey)) continue;
       if (!hydratedPersistedItemKeys.has(itemKey)) continue;
       finalPersistedItemKeys.delete(itemKey);
     }
 
-    if (finalPersistedItemKeys.size > maxItems) {
-      const metadataEntries = await listAllPersistentStorageNamespaceMetadata(
-        itemNamespace,
-        { order: 'lru-desc' },
-      );
+    if (previousItemKeys !== null && finalPersistedItemKeys.size > maxItems) {
+      const metadataEntries =
+        previousItemOverflowMetadataEntries ??
+        (await listAllPersistentStorageNamespaceMetadata(itemNamespace, {
+          order: 'lru-desc',
+        }));
       const commitTimestamp = Date.now();
       const referencedItemKeys = new Set(persistedQueryItemKeys);
       const protectedItemKeys = getProtectedKeysFromMetadata(metadataEntries);
@@ -2090,10 +2156,10 @@ export function setupListQueryPersistence<
       }
     }
 
-    const removedQueryKeys = [...previousQueryKeys].filter(
+    const removedQueryKeys = [...previousKnownLocalQueryKeys].filter(
       (queryKey) => !finalPersistedQueryKeys.has(queryKey),
     );
-    const removedItemKeys = [...previousItemKeys].filter(
+    const removedItemKeys = [...previousKnownLocalItemKeys].filter(
       (itemKey) => !finalPersistedItemKeys.has(itemKey),
     );
     const queryUpserts = new Map<
@@ -2113,7 +2179,10 @@ export function setupListQueryPersistence<
 
       const snapshot = JSON.stringify(value);
       const existingSnapshot = querySnapshotByKey.get(queryKey);
-      if (existingSnapshot === snapshot && previousQueryKeys.has(queryKey)) {
+      if (
+        existingSnapshot === snapshot &&
+        previousKnownLocalQueryKeys.has(queryKey)
+      ) {
         continue;
       }
 
@@ -2125,7 +2194,10 @@ export function setupListQueryPersistence<
 
       const snapshot = JSON.stringify(value);
       const existingSnapshot = itemSnapshotByKey.get(itemKey);
-      if (existingSnapshot === snapshot && previousItemKeys.has(itemKey)) {
+      if (
+        existingSnapshot === snapshot &&
+        previousKnownLocalItemKeys.has(itemKey)
+      ) {
         continue;
       }
 
@@ -2174,12 +2246,16 @@ export function setupListQueryPersistence<
       knownMissingPersistedItemKeys.delete(itemKey);
     }
 
-    knownPersistedQueryKeys = new Set(finalPersistedQueryKeys);
-    knownPersistedItemKeys = new Set(finalPersistedItemKeys);
+    knownPersistedQueryKeys =
+      previousQueryKeys !== null ? new Set(finalPersistedQueryKeys) : null;
+    knownPersistedItemKeys =
+      previousItemKeys !== null ? new Set(finalPersistedItemKeys) : null;
 
     if (
-      knownPersistedItemKeys.size > maxItems ||
-      knownPersistedQueryKeys.size > maxQueries
+      (knownPersistedItemKeys !== null &&
+        knownPersistedItemKeys.size > maxItems) ||
+      (knownPersistedQueryKeys !== null &&
+        knownPersistedQueryKeys.size > maxQueries)
     ) {
       scheduleAsyncStorageMaintenance(
         `list-query:${sessionKey}:${config.storeName}`,

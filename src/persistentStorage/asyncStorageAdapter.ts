@@ -443,20 +443,9 @@ type PendingNamespaceCommit = {
   waiters: Array<{ reject: (error: unknown) => void; resolve: () => void }>;
 };
 
-type NamespaceIndexCache = {
-  cancelFlush: (() => void) | null;
-  dirty: boolean;
-  entries: Map<string, InternalManagedMetadataRecord>;
-  flushPromise: Promise<void> | null;
-  loaded: boolean;
-  loadPromise: Promise<void> | null;
-  scope: AsyncStorageNamespaceScope;
-};
-
 class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   readonly kind = 'async' as const;
 
-  #namespaceIndexes = new Map<string, NamespaceIndexCache>();
   #observedScopes = new Map<string, AsyncStorageNamespaceScope>();
   #pendingNamespaceCommits = new Map<string, PendingNamespaceCommit>();
   #recentTouchedBuckets = new Map<string, string>();
@@ -579,11 +568,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     await Promise.all(
       [...updatesByScope.values()].map(async ({ scope, protectionByKey }) => {
-        const indexCache = await this.#refreshNamespaceIndexCache(scope);
+        const indexEntries = await this.#readNamespaceIndexEntriesUsingDriver(
+          this.driver,
+          scope,
+        );
         let changed = false;
 
         for (const [key, shouldProtect] of protectionByKey.entries()) {
-          const existingMetadata = indexCache.entries.get(key);
+          const existingMetadata = indexEntries.get(key);
           if (existingMetadata === undefined) continue;
           if (
             isOfflineProtectedMetadata(existingMetadata.customMetadata) ===
@@ -605,13 +597,16 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
             delete nextMetadata.customMetadata;
           }
 
-          indexCache.entries.set(key, nextMetadata);
+          indexEntries.set(key, nextMetadata);
           changed = true;
         }
 
         if (changed) {
-          indexCache.dirty = true;
-          await this.#flushNamespaceIndex(scope);
+          await this.#persistNamespaceIndexUsingDriver(
+            this.driver,
+            scope,
+            indexEntries,
+          );
         }
       }),
     );
@@ -621,10 +616,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     for (const pending of this.#pendingNamespaceCommits.values()) {
       pending.cancelFlush?.();
     }
-    for (const index of this.#namespaceIndexes.values()) {
-      index.cancelFlush?.();
-    }
-    this.#namespaceIndexes.clear();
     this.#observedScopes.clear();
     this.#pendingNamespaceCommits.clear();
     this.#recentTouchedBuckets.clear();
@@ -791,128 +782,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
   }
 
-  async #ensureNamespaceIndexLoaded(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<NamespaceIndexCache> {
-    const namespaceKey = getNamespaceId(scope);
-    let cache = this.#namespaceIndexes.get(namespaceKey);
-    if (cache === undefined) {
-      cache = {
-        cancelFlush: null,
-        dirty: false,
-        entries: new Map(),
-        flushPromise: null,
-        loaded: false,
-        loadPromise: null,
-        scope,
-      };
-      this.#namespaceIndexes.set(namespaceKey, cache);
-    }
-
-    if (cache.loaded) return cache;
-    if (cache.loadPromise !== null) {
-      await cache.loadPromise;
-      return cache;
-    }
-
-    cache.loadPromise = this.#readNamespaceIndexStateUsingDriver(
-      this.driver,
-      scope,
-    )
-      .then(({ entries, valid }) => {
-        cache.loaded = true;
-        cache.entries = valid && entries !== null ? entries : new Map();
-      })
-      .finally(() => {
-        cache.loadPromise = null;
-      });
-
-    await cache.loadPromise;
-    return cache;
-  }
-
-  async #refreshNamespaceIndexCache(
-    scope: AsyncStorageNamespaceScope,
-  ): Promise<NamespaceIndexCache> {
-    const namespaceKey = getNamespaceId(scope);
-    let cache = this.#namespaceIndexes.get(namespaceKey);
-    if (cache === undefined) {
-      cache = {
-        cancelFlush: null,
-        dirty: false,
-        entries: new Map(),
-        flushPromise: null,
-        loaded: false,
-        loadPromise: null,
-        scope,
-      };
-      this.#namespaceIndexes.set(namespaceKey, cache);
-    } else if (cache.loadPromise !== null) {
-      await cache.loadPromise;
-    }
-
-    const state = await this.#readNamespaceIndexStateUsingDriver(
-      this.driver,
-      scope,
-    );
-    cache.entries =
-      state.valid && state.entries !== null ? state.entries : new Map();
-    cache.loaded = true;
-    return cache;
-  }
-
-  #scheduleNamespaceIndexFlush(indexCache: NamespaceIndexCache): void {
-    if (indexCache.cancelFlush !== null || indexCache.flushPromise !== null) {
-      return;
-    }
-
-    indexCache.cancelFlush = scheduleIdleCleanup(() => {
-      indexCache.cancelFlush = null;
-      void this.#flushNamespaceIndex(indexCache.scope).catch(() => {});
-    });
-  }
-
-  async #flushNamespaceIndex(scope: AsyncStorageNamespaceScope): Promise<void> {
-    const indexCache = await this.#ensureNamespaceIndexLoaded(scope);
-    if (indexCache.flushPromise !== null) {
-      await indexCache.flushPromise;
-      return;
-    }
-
-    indexCache.cancelFlush?.();
-    indexCache.cancelFlush = null;
-
-    if (!indexCache.dirty) return;
-
-    const snapshot = new Map(indexCache.entries);
-    indexCache.dirty = false;
-    indexCache.flushPromise = this.#persistNamespaceIndexUsingDriver(
-      this.driver,
-      scope,
-      snapshot,
-    )
-      .catch((error: unknown) => {
-        indexCache.dirty = true;
-        throw error;
-      })
-      .finally(() => {
-        indexCache.flushPromise = null;
-        if (indexCache.dirty) {
-          this.#scheduleNamespaceIndexFlush(indexCache);
-        }
-      });
-
-    await indexCache.flushPromise;
-  }
-
-  async #flushAllPendingNamespaceIndexes(): Promise<void> {
-    await Promise.all(
-      [...this.#namespaceIndexes.values()].map((indexCache) =>
-        this.#flushNamespaceIndex(indexCache.scope),
-      ),
-    );
-  }
-
   async #readNamespaceIndexStateUsingDriver(
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
@@ -949,15 +818,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     return { entries: parsed, exists: true, valid: true };
   }
 
-  async #getNamespaceIndexEntriesUsingDriver(
+  async #readNamespaceIndexEntriesUsingDriver(
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     knownRecordKeys?: string[] | null,
   ): Promise<Map<string, InternalManagedMetadataRecord>> {
-    if (driver === this.driver) {
-      return (await this.#ensureNamespaceIndexLoaded(scope)).entries;
-    }
-
     const state = await this.#readNamespaceIndexStateUsingDriver(
       driver,
       scope,
@@ -995,7 +860,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   ): Promise<
     Map<string, AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
   > {
-    const metadataByKey = await this.#getNamespaceIndexEntriesUsingDriver(
+    const metadataByKey = await this.#readNamespaceIndexEntriesUsingDriver(
       this.driver,
       scope,
     );
@@ -1067,7 +932,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       order?: AsyncStorageMetadataOrder;
     } = {},
   ): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]> {
-    const metadataEntries = await this.#getNamespaceIndexEntriesUsingDriver(
+    const metadataEntries = await this.#readNamespaceIndexEntriesUsingDriver(
       driver,
       scope,
       args.knownRecordKeys,
@@ -1089,9 +954,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }
 
   async listManagedKeys(scope: AsyncStorageNamespaceScope): Promise<string[]> {
-    return [
-      ...(await this.#ensureNamespaceIndexLoaded(scope)).entries.keys(),
-    ].sort((left, right) => left.localeCompare(right));
+    const indexEntries = await this.#readNamespaceIndexEntriesUsingDriver(
+      this.driver,
+      scope,
+    );
+
+    return [...indexEntries.keys()].sort((left, right) =>
+      left.localeCompare(right),
+    );
   }
 
   async clearManagedNamespace(
@@ -1099,9 +969,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   ): Promise<void> {
     await this.driver.clear(scope);
     const namespaceKey = getNamespaceId(scope);
-    const indexCache = this.#namespaceIndexes.get(namespaceKey);
-    indexCache?.cancelFlush?.();
-    this.#namespaceIndexes.delete(namespaceKey);
     this.#observedScopes.delete(namespaceKey);
     this.#pendingNamespaceCommits.delete(namespaceKey);
     this.clearRecentTouchedBucketsForNamespace(scope);
@@ -1125,7 +992,10 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     scope: AsyncStorageNamespaceScope,
     args: AsyncStorageNamespaceCommitArgs<unknown, Record<string, unknown>>,
   ): Promise<void> {
-    const indexCache = await this.#refreshNamespaceIndexCache(scope);
+    const indexEntries = await this.#readNamespaceIndexEntriesUsingDriver(
+      this.driver,
+      scope,
+    );
     const upserts = args.upserts ?? [];
     const removes = [...new Set(args.removes ?? [])];
     const touches = args.touches ?? [];
@@ -1140,7 +1010,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     let indexChanged = false;
 
     for (const key of removes) {
-      indexChanged = indexCache.entries.delete(key) || indexChanged;
+      indexChanged = indexEntries.delete(key) || indexChanged;
     }
 
     const protectedKeysSnapshotSet = getSessionProtectedKeysSnapshot(
@@ -1148,7 +1018,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
 
     for (const upsert of upserts) {
-      const existingMetadata = indexCache.entries.get(upsert.key);
+      const existingMetadata = indexEntries.get(upsert.key);
       const customMetadata = this.#mergeOfflineProtectionMetadata(
         scope,
         upsert.key,
@@ -1170,30 +1040,29 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       });
 
       if (
-        existingMetadata === undefined ||
-        existingMetadata.lastAccessAt !== nextMetadata.lastAccessAt ||
-        existingMetadata.version !== nextMetadata.version ||
-        !deepEqual(existingMetadata.customMetadata, nextMetadata.customMetadata)
+        existingMetadata !== undefined &&
+        existingMetadata.lastAccessAt === nextMetadata.lastAccessAt &&
+        existingMetadata.version === nextMetadata.version &&
+        deepEqual(existingMetadata.customMetadata, nextMetadata.customMetadata)
       ) {
-        indexCache.entries.set(upsert.key, nextMetadata);
-        indexChanged = true;
+        continue;
       }
+
+      indexEntries.set(upsert.key, nextMetadata);
+      indexChanged = true;
     }
 
     if (touchedKeys.length > 0) {
       const upsertKeySet = new Set(upserts.map((upsert) => upsert.key));
       for (const key of touchedKeys) {
         if (upsertKeySet.has(key)) continue;
-        const metadata = indexCache.entries.get(key);
+        const metadata = indexEntries.get(key);
         if (!metadata) continue;
 
         const nextLastAccessAt = touchesByKey.get(key) ?? now;
         if (metadata.lastAccessAt === nextLastAccessAt) continue;
 
-        indexCache.entries.set(key, {
-          ...metadata,
-          lastAccessAt: nextLastAccessAt,
-        });
+        indexEntries.set(key, { ...metadata, lastAccessAt: nextLastAccessAt });
         indexChanged = true;
       }
     }
@@ -1206,10 +1075,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         ? this.#driverSetManyFrom(this.driver, scope, setEntries)
         : Promise.resolve(),
     ]);
-
     if (indexChanged) {
-      indexCache.dirty = true;
-      await this.#flushNamespaceIndex(scope);
+      await this.#persistNamespaceIndexUsingDriver(
+        this.driver,
+        scope,
+        indexEntries,
+      );
     }
   }
 
@@ -1254,19 +1125,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       scope,
       uniqueKeys.map((key) => getPayloadRecordKey(key)),
     );
-
-    if (driver === this.driver) {
-      const indexCache = await this.#refreshNamespaceIndexCache(scope);
-      let changed = false;
-      for (const key of uniqueKeys) {
-        changed = indexCache.entries.delete(key) || changed;
-      }
-      if (changed) {
-        indexCache.dirty = true;
-        await this.#flushNamespaceIndex(scope);
-      }
-      return;
-    }
 
     const indexState = await this.#readNamespaceIndexStateUsingDriver(
       driver,
@@ -1441,7 +1299,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
   async #performStartupCleanup(): Promise<void> {
     await this.flushAllPendingNamespaceCommits();
-    await this.#flushAllPendingNamespaceIndexes();
     await this.#withCleanupDriver((driver) =>
       this.#performStartupCleanupWithDriver(driver),
     );

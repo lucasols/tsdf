@@ -21,8 +21,6 @@ import type {
 
 const OPFS_DIR_HANDLE_CACHE_MAX_SIZE = 500;
 const OPFS_FILE_HANDLE_CACHE_MAX_SIZE = 10_000;
-const OPFS_MISSING_HANDLE_CACHE_DURATION = { seconds: 5 } as const;
-
 async function getNavigatorStorageDirectory(): Promise<FileSystemDirectoryHandle> {
   const storage = __LEGIT_CAST__<
     | { getDirectory?: (() => Promise<FileSystemDirectoryHandle>) | undefined }
@@ -87,21 +85,6 @@ type ParsedScopedFileInfo = {
   isHashedPayload: boolean;
   key: string | null;
 };
-
-type CacheUtilsWithExpiration<T> = {
-  withExpiration: (
-    value: T | null,
-    expiration: typeof OPFS_MISSING_HANDLE_CACHE_DURATION,
-  ) => unknown;
-};
-
-function withExpiringNull<T extends FileSystemHandle>(
-  utils: CacheUtilsWithExpiration<T>,
-): T | null {
-  return __LEGIT_CAST__<T | null, unknown>(
-    utils.withExpiration(null, OPFS_MISSING_HANDLE_CACHE_DURATION),
-  );
-}
 
 export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
   #rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
@@ -821,10 +804,8 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const encodedSessionKey = encodePathSegment(sessionKey);
 
     if (options.create) {
-      const cachedSessionDir = await this.#getCachedHandleForCreate(
-        options.cacheContext.dirCache,
-        sessionDirPath,
-      );
+      const cachedSessionDir =
+        await options.cacheContext.dirCache.getAsync(sessionDirPath);
       if (cachedSessionDir !== undefined) return cachedSessionDir;
 
       return options.cacheContext.dirCache.getOrInsertAsync(
@@ -834,16 +815,18 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       );
     }
 
-    return options.cacheContext.dirCache.getOrInsertAsync(
-      sessionDirPath,
-      async (utils) => {
-        const sessionDir = await getDirectoryHandleIfExists(
-          root,
-          encodedSessionKey,
-        );
-        return sessionDir ?? withExpiringNull<FileSystemDirectoryHandle>(utils);
-      },
+    const cachedSessionDir =
+      await options.cacheContext.dirCache.getAsync(sessionDirPath);
+    if (cachedSessionDir !== undefined) return cachedSessionDir;
+
+    const sessionDir = await getDirectoryHandleIfExists(
+      root,
+      encodedSessionKey,
     );
+    if (sessionDir !== null) {
+      options.cacheContext.dirCache.set(sessionDirPath, sessionDir);
+    }
+    return sessionDir;
   }
 
   async #getStoreDir(
@@ -857,10 +840,8 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const encodedStoreName = encodePathSegment(scope.storeName);
 
     if (options.create) {
-      const cachedStoreDir = await this.#getCachedHandleForCreate(
-        options.cacheContext.dirCache,
-        storeDirPath,
-      );
+      const cachedStoreDir =
+        await options.cacheContext.dirCache.getAsync(storeDirPath);
       if (cachedStoreDir !== undefined) return cachedStoreDir;
 
       return options.cacheContext.dirCache.getOrInsertAsync(
@@ -870,16 +851,18 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       );
     }
 
-    return options.cacheContext.dirCache.getOrInsertAsync(
-      storeDirPath,
-      async (utils) => {
-        const storeDir = await getDirectoryHandleIfExists(
-          sessionDir,
-          encodedStoreName,
-        );
-        return storeDir ?? withExpiringNull<FileSystemDirectoryHandle>(utils);
-      },
+    const cachedStoreDir =
+      await options.cacheContext.dirCache.getAsync(storeDirPath);
+    if (cachedStoreDir !== undefined) return cachedStoreDir;
+
+    const storeDir = await getDirectoryHandleIfExists(
+      sessionDir,
+      encodedStoreName,
     );
+    if (storeDir !== null) {
+      options.cacheContext.dirCache.set(storeDirPath, storeDir);
+    }
+    return storeDir;
   }
 
   async #getFileHandle(
@@ -895,10 +878,8 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     const filePath = joinPath(this.#getStoreDirPath(scope), fileName);
 
     if (options.create) {
-      const cachedFileHandle = await this.#getCachedHandleForCreate(
-        options.cacheContext.fileCache,
-        filePath,
-      );
+      const cachedFileHandle =
+        await options.cacheContext.fileCache.getAsync(filePath);
       if (cachedFileHandle !== undefined) return cachedFileHandle;
 
       return options.cacheContext.fileCache.getOrInsertAsync(
@@ -907,16 +888,15 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       );
     }
 
-    return options.cacheContext.fileCache.getOrInsertAsync(
-      filePath,
-      async (utils) => {
-        const fileHandle = await getFileHandleIfExists(
-          options.storeDir,
-          fileName,
-        );
-        return fileHandle ?? withExpiringNull<FileSystemFileHandle>(utils);
-      },
-    );
+    const cachedFileHandle =
+      await options.cacheContext.fileCache.getAsync(filePath);
+    if (cachedFileHandle !== undefined) return cachedFileHandle;
+
+    const fileHandle = await getFileHandleIfExists(options.storeDir, fileName);
+    if (fileHandle !== null) {
+      options.cacheContext.fileCache.set(filePath, fileHandle);
+    }
+    return fileHandle;
   }
 
   async #listScopedFiles(
@@ -1085,22 +1065,6 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
       valueCache?.set(filePath, null);
       return null;
     }
-  }
-
-  async #getCachedHandleForCreate<THandle extends FileSystemHandle>(
-    cache: Cache<THandle | null>,
-    path: string,
-  ): Promise<THandle | undefined> {
-    const cachedHandle = await cache.getAsync(path);
-    if (cachedHandle === undefined) return undefined;
-    // A cached null means a prior read (create: false) cached a "not found" result.
-    // Evict it so the subsequent getOrInsertAsync will create the handle.
-    if (cachedHandle === null) {
-      cache.delete(path);
-      return undefined;
-    }
-
-    return cachedHandle;
   }
 
   async #writeEntryWithRetry(
