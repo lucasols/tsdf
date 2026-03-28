@@ -190,27 +190,17 @@ describe('async storage efficiency: collection', () => {
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
       2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
       2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:collection-startup-max-items"]
-      .      | 📂 dir-open ✅ tsdf/sess1/collection-startup-max-items
-             |    └ (store directory)
       2.004s | 🗂️ list-dir-entries tsdf/sess1/collection-startup-max-items
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1374750182.p.json","file:ci.h~3986551515.p.json","file:ci.h~3994120284.p.json"]
-      .      | 👁️ #1 file-open ✅ tsdf/sess1/collection-startup-max-items/ci._i.r.json
-             |    └ (namespace index)
       2.005s | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb
-      .      | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb ⚠️ REPEATED READ <10ms UNCHANGED
-             ·
-      2.048s | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
-      2.051s | 🗑️ #2 ✅ tsdf/sess1/collection-startup-max-items/ci.h~3986551515.p.json
+      2.008s | 🗑️ #2 ✅ tsdf/sess1/collection-startup-max-items/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
-      2.054s | ✍️ #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
+      2.011s | ✍️ #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
              |    └ (namespace index) | 0.21 kb -> 0.15 kb
-      2.056s | end
+      2.013s | end
       "
     `);
     expect(
@@ -221,6 +211,69 @@ describe('async storage efficiency: collection', () => {
       e:
         "b: { a: 1735689600100, p: 'b' }
         "c: { a: 1735689600200, p: 'c' }
+    `);
+  });
+
+  test('startup cleanup combines expiration and maxItems trimming in one sweep', async () => {
+    const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const storeName = 'collection-startup-expiration-max-items';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+
+    collectionScope.collection.seedItem(
+      'a',
+      { value: { id: 'a', name: 'Expired oldest' } },
+      { timestamp: expiredTimestamp },
+    );
+    await advanceTime(100);
+    collectionScope.collection.seedItem('b', {
+      value: { id: 'b', name: 'Older cached' },
+    });
+    await advanceTime(100);
+    collectionScope.collection.seedItem('c', {
+      value: { id: 'c', name: 'Newer cached' },
+    });
+    await advanceTime(100);
+    collectionScope.collection.seedItem('d', {
+      value: { id: 'd', name: 'Newest cached' },
+    });
+
+    const startupOperationCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
+    const startupOperationBreakdown =
+      startupOperationCapture.finish().timelineString;
+
+    expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
+
+    const cleanupCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    await waitForScheduledCleanup();
+    const operationsBreakdown = cleanupCapture.finish().timelineString;
+
+    expect(
+      collectionScope.collection.listStoredPayloads().sort(),
+    ).toMatchInlineSnapshot(`['c', 'd']`);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time   |
+      2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
+             |    └ (session directory) entries=["dir:collection-startup-expiration-max-items"]
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/collection-startup-expiration-max-items
+             |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1374750182.p.json","file:ci.h~2103001283.p.json","file:ci.h~3986551515.p.json","file:ci.h~3994120284.p.json"]
+      2.005s | 📖 #1 tsdf/sess1/collection-startup-expiration-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.28 kb
+      2.008s | 🗑️ #2 ✅ tsdf/sess1/collection-startup-expiration-max-items/ci.h~3986551515.p.json
+             |    └ (entry data, <"a>)
+      .      | 🗑️ #3 ✅ tsdf/sess1/collection-startup-expiration-max-items/ci.h~1374750182.p.json
+             |    └ (entry data, <"b>)
+      2.011s | ✍️ #1 tsdf/sess1/collection-startup-expiration-max-items/ci._i.r.json
+             |    └ (namespace index) | 0.28 kb -> 0.15 kb
+      2.013s | end
+      "
     `);
   });
 
@@ -267,20 +320,24 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1s     | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.001s | 📂 dir-open ✅ tsdf/sess1/col-max-items-metadata (store directory)
+      1.002s | 👁️ #1 file-open ✅ tsdf/sess1/col-max-items-metadata/ci._i.r.json
+             |    └ (namespace index)
+      1.003s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
              ·
-      1.043s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      1.046s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
+      1.049s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
-      1.049s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      1.052s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
-      1.053s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
+      1.056s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
-      1.055s | end
+      1.058s | end
       "
     `);
 
@@ -397,18 +454,23 @@ describe('async storage efficiency: collection', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1s     | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.001s | 📂 dir-open ✅ tsdf/sess1/col-inline-overflow-cleanup
+             |    └ (store directory)
+      1.002s | 👁️ #1 file-open ✅ tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+             |    └ (namespace index)
+      1.003s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
              ·
-      1.043s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      1.046s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb
-      1.046s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
+      1.049s | 🗑️ #2 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>)
-      1.049s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
+      1.052s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>) | 0.00 kb -> 0.10 kb
-      1.053s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
+      1.056s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
              |    └ (namespace index) | 0.15 kb -> 0.15 kb
              ·
       2.1s   | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json

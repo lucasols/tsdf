@@ -59,14 +59,32 @@ import {
   LIST_QUERY_QUERY_STORAGE_ENTRY_PREFIX,
 } from './storageEntryPrefixes';
 import type {
+  AsyncStorageDriver,
+  AsyncStorageDriverSetEntry,
+  AsyncStorageNamespaceScope,
   ListQueryPersistentStorageConfig,
   PersistedListQueryData,
   PersistedListQueryItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  METADATA_RECORD_PREFIX,
+  PAYLOAD_RECORD_PREFIX,
+  getPayloadRecordKey,
+} from './opfsFileNaming';
+import {
+  ASYNC_STORAGE_MAX_AGE_MS,
+  type AsyncStorageManagedMetadataRecord,
+  driverGetManyFrom,
   getProtectedKeysFromMetadata,
+  isOfflineProtectedMetadata,
+  readAsyncStorageNamespaceIndexStateUsingDriver,
+  registerAsyncStartupStoreCleanup,
   serializeProtectedRef,
+  unregisterAsyncStartupStoreCleanup,
+  type AsyncStartupCleanupScopePlan,
+  type AsyncStartupCleanupStoreDeletePlan,
 } from './asyncStorageAdapter';
 
 const DEFAULT_MAX_ITEMS = 500;
@@ -237,6 +255,8 @@ export function setupListQueryPersistence<
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = config.adapter;
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
+  const asyncStorageAdapter =
+    storageAdapter === 'local-sync' ? null : storageAdapter;
   const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
   const itemStorageValueCodec = {
@@ -539,6 +559,447 @@ export function setupListQueryPersistence<
     const { keptQueryKeys, managedQueryEntriesByKey } =
       await evictStoredQueries();
     await evictStoredItems(keptQueryKeys, managedQueryEntriesByKey);
+  }
+
+  async function planAsyncStartupCleanup(args: {
+    discoveredScopes: Array<{
+      knownRecordKeys: string[] | null;
+      scope: AsyncStorageNamespaceScope;
+    }>;
+    driver: AsyncStorageDriver;
+    now: number;
+  }): Promise<{
+    scopePlans: AsyncStartupCleanupScopePlan[];
+    storeDeletePlans: AsyncStartupCleanupStoreDeletePlan[];
+  }> {
+    const discoveredItemScope = args.discoveredScopes.find(
+      ({ scope }) => scope.kind === 'listQuery.item',
+    );
+    const discoveredQueryScope = args.discoveredScopes.find(
+      ({ scope }) => scope.kind === 'listQuery.query',
+    );
+    const sessionScope = discoveredItemScope ?? discoveredQueryScope;
+    const sessionProtectedRefs = sessionScope
+      ? getSessionProtectedKeysSnapshot(sessionScope.scope.sessionKey)
+      : null;
+
+    const keptQueryDataByKey = new Map<string, PersistedListQueryData>();
+    let keptQueryKeys = new Set<string>();
+    let queryDeleteKeys = new Set<string>();
+    let queryIndexChanged = false;
+    let queryIndexEntries: Map<
+      string,
+      AsyncStorageManagedMetadataRecord
+    > | null = null;
+    const queryRawUpserts: AsyncStorageDriverSetEntry[] = [];
+    let queryScopePlan: AsyncStartupCleanupScopePlan | null = null;
+
+    if (discoveredQueryScope !== undefined) {
+      const { scope } = discoveredQueryScope;
+      const rawKeys =
+        discoveredQueryScope.knownRecordKeys ??
+        (await args.driver.listKeys(scope));
+      const indexState = await readAsyncStorageNamespaceIndexStateUsingDriver(
+        args.driver,
+        scope,
+        rawKeys,
+      );
+
+      if (!indexState.valid || indexState.entries === null) {
+        const keysToRemove = rawKeys.filter(
+          (key) =>
+            key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY || indexState.exists,
+        );
+        if (keysToRemove.length > 0) {
+          queryScopePlan = {
+            deleteKeys: keysToRemove,
+            persistEntries: null,
+            scope,
+          };
+        }
+      } else {
+        const payloadKeys = new Set<string>();
+        const rawKeysToRemove: string[] = [];
+        const legacyMetadataRecordKeys: string[] = [];
+        for (const key of rawKeys) {
+          if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
+            payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
+          } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
+            legacyMetadataRecordKeys.push(key);
+          } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+            rawKeysToRemove.push(key);
+          }
+        }
+
+        queryDeleteKeys = new Set([
+          ...rawKeysToRemove,
+          ...legacyMetadataRecordKeys,
+        ]);
+        queryIndexEntries = new Map(indexState.entries);
+        queryIndexChanged =
+          rawKeysToRemove.length > 0 || legacyMetadataRecordKeys.length > 0;
+
+        const protectedRefs = sessionProtectedRefs ?? new Set<string>();
+        const candidateEntries: Array<{
+          lastAccessAt: number;
+          offlineProtected: boolean;
+          queryKey: string;
+        }> = [];
+
+        for (const [key, metadata] of indexState.entries) {
+          const isProtected =
+            isOfflineProtectedMetadata(metadata.customMetadata) ||
+            protectedRefs.has(serializeProtectedRef({ ...scope, key }));
+
+          if (!payloadKeys.has(key)) {
+            queryIndexEntries.delete(key);
+            queryIndexChanged = true;
+            continue;
+          }
+
+          const payload = validateWithSchema(
+            config.queryPayloadSchema,
+            readManifestPayloadMeta(metadata.customMetadata),
+          );
+          if (payload === null) {
+            queryDeleteKeys.add(getPayloadRecordKey(key));
+            queryIndexEntries.delete(key);
+            queryIndexChanged = true;
+            continue;
+          }
+
+          if (
+            !isProtected &&
+            args.now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
+          ) {
+            queryDeleteKeys.add(getPayloadRecordKey(key));
+            queryIndexEntries.delete(key);
+            queryIndexChanged = true;
+            continue;
+          }
+
+          candidateEntries.push({
+            lastAccessAt: metadata.lastAccessAt,
+            offlineProtected: isProtected,
+            queryKey: key,
+          });
+        }
+
+        for (const payloadKey of payloadKeys) {
+          if (!indexState.entries.has(payloadKey)) {
+            queryDeleteKeys.add(getPayloadRecordKey(payloadKey));
+          }
+        }
+
+        if (candidateEntries.length > maxQueries) {
+          candidateEntries.sort(
+            createEvictionComparator(
+              [
+                (entry) => entry.offlineProtected,
+                (entry) => pinnedQueryKeys.has(entry.queryKey),
+              ],
+              (entry) => entry.lastAccessAt,
+            ),
+          );
+
+          keptQueryKeys = new Set(
+            candidateEntries
+              .slice(0, maxQueries)
+              .map(({ queryKey }) => queryKey),
+          );
+          for (const entry of candidateEntries) {
+            if (keptQueryKeys.has(entry.queryKey)) continue;
+            queryDeleteKeys.add(getPayloadRecordKey(entry.queryKey));
+            queryIndexEntries.delete(entry.queryKey);
+            queryIndexChanged = true;
+          }
+        } else {
+          keptQueryKeys = new Set(
+            candidateEntries.map(({ queryKey }) => queryKey),
+          );
+        }
+      }
+    }
+
+    let itemScopePlan: AsyncStartupCleanupScopePlan | null = null;
+    if (discoveredItemScope !== undefined) {
+      const { scope } = discoveredItemScope;
+      const rawKeys =
+        discoveredItemScope.knownRecordKeys ??
+        (await args.driver.listKeys(scope));
+      const uniqueDeleteKeys = new Set<string>();
+      const indexState = await readAsyncStorageNamespaceIndexStateUsingDriver(
+        args.driver,
+        scope,
+        rawKeys,
+      );
+
+      if (!indexState.valid || indexState.entries === null) {
+        const keysToRemove = rawKeys.filter(
+          (key) =>
+            key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY || indexState.exists,
+        );
+        if (keysToRemove.length > 0) {
+          itemScopePlan = {
+            deleteKeys: keysToRemove,
+            persistEntries: null,
+            scope,
+          };
+        }
+      } else {
+        const payloadKeys = new Set<string>();
+        const rawKeysToRemove: string[] = [];
+        const legacyMetadataRecordKeys: string[] = [];
+        for (const key of rawKeys) {
+          if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
+            payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
+          } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
+            legacyMetadataRecordKeys.push(key);
+          } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+            rawKeysToRemove.push(key);
+          }
+        }
+
+        for (const key of rawKeysToRemove) {
+          uniqueDeleteKeys.add(key);
+        }
+        for (const key of legacyMetadataRecordKeys) {
+          uniqueDeleteKeys.add(key);
+        }
+
+        const nextEntries = new Map(indexState.entries);
+        const protectedRefs = sessionProtectedRefs ?? new Set<string>();
+        const referencedItems = new Set<string>();
+        const remainingEntries: Array<{
+          itemKey: string;
+          lastAccessAt: number;
+          protected: boolean;
+        }> = [];
+
+        for (const [key, metadata] of indexState.entries) {
+          const isProtected =
+            isOfflineProtectedMetadata(metadata.customMetadata) ||
+            protectedRefs.has(serializeProtectedRef({ ...scope, key }));
+
+          if (!payloadKeys.has(key)) {
+            nextEntries.delete(key);
+            continue;
+          }
+
+          const payload = validateWithSchema(
+            config.itemPayloadSchema,
+            readManifestPayloadMeta(metadata.customMetadata),
+          );
+          if (payload === null || shouldIgnoreItem(payload)) {
+            uniqueDeleteKeys.add(getPayloadRecordKey(key));
+            nextEntries.delete(key);
+            continue;
+          }
+
+          if (
+            !isProtected &&
+            args.now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
+          ) {
+            uniqueDeleteKeys.add(getPayloadRecordKey(key));
+            nextEntries.delete(key);
+            continue;
+          }
+
+          remainingEntries.push({
+            itemKey: key,
+            lastAccessAt: metadata.lastAccessAt,
+            protected: isProtected,
+          });
+        }
+
+        for (const payloadKey of payloadKeys) {
+          if (!indexState.entries.has(payloadKey)) {
+            uniqueDeleteKeys.add(getPayloadRecordKey(payloadKey));
+          }
+        }
+
+        const unprotectedCount = remainingEntries.filter(
+          ({ protected: isProtected }) => !isProtected,
+        ).length;
+        const needsEviction =
+          remainingEntries.length > maxItems &&
+          (hasIgnoreItemFilter || unprotectedCount > maxItems);
+
+        if (needsEviction) {
+          if (
+            discoveredQueryScope !== undefined &&
+            queryIndexEntries !== null &&
+            keptQueryKeys.size > 0
+          ) {
+            const keptQueryKeysToRead = [...keptQueryKeys].filter((queryKey) =>
+              queryIndexEntries.has(queryKey),
+            );
+            const payloadValues = await driverGetManyFrom(
+              args.driver,
+              discoveredQueryScope.scope,
+              keptQueryKeysToRead.map((queryKey) =>
+                getPayloadRecordKey(queryKey),
+              ),
+            );
+
+            for (const [index, queryKey] of keptQueryKeysToRead.entries()) {
+              const metadata = queryIndexEntries.get(queryKey);
+              if (metadata === undefined) continue;
+
+              const rawPayload = payloadValues[index] ?? null;
+              if (rawPayload === null) {
+                queryDeleteKeys.add(getPayloadRecordKey(queryKey));
+                queryIndexEntries.delete(queryKey);
+                keptQueryKeys.delete(queryKey);
+                queryIndexChanged = true;
+                continue;
+              }
+
+              const parsed = queryStorageValueCodec.deserialize(
+                rawPayload,
+                metadata.customMetadata,
+              );
+              if (parsed === null) {
+                queryDeleteKeys.add(getPayloadRecordKey(queryKey));
+                queryIndexEntries.delete(queryKey);
+                keptQueryKeys.delete(queryKey);
+                queryIndexChanged = true;
+                continue;
+              }
+
+              keptQueryDataByKey.set(queryKey, parsed);
+              for (const itemKey of parsed.items) {
+                referencedItems.add(itemKey);
+              }
+            }
+          }
+
+          remainingEntries.sort(
+            createEvictionComparator(
+              [
+                (entry) => entry.protected,
+                (entry) => pinnedItemKeys.has(entry.itemKey),
+                (entry) => referencedItems.has(entry.itemKey),
+              ],
+              (entry) => entry.lastAccessAt,
+            ),
+          );
+
+          const keptItemKeys = new Set(
+            remainingEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+          );
+          for (const entry of remainingEntries) {
+            if (keptItemKeys.has(entry.itemKey)) continue;
+            uniqueDeleteKeys.add(getPayloadRecordKey(entry.itemKey));
+            nextEntries.delete(entry.itemKey);
+          }
+
+          for (const [queryKey, queryData] of keptQueryDataByKey) {
+            if (!keptQueryKeys.has(queryKey)) continue;
+
+            const filteredItems = queryData.items.filter((itemKey) =>
+              keptItemKeys.has(itemKey),
+            );
+            const limitedQuery = limitPersistedQueryItems(
+              filteredItems,
+              queryData.hasMore,
+              maxQuerySize,
+            );
+            if (
+              limitedQuery.itemKeys.length === queryData.items.length &&
+              limitedQuery.hasMore === queryData.hasMore
+            ) {
+              continue;
+            }
+
+            queryRawUpserts.push({
+              key: getPayloadRecordKey(queryKey),
+              value: queryStorageValueCodec.serialize({
+                hasMore: limitedQuery.hasMore,
+                items: limitedQuery.itemKeys,
+                payload: queryData.payload,
+              }),
+            });
+          }
+        }
+
+        const indexChanged =
+          nextEntries.size !== indexState.entries.size ||
+          rawKeysToRemove.length > 0 ||
+          legacyMetadataRecordKeys.length > 0;
+        if (indexChanged && nextEntries.size === 0) {
+          uniqueDeleteKeys.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+        }
+
+        const deleteKeys = [...uniqueDeleteKeys];
+        if (deleteKeys.length > 0 || (indexChanged && nextEntries.size > 0)) {
+          itemScopePlan = {
+            deleteKeys,
+            persistEntries:
+              indexChanged && nextEntries.size > 0 ? nextEntries : null,
+            scope,
+          };
+        }
+      }
+    }
+
+    if (discoveredQueryScope !== undefined && queryScopePlan === null) {
+      if (
+        queryIndexEntries !== null &&
+        queryIndexChanged &&
+        queryIndexEntries.size === 0
+      ) {
+        queryDeleteKeys.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+      }
+
+      if (
+        queryDeleteKeys.size > 0 ||
+        (queryIndexEntries !== null &&
+          queryIndexChanged &&
+          queryIndexEntries.size > 0) ||
+        queryRawUpserts.length > 0
+      ) {
+        queryScopePlan = {
+          deleteKeys: [...queryDeleteKeys],
+          persistEntries:
+            queryIndexEntries !== null &&
+            queryIndexChanged &&
+            queryIndexEntries.size > 0
+              ? queryIndexEntries
+              : null,
+          rawUpserts: queryRawUpserts,
+          scope: discoveredQueryScope.scope,
+        };
+      }
+    }
+
+    const scopePlans = filterAndMap(
+      [queryScopePlan, itemScopePlan],
+      (plan) => plan ?? false,
+    );
+    const storeDeleteCandidatePlans = scopePlans.filter(
+      (plan) =>
+        plan.deleteKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY) &&
+        plan.persistEntries === null &&
+        (plan.rawUpserts ?? []).length === 0,
+    );
+    const representativeScope = scopePlans[0]?.scope;
+    const storeDeletePlans =
+      representativeScope !== undefined &&
+      storeDeleteCandidatePlans.length === scopePlans.length &&
+      scopePlans.length > 0
+        ? [
+            {
+              representativeScope,
+              removedKeysByScope: storeDeleteCandidatePlans.map((plan) => ({
+                keys: plan.deleteKeys,
+                scope: plan.scope,
+              })),
+            } satisfies AsyncStartupCleanupStoreDeletePlan,
+          ]
+        : [];
+
+    return { scopePlans, storeDeletePlans };
   }
 
   function syncMaintenanceRegistration(): void {
@@ -2272,24 +2733,23 @@ export function setupListQueryPersistence<
     }, SAVE_DEBOUNCE_MS);
   }
 
-  function scheduleAsyncStartupMaintenance(): void {
-    if (localStorageAdapter !== null) return;
-    if (config.maxItems === undefined && config.maxQueries === undefined) {
-      return;
-    }
-
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return;
-
-    scheduleAsyncStorageMaintenance(
-      `list-query:${sessionKey}:${config.storeName}`,
-      runMaintenance,
-    );
-  }
-
   function attach(store: Store<State>): void {
     syncMaintenanceRegistration();
-    scheduleAsyncStartupMaintenance();
+    if (
+      localStorageAdapter === null &&
+      asyncStorageAdapter !== null &&
+      (config.maxItems !== undefined || config.maxQueries !== undefined)
+    ) {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey !== false) {
+        registerAsyncStartupStoreCleanup(
+          asyncStorageAdapter,
+          sessionKey,
+          config.storeName,
+          planAsyncStartupCleanup,
+        );
+      }
+    }
     storeRef = store;
     unsubscribe = store.subscribe(() => {
       if (suppressedPersistedStateFlushes > 0) {
@@ -2316,6 +2776,20 @@ export function setupListQueryPersistence<
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
+    if (
+      localStorageAdapter === null &&
+      asyncStorageAdapter !== null &&
+      (config.maxItems !== undefined || config.maxQueries !== undefined)
+    ) {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey !== false) {
+        unregisterAsyncStartupStoreCleanup(
+          asyncStorageAdapter,
+          sessionKey,
+          config.storeName,
+        );
+      }
+    }
     if (localStorageAdapter !== null && maintenanceCallbackKey !== null) {
       localStorageAdapter.unregisterMaintenanceCallback(maintenanceCallbackKey);
       maintenanceCallbackKey = null;

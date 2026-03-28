@@ -301,6 +301,12 @@ describe('sync storage efficiency: list-query', () => {
           p: 'third||1'
     `);
     expect(
+      getParsedLocalStorageValue('tsdf.sess1.lq-query-metadata.li."third||1'),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Third' }
+      p: 'third||1'
+    `);
+    expect(
       getParsedLocalStorageValue(
         'tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}',
       ),
@@ -544,6 +550,15 @@ describe('sync storage efficiency: list-query', () => {
       a: 1735689605910
       i: []
       p: { tableId: 'users' }
+    `);
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-query-becomes-empty.li."users||1',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Cached user' }
+      lf: ['age', 'email', 'id', 'name']
+      p: 'users||1'
     `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "

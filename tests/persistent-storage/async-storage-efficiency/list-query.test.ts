@@ -185,26 +185,17 @@ describe('async storage efficiency: list-query', () => {
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
       2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
       2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:lq-startup-max-queries"]
-      .      | 📂 dir-open ✅ tsdf/sess1/lq-startup-max-queries (store directory)
       2.004s | 🗂️ list-dir-entries tsdf/sess1/lq-startup-max-queries
              |    └ (store directory) entries=["file:lq._i.r.json","file:lq.h~2817177027.p.json","file:lq.h~3601729766.p.json","file:lq.h~4141397404.p.json"]
-      .      | 👁️ #1 file-open ✅ tsdf/sess1/lq-startup-max-queries/lq._i.r.json
-             |    └ (queries index)
       2.005s | 📖 #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
              |    └ (queries index) | 0.40 kb
-      .      | 📖 #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
-             |    └ (queries index) | 0.40 kb ⚠️ REPEATED READ <10ms UNCHANGED
-             ·
-      2.048s | 📖 #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
-             |    └ (queries index) | 0.40 kb
-      2.051s | 🗑️ #2 ✅ tsdf/sess1/lq-startup-max-queries/lq.h~4141397404.p.json
+      2.008s | 🗑️ #2 ✅ tsdf/sess1/lq-startup-max-queries/lq.h~4141397404.p.json
              |    └ (query data, <{tableId:"first"}>)
-      2.054s | ✍️ #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
+      2.011s | ✍️ #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
              |    └ (queries index) | 0.40 kb -> 0.28 kb
-      2.056s | end
+      2.013s | end
       "
     `);
     expect(
@@ -257,36 +248,40 @@ describe('async storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.81s  | 📖 #1 tsdf/sess1/lq-query-metadata/lq._i.r.json
+      1.81s  | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.811s | 📂 dir-open ✅ tsdf/sess1/lq-query-metadata (store directory)
+      1.812s | 👁️ #1 file-open ✅ tsdf/sess1/lq-query-metadata/lq._i.r.json
+             |    └ (queries index)
+      1.813s | 📖 #1 tsdf/sess1/lq-query-metadata/lq._i.r.json
              |    └ (queries index) | 0.28 kb
              ·
-      1.853s | 👁️ #2 file-open ❌ tsdf/sess1/lq-query-metadata/li._i.r.json
+      1.856s | 👁️ #2 file-open ❌ tsdf/sess1/lq-query-metadata/li._i.r.json
              |    └ (items index)
       .      | 📖 #1 tsdf/sess1/lq-query-metadata/lq._i.r.json
              |    └ (queries index) | 0.28 kb
-      1.854s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li.h~4006559409.p.json
+      1.857s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li.h~4006559409.p.json
              |    └ (item data, <"third||1>)
-      1.856s | 🗑️ #4 ✅ tsdf/sess1/lq-query-metadata/lq.h~4141397404.p.json
+      1.859s | 🗑️ #4 ✅ tsdf/sess1/lq-query-metadata/lq.h~4141397404.p.json
              |    └ (query data, <{tableId:"first"}>)
       .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/lq.h~3601729766.p.json
              |    └ (query data)
-      1.857s | ✍️ #3 tsdf/sess1/lq-query-metadata/li.h~4006559409.p.json
+      1.86s  | ✍️ #3 tsdf/sess1/lq-query-metadata/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.00 kb -> 0.09 kb
-      1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li._i.r.json
+      1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-query-metadata/li._i.r.json
              |    └ (items index) ⚠️ DUPLICATE OPEN
       .      | ✍️ #5 tsdf/sess1/lq-query-metadata/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
-      1.862s | ✍️ #2 tsdf/sess1/lq-query-metadata/li._i.r.json
+      1.865s | ✍️ #2 tsdf/sess1/lq-query-metadata/li._i.r.json
              |    └ (items index) | 0.00 kb -> 0.11 kb
-      1.863s | ✍️ #1 tsdf/sess1/lq-query-metadata/lq._i.r.json
+      1.866s | ✍️ #1 tsdf/sess1/lq-query-metadata/lq._i.r.json
              |    └ (queries index) | 0.28 kb -> 0.28 kb
-      1.865s | end
+      1.868s | end
       "
     `);
     expect(getParsedOpfsFileData('tsdf/sess1/lq-query-metadata/li._i.r.json'))
       .toMatchInlineSnapshot(`
         e:
-          "third||1: { a: 1735689604954, p: 'third||1' }
+          "third||1: { a: 1735689604957, p: 'third||1' }
       `);
     expect(
       getParsedOpfsFileData(
@@ -303,7 +298,7 @@ describe('async storage efficiency: list-query', () => {
             a: 1735689600100
             p: { tableId: 'second' }
           {tableId:"third"}:
-            a: 1735689604956
+            a: 1735689604959
             p: { tableId: 'third' }
       `);
     expect(
@@ -360,28 +355,33 @@ describe('async storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1.81s  | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+      1.81s  | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.811s | 📂 dir-open ✅ tsdf/sess1/lq-coalesced-query-maintenance
+             |    └ (store directory)
+      1.812s | 👁️ #1 file-open ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+             |    └ (queries index)
+      1.813s | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.28 kb
              ·
-      1.853s | 👁️ #2 file-open ❌ tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
+      1.856s | 👁️ #2 file-open ❌ tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index)
       .      | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.28 kb
-      1.854s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
+      1.857s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
              |    └ (item data, <"third||1>)
-      1.856s | 🗑️ #4 ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.h~4141397404.p.json
+      1.859s | 🗑️ #4 ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.h~4141397404.p.json
              |    └ (query data, <{tableId:"first"}>)
       .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3601729766.p.json
              |    └ (query data)
-      1.857s | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
+      1.86s  | ✍️ #3 tsdf/sess1/lq-coalesced-query-maintenance/li.h~4006559409.p.json
              |    └ (item data, <"third||1>) | 0.00 kb -> 0.09 kb
-      1.859s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
+      1.862s | 👁️ #2 file-open-or-create 🆕 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) ⚠️ DUPLICATE OPEN
       .      | ✍️ #5 tsdf/sess1/lq-coalesced-query-maintenance/lq.h~3601729766.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
-      1.862s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
+      1.865s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.00 kb -> 0.11 kb
-      1.863s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
+      1.866s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
              |    └ (queries index) | 0.28 kb -> 0.28 kb
              ·
       3.62s  | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
@@ -613,20 +613,24 @@ describe('async storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
-      1s     | 📖 #1 tsdf/sess1/lq-item-metadata/li._i.r.json
+      1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.001s | 📂 dir-open ✅ tsdf/sess1/lq-item-metadata (store directory)
+      1.002s | 👁️ #1 file-open ✅ tsdf/sess1/lq-item-metadata/li._i.r.json
+             |    └ (items index)
+      1.003s | 📖 #1 tsdf/sess1/lq-item-metadata/li._i.r.json
              |    └ (items index) | 0.20 kb
              ·
-      1.043s | 📖 #1 tsdf/sess1/lq-item-metadata/li._i.r.json
+      1.046s | 📖 #1 tsdf/sess1/lq-item-metadata/li._i.r.json
              |    └ (items index) | 0.20 kb
-      1.046s | 🗑️ #2 ✅ tsdf/sess1/lq-item-metadata/li.h~228010772.p.json
+      1.049s | 🗑️ #2 ✅ tsdf/sess1/lq-item-metadata/li.h~228010772.p.json
              |    └ (item data, <"users||1>)
       .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-item-metadata/li.h~3224064498.p.json
              |    └ (item data, <"users||3>)
-      1.049s | ✍️ #3 tsdf/sess1/lq-item-metadata/li.h~3224064498.p.json
+      1.052s | ✍️ #3 tsdf/sess1/lq-item-metadata/li.h~3224064498.p.json
              |    └ (item data, <"users||3>) | 0.00 kb -> 0.09 kb
-      1.053s | ✍️ #1 tsdf/sess1/lq-item-metadata/li._i.r.json
+      1.056s | ✍️ #1 tsdf/sess1/lq-item-metadata/li._i.r.json
              |    └ (items index) | 0.20 kb -> 0.20 kb
-      1.055s | end
+      1.058s | end
       "
     `);
   });
@@ -793,8 +797,8 @@ describe('async storage efficiency: list-query', () => {
 
     expect(listQueryScope.listQuery.listStoredItemKeys().sort())
       .toMatchInlineSnapshot(`
-      ['"standalone||1', '"standalone||2', '"users||3']
-    `);
+        ['"standalone||1', '"standalone||2', '"users||3']
+      `);
   });
 
   test('maxItems cleanup evicts standalone items before query-related shared items', async () => {
@@ -849,7 +853,7 @@ describe('async storage efficiency: list-query', () => {
 
     expect(
       listQueryScope.listQuery.listStoredItemKeys().sort(),
-    ).toMatchInlineSnapshot(`['"users||2', '"users||3', '"users||4']`);
+    ).toMatchInlineSnapshot(`['"users||1', '"users||2', '"users||3']`);
     expect(
       getParsedOpfsFileData('tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json'),
     ).toMatchInlineSnapshot(`
@@ -873,23 +877,6 @@ describe('async storage efficiency: list-query', () => {
       ),
     ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
     expect(
-      getParsedOpfsFileData('tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json'),
-    ).toMatchInlineSnapshot(`
-      e:
-        {filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}:
-          a: 1735689600300
-          p:
-            filters:
-              - { field: 'name', op: 'eq', value: 'Alice' }
-            tableId: 'users'
-        {filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}:
-          a: 1735689600300
-          p:
-            filters:
-              - { field: 'name', op: 'eq', value: 'Bob' }
-            tableId: 'users'
-    `);
-    expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-shared-item-cleanup/lq.<{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>.p.json',
       ),
@@ -899,32 +886,23 @@ describe('async storage efficiency: list-query', () => {
       time   |
       2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
       2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
-      .      | 📂 dir-open ✅ tsdf/sess1 (session directory)
       2.003s | 🗂️ list-dir-values tsdf/sess1
              |    └ (session directory) entries=["dir:lq-shared-item-cleanup"]
-      .      | 📂 dir-open ✅ tsdf/sess1/lq-shared-item-cleanup (store directory)
       2.004s | 🗂️ list-dir-entries tsdf/sess1/lq-shared-item-cleanup
              |    └ (store directory) entries=["file:li._i.r.json","file:li.h~1937155452.p.json","file:li.h~228010772.p.json","file:li.h~2854834066.p.json","file:li.h~3224064498.p.json","file:lq._i.r.json","file:lq.h~1471050956.p.json","file:lq.h~1805955701.p.json"]
-      .      | 👁️ #1 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json
-             |    └ (queries index)
-      2.005s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
+      2.005s | 📖 #1 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
              |    └ (items index) | 0.39 kb
-      .      | 📖 #1 tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json
+      2.008s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json
              |    └ (queries index) | 0.69 kb
-      2.008s | 👁️ #2 file-open ✅ tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
-             |    └ (items index)
-      .      | 📖 #1 tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json
-             |    └ (queries index) | 0.69 kb ⚠️ REPEATED READ <10ms UNCHANGED
-      2.009s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
-             |    └ (items index) | 0.39 kb ⚠️ REPEATED READ <10ms UNCHANGED
-             ·
-      2.052s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
-             |    └ (items index) | 0.39 kb
-      2.055s | 🗑️ #3 ✅ tsdf/sess1/lq-shared-item-cleanup/li.h~228010772.p.json
-             |    └ (item data, <"users||1>)
-      2.058s | ✍️ #2 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
+      2.011s | 📖 #3 tsdf/sess1/lq-shared-item-cleanup/lq.h~1805955701.p.json
+             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.06 kb
+      .      | 📖 #4 tsdf/sess1/lq-shared-item-cleanup/lq.h~1471050956.p.json
+             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.06 kb
+      2.014s | 🗑️ #5 ✅ tsdf/sess1/lq-shared-item-cleanup/li.h~2854834066.p.json
+             |    └ (item data, <"users||4>)
+      2.017s | ✍️ #1 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
              |    └ (items index) | 0.39 kb -> 0.29 kb
-      2.06s  | end
+      2.019s | end
       "
     `);
   });

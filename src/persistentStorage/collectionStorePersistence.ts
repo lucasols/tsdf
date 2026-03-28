@@ -25,6 +25,12 @@ import {
   type ParsedPersistedCollectionItemData,
 } from './parsePersistedData';
 import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  METADATA_RECORD_PREFIX,
+  PAYLOAD_RECORD_PREFIX,
+  getPayloadRecordKey,
+} from './opfsFileNaming';
+import {
   assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
   getLocalStorageAdapter,
@@ -44,14 +50,22 @@ import {
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import { COLLECTION_STORAGE_ENTRY_PREFIX } from './storageEntryPrefixes';
 import type {
+  AsyncStorageDriver,
+  AsyncStorageNamespaceScope,
   CollectionPersistentStorageConfig,
   PersistedCollectionItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 import {
   ASYNC_STORAGE_MAX_AGE_MS,
+  isOfflineProtectedMetadata,
+  readAsyncStorageNamespaceIndexStateUsingDriver,
+  registerAsyncStartupStoreCleanup,
   getProtectedKeysFromMetadata,
   serializeProtectedRef,
+  unregisterAsyncStartupStoreCleanup,
+  type AsyncStartupCleanupScopePlan,
+  type AsyncStartupCleanupStoreDeletePlan,
 } from './asyncStorageAdapter';
 
 const DEFAULT_MAX_ITEMS = 50;
@@ -149,6 +163,8 @@ export function setupCollectionPersistence<
   const hasIgnoreItemFilter = config.ignoreItems !== undefined;
   const storageAdapter = config.adapter;
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
+  const asyncStorageAdapter =
+    storageAdapter === 'local-sync' ? null : storageAdapter;
   const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
   const itemStorageValueCodec = {
@@ -237,6 +253,186 @@ export function setupCollectionPersistence<
       maintenanceManifestKey,
       evictStoredItems,
     );
+  }
+
+  async function planAsyncStartupCleanup(args: {
+    discoveredScopes: Array<{
+      knownRecordKeys: string[] | null;
+      scope: AsyncStorageNamespaceScope;
+    }>;
+    driver: AsyncStorageDriver;
+    now: number;
+  }): Promise<{
+    scopePlans: AsyncStartupCleanupScopePlan[];
+    storeDeletePlans: AsyncStartupCleanupStoreDeletePlan[];
+  }> {
+    const discoveredScope = args.discoveredScopes.find(
+      ({ scope }) => scope.kind === 'collection.item',
+    );
+    if (discoveredScope === undefined) {
+      return { scopePlans: [], storeDeletePlans: [] };
+    }
+
+    const { scope } = discoveredScope;
+    const rawKeys =
+      discoveredScope.knownRecordKeys ?? (await args.driver.listKeys(scope));
+    const uniqueDeleteKeys = new Set<string>();
+    const indexState = await readAsyncStorageNamespaceIndexStateUsingDriver(
+      args.driver,
+      scope,
+      rawKeys,
+    );
+
+    if (!indexState.valid || indexState.entries === null) {
+      const keysToRemove = rawKeys.filter(
+        (key) => key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY || indexState.exists,
+      );
+      if (keysToRemove.length === 0) {
+        return { scopePlans: [], storeDeletePlans: [] };
+      }
+
+      return {
+        scopePlans: [{ deleteKeys: keysToRemove, persistEntries: null, scope }],
+        storeDeletePlans: [
+          {
+            representativeScope: scope,
+            removedKeysByScope: [{ keys: keysToRemove, scope }],
+          },
+        ],
+      };
+    }
+
+    const payloadKeys = new Set<string>();
+    const rawKeysToRemove: string[] = [];
+    const legacyMetadataRecordKeys: string[] = [];
+    for (const key of rawKeys) {
+      if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
+        payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
+      } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
+        legacyMetadataRecordKeys.push(key);
+      } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
+        rawKeysToRemove.push(key);
+      }
+    }
+
+    for (const key of rawKeysToRemove) {
+      uniqueDeleteKeys.add(key);
+    }
+    for (const key of legacyMetadataRecordKeys) {
+      uniqueDeleteKeys.add(key);
+    }
+
+    const protectedRefs = getSessionProtectedKeysSnapshot(scope.sessionKey);
+    const nextEntries = new Map(indexState.entries);
+    const remainingEntries: Array<{
+      itemKey: string;
+      lastAccessAt: number;
+      protected: boolean;
+    }> = [];
+
+    for (const [key, metadata] of indexState.entries) {
+      const isProtected =
+        isOfflineProtectedMetadata(metadata.customMetadata) ||
+        protectedRefs?.has(serializeProtectedRef({ ...scope, key })) === true;
+
+      if (!payloadKeys.has(key)) {
+        nextEntries.delete(key);
+        continue;
+      }
+
+      const payload = validateWithSchema(
+        config.payloadSchema,
+        readManifestPayloadMeta(metadata.customMetadata),
+      );
+      if (payload === null || shouldIgnoreItem(payload)) {
+        uniqueDeleteKeys.add(getPayloadRecordKey(key));
+        nextEntries.delete(key);
+        continue;
+      }
+
+      if (
+        !isProtected &&
+        args.now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
+      ) {
+        uniqueDeleteKeys.add(getPayloadRecordKey(key));
+        nextEntries.delete(key);
+        continue;
+      }
+
+      remainingEntries.push({
+        itemKey: key,
+        lastAccessAt: metadata.lastAccessAt,
+        protected: isProtected,
+      });
+    }
+
+    for (const payloadKey of payloadKeys) {
+      if (!indexState.entries.has(payloadKey)) {
+        uniqueDeleteKeys.add(getPayloadRecordKey(payloadKey));
+      }
+    }
+
+    const unprotectedCount = remainingEntries.filter(
+      ({ protected: isProtected }) => !isProtected,
+    ).length;
+    const needsEviction =
+      remainingEntries.length > maxItems &&
+      (hasIgnoreItemFilter || unprotectedCount > maxItems);
+
+    if (needsEviction) {
+      remainingEntries.sort(
+        createEvictionComparator(
+          [
+            (entry) => entry.protected,
+            (entry) => pinnedItemKeys.has(entry.itemKey),
+          ],
+          (entry) => entry.lastAccessAt,
+        ),
+      );
+
+      const keptKeys = new Set(
+        remainingEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
+      );
+      for (const { itemKey } of remainingEntries) {
+        if (keptKeys.has(itemKey)) continue;
+        uniqueDeleteKeys.add(getPayloadRecordKey(itemKey));
+        nextEntries.delete(itemKey);
+      }
+    }
+
+    const indexChanged =
+      nextEntries.size !== indexState.entries.size ||
+      rawKeysToRemove.length > 0 ||
+      legacyMetadataRecordKeys.length > 0;
+    if (indexChanged && nextEntries.size === 0) {
+      uniqueDeleteKeys.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+    }
+
+    const deleteKeys = [...uniqueDeleteKeys];
+    const scopePlan =
+      deleteKeys.length > 0 || (indexChanged && nextEntries.size > 0)
+        ? [
+            {
+              deleteKeys,
+              persistEntries:
+                indexChanged && nextEntries.size > 0 ? nextEntries : null,
+              scope,
+            } satisfies AsyncStartupCleanupScopePlan,
+          ]
+        : [];
+
+    const storeDeletePlans =
+      deleteKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY) &&
+      nextEntries.size === 0
+        ? [
+            {
+              representativeScope: scope,
+              removedKeysByScope: [{ keys: deleteKeys, scope }],
+            } satisfies AsyncStartupCleanupStoreDeletePlan,
+          ]
+        : [];
+
+    return { scopePlans: scopePlan, storeDeletePlans };
   }
 
   async function ensureKnownPersistedKeys(): Promise<Set<string>> {
@@ -979,24 +1175,25 @@ export function setupCollectionPersistence<
     }, SAVE_DEBOUNCE_MS);
   }
 
-  function scheduleAsyncStartupMaintenance(): void {
-    if (localStorageAdapter !== null) return;
-    if (config.maxItems === undefined) return;
-
-    const sessionKey = config.getSessionKey();
-    if (sessionKey === false) return;
-
-    scheduleAsyncStorageMaintenance(
-      `collection:${sessionKey}:${config.storeName}`,
-      evictStoredItems,
-    );
-  }
-
   function attach(
     store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
   ): void {
     syncMaintenanceRegistration();
-    scheduleAsyncStartupMaintenance();
+    if (
+      localStorageAdapter === null &&
+      asyncStorageAdapter !== null &&
+      config.maxItems !== undefined
+    ) {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey !== false) {
+        registerAsyncStartupStoreCleanup(
+          asyncStorageAdapter,
+          sessionKey,
+          config.storeName,
+          planAsyncStartupCleanup,
+        );
+      }
+    }
     storeRef = store;
     unsubscribe = store.subscribe(() => {
       if (suppressedPersistedStateFlushes > 0) {
@@ -1019,6 +1216,20 @@ export function setupCollectionPersistence<
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
+    if (
+      localStorageAdapter === null &&
+      asyncStorageAdapter !== null &&
+      config.maxItems !== undefined
+    ) {
+      const sessionKey = config.getSessionKey();
+      if (sessionKey !== false) {
+        unregisterAsyncStartupStoreCleanup(
+          asyncStorageAdapter,
+          sessionKey,
+          config.storeName,
+        );
+      }
+    }
     if (localStorageAdapter !== null && maintenanceManifestKey !== null) {
       localStorageAdapter.unregisterMaintenanceCallback(maintenanceManifestKey);
       maintenanceManifestKey = null;

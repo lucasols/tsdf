@@ -217,6 +217,53 @@ function serializeIndexEntries(
   };
 }
 
+export async function driverGetManyFrom(
+  driver: AsyncStorageDriver,
+  scope: AsyncStorageNamespaceScope,
+  keys: string[],
+): Promise<unknown[]> {
+  if (keys.length === 0) return [];
+  if (driver.getMany) {
+    return driver.getMany(scope, keys);
+  }
+
+  return Promise.all(keys.map((key) => driver.get(scope, key)));
+}
+
+export type AsyncStorageManagedMetadataRecord = InternalManagedMetadataRecord;
+
+export async function readAsyncStorageNamespaceIndexStateUsingDriver(
+  driver: AsyncStorageDriver,
+  scope: AsyncStorageNamespaceScope,
+  knownRecordKeys?: string[] | null,
+): Promise<{
+  entries: Map<string, AsyncStorageManagedMetadataRecord> | null;
+  exists: boolean;
+  valid: boolean;
+}> {
+  if (
+    knownRecordKeys != null &&
+    !knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)
+  ) {
+    return { entries: null, exists: false, valid: true };
+  }
+  const indexKnownToExist = knownRecordKeys != null;
+
+  const rawIndex = await driver.get(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+  if (rawIndex === null) {
+    return indexKnownToExist
+      ? { entries: null, exists: true, valid: false }
+      : { entries: null, exists: false, valid: true };
+  }
+
+  const parsed = parseIndexEntries(rawIndex);
+  if (parsed === null) {
+    return { entries: null, exists: true, valid: false };
+  }
+
+  return { entries: parsed, exists: true, valid: true };
+}
+
 function parseMaintenanceState(
   value: unknown,
 ): AsyncStorageMaintenanceState | null {
@@ -408,8 +455,17 @@ type StartupCleanupDeleteAction =
 
 type StartupCleanupScopePlan = {
   deleteAction: StartupCleanupDeleteAction | null;
+  rawUpserts?: AsyncStorageDriverSetEntry[];
   persistEntries: Map<string, InternalManagedMetadataRecord> | null;
   scope: AsyncStorageNamespaceScope;
+};
+
+export type AsyncStartupCleanupStoreDeletePlan = {
+  representativeScope: AsyncStorageNamespaceScope;
+  removedKeysByScope: Array<{
+    keys: string[];
+    scope: AsyncStorageNamespaceScope;
+  }>;
 };
 
 type StartupCleanupDeleteActionResult =
@@ -429,6 +485,58 @@ type StartupCleanupDeleteActionResult =
       kind: 'removeStoreDir';
       removed: boolean;
     };
+
+export type AsyncStartupCleanupScopePlan = {
+  deleteKeys: string[];
+  persistEntries: Map<string, AsyncStorageManagedMetadataRecord> | null;
+  rawUpserts?: AsyncStorageDriverSetEntry[];
+  scope: AsyncStorageNamespaceScope;
+};
+
+export type AsyncStartupStoreCleanupCallback = (args: {
+  discoveredScopes: AsyncStorageDiscoveredScope[];
+  driver: AsyncStorageDriver;
+  now: number;
+}) => Promise<{
+  scopePlans: AsyncStartupCleanupScopePlan[];
+  storeDeletePlans?: AsyncStartupCleanupStoreDeletePlan[];
+}>;
+
+const registeredAsyncStartupStoreCleanupCallbacks = new WeakMap<
+  AsyncStorageAdapter,
+  Map<string, AsyncStartupStoreCleanupCallback>
+>();
+
+function getStoreRegistryKey(sessionKey: string, storeName: string): string {
+  return JSON.stringify([sessionKey, storeName]);
+}
+
+export function registerAsyncStartupStoreCleanup(
+  adapter: AsyncStorageAdapter,
+  sessionKey: string,
+  storeName: string,
+  callback: AsyncStartupStoreCleanupCallback,
+): void {
+  const registry =
+    registeredAsyncStartupStoreCleanupCallbacks.get(adapter) ??
+    new Map<string, AsyncStartupStoreCleanupCallback>();
+  registry.set(getStoreRegistryKey(sessionKey, storeName), callback);
+  registeredAsyncStartupStoreCleanupCallbacks.set(adapter, registry);
+}
+
+export function unregisterAsyncStartupStoreCleanup(
+  adapter: AsyncStorageAdapter,
+  sessionKey: string,
+  storeName: string,
+): void {
+  const registry = registeredAsyncStartupStoreCleanupCallbacks.get(adapter);
+  if (registry === undefined) return;
+
+  registry.delete(getStoreRegistryKey(sessionKey, storeName));
+  if (registry.size === 0) {
+    registeredAsyncStartupStoreCleanupCallbacks.delete(adapter);
+  }
+}
 
 type PendingNamespaceCommit = {
   cancelFlush: (() => void) | null;
@@ -782,48 +890,12 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     }
   }
 
-  async #readNamespaceIndexStateUsingDriver(
-    driver: AsyncStorageDriver,
-    scope: AsyncStorageNamespaceScope,
-    knownRecordKeys?: string[] | null,
-  ): Promise<{
-    entries: Map<string, InternalManagedMetadataRecord> | null;
-    exists: boolean;
-    valid: boolean;
-  }> {
-    if (
-      knownRecordKeys !== undefined &&
-      knownRecordKeys !== null &&
-      !knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY)
-    ) {
-      return { entries: null, exists: false, valid: true };
-    }
-    const indexKnownToExist =
-      knownRecordKeys !== undefined &&
-      knownRecordKeys !== null &&
-      knownRecordKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
-
-    const rawIndex = await driver.get(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY);
-    if (rawIndex === null) {
-      return indexKnownToExist
-        ? { entries: null, exists: true, valid: false }
-        : { entries: null, exists: false, valid: true };
-    }
-
-    const parsed = parseIndexEntries(rawIndex);
-    if (parsed === null) {
-      return { entries: null, exists: true, valid: false };
-    }
-
-    return { entries: parsed, exists: true, valid: true };
-  }
-
   async #readNamespaceIndexEntriesUsingDriver(
     driver: AsyncStorageDriver,
     scope: AsyncStorageNamespaceScope,
     knownRecordKeys?: string[] | null,
   ): Promise<Map<string, InternalManagedMetadataRecord>> {
-    const state = await this.#readNamespaceIndexStateUsingDriver(
+    const state = await readAsyncStorageNamespaceIndexStateUsingDriver(
       driver,
       scope,
       knownRecordKeys,
@@ -865,7 +937,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       scope,
     );
     const payloadKeys = keys.filter((key) => metadataByKey.has(key));
-    const payloadValues = await this.#driverGetManyFrom(
+    const payloadValues = await driverGetManyFrom(
       this.driver,
       scope,
       payloadKeys.map((key) => getPayloadRecordKey(key)),
@@ -1126,7 +1198,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       uniqueKeys.map((key) => getPayloadRecordKey(key)),
     );
 
-    const indexState = await this.#readNamespaceIndexStateUsingDriver(
+    const indexState = await readAsyncStorageNamespaceIndexStateUsingDriver(
       driver,
       scope,
     );
@@ -1143,19 +1215,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
         indexState.entries,
       );
     }
-  }
-
-  async #driverGetManyFrom(
-    driver: AsyncStorageDriver,
-    scope: AsyncStorageNamespaceScope,
-    keys: string[],
-  ): Promise<unknown[]> {
-    if (keys.length === 0) return [];
-    if (driver.getMany) {
-      return driver.getMany(scope, keys);
-    }
-
-    return Promise.all(keys.map((key) => driver.get(scope, key)));
   }
 
   async #driverSetManyFrom(
@@ -1319,41 +1378,164 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           [sessionKey, getSessionProtectedKeysSnapshot(sessionKey)] as const,
       ),
     );
+    const customStartupCallbacks: Map<
+      string,
+      AsyncStartupStoreCleanupCallback
+    > =
+      registeredAsyncStartupStoreCleanupCallbacks.get(this) ??
+      new Map<string, AsyncStartupStoreCleanupCallback>();
+    const discoveredScopesByStore = new Map<
+      string,
+      AsyncStorageDiscoveredScope[]
+    >();
+    for (const discoveredScope of discoveredScopes) {
+      const storeKey = getStoreRegistryKey(
+        discoveredScope.scope.sessionKey,
+        discoveredScope.scope.storeName,
+      );
+      const existing = discoveredScopesByStore.get(storeKey);
+      if (existing !== undefined) {
+        existing.push(discoveredScope);
+      } else {
+        discoveredScopesByStore.set(storeKey, [discoveredScope]);
+      }
+    }
 
-    const scopePlans = await Promise.all(
-      discoveredScopes.map(async ({ knownRecordKeys, scope }) =>
-        this.#planStartupCleanupForScope({
-          cleanupActionDriver,
-          driver,
-          knownRecordKeys,
-          now,
-          protectedRefs: protectedRefsBySession.get(scope.sessionKey),
-          scope,
-        }),
+    const callbackEntries: Array<{
+      callback: AsyncStartupStoreCleanupCallback;
+      scopes: AsyncStorageDiscoveredScope[];
+      storeKey: string;
+    }> = [];
+    for (const [storeKey, storeDiscoveredScopes] of discoveredScopesByStore) {
+      const callback = customStartupCallbacks.get(storeKey);
+      if (callback === undefined) continue;
+      callbackEntries.push({
+        callback,
+        scopes: storeDiscoveredScopes,
+        storeKey,
+      });
+    }
+    const handledStoreKeys = new Set(callbackEntries.map((e) => e.storeKey));
+
+    const [callbackResults, genericScopePlans] = await Promise.all([
+      Promise.all(
+        callbackEntries.map(({ callback, scopes }) =>
+          callback({ discoveredScopes: scopes, driver, now }),
+        ),
       ),
+      Promise.all(
+        discoveredScopes
+          .filter(
+            ({ scope }) =>
+              !handledStoreKeys.has(
+                getStoreRegistryKey(scope.sessionKey, scope.storeName),
+              ),
+          )
+          .map(async ({ knownRecordKeys, scope }) =>
+            this.#planStartupCleanupForScope({
+              cleanupActionDriver,
+              driver,
+              knownRecordKeys,
+              now,
+              protectedRefs: protectedRefsBySession.get(scope.sessionKey),
+              scope,
+            }),
+          ),
+      ),
+    ]);
+
+    const customScopePlans: StartupCleanupScopePlan[] = [];
+    const customStoreDeletePlans: AsyncStartupCleanupStoreDeletePlan[] = [];
+
+    for (const result of callbackResults) {
+      for (const scopePlan of result.scopePlans) {
+        customScopePlans.push({
+          deleteAction:
+            scopePlan.deleteKeys.length === 0
+              ? null
+              : this.#createStartupCleanupDeleteAction({
+                  cleanupActionDriver,
+                  keys: scopePlan.deleteKeys,
+                  scope: scopePlan.scope,
+                }),
+          persistEntries: scopePlan.persistEntries ?? null,
+          rawUpserts: scopePlan.rawUpserts ?? [],
+          scope: scopePlan.scope,
+        });
+      }
+
+      for (const storeDeletePlan of result.storeDeletePlans ?? []) {
+        customStoreDeletePlans.push(storeDeletePlan);
+      }
+    }
+
+    const scopePlans = [...customScopePlans, ...genericScopePlans];
+    const persistPlans: Array<{
+      entries: Map<string, InternalManagedMetadataRecord> | null;
+      rawUpserts: AsyncStorageDriverSetEntry[];
+      scope: AsyncStorageNamespaceScope;
+    }> = [];
+    const successfulStoreDeleteSessions = new Set<string>();
+    const successfulStoreDeleteScopes = new Set<string>();
+    const skippedScopeIds = new Set<string>();
+    const scopePlansByNamespaceId = new Map(
+      scopePlans.map((plan) => [getNamespaceId(plan.scope), plan]),
     );
 
+    if (cleanupActionDriver.cleanupRemoveKnownStoreDir !== undefined) {
+      const removeStoreDir = cleanupActionDriver.cleanupRemoveKnownStoreDir;
+      const storeDeleteResults = await Promise.all(
+        customStoreDeletePlans.map(async (storeDeletePlan) => {
+          const deleteKeys = [
+            ...new Set(
+              storeDeletePlan.removedKeysByScope.flatMap(({ keys }) => keys),
+            ),
+          ];
+          const removed = await removeStoreDir(
+            storeDeletePlan.representativeScope,
+            deleteKeys,
+          );
+          return { removed, storeDeletePlan };
+        }),
+      );
+
+      for (const { removed, storeDeletePlan } of storeDeleteResults) {
+        if (!removed) continue;
+
+        for (const { keys, scope } of storeDeletePlan.removedKeysByScope) {
+          cleanupActionDriver.cleanupFinalizeRemovedRecords?.(scope, keys);
+        }
+        cleanupActionDriver.cleanupFinalizeRemovedStoreDir?.(
+          storeDeletePlan.representativeScope,
+          [],
+        );
+
+        successfulStoreDeleteSessions.add(
+          storeDeletePlan.representativeScope.sessionKey,
+        );
+        for (const { scope } of storeDeletePlan.removedKeysByScope) {
+          const namespaceId = getNamespaceId(scope);
+          successfulStoreDeleteScopes.add(namespaceId);
+          skippedScopeIds.add(namespaceId);
+        }
+      }
+    }
+
     const deleteResults = await Promise.allSettled(
-      scopePlans.flatMap((plan) =>
-        plan.deleteAction === null
+      scopePlans.flatMap((plan) => {
+        if (skippedScopeIds.has(getNamespaceId(plan.scope))) {
+          return [];
+        }
+
+        return plan.deleteAction === null
           ? []
           : [
               this.#runStartupCleanupDeleteAction(
                 cleanupActionDriver,
                 plan.deleteAction,
               ),
-            ],
-      ),
-    );
-
-    const persistPlans: Array<{
-      entries: Map<string, InternalManagedMetadataRecord>;
-      scope: AsyncStorageNamespaceScope;
-    }> = [];
-    const successfulStoreDeleteSessions = new Set<string>();
-    const successfulStoreDeleteScopes = new Set<string>();
-    const scopePlansByNamespaceId = new Map(
-      scopePlans.map((plan) => [getNamespaceId(plan.scope), plan]),
+            ];
+      }),
     );
 
     for (const settledResult of deleteResults) {
@@ -1373,9 +1555,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           const scopePlan = scopePlansByNamespaceId.get(
             getNamespaceId(result.action.scope),
           );
-          if (scopePlan !== undefined && scopePlan.persistEntries !== null) {
+          if (
+            scopePlan !== undefined &&
+            (scopePlan.persistEntries !== null ||
+              (scopePlan.rawUpserts ?? []).length > 0)
+          ) {
             persistPlans.push({
               entries: scopePlan.persistEntries,
+              rawUpserts: scopePlan.rawUpserts ?? [],
               scope: scopePlan.scope,
             });
           }
@@ -1396,14 +1583,17 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
 
     for (const scopePlan of scopePlans) {
       if (
+        skippedScopeIds.has(getNamespaceId(scopePlan.scope)) ||
         scopePlan.deleteAction !== null ||
-        scopePlan.persistEntries === null
+        (scopePlan.persistEntries === null &&
+          (scopePlan.rawUpserts ?? []).length === 0)
       ) {
         continue;
       }
 
       persistPlans.push({
         entries: scopePlan.persistEntries,
+        rawUpserts: scopePlan.rawUpserts ?? [],
         scope: scopePlan.scope,
       });
     }
@@ -1432,9 +1622,14 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
 
     const persistPromise = Promise.all(
-      persistPlans.map(({ entries, scope }) =>
-        this.#persistNamespaceIndexUsingDriver(driver, scope, entries),
-      ),
+      persistPlans.map(async ({ entries, rawUpserts, scope }) => {
+        if (rawUpserts.length > 0) {
+          await this.#driverSetManyFrom(driver, scope, rawUpserts);
+        }
+        if (entries !== null) {
+          await this.#persistNamespaceIndexUsingDriver(driver, scope, entries);
+        }
+      }),
     );
 
     const [sessionDeleteResults] = await Promise.all([
@@ -1462,7 +1657,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   }): Promise<StartupCleanupScopePlan> {
     const rawKeys =
       args.knownRecordKeys ?? (await args.driver.listKeys(args.scope));
-    const indexState = await this.#readNamespaceIndexStateUsingDriver(
+    const indexState = await readAsyncStorageNamespaceIndexStateUsingDriver(
       args.driver,
       args.scope,
       rawKeys,
@@ -1637,10 +1832,8 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
     return (
       sessionScopePlans.length > 0 &&
-      sessionScopePlans.every(
-        (plan) =>
-          plan.deleteAction?.kind === 'removeStoreDir' &&
-          successfulStoreDeleteScopes.has(getNamespaceId(plan.scope)),
+      sessionScopePlans.every((plan) =>
+        successfulStoreDeleteScopes.has(getNamespaceId(plan.scope)),
       )
     );
   }
