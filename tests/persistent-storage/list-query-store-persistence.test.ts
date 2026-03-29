@@ -1213,7 +1213,7 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['"users||1', '"users||3']`);
   });
 
-  test('cold persisted query items survive unrelated writes and keep their query protection during maxItems cleanup', async () => {
+  test('cold persisted query items are trimmed by recency during unrelated maxItems cleanup', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-cold-query-items';
     const sessionKey = 'sess1';
@@ -1243,16 +1243,24 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    // The cold query stays persisted, and maintenance prefers its referenced
-    // cached items over the unrelated standalone item.
+    // The cold query stays persisted, but maintenance now keeps the newer
+    // cached item and the unrelated standalone item by recency.
     expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`))
       .toMatchInlineSnapshot(`
         ['{tableId:"users"}']
       `);
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`))
-      .toMatchInlineSnapshot(`
-        ['"users||1', '"users||2']
-      `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry(usersQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||2']
+      payload: { tableId: 'users' }
+    `);
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
   });
 
   test('items and queries are saved per entry and pinned entries survive eviction', async () => {

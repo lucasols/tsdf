@@ -60,7 +60,6 @@ import {
 } from './storageEntryPrefixes';
 import type {
   AsyncStorageDriver,
-  AsyncStorageDriverSetEntry,
   AsyncStorageNamespaceScope,
   ListQueryPersistentStorageConfig,
   PersistedListQueryData,
@@ -76,7 +75,6 @@ import {
 import {
   ASYNC_STORAGE_MAX_AGE_MS,
   type AsyncStorageManagedMetadataRecord,
-  driverGetManyFrom,
   getProtectedKeysFromMetadata,
   isOfflineProtectedMetadata,
   readAsyncStorageNamespaceIndexStateUsingDriver,
@@ -583,7 +581,6 @@ export function setupListQueryPersistence<
       ? getSessionProtectedKeysSnapshot(sessionScope.scope.sessionKey)
       : null;
 
-    const keptQueryDataByKey = new Map<string, PersistedListQueryData>();
     let keptQueryKeys = new Set<string>();
     let queryDeleteKeys = new Set<string>();
     let queryIndexChanged = false;
@@ -591,7 +588,6 @@ export function setupListQueryPersistence<
       string,
       AsyncStorageManagedMetadataRecord
     > | null = null;
-    const queryRawUpserts: AsyncStorageDriverSetEntry[] = [];
     let queryScopePlan: AsyncStartupCleanupScopePlan | null = null;
 
     if (discoveredQueryScope !== undefined) {
@@ -769,7 +765,6 @@ export function setupListQueryPersistence<
 
         const nextEntries = new Map(indexState.entries);
         const protectedRefs = sessionProtectedRefs ?? new Set<string>();
-        const referencedItems = new Set<string>();
         const remainingEntries: Array<{
           itemKey: string;
           lastAccessAt: number;
@@ -826,60 +821,11 @@ export function setupListQueryPersistence<
           (hasIgnoreItemFilter || unprotectedCount > maxItems);
 
         if (needsEviction) {
-          if (
-            discoveredQueryScope !== undefined &&
-            queryIndexEntries !== null &&
-            keptQueryKeys.size > 0
-          ) {
-            const keptQueryKeysToRead = [...keptQueryKeys].filter((queryKey) =>
-              queryIndexEntries.has(queryKey),
-            );
-            const payloadValues = await driverGetManyFrom(
-              args.driver,
-              discoveredQueryScope.scope,
-              keptQueryKeysToRead.map((queryKey) =>
-                getPayloadRecordKey(queryKey),
-              ),
-            );
-
-            for (const [index, queryKey] of keptQueryKeysToRead.entries()) {
-              const metadata = queryIndexEntries.get(queryKey);
-              if (metadata === undefined) continue;
-
-              const rawPayload = payloadValues[index] ?? null;
-              if (rawPayload === null) {
-                queryDeleteKeys.add(getPayloadRecordKey(queryKey));
-                queryIndexEntries.delete(queryKey);
-                keptQueryKeys.delete(queryKey);
-                queryIndexChanged = true;
-                continue;
-              }
-
-              const parsed = queryStorageValueCodec.deserialize(
-                rawPayload,
-                metadata.customMetadata,
-              );
-              if (parsed === null) {
-                queryDeleteKeys.add(getPayloadRecordKey(queryKey));
-                queryIndexEntries.delete(queryKey);
-                keptQueryKeys.delete(queryKey);
-                queryIndexChanged = true;
-                continue;
-              }
-
-              keptQueryDataByKey.set(queryKey, parsed);
-              for (const itemKey of parsed.items) {
-                referencedItems.add(itemKey);
-              }
-            }
-          }
-
           remainingEntries.sort(
             createEvictionComparator(
               [
                 (entry) => entry.protected,
                 (entry) => pinnedItemKeys.has(entry.itemKey),
-                (entry) => referencedItems.has(entry.itemKey),
               ],
               (entry) => entry.lastAccessAt,
             ),
@@ -892,34 +838,6 @@ export function setupListQueryPersistence<
             if (keptItemKeys.has(entry.itemKey)) continue;
             uniqueDeleteKeys.add(getPayloadRecordKey(entry.itemKey));
             nextEntries.delete(entry.itemKey);
-          }
-
-          for (const [queryKey, queryData] of keptQueryDataByKey) {
-            if (!keptQueryKeys.has(queryKey)) continue;
-
-            const filteredItems = queryData.items.filter((itemKey) =>
-              keptItemKeys.has(itemKey),
-            );
-            const limitedQuery = limitPersistedQueryItems(
-              filteredItems,
-              queryData.hasMore,
-              maxQuerySize,
-            );
-            if (
-              limitedQuery.itemKeys.length === queryData.items.length &&
-              limitedQuery.hasMore === queryData.hasMore
-            ) {
-              continue;
-            }
-
-            queryRawUpserts.push({
-              key: getPayloadRecordKey(queryKey),
-              value: queryStorageValueCodec.serialize({
-                hasMore: limitedQuery.hasMore,
-                items: limitedQuery.itemKeys,
-                payload: queryData.payload,
-              }),
-            });
           }
         }
 
@@ -956,8 +874,7 @@ export function setupListQueryPersistence<
         queryDeleteKeys.size > 0 ||
         (queryIndexEntries !== null &&
           queryIndexChanged &&
-          queryIndexEntries.size > 0) ||
-        queryRawUpserts.length > 0
+          queryIndexEntries.size > 0)
       ) {
         queryScopePlan = {
           deleteKeys: [...queryDeleteKeys],
@@ -967,7 +884,6 @@ export function setupListQueryPersistence<
             queryIndexEntries.size > 0
               ? queryIndexEntries
               : null,
-          rawUpserts: queryRawUpserts,
           scope: discoveredQueryScope.scope,
         };
       }
@@ -980,8 +896,7 @@ export function setupListQueryPersistence<
     const storeDeleteCandidatePlans = scopePlans.filter(
       (plan) =>
         plan.deleteKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY) &&
-        plan.persistEntries === null &&
-        (plan.rawUpserts ?? []).length === 0,
+        plan.persistEntries === null,
     );
     const representativeScope = scopePlans[0]?.scope;
     const storeDeletePlans =
@@ -1065,6 +980,11 @@ export function setupListQueryPersistence<
     hydratedPersistedItemKeys.delete(itemKey);
     itemSnapshotByKey.delete(itemKey);
     knownPersistedItemKeys?.delete(itemKey);
+  }
+
+  function markItemAsMissing(itemKey: string): void {
+    knownMissingPersistedItemKeys.add(itemKey);
+    forgetPersistedItem(itemKey);
   }
 
   function forgetPersistedQuery(queryKey: string): void {
@@ -1174,8 +1094,7 @@ export function setupListQueryPersistence<
     );
 
     if (!cacheEntry) {
-      knownMissingPersistedItemKeys.add(itemKey);
-      forgetPersistedItem(itemKey);
+      markItemAsMissing(itemKey);
       return undefined;
     }
 
@@ -1192,8 +1111,7 @@ export function setupListQueryPersistence<
         metadata: 'namespace',
         namespacePrefix: prefix,
       });
-      knownMissingPersistedItemKeys.add(itemKey);
-      forgetPersistedItem(itemKey);
+      markItemAsMissing(itemKey);
       return undefined;
     }
 
@@ -1384,6 +1302,8 @@ export function setupListQueryPersistence<
       return true;
     }
 
+    if (knownMissingPersistedItemKeys.has(itemKey)) return false;
+
     const existingPromise = pendingItemPreloads.get(itemKey);
     if (existingPromise) return existingPromise;
 
@@ -1391,7 +1311,11 @@ export function setupListQueryPersistence<
     const promise = itemNamespace
       .load(itemKey, { touch: 'coarse' })
       .then((cached) => {
-        if (!cached || currentGeneration !== generation || !storeRef) {
+        if (currentGeneration !== generation || !storeRef) {
+          return false;
+        }
+        if (!cached) {
+          markItemAsMissing(itemKey);
           return false;
         }
 
@@ -1400,12 +1324,14 @@ export function setupListQueryPersistence<
           config.itemPayloadSchema,
         );
         if (!persisted) {
+          markItemAsMissing(itemKey);
           void itemNamespace.remove(itemKey).catch(() => {});
           return false;
         }
 
         const itemState = toItemState(persisted, dataSchema, shouldIgnoreItem);
         if (!itemState) {
+          markItemAsMissing(itemKey);
           void itemNamespace.remove(itemKey).catch(() => {});
           return false;
         }
@@ -1743,44 +1669,6 @@ export function setupListQueryPersistence<
           );
 
     if (localStorageAdapter !== null && itemPrefix !== null) {
-      const referencedItems = new Set<string>();
-      const queryEntries: ManagedQueryEntry[] = managedQueryEntriesByKey
-        ? [...managedQueryEntriesByKey.values()].filter(({ queryKey }) =>
-            keptQueryKeys.has(queryKey),
-          )
-        : filterAndMap(
-            await Promise.all(
-              [...keptQueryKeys].map(async (queryKey) => ({
-                queryKey,
-                entry: await queryNamespace.readEntry(queryKey),
-              })),
-            ),
-            ({ entry, queryKey }) => {
-              if (!entry) {
-                forgetPersistedQuery(queryKey);
-                keptQueryKeys.delete(queryKey);
-                return false;
-              }
-
-              return {
-                queryKey,
-                payload: entry.data.payload,
-                items: entry.data.items,
-                hasMore: entry.data.hasMore,
-                lastAccessAt: entry.timestamp,
-                offlineProtected: false,
-              };
-            },
-          );
-
-      for (const entry of queryEntries) {
-        const itemKeys = entry.items;
-
-        for (const itemKey of itemKeys) {
-          referencedItems.add(itemKey);
-        }
-      }
-
       const metadataEntries =
         localStorageAdapter.listManifestEntries(itemPrefix);
       const protectedItemKeys = new Set(
@@ -1851,7 +1739,6 @@ export function setupListQueryPersistence<
           [
             (e) => protectedItemKeys.has(e.itemKey),
             (e) => pinnedItemKeys.has(e.itemKey),
-            (e) => referencedItems.has(e.itemKey),
           ],
           (e) => e.lastAccessAt,
         ),
@@ -1860,11 +1747,15 @@ export function setupListQueryPersistence<
       const keptItemKeys = new Set(
         persistedItemEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
       );
+      const evictedItemKeys = new Set<string>();
 
       await Promise.all(
         persistedItemEntries
           .filter(({ itemKey }) => !keptItemKeys.has(itemKey))
-          .map(({ itemKey }) => itemNamespace.remove(itemKey)),
+          .map(({ itemKey }) => {
+            evictedItemKeys.add(itemKey);
+            return itemNamespace.remove(itemKey);
+          }),
       );
       for (const { itemKey } of persistedItemEntries) {
         if (!keptItemKeys.has(itemKey)) {
@@ -1873,6 +1764,23 @@ export function setupListQueryPersistence<
       }
 
       knownPersistedItemKeys = keptItemKeys;
+
+      if (evictedItemKeys.size === 0 || keptQueryKeys.size === 0) return;
+
+      const queryEntries: ManagedQueryEntry[] = managedQueryEntriesByKey
+        ? [...managedQueryEntriesByKey.values()].filter(({ queryKey }) =>
+            keptQueryKeys.has(queryKey),
+          )
+        : filterAndMap([...keptQueryKeys], (queryKey) => {
+            const entry = readLocalStorageQueryEntry(queryKey);
+            if (!entry) {
+              forgetPersistedQuery(queryKey);
+              keptQueryKeys.delete(queryKey);
+              return false;
+            }
+
+            return entry;
+          });
 
       await Promise.all(
         queryEntries.map(async (queryData) => {
@@ -2486,11 +2394,12 @@ export function setupListQueryPersistence<
         continue;
       }
 
-      finalItemDataByKey.set(itemKey, {
+      const nextValue = {
         data: converted.value,
         payload: itemQuery.payload,
         loadedFields,
-      });
+      };
+      finalItemDataByKey.set(itemKey, nextValue);
       finalPersistedItemKeys.add(itemKey);
     }
 
@@ -2507,7 +2416,9 @@ export function setupListQueryPersistence<
           order: 'lru-desc',
         }));
       const commitTimestamp = Date.now();
-      const referencedItemKeys = new Set(persistedQueryItemKeys);
+      const metadataByKey = new Map(
+        metadataEntries.map((entry) => [entry.key, entry] as const),
+      );
       const protectedItemKeys = getProtectedKeysFromMetadata(metadataEntries);
       const candidateEntries: Array<{
         itemKey: string;
@@ -2536,9 +2447,10 @@ export function setupListQueryPersistence<
       }
 
       for (const [itemKey] of finalItemDataByKey) {
+        const existingMetadata = metadataByKey.get(itemKey);
         candidateEntries.push({
           itemKey,
-          lastAccessAt: commitTimestamp,
+          lastAccessAt: existingMetadata?.lastAccessAt ?? commitTimestamp,
           offlineProtected:
             protectedItemKeys.has(itemKey) ||
             protectedRefs?.has(
@@ -2564,7 +2476,6 @@ export function setupListQueryPersistence<
             [
               (entry) => entry.offlineProtected,
               (entry) => pinnedItemKeys.has(entry.itemKey),
-              (entry) => referencedItemKeys.has(entry.itemKey),
             ],
             (entry) => entry.lastAccessAt,
           ),
@@ -2590,30 +2501,6 @@ export function setupListQueryPersistence<
       }
       for (const itemKey of evictedItemKeys) {
         finalItemDataByKey.delete(itemKey);
-      }
-
-      for (const [queryKey, queryData] of finalQueryDataByKey.entries()) {
-        const filteredItems = queryData.items.filter((itemKey) =>
-          finalPersistedItemKeys.has(itemKey),
-        );
-        const limitedQuery = limitPersistedQueryItems(
-          filteredItems,
-          queryData.hasMore,
-          maxQuerySize,
-        );
-
-        if (
-          limitedQuery.itemKeys.length === queryData.items.length &&
-          limitedQuery.hasMore === queryData.hasMore
-        ) {
-          continue;
-        }
-
-        finalQueryDataByKey.set(queryKey, {
-          payload: queryData.payload,
-          items: limitedQuery.itemKeys,
-          hasMore: limitedQuery.hasMore,
-        });
       }
     }
 

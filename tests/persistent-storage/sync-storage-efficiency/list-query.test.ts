@@ -579,7 +579,7 @@ describe('sync storage efficiency: list-query', () => {
     `);
   });
 
-  test('when maxItems limit is reached a full store cleanup occurs', async () => {
+  test('when maxItems limit is reached cleanup evicts the oldest unprotected item and rewrites the query', async () => {
     const storeName = 'lq-item-metadata';
     const sessionKey = 'sess1';
 
@@ -615,7 +615,16 @@ describe('sync storage efficiency: list-query', () => {
 
     expect(
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
-    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry({ tableId: 'users' }).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||2']
+      payload: { tableId: 'users' }
+    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
@@ -644,15 +653,17 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (item data, <"users||3>)
       .    | 📖 #5 ✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
            |    └ (query data, <{tableId:"users"}>) | 0.15 kb
-      .    | 🗑️ #2 ✅->❌ tsdf.sess1.lq-item-metadata.li."users||3
-           |    └ (item data, <"users||3>)
+      .    | 🗑️ #3 ✅->❌ tsdf.sess1.lq-item-metadata.li."users||1
+           |    └ (item data, <"users||1>)
+      .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.12 kb
       .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
            |    └ (items index) | 0.32 kb -> 0.22 kb
       "
     `);
   });
 
-  test('maxItems cleanup evicts standalone items before query-related shared items', async () => {
+  test('maxItems cleanup falls back to protected pinned and recency for preloaded query items and rewrites affected queries', async () => {
     const storeName = 'lq-shared-item-cleanup';
     const sessionKey = 'sess1';
     const firstUsersQuery = {
@@ -709,19 +720,18 @@ describe('sync storage efficiency: list-query', () => {
     await waitForScheduledCleanup();
     const cleanupOperations = cleanupCapture.finish().timelineString;
 
-    // The standalone newest item should be evicted before any item referenced
-    // by the persisted queries, so both query entries stay untouched.
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).sort())
-      .toMatchInlineSnapshot(`
-        ['"users||1', '"users||2', '"users||3']
-      `);
+    // The oldest item should be evicted by recency, and both query entries
+    // should be rewritten to drop it.
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).sort(),
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3', '"users||4']`);
     expect(
       persistentStore
         .scope(storeName, sessionKey)
         .listQuery.readQueryEntry(firstUsersQuery).data,
     ).toMatchInlineSnapshot(`
       hasMore: '❌'
-      items: ['"users||1', '"users||2']
+      items: ['"users||2']
 
       payload:
         filters:
@@ -734,7 +744,7 @@ describe('sync storage efficiency: list-query', () => {
         .listQuery.readQueryEntry(secondUsersQuery).data,
     ).toMatchInlineSnapshot(`
       hasMore: '❌'
-      items: ['"users||1', '"users||3']
+      items: ['"users||3']
 
       payload:
         filters:
@@ -765,8 +775,12 @@ describe('sync storage efficiency: list-query', () => {
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb
       .    | 📖 #8 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb
-      .    | 🗑️ #6 ✅->❌ tsdf.sess1.lq-shared-item-cleanup.li."users||4
-           |    └ (item data, <"users||4>)
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.lq-shared-item-cleanup.li."users||1
+           |    └ (item data, <"users||1>)
+      .    | ✍️ #7 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb -> 0.23 kb
+      .    | ✍️ #8 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb -> 0.22 kb
       .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
       .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
            |    └ (items index) | 0.42 kb -> 0.32 kb

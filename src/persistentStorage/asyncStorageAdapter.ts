@@ -455,7 +455,6 @@ type StartupCleanupDeleteAction =
 
 type StartupCleanupScopePlan = {
   deleteAction: StartupCleanupDeleteAction | null;
-  rawUpserts?: AsyncStorageDriverSetEntry[];
   persistEntries: Map<string, InternalManagedMetadataRecord> | null;
   scope: AsyncStorageNamespaceScope;
 };
@@ -489,7 +488,6 @@ type StartupCleanupDeleteActionResult =
 export type AsyncStartupCleanupScopePlan = {
   deleteKeys: string[];
   persistEntries: Map<string, AsyncStorageManagedMetadataRecord> | null;
-  rawUpserts?: AsyncStorageDriverSetEntry[];
   scope: AsyncStorageNamespaceScope;
 };
 
@@ -1459,7 +1457,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
                   scope: scopePlan.scope,
                 }),
           persistEntries: scopePlan.persistEntries ?? null,
-          rawUpserts: scopePlan.rawUpserts ?? [],
           scope: scopePlan.scope,
         });
       }
@@ -1472,7 +1469,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const scopePlans = [...customScopePlans, ...genericScopePlans];
     const persistPlans: Array<{
       entries: Map<string, InternalManagedMetadataRecord> | null;
-      rawUpserts: AsyncStorageDriverSetEntry[];
       scope: AsyncStorageNamespaceScope;
     }> = [];
     const successfulStoreDeleteSessions = new Set<string>();
@@ -1555,14 +1551,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
           const scopePlan = scopePlansByNamespaceId.get(
             getNamespaceId(result.action.scope),
           );
-          if (
-            scopePlan !== undefined &&
-            (scopePlan.persistEntries !== null ||
-              (scopePlan.rawUpserts ?? []).length > 0)
-          ) {
+          if (scopePlan !== undefined && scopePlan.persistEntries !== null) {
             persistPlans.push({
               entries: scopePlan.persistEntries,
-              rawUpserts: scopePlan.rawUpserts ?? [],
               scope: scopePlan.scope,
             });
           }
@@ -1585,15 +1576,13 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       if (
         skippedScopeIds.has(getNamespaceId(scopePlan.scope)) ||
         scopePlan.deleteAction !== null ||
-        (scopePlan.persistEntries === null &&
-          (scopePlan.rawUpserts ?? []).length === 0)
+        scopePlan.persistEntries === null
       ) {
         continue;
       }
 
       persistPlans.push({
         entries: scopePlan.persistEntries,
-        rawUpserts: scopePlan.rawUpserts ?? [],
         scope: scopePlan.scope,
       });
     }
@@ -1622,10 +1611,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     );
 
     const persistPromise = Promise.all(
-      persistPlans.map(async ({ entries, rawUpserts, scope }) => {
-        if (rawUpserts.length > 0) {
-          await this.#driverSetManyFrom(driver, scope, rawUpserts);
-        }
+      persistPlans.map(async ({ entries, scope }) => {
         if (entries !== null) {
           await this.#persistNamespaceIndexUsingDriver(driver, scope, entries);
         }

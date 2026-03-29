@@ -1,6 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
+import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
@@ -39,7 +40,10 @@ import {
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
-import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
+import {
+  getParsedOpfsFileData,
+  startOpfsPersistentStorageOperationCapture,
+} from '../utils/persistentStorageOptimizationTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -1117,6 +1121,47 @@ describe('opfs: list query store persistence', () => {
       `);
   });
 
+  test('failed item preloads are memoized so repeated misses skip OPFS reads', async () => {
+    const storeName = 'lq-opfs-missing-item-cache';
+    const sessionKey = 'sess1';
+    const { mockAdapter } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    const env = createEnv({ storeName, sessionKey });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    const firstCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const firstPreloadPromise = env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(firstPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
+    `);
+    const firstOperations = firstCapture.finish().timelineString;
+
+    expect(firstOperations).not.toBe('empty');
+
+    // Reset adapter caches so the second call only stays read-free if the
+    // list-query persistence layer remembered the missing item.
+    opfsPersistentStorage.resetForTests?.();
+
+    const secondCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const secondPreloadPromise =
+      env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(secondPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
+    `);
+    expect(secondCapture.finish().timelineString).toMatchInlineSnapshot(
+      `"empty"`,
+    );
+  });
+
   test('invalid cached items are removed during targeted preload', async () => {
     const storeName = 'lq-opfs-invalid';
     const sessionKey = 'sess1';
@@ -1143,6 +1188,69 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);
+  });
+
+  test('items marked missing can be re-persisted and later preloaded again', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-opfs-repersist-missing-item';
+    const sessionKey = 'sess1';
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Alice' }] },
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    const missingPreloadPromise =
+      env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(missingPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
+    `);
+
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||1']
+    `);
+
+    // Drop the in-memory item without touching the persisted copy so the next
+    // preload must go back to storage.
+    act(() => {
+      env.store.produceState((draft) => {
+        delete draft.items['users||1'];
+        delete draft.itemQueries['users||1'];
+        delete draft.itemLoadedFields['users||1'];
+      });
+    });
+
+    // Clearing adapter caches and pending commits keeps the assertion focused on
+    // whether the persistence layer cleared the missing-item memo on re-save.
+    opfsPersistentStorage.resetForTests?.();
+
+    const reloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const reloadedItem = env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(reloadedItem)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '✅' }
+    `);
+    expect(reloadCapture.finish().timelineString).toContain(
+      '(item data, <"users||1>)',
+    );
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Alice'
+    `);
   });
 
   test('invalid cached item payloads are removed during targeted preload', async () => {

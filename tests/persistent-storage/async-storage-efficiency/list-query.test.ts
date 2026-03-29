@@ -572,7 +572,7 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`i: []`);
   });
 
-  test('when maxItems limit is reached the flush trims items inline', async () => {
+  test('when maxItems limit is reached the flush trims items inline by recency without touching cold queries', async () => {
     const storeName = 'lq-item-metadata';
     const sessionKey = 'sess1';
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -610,6 +610,7 @@ describe('async storage efficiency: list-query', () => {
     expect(
       listQueryScope.listQuery.listStoredItemKeys().sort(),
     ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
+    expect(operationsBreakdown).not.toContain('query data');
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time   |
@@ -635,7 +636,7 @@ describe('async storage efficiency: list-query', () => {
     `);
   });
 
-  test('maxItems-triggered flush also prunes expired persisted standalone items', async () => {
+  test('maxItems-triggered flush re-evaluates mixed standalone and query-backed items using persisted recency', async () => {
     const expiredTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const storeName = 'lq-expired-during-max-items';
     const sessionKey = 'sess1';
@@ -672,7 +673,7 @@ describe('async storage efficiency: list-query', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    // Persist one query-backed item so the cleanup has a referenced entry it must preserve.
+    // Persist one query-backed item before introducing a second query-backed item.
     env.scheduleFetch('highPriority', usersQuery);
     await flushAllTimers();
     await advanceTime(1100);
@@ -698,7 +699,8 @@ describe('async storage efficiency: list-query', () => {
       },
     );
 
-    // Fetching a second query-backed item should keep both referenced entries and prune the expired standalone ones.
+    // Fetching a second query-backed item should re-run the inline trim using the
+    // persisted timestamps from the earlier writes.
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.scheduleFetch('highPriority', adminsQuery);
     await flushAllTimers();
@@ -708,7 +710,7 @@ describe('async storage efficiency: list-query', () => {
 
     expect(
       listQueryScope.listQuery.listStoredItemKeys().sort(),
-    ).toMatchInlineSnapshot(`['"admins||4', '"users||3']`);
+    ).toMatchInlineSnapshot(`['"admins||4', '"standalone||1']`);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/lq-expired-during-max-items/li._i.r.json',
@@ -716,7 +718,7 @@ describe('async storage efficiency: list-query', () => {
     ).toMatchInlineSnapshot(`
       e:
         "admins||4: { a: 1735689610121, p: 'admins||4' }
-        "users||3: { a: 1735689607156, p: 'users||3' }
+        "standalone||1: { a: 1735689610121, p: 'standalone||1' }
     `);
     expect(
       getParsedOpfsFileData(
@@ -743,31 +745,35 @@ describe('async storage efficiency: list-query', () => {
              |    └ (items index) | 0.22 kb
       1.856s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data)
-      .      | 🗑️ #4 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
+      .      | 🗑️ #4 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~3224064498.p.json
+             |    └ (item data, <"users||3>)
+      .      | 🗑️ #5 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~3111345837.p.json
+             |    └ (item data, <"standalone||2>)
+      .      | 👁️ #6 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
              |    └ (item data, <"standalone||1>)
-      .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
+      .      | 👁️ #7 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data, <"admins||4>)
-      1.858s | ✍️ #6 tsdf/sess1/lq-expired-during-max-items/li.h~3224064498.p.json
-             |    └ (item data, <"users||3>) | 0.11 kb -> 0.17 kb
       1.859s | ✍️ #3 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data) | 0.00 kb -> 0.04 kb
-      .      | ✍️ #5 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
+      .      | ✍️ #6 tsdf/sess1/lq-expired-during-max-items/li.h~2775221404.p.json
+             |    └ (item data, <"standalone||1>) | 0.00 kb -> 0.11 kb
+      .      | ✍️ #7 tsdf/sess1/lq-expired-during-max-items/li.h~2792428996.p.json
              |    └ (item data, <"admins||4>) | 0.00 kb -> 0.12 kb
       1.863s | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.14 kb -> 0.28 kb
       .      | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
-             |    └ (items index) | 0.22 kb -> 0.21 kb
+             |    └ (items index) | 0.22 kb -> 0.22 kb
       1.865s | end
       "
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (1.21 kb)
-      ├ sess1 (1.14 kb)
-      │ └ lq-expired-during-max-items (1.13 kb)
-      │   ├ li._i.r.json (0.23 kb)
+      "tsdf (1.17 kb)
+      ├ sess1 (1.10 kb)
+      │ └ lq-expired-during-max-items (1.09 kb)
+      │   ├ li._i.r.json (0.25 kb)
+      │   ├ li.h~2775221404.p.json (0.16 kb)
       │   ├ li.h~2792428996.p.json (0.17 kb)
-      │   ├ li.h~3224064498.p.json (0.21 kb)
       │   ├ lq._i.r.json (0.30 kb)
       │   ├ lq.h~2316387135.p.json (0.08 kb)
       │   └ lq.h~2902406637.p.json (0.08 kb)
@@ -814,7 +820,7 @@ describe('async storage efficiency: list-query', () => {
       `);
   });
 
-  test('maxItems cleanup evicts standalone items before query-related shared items', async () => {
+  test('maxItems startup cleanup falls back to protected pinned and recency for preloaded query items', async () => {
     const storeName = 'lq-shared-item-cleanup';
     const sessionKey = 'sess1';
     const firstUsersQuery = {
@@ -864,9 +870,11 @@ describe('async storage efficiency: list-query', () => {
     await waitForScheduledCleanup();
     const cleanupOperations = cleanupCapture.finish().timelineString;
 
+    // The oldest item should be evicted by recency, while the persisted query
+    // payloads stay untouched and rely on later hydration to filter the missing item.
     expect(
       listQueryScope.listQuery.listStoredItemKeys().sort(),
-    ).toMatchInlineSnapshot(`['"users||1', '"users||2', '"users||3']`);
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3', '"users||4']`);
     expect(
       getParsedOpfsFileData('tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json'),
     ).toMatchInlineSnapshot(`
@@ -894,6 +902,7 @@ describe('async storage efficiency: list-query', () => {
         'tsdf/sess1/lq-shared-item-cleanup/lq.<{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>.p.json',
       ),
     ).toMatchInlineSnapshot(`i: ['"users||1', '"users||3']`);
+    expect(cleanupOperations).not.toContain('query data');
     expect(cleanupOperations).toMatchInlineSnapshot(`
       "
       time   |
@@ -907,15 +916,11 @@ describe('async storage efficiency: list-query', () => {
              |    └ (items index) | 0.39 kb
       2.008s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json
              |    └ (queries index) | 0.69 kb
-      2.011s | 📖 #3 tsdf/sess1/lq-shared-item-cleanup/lq.h~1805955701.p.json
-             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.06 kb
-      .      | 📖 #4 tsdf/sess1/lq-shared-item-cleanup/lq.h~1471050956.p.json
-             |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.06 kb
-      2.014s | 🗑️ #5 ✅ tsdf/sess1/lq-shared-item-cleanup/li.h~2854834066.p.json
-             |    └ (item data, <"users||4>)
-      2.017s | ✍️ #1 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
+      2.011s | 🗑️ #3 ✅ tsdf/sess1/lq-shared-item-cleanup/li.h~228010772.p.json
+             |    └ (item data, <"users||1>)
+      2.014s | ✍️ #1 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
              |    └ (items index) | 0.39 kb -> 0.29 kb
-      2.019s | end
+      2.016s | end
       "
     `);
   });
