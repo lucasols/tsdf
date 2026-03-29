@@ -12,19 +12,31 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - `Improve` (default): make concrete test changes. Add or rewrite tests, improve structure/readability, replace weak assertions, reduce flakiness, and run the relevant test commands.
 - `Review` (only when explicitly requested): inspect tests and report prioritized findings without changing files unless the user then asks for fixes.
 
+## Core Standard
+
+- Prefer tests that reproduce real library usage flows through the highest practical public surface.
+- Prefer existing higher-level suites over adding new low-level or synthetic “contract” tests when they protect the same behavior with better realism.
+- Do not build fake or simplified versions of real library behavior inside tests unless the true system boundary requires a mock.
+- When fake timers are used, keep timings realistic. Prefer shared defaults and production-like durations over tiny toy numbers chosen only to make snapshots shorter.
+- Treat unrealistic timing, impossible state combinations, and elaborate synthetic scaffolding as defects in the test shape, not acceptable shortcuts.
+- Be willing to delete or replace tests that are rare, low-risk, redundant, or too synthetic to provide meaningful confidence.
+
 ## Improve Workflow
 
 1. Define scope and intent.
 2. Identify the most valuable test improvements.
 3. Implement the test changes.
-4. Validate realism, readability, and determinism.
-5. Run relevant tests and lint/type-check when appropriate.
-6. Summarize what changed, what improved, and any remaining gaps.
+4. Validate realism, abstraction level, and test value.
+5. Validate readability, assertion quality, and determinism.
+6. Run relevant tests and lint/type-check when appropriate.
+7. Summarize what changed, what improved, and any remaining gaps.
 
 ## 1) Define Scope And Intent
 
 - Identify the behavior each test file is supposed to protect.
 - Map core production paths to explicit tests.
+- Identify the highest realistic public surface that can express the behavior.
+- Check whether an existing higher-level suite already covers the behavior better than the current test location or abstraction level.
 - Distinguish whether the user wants:
   - better tests by default, or
   - a review-only pass with findings and no edits.
@@ -35,21 +47,39 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - Prioritize changes that improve regression protection, readability, and trustworthiness.
 - Focus first on:
   - missing realistic scenarios,
+  - unrealistic or synthetic scenarios that should be rewritten or removed,
   - tests that give false confidence,
   - flaky/nondeterministic behavior,
   - assertions that are too weak or too low-level,
-  - tests whose story is hard to follow.
+  - tests whose story is hard to follow,
+  - rare low-risk edge cases that cost more to maintain than the confidence they add.
 - Prefer a small number of high-signal improvements over many low-value edits.
+- Prefer deleting low-value or misleading tests over preserving them out of caution.
 
 ## 3) Implement The Test Changes
 
 - Add or rewrite tests to cover realistic production behavior.
+- Prefer feature-level or user-visible flows through the normal test envs and public hooks/APIs.
 - Prefer the project's shared test environments and utilities instead of hand-rolled setup.
+- Reuse the library’s real implementation plus boundary mocks instead of inventing fake mini-implementations inside the test.
+- When timing matters, use realistic durations from shared defaults/constants/helpers unless the exact timing value is itself the behavior under test.
 - Strengthen assertions so failures explain the regression clearly.
 - Prefer readable snapshots, timelines, and helpers over dense low-level expectations.
 - Improve naming, comments, and structure so the scenario is obvious at a glance.
+- Delete or consolidate tests that are redundant, low-signal, or only test speculative low-risk edges through synthetic setup.
 
-## 4) Validate Readability And Reviewability
+## 4) Validate Realism, Abstraction Level, And Test Value
+
+- Ask first: does this test reproduce a real library usage flow, or is it simulating an artificial situation that exists only in the test?
+- Prefer the highest practical public surface. If a bug can be expressed through normal envs, hooks, store APIs, or feature-level flows, do not drop to lower-level scheduler/internal contract scaffolding.
+- Flag tests that create fake, naive, or simplified versions of behavior that the library already implements for real.
+- Flag tests that use unrealistic fake-timer values purely for convenience, especially when shared defaults or production-like timings are available.
+- When fake timers are used, prefer values that preserve the real relative timing story of the feature. Tiny durations are acceptable only when the exact numbers are irrelevant and realism is not lost; if you keep them, justify that choice in the test.
+- Flag rare, low-risk edge-case tests that add substantial scaffolding, brittleness, or maintenance cost without materially improving regression protection.
+- In improve mode, remove or replace tests that are low-value, unrealistic, or better covered by a more realistic suite.
+- If a behavior cannot be reproduced in a realistic way and the test would only assert a synthetic scenario, skip or delete the test instead of adding speculative coverage.
+
+## 5) Validate Readability And Reviewability
 
 - Treat readability as one of the top priorities in the review. If a test is difficult for a human to scan and understand quickly, that is a real defect in the test suite.
 - Ask: can a reviewer understand the scenario, the actions, and the expected outcome at a glance without reverse-engineering the implementation?
@@ -59,24 +89,26 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - Prefer tests that communicate the regression they guard against immediately through naming, comments, helpers, and snapshots.
 - Do not treat readability issues as optional cleanup. In improve mode, fix them. In review mode, report them.
 
-## 5) Validate Behavioral Coverage
+## 6) Validate Behavioral Coverage
 
 - Check happy path, edge cases, error paths, and state transitions.
 - Check that contract changes would fail tests in useful ways.
 - Flag missing cases where production code can regress silently.
 - Verify that test scenarios reflect realistic production usage — tests should simulate how the code is actually used in practice, not manufacture impossible or contrived sequences just to satisfy assertions.
 - Flag tests that force artificial conditions (impossible state combinations, unrealistic timing, states that cannot occur in real usage) to make assertions pass. These create false confidence and may mask real bugs.
+- Do not treat every theoretical edge case as worth covering. Prefer omitting or deleting rare low-risk cases when they do not reflect meaningful user risk.
 - Verify that test setup matches the scenario being tested. Initial state must reflect the real-world context of the behavior under test (for example, a test for "refetch on mount" should start with an already-loaded store, not an idle one — testing refetch from idle is a different scenario). Mismatched initial state makes the test verify the wrong behavior.
 
-## 6) Validate Mock Fidelity And Test Setup
+## 7) Validate Mock Fidelity And Test Setup
 
 - Flag mocks that deviate from real behavior in ways that affect test validity (for example, a mock that resolves instantly when the real API is paginated, or a mock that never returns errors when the test is about error handling).
 - Verify mocks preserve the behavioral contract of what they replace — response shape, timing characteristics, failure modes.
+- Prefer production-like default timings from shared mocks/helpers over custom tiny durations chosen just to shorten the test, unless the shorter duration is itself important to the scenario.
 - Flag test setup that initializes state inconsistent with the scenario being tested. The initial conditions must be the ones that would naturally lead to the behavior under test in production.
 - Use the project's shared test utilities (`createLoggerStore`, `flushAllTimers`, `advanceTime`, `range`, `pick`, test environment helpers from `tests/mocks/`) instead of rolling custom setup. Inconsistent setup across tests makes it harder to spot when initial conditions are wrong.
 - Treat raw `fetchHistory` assertions as a default review finding when `serverTable.getRequestHistory('item' | 'list' | 'all')` can express the same behavior. Prefer `getRequestHistory(...)` because it snapshots the request contract instead of low-level transport internals; fall back to raw `fetchHistory` only when the higher-level helper cannot express the assertion.
 
-## 7) Validate Assertion Quality And Failure Signals
+## 8) Validate Assertion Quality And Failure Signals
 
 - Prefer assertions on user-visible or API-visible outcomes.
 - Flag weak assertions (for example, only checking call count without verifying effect).
@@ -92,13 +124,14 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - Flag tests that force the reader to reconstruct the scenario from many low-level assertions instead of showing the important behavior in one readable artifact.
 - Flag assertions that only pass because the test setup created an unrealistic scenario. If the assertion requires bending production invariants, the test is wrong — not the code.
 
-## 8) Check Determinism And Flakiness
+## 9) Check Determinism And Flakiness
 
 - Flag reliance on real time, random values, network race timing, or global mutable state.
 - Ensure async behavior is awaited and timers are controlled.
+- If fake timers are used, verify the chosen durations preserve realism and do not distort the behavior being protected.
 - Flag tests that depend on execution order or leaked state between tests.
 
-## 9) Readability Standards
+## 10) Readability Standards
 
 - Prefer focused tests with clear setup and intent.
 - Default stance: unreadable tests are review findings, not polish opportunities.
@@ -116,11 +149,13 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - Flag tests where related assertions are scattered across many individual `expect` calls when they could be grouped into one snapshot.
 - Flag tests that mix transport assertions, `fetchHistory` checks, and raw state checks without a clear primary assertion showing the user-visible story. In most cases the `fetchHistory` part should be replaced with `serverTable.getRequestHistory(...)`.
 - Flag redundant or noise assertions that don't add confidence — re-checking already-asserted state, asserting obvious intermediate values, or verifying test setup rather than behavior. Every assertion should justify its existence by catching a distinct regression.
+- Flag tests whose complexity exists mainly to cover a marginal edge with little real user risk. If the scenario is not carrying its weight, simplify or remove it.
 
-## 10) Deliver The Result
+## 11) Deliver The Result
 
 - In `Improve` mode:
   - summarize the test changes you made,
+  - mention any tests you deleted or intentionally declined to add because they were unrealistic or low-value,
   - report which commands you ran,
   - call out any remaining gaps or risks.
 - In `Review` mode:
