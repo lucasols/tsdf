@@ -1046,14 +1046,48 @@ describe('async storage efficiency: list-query', () => {
     // Let the startup scan settle so the captured delete path only reflects the explicit flush.
     await settleStartupBackgroundScan(mockAdapter);
 
+    // Deleting a cold standalone item should consult only the namespace index and remove the
+    // payload file directly, without hydrating the cached item into memory first.
+    const deleteCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     env.apiStore.deleteItemState('users||1');
     await advanceTime(1100);
     await flushAllTimers();
+    const {
+      operations: deleteOperationLabels,
+      timelineString: deleteOperations,
+    } = deleteCapture.finish();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
     expect(listQueryScope.listQuery.listStoredItemKeys()).toMatchInlineSnapshot(
       `[]`,
     );
+    expect(
+      deleteOperationLabels.filter(
+        (label) =>
+          label.startsWith('📖') && label.includes(deletedItemStorageKey),
+      ),
+    ).toMatchInlineSnapshot(`[]`);
+    expect(deleteOperations).toMatchInlineSnapshot(`
+      "
+      time   |
+      1s     | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1.001s | 📂 dir-open ✅ tsdf/sess1/lq-cold-delete-flow (store directory)
+      1.002s | 👁️ #1 file-open ✅ tsdf/sess1/lq-cold-delete-flow/li._i.r.json
+             |    └ (items index)
+      1.003s | 📖 #1 tsdf/sess1/lq-cold-delete-flow/li._i.r.json
+             |    └ (items index) | 0.11 kb
+             ·
+      1.046s | 📖 #1 tsdf/sess1/lq-cold-delete-flow/li._i.r.json
+             |    └ (items index) | 0.11 kb
+      1.049s | 🗑️ #2 ✅ tsdf/sess1/lq-cold-delete-flow/li.h~228010772.p.json
+             |    └ (item data, <"users||1>)
+      1.05s  | 🗑️ #1 ✅ tsdf/sess1/lq-cold-delete-flow/li._i.r.json (items index)
+      1.051s | 🧹 del-dir ✅ tsdf/sess1/lq-cold-delete-flow (store directory)
+      1.052s | 🧹 del-dir ✅ tsdf/sess1 (session directory)
+      1.053s | end
+      "
+    `);
   });
 
   test('direct getQueryState reads the cached list query multiple times with short gaps and keeps it in memory', async () => {
