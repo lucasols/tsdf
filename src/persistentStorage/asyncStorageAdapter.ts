@@ -376,11 +376,7 @@ export async function driverGetManyFrom(
   keys: string[],
 ): Promise<unknown[]> {
   if (keys.length === 0) return [];
-  if (driver.getMany) {
-    return driver.getMany(scope, keys);
-  }
-
-  return Promise.all(keys.map((key) => driver.get(scope, key)));
+  return driver.getMany(scope, keys);
 }
 
 export type AsyncStorageManagedMetadataRecord = InternalManagedMetadataRecord;
@@ -1432,14 +1428,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     entries: AsyncStorageDriverSetEntry[],
   ): Promise<void> {
     if (entries.length === 0) return;
-    if (driver.setMany) {
-      await driver.setMany(scope, entries);
-      return;
-    }
-
-    await Promise.all(
-      entries.map((entry) => driver.set(scope, entry.key, entry.value)),
-    );
+    await driver.setMany(scope, entries);
   }
 
   async #driverRemoveManyFrom(
@@ -1448,12 +1437,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     keys: string[],
   ): Promise<void> {
     if (keys.length === 0) return;
-    if (driver.removeMany) {
-      await driver.removeMany(scope, keys);
-      return;
-    }
-
-    await Promise.all(keys.map((key) => driver.remove(scope, key)));
+    await driver.removeMany(scope, keys);
   }
 
   #readMaintenanceState(): AsyncStorageMaintenanceState {
@@ -2256,15 +2240,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     sessionKey?: string,
   ): Promise<AsyncStorageDiscoveredScope[]> {
     const discoveredScopes =
-      await driver.listScopesWithKnownRecordKeys?.(sessionKey);
-    if (discoveredScopes !== undefined) {
-      return discoveredScopes.filter(
-        ({ scope }) => scope.kind !== '__internal.protected',
-      );
-    }
-
-    return (await this.#listDiscoveredScopes(sessionKey, driver)).map(
-      (scope) => ({ knownRecordKeys: null, scope }),
+      await driver.listScopesWithKnownRecordKeys(sessionKey);
+    return discoveredScopes.filter(
+      ({ scope }) => scope.kind !== '__internal.protected',
     );
   }
 

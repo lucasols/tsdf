@@ -126,22 +126,22 @@ export type AsyncStorageDriver = {
   clear(scope: AsyncStorageNamespaceScope): Promise<void>;
   /** Namespace discovery used for cold cleanup, protected-key restore, and session clearing. */
   listScopes(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]>;
-  /** Optional cleanup fast path that returns discovered scopes together with known raw record keys. */
-  listScopesWithKnownRecordKeys?(
+  /** Returns discovered scopes together with known raw record keys. Used for cleanup. */
+  listScopesWithKnownRecordKeys(
     sessionKey?: string,
   ): Promise<AsyncStorageDiscoveredScope[]>;
-  /** Optional bulk read fast path for backends that support it cheaply. */
-  getMany?(
+  /** Bulk read for multiple keys in a single call. */
+  getMany(
     scope: AsyncStorageNamespaceScope,
     keys: string[],
   ): Promise<unknown[]>;
-  /** Optional bulk write fast path for backends that support it cheaply. */
-  setMany?(
+  /** Bulk write for multiple entries in a single call. */
+  setMany(
     scope: AsyncStorageNamespaceScope,
     entries: AsyncStorageDriverSetEntry[],
   ): Promise<void>;
-  /** Optional bulk remove fast path for backends that support it cheaply. */
-  removeMany?(scope: AsyncStorageNamespaceScope, keys: string[]): Promise<void>;
+  /** Bulk remove for multiple keys in a single call. */
+  removeMany(scope: AsyncStorageNamespaceScope, keys: string[]): Promise<void>;
   /** @internal Test-only reset hook used by TSDF internals. */
   __resetForTests?(): void;
 };
