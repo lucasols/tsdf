@@ -15,6 +15,7 @@ import {
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
   captureHookRemount,
+  createDocumentEnv,
   createListQueryEnv,
   flushInvalidationPersistence,
   markEntryOfflineProtected,
@@ -162,11 +163,12 @@ describe('async storage efficiency: list-query', () => {
     listQueryScope.listQuery.seedQuery(secondQuery, []);
     await advanceTime(100);
     listQueryScope.listQuery.seedQuery(thirdQuery, []);
+    listQueryScope.listQuery.setQueryStaticPolicy({ m: 2 });
 
     // Startup should only schedule the cleanup work.
     const startupOperationCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
-    createListQueryEnv({ storeName, sessionKey, maxQueries: 2 });
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
 
@@ -190,11 +192,11 @@ describe('async storage efficiency: list-query', () => {
       2.004s | 🗂️ list-dir-entries tsdf/sess1/lq-startup-max-queries
              |    └ (store directory) entries=["file:lq._i.r.json","file:lq.h~2817177027.p.json","file:lq.h~3601729766.p.json","file:lq.h~4141397404.p.json"]
       2.005s | 📖 #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
-             |    └ (queries index) | 0.40 kb
+             |    └ (queries index) | 0.43 kb
       2.008s | 🗑️ #2 ✅ tsdf/sess1/lq-startup-max-queries/lq.h~4141397404.p.json
              |    └ (query data, <{tableId:"first"}>)
       2.011s | ✍️ #1 tsdf/sess1/lq-startup-max-queries/lq._i.r.json
-             |    └ (queries index) | 0.40 kb -> 0.28 kb
+             |    └ (queries index) | 0.43 kb -> 0.30 kb
       2.013s | end
       "
     `);
@@ -208,6 +210,135 @@ describe('async storage efficiency: list-query', () => {
         {tableId:"third"}:
           a: 1735689600200
           p: { tableId: 'third' }
+
+      s: { m: 2 }
+    `);
+  });
+
+  test('cold startup enforces the default list-query maxQueries policy before the store mounts', async () => {
+    const storeName = 'lq-cold-default-max-queries';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+
+    for (let index = 0; index <= 100; index++) {
+      listQueryScope.listQuery.seedQuery({ tableId: `users-${index}` }, []);
+      await advanceTime(10);
+    }
+
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
+    await waitForScheduledCleanup();
+
+    expect(
+      listQueryScope.listQuery
+        .listStoredQueryKeys()
+        .sort((left, right) =>
+          left.localeCompare(right, undefined, { numeric: true }),
+        )
+        .map((queryKey) =>
+          queryKey.replace('{tableId:"', '').replace('"}', ''),
+        ),
+    ).toMatchInlineSnapshot(`
+      - 'users-1'
+      - 'users-2'
+      - 'users-3'
+      - 'users-4'
+      - 'users-5'
+      - 'users-6'
+      - 'users-7'
+      - 'users-8'
+      - 'users-9'
+      - 'users-10'
+      - 'users-11'
+      - 'users-12'
+      - 'users-13'
+      - 'users-14'
+      - 'users-15'
+      - 'users-16'
+      - 'users-17'
+      - 'users-18'
+      - 'users-19'
+      - 'users-20'
+      - 'users-21'
+      - 'users-22'
+      - 'users-23'
+      - 'users-24'
+      - 'users-25'
+      - 'users-26'
+      - 'users-27'
+      - 'users-28'
+      - 'users-29'
+      - 'users-30'
+      - 'users-31'
+      - 'users-32'
+      - 'users-33'
+      - 'users-34'
+      - 'users-35'
+      - 'users-36'
+      - 'users-37'
+      - 'users-38'
+      - 'users-39'
+      - 'users-40'
+      - 'users-41'
+      - 'users-42'
+      - 'users-43'
+      - 'users-44'
+      - 'users-45'
+      - 'users-46'
+      - 'users-47'
+      - 'users-48'
+      - 'users-49'
+      - 'users-50'
+      - 'users-51'
+      - 'users-52'
+      - 'users-53'
+      - 'users-54'
+      - 'users-55'
+      - 'users-56'
+      - 'users-57'
+      - 'users-58'
+      - 'users-59'
+      - 'users-60'
+      - 'users-61'
+      - 'users-62'
+      - 'users-63'
+      - 'users-64'
+      - 'users-65'
+      - 'users-66'
+      - 'users-67'
+      - 'users-68'
+      - 'users-69'
+      - 'users-70'
+      - 'users-71'
+      - 'users-72'
+      - 'users-73'
+      - 'users-74'
+      - 'users-75'
+      - 'users-76'
+      - 'users-77'
+      - 'users-78'
+      - 'users-79'
+      - 'users-80'
+      - 'users-81'
+      - 'users-82'
+      - 'users-83'
+      - 'users-84'
+      - 'users-85'
+      - 'users-86'
+      - 'users-87'
+      - 'users-88'
+      - 'users-89'
+      - 'users-90'
+      - 'users-91'
+      - 'users-92'
+      - 'users-93'
+      - 'users-94'
+      - 'users-95'
+      - 'users-96'
+      - 'users-97'
+      - 'users-98'
+      - 'users-99'
+      - 'users-100'
     `);
   });
 
@@ -274,7 +405,7 @@ describe('async storage efficiency: list-query', () => {
       1.865s | ✍️ #2 tsdf/sess1/lq-query-metadata/li._i.r.json
              |    └ (items index) | 0.00 kb -> 0.11 kb
       1.866s | ✍️ #1 tsdf/sess1/lq-query-metadata/lq._i.r.json
-             |    └ (queries index) | 0.28 kb -> 0.28 kb
+             |    └ (queries index) | 0.28 kb -> 0.30 kb
       1.868s | end
       "
     `);
@@ -300,6 +431,8 @@ describe('async storage efficiency: list-query', () => {
           {tableId:"third"}:
             a: 1735689604959
             p: { tableId: 'third' }
+
+        s: { m: 2 }
       `);
     expect(
       getParsedOpfsFileData(
@@ -382,13 +515,13 @@ describe('async storage efficiency: list-query', () => {
       1.865s | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.00 kb -> 0.11 kb
       1.866s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
-             |    └ (queries index) | 0.28 kb -> 0.28 kb
+             |    └ (queries index) | 0.28 kb -> 0.30 kb
              ·
       3.62s  | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
-             |    └ (queries index) | 0.28 kb
+             |    └ (queries index) | 0.30 kb
              ·
       3.663s | 📖 #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
-             |    └ (queries index) | 0.28 kb
+             |    └ (queries index) | 0.30 kb
       .      | 📖 #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.11 kb
       3.666s | 🗑️ #6 ✅ tsdf/sess1/lq-coalesced-query-maintenance/lq.h~2817177027.p.json
@@ -404,7 +537,7 @@ describe('async storage efficiency: list-query', () => {
       .      | ✍️ #8 tsdf/sess1/lq-coalesced-query-maintenance/li.h~1322690187.p.json
              |    └ (item data, <"fourth||2>) | 0.00 kb -> 0.09 kb
       3.673s | ✍️ #1 tsdf/sess1/lq-coalesced-query-maintenance/lq._i.r.json
-             |    └ (queries index) | 0.28 kb -> 0.28 kb
+             |    └ (queries index) | 0.30 kb -> 0.30 kb
       .      | ✍️ #2 tsdf/sess1/lq-coalesced-query-maintenance/li._i.r.json
              |    └ (items index) | 0.11 kb -> 0.21 kb
       3.675s | end
@@ -630,7 +763,7 @@ describe('async storage efficiency: list-query', () => {
       1.052s | ✍️ #3 tsdf/sess1/lq-item-metadata/li.h~3224064498.p.json
              |    └ (item data, <"users||3>) | 0.00 kb -> 0.09 kb
       1.056s | ✍️ #1 tsdf/sess1/lq-item-metadata/li._i.r.json
-             |    └ (items index) | 0.20 kb -> 0.20 kb
+             |    └ (items index) | 0.20 kb -> 0.22 kb
       1.058s | end
       "
     `);
@@ -719,6 +852,8 @@ describe('async storage efficiency: list-query', () => {
       e:
         "admins||4: { a: 1735689610121, p: 'admins||4' }
         "standalone||1: { a: 1735689610121, p: 'standalone||1' }
+
+      s: { m: 2 }
     `);
     expect(
       getParsedOpfsFileData(
@@ -737,12 +872,12 @@ describe('async storage efficiency: list-query', () => {
       "
       time   |
       1.81s  | 📖 #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
-             |    └ (items index) | 0.22 kb
+             |    └ (items index) | 0.24 kb
              ·
       1.853s | 📖 #2 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.14 kb
       .      | 📖 #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
-             |    └ (items index) | 0.22 kb
+             |    └ (items index) | 0.24 kb
       1.856s | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/lq-expired-during-max-items/lq.h~2316387135.p.json
              |    └ (query data)
       .      | 🗑️ #4 ✅ tsdf/sess1/lq-expired-during-max-items/li.h~3224064498.p.json
@@ -762,16 +897,16 @@ describe('async storage efficiency: list-query', () => {
       1.863s | ✍️ #2 tsdf/sess1/lq-expired-during-max-items/lq._i.r.json
              |    └ (queries index) | 0.14 kb -> 0.28 kb
       .      | ✍️ #1 tsdf/sess1/lq-expired-during-max-items/li._i.r.json
-             |    └ (items index) | 0.22 kb -> 0.22 kb
+             |    └ (items index) | 0.24 kb -> 0.25 kb
       1.865s | end
       "
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (1.17 kb)
-      ├ sess1 (1.10 kb)
-      │ └ lq-expired-during-max-items (1.09 kb)
-      │   ├ li._i.r.json (0.25 kb)
+      "tsdf (1.19 kb)
+      ├ sess1 (1.12 kb)
+      │ └ lq-expired-during-max-items (1.11 kb)
+      │   ├ li._i.r.json (0.27 kb)
       │   ├ li.h~2775221404.p.json (0.16 kb)
       │   ├ li.h~2792428996.p.json (0.17 kb)
       │   ├ lq._i.r.json (0.30 kb)
@@ -862,7 +997,8 @@ describe('async storage efficiency: list-query', () => {
       sharedItemKey,
       bobOnlyItemKey,
     ]);
-    createListQueryEnv({ storeName, sessionKey, maxItems: 3 });
+    listQueryScope.listQuery.setItemStaticPolicy({ m: 3 });
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
 
     // Let the startup-scheduled maintenance enforce maxItems against the preloaded cache.
     const cleanupCapture =
@@ -913,13 +1049,13 @@ describe('async storage efficiency: list-query', () => {
       2.004s | 🗂️ list-dir-entries tsdf/sess1/lq-shared-item-cleanup
              |    └ (store directory) entries=["file:li._i.r.json","file:li.h~1937155452.p.json","file:li.h~228010772.p.json","file:li.h~2854834066.p.json","file:li.h~3224064498.p.json","file:lq._i.r.json","file:lq.h~1471050956.p.json","file:lq.h~1805955701.p.json"]
       2.005s | 📖 #1 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
-             |    └ (items index) | 0.39 kb
+             |    └ (items index) | 0.41 kb
       2.008s | 📖 #2 tsdf/sess1/lq-shared-item-cleanup/lq._i.r.json
              |    └ (queries index) | 0.69 kb
       2.011s | 🗑️ #3 ✅ tsdf/sess1/lq-shared-item-cleanup/li.h~228010772.p.json
              |    └ (item data, <"users||1>)
       2.014s | ✍️ #1 tsdf/sess1/lq-shared-item-cleanup/li._i.r.json
-             |    └ (items index) | 0.39 kb -> 0.29 kb
+             |    └ (items index) | 0.41 kb -> 0.32 kb
       2.016s | end
       "
     `);
@@ -1915,19 +2051,12 @@ describe('async storage efficiency: list-query', () => {
       "
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      .    | 📂 dir-open ✅ tsdf/sess1 (session directory) ⚠️ DUPLICATE OPEN
       1ms  | 📂 dir-open ✅ tsdf/sess1/lq-multi-item-remount-flow
            |    └ (store directory)
-      .    | 📂 dir-open ✅ tsdf/sess1/lq-multi-item-remount-flow
-           |    └ (store directory) ⚠️ DUPLICATE OPEN
       2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
            |    └ (items index)
-      .    | 👁️ #1 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
-           |    └ (items index) ⚠️ DUPLICATE OPEN
       3ms  | 📖 #1 tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
            |    └ (items index) | 0.20 kb
-      .    | 📖 #1 tsdf/sess1/lq-multi-item-remount-flow/li._i.r.json
-           |    └ (items index) | 0.20 kb ⚠️ REPEATED READ <10ms UNCHANGED
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.h~228010772.p.json
            |    └ (item data, <"users||1>)
       .    | 👁️ #3 file-open ✅ tsdf/sess1/lq-multi-item-remount-flow/li.h~1937155452.p.json
@@ -2106,10 +2235,17 @@ describe('async storage efficiency: list-query', () => {
         listQuery: {
           items: [
             { tableId: 'users', id: 1, data: { id: 1, name: 'User 1' } },
+            { tableId: 'users', id: 2, data: { id: 2, name: 'User 2' } },
             { tableId: 'projects', id: 1, data: { id: 1, name: 'Project 1' } },
           ],
           queries: [
-            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
+            {
+              params: usersQuery,
+              items: [
+                { tableId: 'users', id: 1 },
+                { tableId: 'users', id: 2 },
+              ],
+            },
             { params: projectsQuery, items: [{ tableId: 'projects', id: 1 }] },
           ],
         },
@@ -2117,6 +2253,10 @@ describe('async storage efficiency: list-query', () => {
     });
     const listQueryScope = mockAdapter.scope(storeName, sessionKey);
     const usersItemKey = listQueryScope.listQuery.itemStorageKey('users', 1);
+    const usersSecondItemKey = listQueryScope.listQuery.itemStorageKey(
+      'users',
+      2,
+    );
     const projectsItemKey = listQueryScope.listQuery.itemStorageKey(
       'projects',
       1,
@@ -2145,21 +2285,37 @@ describe('async storage efficiency: list-query', () => {
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/lq.h~2902406637.p.json
            |    └ (query data, <{tableId:"users"}>)
       7ms  | 📖 #2 tsdf/sess1/list-query-opfs-efficiency/lq.h~2902406637.p.json
-           |    └ (query data, <{tableId:"users"}>) | 0.04 kb
+           |    └ (query data, <{tableId:"users"}>) | 0.06 kb
       10ms | 👁️ #3 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/li._i.r.json
            |    └ (items index)
       11ms | 📖 #3 tsdf/sess1/list-query-opfs-efficiency/li._i.r.json
-           |    └ (items index) | 0.21 kb
+           |    └ (items index) | 0.31 kb
       14ms | 👁️ #4 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/li.h~228010772.p.json
            |    └ (item data, <"users||1>)
+      .    | 👁️ #5 file-open ✅ tsdf/sess1/list-query-opfs-efficiency/li.h~1937155452.p.json
+           |    └ (item data, <"users||2>)
       15ms | 📖 #4 tsdf/sess1/list-query-opfs-efficiency/li.h~228010772.p.json
            |    └ (item data, <"users||1>) | 0.09 kb
+      .    | 📖 #5 tsdf/sess1/list-query-opfs-efficiency/li.h~1937155452.p.json
+           |    └ (item data, <"users||2>) | 0.09 kb
       18ms | end
       "
     `);
 
+    expect(
+      mockAdapter.payloadGetManyRequests.filter(
+        (keys) =>
+          keys.includes(usersItemKey) || keys.includes(usersSecondItemKey),
+      ),
+    ).toMatchInlineSnapshot(`
+      - - 'tsdf.sess1.list-query-opfs-efficiency.li."users||1'
+        - 'tsdf.sess1.list-query-opfs-efficiency.li."users||2'
+    `);
     expect(mockAdapter.payloadGetManyRequests.flat()).toContain(usersQueryKey);
     expect(mockAdapter.payloadGetManyRequests.flat()).toContain(usersItemKey);
+    expect(mockAdapter.payloadGetManyRequests.flat()).toContain(
+      usersSecondItemKey,
+    );
     expect(mockAdapter.payloadGetManyRequests.flat()).not.toContain(
       projectsQueryKey,
     );
@@ -2210,10 +2366,10 @@ describe('async storage efficiency: list-query', () => {
       "
       time   |
       1.81s  | 📖 #1 tsdf/sess1/list-query-opfs-eviction-efficiency/lq._i.r.json
-             |    └ (queries index) | 0.28 kb
+             |    └ (queries index) | 0.31 kb
              ·
       1.853s | 📖 #2 tsdf/sess1/list-query-opfs-eviction-efficiency/li._i.r.json
-             |    └ (items index) | 0.21 kb
+             |    └ (items index) | 0.24 kb
       1.858s | ✍️ #3 tsdf/sess1/list-query-opfs-eviction-efficiency/li.h~2924752681.p.json
              |    └ (item data, <"projects||1>) | 0.10 kb -> 0.16 kb
       1.86s  | end

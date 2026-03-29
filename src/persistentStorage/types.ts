@@ -1,5 +1,5 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { type RcType } from 'runcheck';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
@@ -81,12 +81,18 @@ export type AsyncStorageNamespaceCommitTouch = {
   lastAccessAt?: number;
 };
 
+export type AsyncStorageNamespaceStaticPolicy = {
+  maxEntries?: number;
+  pinnedKeys?: string[];
+};
+
 export type AsyncStorageNamespaceCommitArgs<
   TValue,
   TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
 > = {
   upserts?: AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>[];
   removes?: string[];
+  staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
   touches?: AsyncStorageNamespaceCommitTouch[];
 };
 
@@ -118,8 +124,8 @@ export type AsyncStorageDriver = {
   listKeys(scope: AsyncStorageNamespaceScope): Promise<string[]>;
   /** Remove every record from a logical namespace. */
   clear(scope: AsyncStorageNamespaceScope): Promise<void>;
-  /** Optional namespace discovery fast path used by OPFS cleanup/session clearing. */
-  listScopes?(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]>;
+  /** Namespace discovery used for cold cleanup, protected-key restore, and session clearing. */
+  listScopes(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]>;
   /** Optional cleanup fast path that returns discovered scopes together with known raw record keys. */
   listScopesWithKnownRecordKeys?(
     sessionKey?: string,
@@ -136,8 +142,8 @@ export type AsyncStorageDriver = {
   ): Promise<void>;
   /** Optional bulk remove fast path for backends that support it cheaply. */
   removeMany?(scope: AsyncStorageNamespaceScope, keys: string[]): Promise<void>;
-  /** Test-only reset hook used by TSDF internals. */
-  resetForTests?(): void;
+  /** @internal Test-only reset hook used by TSDF internals. */
+  __resetForTests?(): void;
 };
 
 export type AsyncStorageNamespaceHandle<

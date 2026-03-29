@@ -261,9 +261,12 @@ function parseManagedMetadataRecord(
   };
 }
 
-function parseManagedIndexRecord(
-  value: unknown,
-): Map<string, ManagedMetadataRecord> | null {
+type ManagedIndexRecord = {
+  entries: Map<string, ManagedMetadataRecord>;
+  staticPolicy: Record<string, unknown> | null;
+};
+
+function parseManagedIndexRecord(value: unknown): ManagedIndexRecord | null {
   const record = getRecord(value);
   const rawEntries = getRecord(record?.e);
   if (rawEntries === null) return null;
@@ -275,13 +278,17 @@ function parseManagedIndexRecord(
     entries.set(key, parsed);
   }
 
-  return entries;
+  return { entries, staticPolicy: getRecord(record?.s) };
 }
 
-type RawManagedIndexRecord = { e: Record<string, RawManagedMetadataRecord> };
+type RawManagedIndexRecord = {
+  e: Record<string, RawManagedMetadataRecord>;
+  s: Record<string, unknown> | undefined;
+};
 
 function serializeManagedIndexRecord(
   entries: ReadonlyMap<string, ManagedMetadataRecord>,
+  staticPolicy: Record<string, unknown> | null = null,
 ): RawManagedIndexRecord {
   return {
     e: Object.fromEntries(
@@ -290,6 +297,7 @@ function serializeManagedIndexRecord(
         serializeManagedMetadataRecord(metadata),
       ]),
     ),
+    s: staticPolicy ?? undefined,
   };
 }
 
@@ -402,28 +410,62 @@ function removeRawRecord(
   mockBrowserOpfs.removeFile(filePathForRecord(scope, key));
 }
 
-function readNamespaceIndex(
+function readManagedIndexRecord(
   mockBrowserOpfs: MockBrowserOpfsEnvironment,
   scope: AsyncStorageNamespaceScope,
-): Map<string, ManagedMetadataRecord> {
+): ManagedIndexRecord | null {
   const raw = readRawRecord(
     mockBrowserOpfs,
     scope,
     ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   );
-  if (raw === null) return new Map<string, ManagedMetadataRecord>();
+  if (raw === null) return null;
 
-  return (
-    __LEGIT_CAST__<Map<string, ManagedMetadataRecord> | null, unknown>(
-      parseManagedIndexRecord(safeJsonParse(raw)),
-    ) ?? new Map<string, ManagedMetadataRecord>()
+  return __LEGIT_CAST__<ManagedIndexRecord | null, unknown>(
+    parseManagedIndexRecord(safeJsonParse(raw)),
   );
+}
+
+function readNamespaceIndex(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+  scope: AsyncStorageNamespaceScope,
+): Map<string, ManagedMetadataRecord> {
+  return (
+    readManagedIndexRecord(mockBrowserOpfs, scope)?.entries ??
+    new Map<string, ManagedMetadataRecord>()
+  );
+}
+
+function readNamespaceStaticPolicy(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+  scope: AsyncStorageNamespaceScope,
+): Record<string, unknown> | null {
+  return readManagedIndexRecord(mockBrowserOpfs, scope)?.staticPolicy ?? null;
+}
+
+function setNamespaceStaticPolicy(
+  mockBrowserOpfs: MockBrowserOpfsEnvironment,
+  scope: AsyncStorageNamespaceScope,
+  policy: Record<string, unknown>,
+): void {
+  const current = readManagedIndexRecord(mockBrowserOpfs, scope);
+  if (current === null) {
+    throw new Error(
+      `Missing namespace index at ${filePathForRecord(scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY)}`,
+    );
+  }
+
+  writeNamespaceIndex(mockBrowserOpfs, scope, current.entries, policy);
 }
 
 function writeNamespaceIndex(
   mockBrowserOpfs: MockBrowserOpfsEnvironment,
   scope: AsyncStorageNamespaceScope,
   entries: ReadonlyMap<string, ManagedMetadataRecord>,
+  staticPolicy: Record<string, unknown> | null = readNamespaceStaticPolicy(
+    mockBrowserOpfs,
+    scope,
+  ),
 ): void {
   if (entries.size === 0) {
     removeRawRecord(mockBrowserOpfs, scope, ASYNC_NAMESPACE_INDEX_RECORD_KEY);
@@ -434,7 +476,7 @@ function writeNamespaceIndex(
     mockBrowserOpfs,
     scope,
     ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-    JSON.stringify(serializeManagedIndexRecord(entries)),
+    JSON.stringify(serializeManagedIndexRecord(entries, staticPolicy)),
   );
 }
 
@@ -448,9 +490,9 @@ function readNamespaceIndexFromSnapshot(
   if (raw === undefined) return new Map<string, ManagedMetadataRecord>();
 
   return (
-    __LEGIT_CAST__<Map<string, ManagedMetadataRecord> | null, unknown>(
+    __LEGIT_CAST__<ManagedIndexRecord | null, unknown>(
       parseManagedIndexRecord(safeJsonParse(raw)),
-    ) ?? new Map<string, ManagedMetadataRecord>()
+    )?.entries ?? new Map<string, ManagedMetadataRecord>()
   );
 }
 
@@ -549,7 +591,10 @@ function readLogicalMetadata(
   );
   if (raw === null) return null;
 
-  return parseManagedIndexRecord(safeJsonParse(raw))?.get(location.key) ?? null;
+  return (
+    parseManagedIndexRecord(safeJsonParse(raw))?.entries.get(location.key) ??
+    null
+  );
 }
 
 function setPayloadValue(
@@ -1063,6 +1108,7 @@ export type OpfsPersistentStorageTestStoreScope = {
     itemKey: (payload: string) => string;
     itemStorageKey: (payload: string) => string;
     listStoredPayloads: () => string[];
+    setStaticPolicy: (policy: Record<string, unknown>) => void;
     seedItem: <T>(
       payload: string,
       data: T,
@@ -1078,6 +1124,8 @@ export type OpfsPersistentStorageTestStoreScope = {
     queryStorageKey: (params: unknown) => string;
     listStoredItemKeys: () => string[];
     listStoredQueryKeys: () => string[];
+    setItemStaticPolicy: (policy: Record<string, unknown>) => void;
+    setQueryStaticPolicy: (policy: Record<string, unknown>) => void;
     seedItem: <T>(
       tableId: string,
       id: number | string,
@@ -1307,6 +1355,12 @@ export function createOpfsPersistentStorageTestStore(
             },
           );
         },
+        setStaticPolicy: (policy) =>
+          setNamespaceStaticPolicy(
+            mockBrowserOpfs,
+            collectionNamespace,
+            policy,
+          ),
         seedItem<T>(
           payload: string,
           data: T,
@@ -1337,6 +1391,18 @@ export function createOpfsPersistentStorageTestStore(
           listStoredKeysForNamespace(listQueryItemNamespace),
         listStoredQueryKeys: () =>
           listStoredKeysForNamespace(listQueryQueryNamespace),
+        setItemStaticPolicy: (policy) =>
+          setNamespaceStaticPolicy(
+            mockBrowserOpfs,
+            listQueryItemNamespace,
+            policy,
+          ),
+        setQueryStaticPolicy: (policy) =>
+          setNamespaceStaticPolicy(
+            mockBrowserOpfs,
+            listQueryQueryNamespace,
+            policy,
+          ),
         seedItem<T>(
           tableId: string,
           id: number | string,

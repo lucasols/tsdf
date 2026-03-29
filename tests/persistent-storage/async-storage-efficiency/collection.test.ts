@@ -15,6 +15,7 @@ import {
 import {
   captureHookRemount,
   createCollectionEnv,
+  createDocumentEnv,
   flushInvalidationPersistence,
   markEntryOfflineProtected,
   setProtectedKeysSnapshot,
@@ -167,11 +168,12 @@ describe('async storage efficiency: collection', () => {
     collectionScope.collection.seedItem('c', {
       value: { id: 'c', name: 'Newest cached' },
     });
+    collectionScope.collection.setStaticPolicy({ m: 2 });
 
     // Startup should only schedule the cleanup work.
     const startupOperationCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
-    createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
 
@@ -195,11 +197,11 @@ describe('async storage efficiency: collection', () => {
       2.004s | 🗂️ list-dir-entries tsdf/sess1/collection-startup-max-items
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1374750182.p.json","file:ci.h~3986551515.p.json","file:ci.h~3994120284.p.json"]
       2.005s | 📖 #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb
+             |    └ (namespace index) | 0.24 kb
       2.008s | 🗑️ #2 ✅ tsdf/sess1/collection-startup-max-items/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       2.011s | ✍️ #1 tsdf/sess1/collection-startup-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb -> 0.15 kb
+             |    └ (namespace index) | 0.24 kb -> 0.17 kb
       2.013s | end
       "
     `);
@@ -211,6 +213,82 @@ describe('async storage efficiency: collection', () => {
       e:
         "b: { a: 1735689600100, p: 'b' }
         "c: { a: 1735689600200, p: 'c' }
+
+      s: { m: 2 }
+    `);
+  });
+
+  test('cold startup enforces the default collection maxItems policy before the store mounts', async () => {
+    const storeName = 'collection-cold-default-max-items';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+
+    for (let index = 0; index <= 50; index++) {
+      collectionScope.collection.seedItem(String(index), {
+        value: { id: String(index), name: `Cached ${index}` },
+      });
+      await advanceTime(10);
+    }
+
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
+    await waitForScheduledCleanup();
+
+    expect(
+      collectionScope.collection
+        .listStoredPayloads()
+        .sort((left, right) => left.localeCompare(right)),
+    ).toMatchInlineSnapshot(`
+      - '1'
+      - '10'
+      - '11'
+      - '12'
+      - '13'
+      - '14'
+      - '15'
+      - '16'
+      - '17'
+      - '18'
+      - '19'
+      - '2'
+      - '20'
+      - '21'
+      - '22'
+      - '23'
+      - '24'
+      - '25'
+      - '26'
+      - '27'
+      - '28'
+      - '29'
+      - '3'
+      - '30'
+      - '31'
+      - '32'
+      - '33'
+      - '34'
+      - '35'
+      - '36'
+      - '37'
+      - '38'
+      - '39'
+      - '4'
+      - '40'
+      - '41'
+      - '42'
+      - '43'
+      - '44'
+      - '45'
+      - '46'
+      - '47'
+      - '48'
+      - '49'
+      - '5'
+      - '50'
+      - '6'
+      - '7'
+      - '8'
+      - '9'
     `);
   });
 
@@ -238,10 +316,11 @@ describe('async storage efficiency: collection', () => {
     collectionScope.collection.seedItem('d', {
       value: { id: 'd', name: 'Newest cached' },
     });
+    collectionScope.collection.setStaticPolicy({ m: 2 });
 
     const startupOperationCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
-    createCollectionEnv({ storeName, sessionKey, maxItems: 2 });
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey });
     const startupOperationBreakdown =
       startupOperationCapture.finish().timelineString;
 
@@ -265,13 +344,13 @@ describe('async storage efficiency: collection', () => {
       2.004s | 🗂️ list-dir-entries tsdf/sess1/collection-startup-expiration-max-items
              |    └ (store directory) entries=["file:ci._i.r.json","file:ci.h~1374750182.p.json","file:ci.h~2103001283.p.json","file:ci.h~3986551515.p.json","file:ci.h~3994120284.p.json"]
       2.005s | 📖 #1 tsdf/sess1/collection-startup-expiration-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.28 kb
+             |    └ (namespace index) | 0.30 kb
       2.008s | 🗑️ #2 ✅ tsdf/sess1/collection-startup-expiration-max-items/ci.h~3986551515.p.json
              |    └ (entry data, <"a>)
       .      | 🗑️ #3 ✅ tsdf/sess1/collection-startup-expiration-max-items/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       2.011s | ✍️ #1 tsdf/sess1/collection-startup-expiration-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.28 kb -> 0.15 kb
+             |    └ (namespace index) | 0.30 kb -> 0.17 kb
       2.013s | end
       "
     `);
@@ -325,27 +404,29 @@ describe('async storage efficiency: collection', () => {
       1.002s | 👁️ #1 file-open ✅ tsdf/sess1/col-max-items-metadata/ci._i.r.json
              |    └ (namespace index)
       1.003s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
+             |    └ (namespace index) | 0.21 kb
              ·
       1.046s | 📖 #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
+             |    └ (namespace index) | 0.21 kb
       1.049s | 🗑️ #2 ✅ tsdf/sess1/col-max-items-metadata/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
-      .      | 👁️ #3 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      .      | 🗑️ #3 ✅ tsdf/sess1/col-max-items-metadata/ci.h~3986551515.p.json
+             |    └ (entry data, <"a>)
+      .      | 👁️ #4 file-open-or-create 🆕 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>)
-      1.052s | ✍️ #3 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
+      1.052s | ✍️ #4 tsdf/sess1/col-max-items-metadata/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
       1.056s | ✍️ #1 tsdf/sess1/col-max-items-metadata/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb -> 0.15 kb
+             |    └ (namespace index) | 0.21 kb -> 0.17 kb
       1.058s | end
       "
     `);
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.58 kb)
-      ├ sess1 (0.51 kb)
-      │ └ col-max-items-metadata (0.50 kb)
-      │   ├ ci._i.r.json (0.17 kb)
+      "tsdf (0.61 kb)
+      ├ sess1 (0.54 kb)
+      │ └ col-max-items-metadata (0.53 kb)
+      │   ├ ci._i.r.json (0.19 kb)
       │   ├ ci.h~2103001283.p.json (0.14 kb)
       │   └ ci.h~3994120284.p.json (0.15 kb)
       └ tsdf._am.g* (0.06 kb)"
@@ -410,7 +491,7 @@ describe('async storage efficiency: collection', () => {
       1.052s | ✍️ #4 tsdf/sess1/col-expired-during-max-items/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
       1.056s | ✍️ #1 tsdf/sess1/col-expired-during-max-items/ci._i.r.json
-             |    └ (namespace index) | 0.21 kb -> 0.15 kb
+             |    └ (namespace index) | 0.21 kb -> 0.17 kb
       1.058s | end
       "
     `);
@@ -471,13 +552,13 @@ describe('async storage efficiency: collection', () => {
       1.052s | ✍️ #3 tsdf/sess1/col-inline-overflow-cleanup/ci.h~3994120284.p.json
              |    └ (entry data, <"c>) | 0.00 kb -> 0.10 kb
       1.056s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb -> 0.15 kb
+             |    └ (namespace index) | 0.15 kb -> 0.17 kb
              ·
       2.1s   | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
+             |    └ (namespace index) | 0.17 kb
              ·
       2.143s | 📖 #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb
+             |    └ (namespace index) | 0.17 kb
       2.146s | 🗑️ #4 ✅ tsdf/sess1/col-inline-overflow-cleanup/ci.h~1374750182.p.json
              |    └ (entry data, <"b>)
       .      | 👁️ #5 file-open-or-create 🆕 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
@@ -485,7 +566,7 @@ describe('async storage efficiency: collection', () => {
       2.149s | ✍️ #5 tsdf/sess1/col-inline-overflow-cleanup/ci.h~2103001283.p.json
              |    └ (entry data, <"d>) | 0.00 kb -> 0.10 kb
       2.153s | ✍️ #1 tsdf/sess1/col-inline-overflow-cleanup/ci._i.r.json
-             |    └ (namespace index) | 0.15 kb -> 0.15 kb
+             |    └ (namespace index) | 0.17 kb -> 0.17 kb
       2.155s | end
       "
     `);
@@ -1242,18 +1323,11 @@ describe('async storage efficiency: collection', () => {
       "
       time |
       0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
-      .    | 📂 dir-open ✅ tsdf/sess1 (session directory) ⚠️ DUPLICATE OPEN
       1ms  | 📂 dir-open ✅ tsdf/sess1/col-multi-remount-flow (store directory)
-      .    | 📂 dir-open ✅ tsdf/sess1/col-multi-remount-flow
-           |    └ (store directory) ⚠️ DUPLICATE OPEN
       2ms  | 👁️ #1 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci._i.r.json
            |    └ (namespace index)
-      .    | 👁️ #1 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci._i.r.json
-           |    └ (namespace index) ⚠️ DUPLICATE OPEN
       3ms  | 📖 #1 tsdf/sess1/col-multi-remount-flow/ci._i.r.json
            |    └ (namespace index) | 0.15 kb
-      .    | 📖 #1 tsdf/sess1/col-multi-remount-flow/ci._i.r.json
-           |    └ (namespace index) | 0.15 kb ⚠️ REPEATED READ <10ms UNCHANGED
       6ms  | 👁️ #2 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~3574006234.p.json
            |    └ (entry data, <"1>)
       .    | 👁️ #3 file-open ✅ tsdf/sess1/col-multi-remount-flow/ci.h~1409323532.p.json
@@ -1354,6 +1428,68 @@ describe('async storage efficiency: collection', () => {
 
     expect(mockAdapter.payloadGetManyRequests.flat()).toContain(hotKey);
     expect(mockAdapter.payloadGetManyRequests.flat()).not.toContain(coldKey);
+  });
+
+  test('useMultipleItems batches cold collection preloads through one namespace index read', async () => {
+    const storeName = 'collection-opfs-batched-preload';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore({
+      initialState: {
+        storeName,
+        sessionKey,
+        collection: [
+          { payload: '1', data: { value: { id: '1', name: 'One' } } },
+          { payload: '2', data: { value: { id: '2', name: 'Two' } } },
+        ],
+      },
+    });
+    const env = createCollectionEnv({ storeName, sessionKey });
+
+    await settleStartupBackgroundScan(mockAdapter);
+
+    const preloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const hook = renderHook(() =>
+      env.apiStore.useMultipleItems([{ payload: '1' }, { payload: '2' }], {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await advanceTime(250);
+    hook.unmount();
+
+    const { operations, timelineString } = preloadCapture.finish();
+
+    expect(
+      operations.filter(
+        (label) => label.startsWith('📖') && label.includes('/ci._i.r.json'),
+      ),
+    ).toHaveLength(1);
+    expect(mockAdapter.payloadGetManyRequests).toMatchInlineSnapshot(`
+      - - 'tsdf.sess1.collection-opfs-batched-preload.ci."1'
+        - 'tsdf.sess1.collection-opfs-batched-preload.ci."2'
+    `);
+    expect(timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/collection-opfs-batched-preload
+           |    └ (store directory)
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/collection-opfs-batched-preload/ci._i.r.json
+           |    └ (namespace index)
+      3ms  | 📖 #1 tsdf/sess1/collection-opfs-batched-preload/ci._i.r.json
+           |    └ (namespace index) | 0.15 kb
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/collection-opfs-batched-preload/ci.h~3574006234.p.json
+           |    └ (entry data, <"1>)
+      .    | 👁️ #3 file-open ✅ tsdf/sess1/collection-opfs-batched-preload/ci.h~1409323532.p.json
+           |    └ (entry data, <"2>)
+      7ms  | 📖 #2 tsdf/sess1/collection-opfs-batched-preload/ci.h~3574006234.p.json
+           |    └ (entry data, <"1>) | 0.09 kb
+      .    | 📖 #3 tsdf/sess1/collection-opfs-batched-preload/ci.h~1409323532.p.json
+           |    └ (entry data, <"2>) | 0.09 kb
+      10ms | end
+      "
+    `);
   });
 
   test('protected snapshot reuse avoids rereading the async protected registry during eviction', async () => {

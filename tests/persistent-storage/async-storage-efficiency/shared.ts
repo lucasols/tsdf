@@ -145,6 +145,7 @@ export type CollectionItemState = { id: string; name: string };
 
 export function createCollectionEnv(options: {
   maxItems?: number;
+  pinnedItems?: string[];
   serverData?: Record<string, CollectionItemState>;
   sessionKey?: string;
   storeName: string;
@@ -157,6 +158,7 @@ export function createCollectionEnv(options: {
       schema: wrappedCollectionItemSchema,
       payloadSchema: rc_string,
       maxItems: options.maxItems,
+      pinnedItems: options.pinnedItems,
     },
   });
 }
@@ -175,6 +177,8 @@ export function createListQueryEnv(options: {
   maxQueries?: number;
   maxQuerySize?: number;
   offsetPagination?: OffsetPaginationConfig;
+  pinnedItems?: string[];
+  pinnedQueries?: Array<{ tableId: string }>;
   serverData?: Tables<Row>;
   sessionKey?: string;
   storeName: string;
@@ -193,6 +197,8 @@ export function createListQueryEnv(options: {
       maxItems: options.maxItems,
       maxQueries: options.maxQueries,
       maxQuerySize: options.maxQuerySize,
+      pinnedItems: options.pinnedItems,
+      pinnedQueries: options.pinnedQueries,
     },
   });
 }

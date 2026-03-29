@@ -77,6 +77,8 @@ function createEnv(options: {
   maxQueries?: number;
   maxQuerySize?: number;
   ignoreItems?: string[] | ((payload: string) => boolean);
+  pinnedItems?: string[];
+  pinnedQueries?: ListQueryParams[];
   serverData?: Tables<Row>;
   partialResources?: PartialResourcesConfig<Row>;
   offsetPagination?: OffsetPaginationConfig;
@@ -98,6 +100,8 @@ function createEnv(options: {
       maxQueries: options.maxQueries,
       maxQuerySize: options.maxQuerySize,
       ignoreItems: options.ignoreItems,
+      pinnedItems: options.pinnedItems,
+      pinnedQueries: options.pinnedQueries,
     },
   });
 }
@@ -1121,7 +1125,7 @@ describe('opfs: list query store persistence', () => {
       `);
   });
 
-  test('failed item preloads are memoized so repeated misses skip OPFS reads', async () => {
+  test('missing item preloads still recheck storage on later retries', async () => {
     const storeName = 'lq-opfs-missing-item-cache';
     const sessionKey = 'sess1';
     const { mockAdapter } = createListQueryOpfsTestStore({
@@ -1145,10 +1149,6 @@ describe('opfs: list query store persistence', () => {
 
     expect(firstOperations).not.toBe('empty');
 
-    // Reset adapter caches so the second call only stays read-free if the
-    // list-query persistence layer remembered the missing item.
-    opfsPersistentStorage.resetForTests?.();
-
     const secondCapture =
       startOpfsPersistentStorageOperationCapture(mockAdapter);
     const secondPreloadPromise =
@@ -1157,9 +1157,173 @@ describe('opfs: list query store persistence', () => {
       .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
-    expect(secondCapture.finish().timelineString).toMatchInlineSnapshot(
-      `"empty"`,
-    );
+    const secondOperations = secondCapture.finish().timelineString;
+    expect(secondOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1ms  | end
+      "
+    `);
+  });
+
+  test('persisted list item maxItems policy is enforced on cold startup before the store mounts', async () => {
+    const storeName = 'lq-opfs-cold-policy-max-items';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Older cached' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 2, { id: 2, name: 'Older kept' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 3, { id: 3, name: 'Newest kept' });
+    listQueryScope.setItemStaticPolicy({ m: 2 });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||2', '"users||3']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-max-items/li._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "users||2: { a: 1735689600100, p: 'users||2' }
+        "users||3: { a: 1735689600200, p: 'users||3' }
+
+      s: { m: 2 }
+    `);
+  });
+
+  test('persisted list query maxQueries policy is enforced on cold startup before the store mounts', async () => {
+    const storeName = 'lq-opfs-cold-policy-max-queries';
+    const sessionKey = 'sess1';
+    const firstQuery = { tableId: 'users-1' };
+    const secondQuery = { tableId: 'users-2' };
+    const thirdQuery = { tableId: 'users-3' };
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedQuery(firstQuery, []);
+    await advanceTime(100);
+    listQueryScope.seedQuery(secondQuery, []);
+    await advanceTime(100);
+    listQueryScope.seedQuery(thirdQuery, []);
+    listQueryScope.setQueryStaticPolicy({ m: 2 });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
+      ['{tableId:"users-2"}', '{tableId:"users-3"}']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-max-queries/lq._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        {tableId:"users-2"}:
+          a: 1735689600100
+          p: { tableId: 'users-2' }
+        {tableId:"users-3"}:
+          a: 1735689600200
+          p: { tableId: 'users-3' }
+
+      s: { m: 2 }
+    `);
+  });
+
+  test('persisted pinned list item keys survive cold startup cleanup', async () => {
+    const storeName = 'lq-opfs-cold-policy-pinned-item';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Pinned older' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 2, { id: 2, name: 'Newer other' });
+    listQueryScope.setItemStaticPolicy({
+      k: [listQueryScope.itemKey('users', 1)],
+      m: 1,
+    });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||1']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-pinned-item/li._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "users||1: { a: 1735689600000, p: 'users||1' }
+
+      s:
+        k: ['"users||1']
+        m: 1
+    `);
+  });
+
+  test('persisted pinned query keys survive cold startup cleanup', async () => {
+    const storeName = 'lq-opfs-cold-policy-pinned-query';
+    const sessionKey = 'sess1';
+    const pinnedQuery = { tableId: 'users-pinned' };
+    const otherQuery = { tableId: 'users-other' };
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedQuery(pinnedQuery, []);
+    await advanceTime(100);
+    listQueryScope.seedQuery(otherQuery, []);
+    listQueryScope.setQueryStaticPolicy({
+      k: [listQueryScope.queryKey(pinnedQuery)],
+      m: 1,
+    });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
+      ['{tableId:"users-pinned"}']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-pinned-query/lq._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        {tableId:"users-pinned"}:
+          a: 1735689600000
+          p: { tableId: 'users-pinned' }
+
+      s:
+        k: ['{tableId:"users-pinned"}']
+        m: 1
+    `);
   });
 
   test('invalid cached items are removed during targeted preload', async () => {
@@ -1234,7 +1398,7 @@ describe('opfs: list query store persistence', () => {
     });
 
     // Clearing adapter caches and pending commits keeps the assertion focused on
-    // whether the persistence layer cleared the missing-item memo on re-save.
+    // whether the next preload really goes back to storage.
     opfsPersistentStorage.resetForTests?.();
 
     const reloadCapture =

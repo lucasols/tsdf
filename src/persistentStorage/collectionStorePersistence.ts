@@ -26,8 +26,6 @@ import {
 } from './parsePersistedData';
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  METADATA_RECORD_PREFIX,
-  PAYLOAD_RECORD_PREFIX,
   getPayloadRecordKey,
 } from './opfsFileNaming';
 import {
@@ -58,7 +56,7 @@ import type {
 import { validateWithSchema } from './validateWithSchema';
 import {
   ASYNC_STORAGE_MAX_AGE_MS,
-  isOfflineProtectedMetadata,
+  buildPersistedStaticPolicy,
   readAsyncStorageNamespaceIndexStateUsingDriver,
   registerAsyncStartupStoreCleanup,
   getProtectedKeysFromMetadata,
@@ -165,6 +163,14 @@ export function setupCollectionPersistence<
   const localStorageAdapter = getLocalStorageAdapter(storageAdapter);
   const asyncStorageAdapter =
     storageAdapter === 'local-sync' ? null : storageAdapter;
+  const persistedStaticPolicy =
+    localStorageAdapter === null
+      ? buildPersistedStaticPolicy(
+          config.maxItems,
+          DEFAULT_MAX_ITEMS,
+          pinnedItemKeys,
+        )
+      : null;
   const persistentConfig = config;
   const dataSchema = normalizePersistentStorageDataSchema(config.schema);
   const itemStorageValueCodec = {
@@ -213,7 +219,6 @@ export function setupCollectionPersistence<
   const pendingPreloads = new Map<string, Promise<boolean>>();
   const persistedSnapshotByKey = new Map<string, string>();
   const hydratedPersistedKeys = new Set<string>();
-  const knownMissingPersistedKeys = new Set<string>();
   let knownPersistedKeys: Set<string> | null = null;
   let maintenanceManifestKey: string | null = null;
 
@@ -274,165 +279,52 @@ export function setupCollectionPersistence<
     }
 
     const { scope } = discoveredScope;
-    const rawKeys =
-      discoveredScope.knownRecordKeys ?? (await args.driver.listKeys(scope));
-    const uniqueDeleteKeys = new Set<string>();
     const indexState = await readAsyncStorageNamespaceIndexStateUsingDriver(
       args.driver,
       scope,
-      rawKeys,
+      discoveredScope.knownRecordKeys,
     );
 
     if (!indexState.valid || indexState.entries === null) {
-      const keysToRemove = rawKeys.filter(
-        (key) => key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY || indexState.exists,
-      );
-      if (keysToRemove.length === 0) {
-        return { scopePlans: [], storeDeletePlans: [] };
-      }
-
-      return {
-        scopePlans: [{ deleteKeys: keysToRemove, persistEntries: null, scope }],
-        storeDeletePlans: [
-          {
-            representativeScope: scope,
-            removedKeysByScope: [{ keys: keysToRemove, scope }],
-          },
-        ],
-      };
+      return { scopePlans: [], storeDeletePlans: [] };
     }
 
-    const payloadKeys = new Set<string>();
-    const rawKeysToRemove: string[] = [];
-    const legacyMetadataRecordKeys: string[] = [];
-    for (const key of rawKeys) {
-      if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
-        payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
-      } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
-        legacyMetadataRecordKeys.push(key);
-      } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
-        rawKeysToRemove.push(key);
-      }
-    }
-
-    for (const key of rawKeysToRemove) {
-      uniqueDeleteKeys.add(key);
-    }
-    for (const key of legacyMetadataRecordKeys) {
-      uniqueDeleteKeys.add(key);
-    }
-
-    const protectedRefs = getSessionProtectedKeysSnapshot(scope.sessionKey);
+    const deleteKeys = new Set<string>();
     const nextEntries = new Map(indexState.entries);
-    const remainingEntries: Array<{
-      itemKey: string;
-      lastAccessAt: number;
-      protected: boolean;
-    }> = [];
+    let indexChanged = false;
 
     for (const [key, metadata] of indexState.entries) {
-      const isProtected =
-        isOfflineProtectedMetadata(metadata.customMetadata) ||
-        protectedRefs?.has(serializeProtectedRef({ ...scope, key })) === true;
-
-      if (!payloadKeys.has(key)) {
-        nextEntries.delete(key);
-        continue;
-      }
-
       const payload = validateWithSchema(
         config.payloadSchema,
         readManifestPayloadMeta(metadata.customMetadata),
       );
       if (payload === null || shouldIgnoreItem(payload)) {
-        uniqueDeleteKeys.add(getPayloadRecordKey(key));
+        deleteKeys.add(getPayloadRecordKey(key));
         nextEntries.delete(key);
-        continue;
-      }
-
-      if (
-        !isProtected &&
-        args.now - metadata.lastAccessAt > ASYNC_STORAGE_MAX_AGE_MS
-      ) {
-        uniqueDeleteKeys.add(getPayloadRecordKey(key));
-        nextEntries.delete(key);
-        continue;
-      }
-
-      remainingEntries.push({
-        itemKey: key,
-        lastAccessAt: metadata.lastAccessAt,
-        protected: isProtected,
-      });
-    }
-
-    for (const payloadKey of payloadKeys) {
-      if (!indexState.entries.has(payloadKey)) {
-        uniqueDeleteKeys.add(getPayloadRecordKey(payloadKey));
+        indexChanged = true;
       }
     }
 
-    const unprotectedCount = remainingEntries.filter(
-      ({ protected: isProtected }) => !isProtected,
-    ).length;
-    const needsEviction =
-      remainingEntries.length > maxItems &&
-      (hasIgnoreItemFilter || unprotectedCount > maxItems);
-
-    if (needsEviction) {
-      remainingEntries.sort(
-        createEvictionComparator(
-          [
-            (entry) => entry.protected,
-            (entry) => pinnedItemKeys.has(entry.itemKey),
-          ],
-          (entry) => entry.lastAccessAt,
-        ),
-      );
-
-      const keptKeys = new Set(
-        remainingEntries.slice(0, maxItems).map(({ itemKey }) => itemKey),
-      );
-      for (const { itemKey } of remainingEntries) {
-        if (keptKeys.has(itemKey)) continue;
-        uniqueDeleteKeys.add(getPayloadRecordKey(itemKey));
-        nextEntries.delete(itemKey);
-      }
+    if (!indexChanged) {
+      return { scopePlans: [], storeDeletePlans: [] };
     }
 
-    const indexChanged =
-      nextEntries.size !== indexState.entries.size ||
-      rawKeysToRemove.length > 0 ||
-      legacyMetadataRecordKeys.length > 0;
-    if (indexChanged && nextEntries.size === 0) {
-      uniqueDeleteKeys.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
+    if (nextEntries.size === 0) {
+      deleteKeys.add(ASYNC_NAMESPACE_INDEX_RECORD_KEY);
     }
 
-    const deleteKeys = [...uniqueDeleteKeys];
-    const scopePlan =
-      deleteKeys.length > 0 || (indexChanged && nextEntries.size > 0)
-        ? [
-            {
-              deleteKeys,
-              persistEntries:
-                indexChanged && nextEntries.size > 0 ? nextEntries : null,
-              scope,
-            } satisfies AsyncStartupCleanupScopePlan,
-          ]
-        : [];
-
-    const storeDeletePlans =
-      deleteKeys.includes(ASYNC_NAMESPACE_INDEX_RECORD_KEY) &&
-      nextEntries.size === 0
-        ? [
-            {
-              representativeScope: scope,
-              removedKeysByScope: [{ keys: deleteKeys, scope }],
-            } satisfies AsyncStartupCleanupStoreDeletePlan,
-          ]
-        : [];
-
-    return { scopePlans: scopePlan, storeDeletePlans };
+    return {
+      scopePlans: [
+        {
+          deleteKeys: [...deleteKeys],
+          persistEntries: nextEntries.size > 0 ? nextEntries : null,
+          persistStaticPolicy:
+            nextEntries.size > 0 ? indexState.staticPolicy : undefined,
+          scope,
+        } satisfies AsyncStartupCleanupScopePlan,
+      ],
+      storeDeletePlans: [],
+    };
   }
 
   async function ensureKnownPersistedKeys(): Promise<Set<string>> {
@@ -447,7 +339,6 @@ export function setupCollectionPersistence<
     persisted: PersistedCollectionItemData<unknown>,
   ): void {
     hydratedPersistedKeys.add(itemKey);
-    knownMissingPersistedKeys.delete(itemKey);
     persistedSnapshotByKey.set(itemKey, JSON.stringify(persisted));
     knownPersistedKeys?.add(itemKey);
   }
@@ -505,7 +396,6 @@ export function setupCollectionPersistence<
     itemKey: string,
   ): TSFDCollectionItem<ItemState, ItemPayload> | undefined {
     if (localStorageAdapter === null) return undefined;
-    if (knownMissingPersistedKeys.has(itemKey)) return undefined;
 
     const sessionKey = config.getSessionKey();
     if (sessionKey === false) return undefined;
@@ -524,7 +414,6 @@ export function setupCollectionPersistence<
     );
 
     if (!cacheEntry) {
-      knownMissingPersistedKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -542,7 +431,6 @@ export function setupCollectionPersistence<
         metadata: 'namespace',
         namespacePrefix: prefix,
       });
-      knownMissingPersistedKeys.add(itemKey);
       forgetPersistedItem(itemKey);
       return undefined;
     }
@@ -579,6 +467,52 @@ export function setupCollectionPersistence<
     return snapshot ? parseHydratedItemSnapshot(snapshot) : undefined;
   }
 
+  function resolveAsyncPreloadedItem(
+    itemKey: string,
+    cached: PersistedCollectionItemData<ItemState | StorageState> | null,
+    currentGeneration: number,
+  ): boolean {
+    if (currentGeneration !== generation || !storeRef) {
+      return false;
+    }
+    if (!cached) {
+      forgetPersistedItem(itemKey);
+      return false;
+    }
+
+    const persisted = parsePersistedCollectionItemData(
+      cached,
+      config.payloadSchema,
+    );
+    if (!persisted) {
+      forgetPersistedItem(itemKey);
+      void namespace.remove(itemKey).catch(() => {});
+      return false;
+    }
+
+    const validated = toCollectionItemState(
+      persisted,
+      dataSchema,
+      shouldIgnoreItem,
+    );
+
+    if (!validated) {
+      forgetPersistedItem(itemKey);
+      void namespace.remove(itemKey).catch(() => {});
+      return false;
+    }
+
+    rememberHydratedItem(itemKey, cached);
+
+    if (storeRef.state[itemKey] !== undefined) {
+      return storeRef.state[itemKey] !== null;
+    }
+
+    materializeHydratedItem(itemKey, validated);
+
+    return true;
+  }
+
   async function preloadItem(itemKey: string): Promise<boolean> {
     if (!storeRef) return false;
     const existingItem = storeRef.state[itemKey];
@@ -606,41 +540,9 @@ export function setupCollectionPersistence<
     const currentGeneration = generation;
     const promise = namespace
       .load(itemKey, { touch: 'coarse' })
-      .then((cached) => {
-        if (!cached || currentGeneration !== generation || !storeRef) {
-          return false;
-        }
-
-        const persisted = parsePersistedCollectionItemData(
-          cached,
-          config.payloadSchema,
-        );
-        if (!persisted) {
-          void namespace.remove(itemKey).catch(() => {});
-          return false;
-        }
-
-        const validated = toCollectionItemState(
-          persisted,
-          dataSchema,
-          shouldIgnoreItem,
-        );
-
-        if (!validated) {
-          void namespace.remove(itemKey).catch(() => {});
-          return false;
-        }
-
-        rememberHydratedItem(itemKey, cached);
-
-        if (storeRef.state[itemKey] !== undefined) {
-          return storeRef.state[itemKey] !== null;
-        }
-
-        materializeHydratedItem(itemKey, validated);
-
-        return true;
-      })
+      .then((cached) =>
+        resolveAsyncPreloadedItem(itemKey, cached, currentGeneration),
+      )
       .finally(() => {
         if (currentGeneration === generation) {
           pendingPreloads.delete(itemKey);
@@ -652,11 +554,70 @@ export function setupCollectionPersistence<
   }
 
   async function preloadItems(itemKeys: string[]): Promise<boolean[]> {
-    return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+    if (localStorageAdapter !== null || itemKeys.length <= 1) {
+      return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+    }
+    if (!storeRef) return itemKeys.map(() => false);
+
+    const resultsByKey = new Map<string, Promise<boolean>>();
+    const batchKeys: string[] = [];
+
+    for (const itemKey of [...new Set(itemKeys)]) {
+      const existingItem = storeRef.state[itemKey];
+      if (existingItem !== undefined) {
+        resultsByKey.set(itemKey, Promise.resolve(existingItem !== null));
+        continue;
+      }
+      const existingPromise = pendingPreloads.get(itemKey);
+      if (existingPromise !== undefined) {
+        resultsByKey.set(itemKey, existingPromise);
+        continue;
+      }
+
+      batchKeys.push(itemKey);
+    }
+
+    if (batchKeys.length > 0) {
+      const currentGeneration = generation;
+      const batchPromise = namespace
+        .loadMany(batchKeys, { touch: 'coarse' })
+        .then((cachedEntries) => {
+          const resolved = new Map<string, boolean>();
+          for (const [index, itemKey] of batchKeys.entries()) {
+            resolved.set(
+              itemKey,
+              resolveAsyncPreloadedItem(
+                itemKey,
+                cachedEntries[index] ?? null,
+                currentGeneration,
+              ),
+            );
+          }
+          return resolved;
+        });
+
+      for (const itemKey of batchKeys) {
+        const itemPromise = batchPromise
+          .then((resolved) => resolved.get(itemKey) ?? false)
+          .finally(() => {
+            if (currentGeneration === generation) {
+              pendingPreloads.delete(itemKey);
+            }
+          });
+        pendingPreloads.set(itemKey, itemPromise);
+        resultsByKey.set(itemKey, itemPromise);
+      }
+    }
+
+    return Promise.all(
+      itemKeys.map(
+        (itemKey) => resultsByKey.get(itemKey) ?? Promise.resolve(false),
+      ),
+    );
   }
 
   async function maybeHydrateItems(itemKeys: string[]): Promise<boolean[]> {
-    return Promise.all(itemKeys.map((itemKey) => preloadItem(itemKey)));
+    return preloadItems(itemKeys);
   }
 
   async function evictStoredItems(): Promise<void> {
@@ -911,10 +872,17 @@ export function setupCollectionPersistence<
         if (hydratedItem === undefined) continue;
         stateEntries.push([itemKey, hydratedItem]);
       }
-      const previousOverflowMetadataEntries =
-        knownPersistedKeys === null &&
+      const persistableStateEntryCount = stateEntries.filter(
+        ([, item]) => item?.data && !shouldIgnoreItem(item.payload),
+      ).length;
+      const shouldTrackAsyncOverflow =
         localStorageAdapter === null &&
-        config.maxItems !== undefined
+        (config.maxItems !== undefined ||
+          (knownPersistedKeys?.size ?? 0) > maxItems ||
+          hydratedPersistedKeys.size > maxItems ||
+          persistableStateEntryCount > maxItems);
+      const previousOverflowMetadataEntries =
+        knownPersistedKeys === null && shouldTrackAsyncOverflow
           ? await listAllPersistentStorageNamespaceMetadata(namespace, {
               order: 'lru-desc',
             })
@@ -925,7 +893,7 @@ export function setupCollectionPersistence<
           : previousOverflowMetadataEntries !== null
             ? new Set(previousOverflowMetadataEntries.map((entry) => entry.key))
             : localStorageAdapter !== null ||
-                config.maxItems !== undefined ||
+                shouldTrackAsyncOverflow ||
                 stateEntries.some(([itemKey, item]) => {
                   if (hydratedPersistedKeys.has(itemKey)) return false;
                   return !item?.data || shouldIgnoreItem(item.payload);
@@ -1105,6 +1073,7 @@ export function setupCollectionPersistence<
 
       await namespace.commit({
         removes: [...pendingRemoves],
+        staticPolicy: persistedStaticPolicy,
         upserts: [...pendingUpserts.entries()].map(([key, entry]) => ({
           data: entry.value,
           key,
@@ -1117,7 +1086,6 @@ export function setupCollectionPersistence<
       for (const [itemKey, entry] of pendingUpserts.entries()) {
         persistedSnapshotByKey.set(itemKey, entry.snapshot);
         hydratedPersistedKeys.add(itemKey);
-        knownMissingPersistedKeys.delete(itemKey);
       }
       if (previousPersistedKeys !== null) {
         knownPersistedKeys = new Set(previousPersistedKeys);
@@ -1179,11 +1147,7 @@ export function setupCollectionPersistence<
     store: Store<TSFDCollectionState<ItemState, ItemPayload>>,
   ): void {
     syncMaintenanceRegistration();
-    if (
-      localStorageAdapter === null &&
-      asyncStorageAdapter !== null &&
-      config.maxItems !== undefined
-    ) {
+    if (localStorageAdapter === null && asyncStorageAdapter !== null) {
       const sessionKey = config.getSessionKey();
       if (sessionKey !== false) {
         registerAsyncStartupStoreCleanup(
@@ -1209,18 +1173,13 @@ export function setupCollectionPersistence<
     generation++;
     pendingPreloads.clear();
     hydratedPersistedKeys.clear();
-    knownMissingPersistedKeys.clear();
     knownPersistedKeys = null;
     suppressedPersistedStateFlushes = 0;
     clearSaveTimer();
     unsubscribe?.();
     unsubscribe = null;
     storeRef = null;
-    if (
-      localStorageAdapter === null &&
-      asyncStorageAdapter !== null &&
-      config.maxItems !== undefined
-    ) {
+    if (localStorageAdapter === null && asyncStorageAdapter !== null) {
       const sessionKey = config.getSessionKey();
       if (sessionKey !== false) {
         unregisterAsyncStartupStoreCleanup(
@@ -1243,7 +1202,6 @@ export function setupCollectionPersistence<
     suppressedPersistedStateFlushes = 0;
     persistedSnapshotByKey.clear();
     hydratedPersistedKeys.clear();
-    knownMissingPersistedKeys.clear();
     await namespace.clear();
   }
 

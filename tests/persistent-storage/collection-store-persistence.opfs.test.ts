@@ -26,6 +26,10 @@ import {
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
 import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
+import {
+  getParsedOpfsFileData,
+  startOpfsPersistentStorageOperationCapture,
+} from '../utils/persistentStorageOptimizationTestUtils';
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
@@ -70,6 +74,8 @@ function createEnv(options: {
   storeName: string;
   sessionKey?: string;
   ignoreItems?: string[] | ((payload: string) => boolean);
+  maxItems?: number;
+  pinnedItems?: string[];
   serverData?: Record<string, ItemState>;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
@@ -80,6 +86,8 @@ function createEnv(options: {
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
       ignoreItems: options.ignoreItems,
+      maxItems: options.maxItems,
+      pinnedItems: options.pinnedItems,
     },
   });
 }
@@ -200,6 +208,125 @@ describe('opfs: collection store persistence', () => {
       -> status: refetching ⋅ data: {id:1, name:Cached}
       -> status: success ⋅ data: {id:1, name:Fresh}
       "
+    `);
+  });
+
+  test('missing collection item preloads still recheck storage on later retries', async () => {
+    const storeName = 'col-opfs-missing-item-cache';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const env = createEnv({ storeName, sessionKey });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    const firstCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const firstPreloadPromise = env.apiStore.preloadItemFromStorage('1');
+    await expect(resolveAfterAllTimers(firstPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '❌' }
+    `);
+    const firstOperations = firstCapture.finish().timelineString;
+
+    expect(firstOperations).not.toBe('empty');
+
+    const secondCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const secondPreloadPromise = env.apiStore.preloadItemFromStorage('1');
+    await expect(resolveAfterAllTimers(secondPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: '1', preloaded: '❌' }
+    `);
+    const secondOperations = secondCapture.finish().timelineString;
+    expect(secondOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1ms  | end
+      "
+    `);
+  });
+
+  test('persisted collection maxItems policy is enforced on cold startup before the store mounts', async () => {
+    const storeName = 'col-opfs-cold-policy-max-items';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+
+    collectionScope.collection.seedItem('a', {
+      value: { id: 'a', name: 'Older cached' },
+    });
+    await advanceTime(100);
+    collectionScope.collection.seedItem('b', {
+      value: { id: 'b', name: 'Older kept' },
+    });
+    await advanceTime(100);
+    collectionScope.collection.seedItem('c', {
+      value: { id: 'c', name: 'Newest kept' },
+    });
+    collectionScope.collection.setStaticPolicy({ m: 2 });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-collection', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(collectionScope.collection.listStoredPayloads())
+      .toMatchInlineSnapshot(`
+      ['b', 'c']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-opfs-cold-policy-max-items/ci._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "b: { a: 1735689600100, p: 'b' }
+        "c: { a: 1735689600200, p: 'c' }
+
+      s: { m: 2 }
+    `);
+  });
+
+  test('persisted pinned collection keys survive cold startup cleanup', async () => {
+    const storeName = 'col-opfs-cold-policy-pinned';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const collectionScope = mockAdapter.scope(storeName, sessionKey);
+
+    collectionScope.collection.seedItem('pinned', {
+      value: { id: 'pinned', name: 'Pinned older' },
+    });
+    await advanceTime(100);
+    collectionScope.collection.seedItem('other', {
+      value: { id: 'other', name: 'Newer other' },
+    });
+    collectionScope.collection.setStaticPolicy({
+      k: [itemKey('pinned')],
+      m: 1,
+    });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-collection', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(collectionScope.collection.listStoredPayloads())
+      .toMatchInlineSnapshot(`
+      ['pinned']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/col-opfs-cold-policy-pinned/ci._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "pinned: { a: 1735689600000, p: 'pinned' }
+
+      s:
+        k: ['"pinned']
+        m: 1
     `);
   });
 

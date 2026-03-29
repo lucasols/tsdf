@@ -233,7 +233,7 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     );
   }
 
-  resetForTests(): void {
+  __resetForTests(): void {
     this.#rootDirPromise = null;
     this.#mainCacheContext.dirCache.clear();
     this.#mainCacheContext.fileCache.clear();
@@ -1128,30 +1128,6 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     cacheContext: OpfsCacheContext,
   ): Promise<string[]> {
     if (keys.length === 0) return [];
-
-    const cleanupKnowledge = cacheContext.cleanupKnowledge;
-    const storeDirPath = this.#getStoreDirPath(scope);
-    const knownStoreEntryCount =
-      cleanupKnowledge?.knownRemainingEntryCountByStorePath.get(storeDirPath);
-    if (
-      knownStoreEntryCount !== undefined &&
-      knownStoreEntryCount === keys.length
-    ) {
-      const sessionDir = await this.#getSessionDir(scope.sessionKey, {
-        create: false,
-        cacheContext,
-      });
-      if (sessionDir !== null) {
-        try {
-          await sessionDir.removeEntry(encodePathSegment(scope.storeName), {
-            recursive: true,
-          });
-          return keys;
-        } catch {
-          // Fall back to per-file deletion when the recursive delete fails.
-        }
-      }
-    }
 
     const storeDir = await this.#getStoreDir(scope, {
       create: false,

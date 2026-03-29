@@ -22,6 +22,7 @@ import type {
   AsyncStorageAdapter,
   AsyncStorageMetadataOrder,
   AsyncStorageNamespaceKind,
+  AsyncStorageNamespaceStaticPolicy,
   AsyncStorageTouchMode,
   PersistentStorageBaseConfig,
   StorageAdapter,
@@ -535,6 +536,7 @@ export type PersistentStorageNamespaceCommitArgs<
   TMetadata extends Record<string, unknown> = Record<string, never>,
 > = {
   removes?: string[];
+  staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
   touches?: Array<{ key: string; lastAccessAt?: number }>;
   upserts?: Array<{ data: T; key: string; metadata?: TMetadata }>;
 };
@@ -636,6 +638,7 @@ export function createPersistentStorageNamespaceHandle<
 
         await namespace.commit({
           removes: args.removes,
+          staticPolicy: args.staticPolicy,
           touches: args.touches,
           upserts: args.upserts?.map((upsert) => ({
             key: upsert.key,

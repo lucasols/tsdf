@@ -60,7 +60,18 @@ export type {
 // Persistent Storage types
 export type {
   AsyncStorageAdapter,
+  AsyncStorageDiscoveredScope,
   AsyncStorageDriver,
+  AsyncStorageDriverSetEntry,
+  AsyncStorageMetadataOrder,
+  AsyncStorageNamespaceCommitArgs,
+  AsyncStorageNamespaceCommitTouch,
+  AsyncStorageNamespaceCommitUpsert,
+  AsyncStorageNamespaceGetResult,
+  AsyncStorageNamespaceHandle,
+  AsyncStorageNamespaceKind,
+  AsyncStorageNamespaceScope,
+  AsyncStorageReadOptions,
   PersistentStorageSchema,
   PersistentStorageDataSchema,
   ConvertedPersistentStorageDataSchema,

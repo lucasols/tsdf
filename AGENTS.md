@@ -82,6 +82,15 @@ Test scenarios can be configured via the `testScenario` option to start tests in
 
 Do not manually wire up fetch functions, error normalizers, or event handlers — the test envs handle all of this. See existing tests in `tests/` for usage examples.
 
+### Test value and abstraction level
+
+- Prefer tests that exercise real user-visible behavior through the highest practical public surface instead of low-level mechanics or internal implementation steps.
+- Prefer existing higher-level suites over adding new low-level or "contract" smoke tests when they cover the same behavior with better realism.
+- Do not create fake, naive, or simplified test implementations of features that already exist in the library. Use the real implementation plus mocks only at the true system boundary.
+- When fixing bugs, prefer realistic end-to-end or feature-level flows through the normal test envs/helpers. Only drop to a lower abstraction level when the lower-level API is itself a supported product surface or the bug genuinely cannot be expressed through a real usage flow.
+- If a behavior cannot be reproduced realistically and only appears through synthetic scaffolding that weakens confidence, skip the test instead of adding speculative coverage.
+- If a test is extremely slow, brittle, timeout-prone, or requires elaborate scaffolding, treat that as evidence the test shape may be wrong. Simplify it, move it to a better-fitting existing suite, or delete it if it adds little unique signal.
+
 ### General testing guidelines
 
 - Prefer using toMatchInlineSnapshot instead of toBe or toEqual for object assertions

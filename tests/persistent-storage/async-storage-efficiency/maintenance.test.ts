@@ -22,6 +22,7 @@ import {
 import {
   createCollectionEnv,
   createDocumentEnv,
+  createListQueryEnv,
   setupAsyncStorageEfficiencyTestSuite,
   waitForScheduledCleanup,
   wrappedDocumentSchema,
@@ -457,12 +458,24 @@ describe('async storage efficiency: maintenance', () => {
 
     expect({
       invalidMetadataExists: mockAdapter.has(invalidMetadataKey),
+      invalidMetadataStorePresent: mockAdapter.mockBrowserOpfs
+        .listEntries('tsdf/sess1')
+        .includes('dir:invalid-metadata'),
       missingPayloadExists: mockAdapter.has(missingPayloadKey),
+      missingPayloadStorePresent: mockAdapter.mockBrowserOpfs
+        .listEntries('tsdf/sess1')
+        .includes('dir:missing-payload'),
       validEntryExists: mockAdapter.has(validKey),
+      validStorePresent: mockAdapter.mockBrowserOpfs
+        .listEntries('tsdf/sess1')
+        .includes('dir:valid-doc'),
     }).toMatchInlineSnapshot(`
       invalidMetadataExists: '❌'
+      invalidMetadataStorePresent: '❌'
       missingPayloadExists: '❌'
+      missingPayloadStorePresent: '❌'
       validEntryExists: '✅'
+      validStorePresent: '✅'
     `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
@@ -484,6 +497,113 @@ describe('async storage efficiency: maintenance', () => {
       .      | 🧹 del-dir recursive ✅ tsdf/sess1/missing-payload (store directory)
       2.009s | end
       "
+    `);
+  });
+
+  test('startup cleanup keeps mixed list-query stores on record deletion when only one discovered scope is junk', async () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const mixedStore = mockAdapter.scope('mixed-list-query', 'sess1');
+    const validDoc = mockAdapter.scope('valid-doc', 'sess1');
+    const validItem = mixedStore.listQuery.seedItem('projects', 1, {
+      id: 1,
+      name: 'Project 1',
+    });
+    const invalidQueryKey = mixedStore.listQuery.seedQuery(
+      { tableId: 'projects' },
+      [{ tableId: 'projects', id: 1 }],
+    );
+    const validDocKey = validDoc.document.seed({
+      value: { name: 'valid', value: 1 },
+    });
+
+    // Corrupt only the query metadata so startup cleanup has to prune the
+    // query namespace while preserving the sibling item namespace in the same store.
+    mockAdapter.setMetadata(invalidQueryKey, {
+      customMetadata: {},
+      lastAccessAt: Date.now(),
+      version: 1,
+    });
+
+    createListQueryEnv({
+      serverData: { projects: [{ id: 1, name: 'Project 1' }] },
+      sessionKey: 'sess1',
+      storeName: 'mixed-list-query',
+    });
+    createDocumentEnv({ storeName: 'valid-doc', sessionKey: 'sess1' });
+
+    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+      "tsdf (0.76 kb)
+      └ sess1 (0.75 kb)
+        ├ mixed-list-query (0.53 kb)
+        │ ├ li._i.r.json (0.14 kb)
+        │ ├ li.h~2924752681.p.json (0.14 kb)
+        │ ├ lq._i.r.json (0.13 kb)
+        │ └ lq.h~2044383828.p.json (0.09 kb)
+        └ valid-doc (0.21 kb)
+          ├ d._i.r.json (0.10 kb)
+          └ d.e.p.json (0.10 kb)"
+    `);
+
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      mixedStoreEntries: mockAdapter.mockBrowserOpfs.listEntries(
+        'tsdf/sess1/mixed-list-query',
+      ),
+      mixedStorePresent: mockAdapter.mockBrowserOpfs
+        .listEntries('tsdf/sess1')
+        .includes('dir:mixed-list-query'),
+      queryExists: mockAdapter.has(invalidQueryKey),
+      validDocExists: mockAdapter.has(validDocKey),
+      validItemExists: mockAdapter.has(validItem.storageKey),
+      validStorePresent: mockAdapter.mockBrowserOpfs
+        .listEntries('tsdf/sess1')
+        .includes('dir:valid-doc'),
+    }).toMatchInlineSnapshot(`
+      mixedStoreEntries: ['file:li._i.r.json', 'file:li.h~2924752681.p.json']
+      mixedStorePresent: '✅'
+      queryExists: '❌'
+      validDocExists: '✅'
+      validItemExists: '✅'
+      validStorePresent: '✅'
+    `);
+    expect(operationsBreakdown).not.toContain(
+      'tsdf/sess1/mixed-list-query (store directory)',
+    );
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time   |
+      2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
+             |    └ (session directory) entries=["dir:mixed-list-query","dir:valid-doc"]
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/mixed-list-query
+             |    └ (store directory) entries=["file:li._i.r.json","file:li.h~2924752681.p.json","file:lq._i.r.json","file:lq.h~2044383828.p.json"]
+      .      | 🗂️ list-dir-entries tsdf/sess1/valid-doc
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      2.005s | 📖 #1 tsdf/sess1/mixed-list-query/li._i.r.json
+             |    └ (items index) | 0.12 kb
+      2.008s | 📖 #2 tsdf/sess1/mixed-list-query/lq._i.r.json
+             |    └ (queries index) | 0.10 kb
+      2.011s | 📖 #3 tsdf/sess1/valid-doc/d._i.r.json (namespace index) | 0.07 kb
+      2.014s | 🗑️ #4 ✅ tsdf/sess1/mixed-list-query/lq.h~2044383828.p.json
+             |    └ (query data, <{tableId:"projects"}>)
+      .      | 🗑️ #2 ✅ tsdf/sess1/mixed-list-query/lq._i.r.json (queries index)
+      2.015s | end
+      "
+    `);
+    expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
+      "tsdf (0.61 kb)
+      ├ sess1 (0.54 kb)
+      │ ├ mixed-list-query (0.32 kb)
+      │ │ ├ li._i.r.json (0.14 kb)
+      │ │ └ li.h~2924752681.p.json (0.14 kb)
+      │ └ valid-doc (0.21 kb)
+      │   ├ d._i.r.json (0.10 kb)
+      │   └ d.e.p.json (0.10 kb)
+      └ tsdf._am.g* (0.06 kb)"
     `);
   });
 

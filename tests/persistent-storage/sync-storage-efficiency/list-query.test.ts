@@ -1431,9 +1431,15 @@ describe('sync storage efficiency: list-query', () => {
       time  |
       0     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>)
+      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>)
+      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>)
             ·
       1.81s | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
             |    └ (items index)
+      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>)
       .     | ✍️ #1 ❌->✅ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
             |    └ (query data, <{tableId:"users"}>) | ❌ -> 0.12 kb
       .     | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
@@ -1586,8 +1592,17 @@ describe('sync storage efficiency: list-query', () => {
       time  |
       0     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+      10ms  | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+            ·
+      810ms | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
             ·
       1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
             |    └ (items index)
       .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-item-remount-no-cache.li."users||1
             |    └ (item data, <"users||1>) | ❌ -> 0.10 kb

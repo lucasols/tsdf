@@ -800,6 +800,10 @@ describe('sync storage efficiency: collection', () => {
       time  |
       0     | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (namespace index)
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+            |    └ (namespace index)
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
+            |    └ (namespace index)
             ·
       1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.col-remount-no-cache.ci.m
             |    └ (namespace index)
