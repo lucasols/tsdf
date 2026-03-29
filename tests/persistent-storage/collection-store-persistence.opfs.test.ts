@@ -274,8 +274,8 @@ describe('opfs: collection store persistence', () => {
 
     expect(collectionScope.collection.listStoredPayloads())
       .toMatchInlineSnapshot(`
-      ['b', 'c']
-    `);
+        ['b', 'c']
+      `);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/col-opfs-cold-policy-max-items/ci._i.r.json',
@@ -314,8 +314,8 @@ describe('opfs: collection store persistence', () => {
 
     expect(collectionScope.collection.listStoredPayloads())
       .toMatchInlineSnapshot(`
-      ['pinned']
-    `);
+        ['pinned']
+      `);
     expect(
       getParsedOpfsFileData(
         'tsdf/sess1/col-opfs-cold-policy-pinned/ci._i.r.json',
