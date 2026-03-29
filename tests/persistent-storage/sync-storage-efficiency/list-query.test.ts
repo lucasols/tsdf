@@ -696,6 +696,12 @@ describe('sync storage efficiency: list-query', () => {
       bobOnlyItemKey,
     ]);
 
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).sort(),
+    ).toMatchInlineSnapshot(
+      `['"users||1', '"users||2', '"users||3', '"users||4']`,
+    );
+
     createListQueryEnv({ storeName, sessionKey, maxItems: 3 });
 
     // Let the startup-scheduled maintenance enforce maxItems against the preloaded cache.
