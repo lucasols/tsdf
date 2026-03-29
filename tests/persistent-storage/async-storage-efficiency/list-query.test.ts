@@ -1090,7 +1090,7 @@ describe('async storage efficiency: list-query', () => {
     `);
   });
 
-  test('direct getQueryState reads the cached list query multiple times with short gaps and keeps it in memory', async () => {
+  test('direct getQueryState does not hydrate a cold OPFS-backed query', async () => {
     const storeName = 'lq-direct-get-query-state';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
@@ -1105,10 +1105,12 @@ describe('async storage efficiency: list-query', () => {
 
     const env = createListQueryEnv({ storeName, sessionKey });
 
-    // Drain the startup scan so this capture only measures the direct read-through path.
+    // Drain the startup scan so this capture only measures direct getter behavior.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // Repeated direct reads with short gaps should hydrate once, then reuse in-memory query and item state.
+    // `getQueryState` is synchronous, so the async OPFS adapter cannot hydrate here.
+    // Repeated direct reads should stay cold, avoid scheduling background reads, and
+    // leave both the query and its referenced item unmaterialized.
     const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
     expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(
       `undefined`,
