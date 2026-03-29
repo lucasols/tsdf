@@ -1090,8 +1090,8 @@ describe('async storage efficiency: list-query', () => {
     `);
   });
 
-  test('direct getQueryState does not hydrate a cold OPFS-backed query', async () => {
-    const storeName = 'lq-direct-get-query-state';
+  test('preloadQueryFromStorage hydrates the cached list query once and keeps later preloads and direct reads in memory', async () => {
+    const storeName = 'lq-preload-query-state';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -1105,42 +1105,223 @@ describe('async storage efficiency: list-query', () => {
 
     const env = createListQueryEnv({ storeName, sessionKey });
 
-    // Drain the startup scan so this capture only measures direct getter behavior.
+    // Drain the startup scan so the capture only measures explicit preload behavior.
     await settleStartupBackgroundScan(mockAdapter);
 
-    // `getQueryState` is synchronous, so the async OPFS adapter cannot hydrate here.
-    // Repeated direct reads should stay cold, avoid scheduling background reads, and
-    // leave both the query and its referenced item unmaterialized.
-    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
-    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(
-      `undefined`,
-    );
-    await advanceTime(100);
-    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(
-      `undefined`,
-    );
-    await advanceTime(100);
-    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(
-      `undefined`,
-    );
+    // Preload should materialize both the cached query and its referenced item through the async path.
+    const preloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
     expect(
-      env.apiStore.getItemState(rawItemPayload('users', 1)),
-    ).toMatchInlineSnapshot(`undefined`);
+      await resolveAfterAllTimers(
+        env.apiStore.preloadQueryFromStorage(usersQuery),
+      ),
+    ).toMatchInlineSnapshot(`
+      - payload: { tableId: 'users' }
+        preloaded: '✅'
+    `);
+    expect(preloadCapture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-preload-query-state (store directory)
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-preload-query-state/lq._i.r.json
+           |    └ (queries index)
+      3ms  | 📖 #1 tsdf/sess1/lq-preload-query-state/lq._i.r.json
+           |    └ (queries index) | 0.14 kb
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-preload-query-state/lq.h~2902406637.p.json
+           |    └ (query data, <{tableId:"users"}>)
+      7ms  | 📖 #2 tsdf/sess1/lq-preload-query-state/lq.h~2902406637.p.json
+           |    └ (query data, <{tableId:"users"}>) | 0.04 kb
+      10ms | 👁️ #3 file-open ✅ tsdf/sess1/lq-preload-query-state/li._i.r.json
+           |    └ (items index)
+      11ms | 📖 #3 tsdf/sess1/lq-preload-query-state/li._i.r.json
+           |    └ (items index) | 0.11 kb
+      14ms | 👁️ #4 file-open ✅ tsdf/sess1/lq-preload-query-state/li.h~228010772.p.json
+           |    └ (item data, <"users||1>)
+      15ms | 📖 #4 tsdf/sess1/lq-preload-query-state/li.h~228010772.p.json
+           |    └ (item data, <"users||1>) | 0.10 kb
+      18ms | end
+      "
+    `);
+
+    // Once preloaded, repeated explicit preload calls should reuse in-memory state without new storage work.
+    const repeatedPreloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadQueryFromStorage(usersQuery),
+      ),
+    ).toMatchInlineSnapshot(`
+      - payload: { tableId: 'users' }
+        preloaded: '✅'
+    `);
+    await advanceTime(100);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadQueryFromStorage(usersQuery),
+      ),
+    ).toMatchInlineSnapshot(`
+      - payload: { tableId: 'users' }
+        preloaded: '✅'
+    `);
+    await advanceTime(100);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadQueryFromStorage(usersQuery),
+      ),
+    ).toMatchInlineSnapshot(`
+      - payload: { tableId: 'users' }
+        preloaded: '✅'
+    `);
+    expect(
+      repeatedPreloadCapture.finish().timelineString,
+    ).toMatchInlineSnapshot(`"empty"`);
+
+    // Repeated direct reads should also reuse in-memory query and item state without new storage work.
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    await advanceTime(100);
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    await advanceTime(100);
+    expect(env.apiStore.getQueryState(usersQuery)).toMatchInlineSnapshot(`
+      error: null
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+      refetchOnMount: 'lowPriority'
+      status: 'success'
+      wasLoaded: '✅'
+    `);
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached user'
+      `);
     await flushAllTimers();
     const operationsBreakdown = readCapture.finish().timelineString;
 
-    expect(env.store.state).toMatchInlineSnapshot(`
-      itemFieldInvalidationFields: {}
-
-      itemLoadedFields: {}
-
-      itemQueries: {}
-
-      items: {}
-
-      queries: {}
-    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('preloadItemFromStorage hydrates the cached standalone list-query item once and keeps later preloads and direct reads in memory', async () => {
+    const storeName = 'lq-preload-item-state';
+    const sessionKey = 'sess1';
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const listQueryScope = mockAdapter.scope(storeName, sessionKey);
+
+    listQueryScope.listQuery.seedItem('users', 1, {
+      id: 1,
+      name: 'Cached user',
+    });
+    listQueryScope.listQuery.seedItem('users', 2, {
+      id: 2,
+      name: 'Another cached user',
+    });
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture only measures explicit preload behavior.
+    await settleStartupBackgroundScan(mockAdapter);
+
+    // Preload should materialize the cached item into store state through the async path.
+    const preloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadItemFromStorage(rawItemPayload('users', 1)),
+      ),
+    ).toMatchInlineSnapshot(`- { payload: 'users||1', preloaded: '✅' }`);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadItemFromStorage(rawItemPayload('users', 2)),
+      ),
+    ).toMatchInlineSnapshot(`- { payload: 'users||2', preloaded: '✅' }`);
+    expect(preloadCapture.finish().timelineString).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ✅ tsdf/sess1 (session directory)
+      1ms  | 📂 dir-open ✅ tsdf/sess1/lq-preload-item-state (store directory)
+      2ms  | 👁️ #1 file-open ✅ tsdf/sess1/lq-preload-item-state/li._i.r.json
+           |    └ (items index)
+      3ms  | 📖 #1 tsdf/sess1/lq-preload-item-state/li._i.r.json
+           |    └ (items index) | 0.20 kb
+      6ms  | 👁️ #2 file-open ✅ tsdf/sess1/lq-preload-item-state/li.h~228010772.p.json
+           |    └ (item data, <"users||1>)
+      7ms  | 📖 #2 tsdf/sess1/lq-preload-item-state/li.h~228010772.p.json
+           |    └ (item data, <"users||1>) | 0.10 kb
+      10ms | 📖 #1 tsdf/sess1/lq-preload-item-state/li._i.r.json
+           |    └ (items index) | 0.20 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      13ms | 👁️ #3 file-open ✅ tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
+           |    └ (item data, <"users||2>)
+      14ms | 📖 #3 tsdf/sess1/lq-preload-item-state/li.h~1937155452.p.json
+           |    └ (item data, <"users||2>) | 0.11 kb
+      17ms | end
+      "
+    `);
+
+    // Once preloaded, repeated explicit preload calls should reuse in-memory state without new storage work.
+    const repeatedPreloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadItemFromStorage(rawItemPayload('users', 1)),
+      ),
+    ).toMatchInlineSnapshot(`- { payload: 'users||1', preloaded: '✅' }`);
+    await advanceTime(100);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadItemFromStorage(rawItemPayload('users', 1)),
+      ),
+    ).toMatchInlineSnapshot(`- { payload: 'users||1', preloaded: '✅' }`);
+    await advanceTime(100);
+    expect(
+      await resolveAfterAllTimers(
+        env.apiStore.preloadItemFromStorage(rawItemPayload('users', 1)),
+      ),
+    ).toMatchInlineSnapshot(`- { payload: 'users||1', preloaded: '✅' }`);
+    expect(
+      repeatedPreloadCapture.finish().timelineString,
+    ).toMatchInlineSnapshot(`"empty"`);
+
+    // Repeated direct reads should also reuse in-memory state without new storage work.
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached user'
+      `);
+    await advanceTime(100);
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached user'
+      `);
+    await advanceTime(100);
+    expect(env.apiStore.getItemState(rawItemPayload('users', 1)))
+      .toMatchInlineSnapshot(`
+        id: 1
+        name: 'Cached user'
+      `);
+    await flushAllTimers();
+    expect(readCapture.finish().timelineString).toMatchInlineSnapshot(
+      `"empty"`,
+    );
   });
 
   test('useListQuery invalidation snapshots the full query persistence timeline through the refetch save', async () => {
