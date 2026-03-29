@@ -25,7 +25,10 @@ import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  getNextStoreId,
+  registerMockStoreInstance,
+} from './browserTabsTestUtils';
 import {
   createServerTableMock,
   createSharedServerTableState,
@@ -126,6 +129,7 @@ export function createListQueryStoreTestEnv<
     getSessionKey = () => 'test-session',
     sharedServerTableState,
     browserTabsTransportFactory,
+    testBrowserTabId,
     browserTabsLeadershipTimings,
     bindFocusController,
     dynamicRealtimeThrottleMs,
@@ -156,6 +160,7 @@ export function createListQueryStoreTestEnv<
     getSessionKey?: () => string | false;
     sharedServerTableState?: ServerTableSharedState<TRow>;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
+    testBrowserTabId?: string;
     browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
     /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
     bindFocusController?: {
@@ -410,28 +415,54 @@ export function createListQueryStoreTestEnv<
         ) => fetchFromServer(payload, undefined, size, signal, fields),
       };
 
-  const listQueryStore = createListQueryStore<
-    TRow,
-    ListQueryParams,
-    ListQueryItemPayload,
-    TPartialResources,
-    TOffsetPagination,
-    TOfflineOperations,
-    StorageState
-  >(
-    __LEGIT_CAST__<
-      ListQueryStoreOptions<
-        TRow,
-        ListQueryParams,
-        ListQueryItemPayload,
-        TPartialResources,
-        TOffsetPagination,
-        TOfflineOperations,
-        StorageState
-      >,
-      unknown
-    >(storeOptions),
-  );
+  const unregisterMockStoreInstance =
+    testBrowserTabId === undefined
+      ? () => {}
+      : registerMockStoreInstance({
+          storeId: id,
+          storeType: 'listQuery',
+          testBrowserTabId,
+        });
+
+  let listQueryStore: ReturnType<
+    typeof createListQueryStore<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      TPartialResources,
+      TOffsetPagination,
+      TOfflineOperations,
+      StorageState
+    >
+  >;
+
+  try {
+    listQueryStore = createListQueryStore<
+      TRow,
+      ListQueryParams,
+      ListQueryItemPayload,
+      TPartialResources,
+      TOffsetPagination,
+      TOfflineOperations,
+      StorageState
+    >(
+      __LEGIT_CAST__<
+        ListQueryStoreOptions<
+          TRow,
+          ListQueryParams,
+          ListQueryItemPayload,
+          TPartialResources,
+          TOffsetPagination,
+          TOfflineOperations,
+          StorageState
+        >,
+        unknown
+      >(storeOptions),
+    );
+  } catch (error) {
+    unregisterMockStoreInstance();
+    throw error;
+  }
 
   // Simplified method references for internal test helpers.
   // The store methods have deferred conditional rest params (from boolean generics)

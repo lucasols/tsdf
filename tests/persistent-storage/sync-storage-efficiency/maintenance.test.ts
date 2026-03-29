@@ -1,8 +1,12 @@
 import { rc_number, rc_object } from 'runcheck';
 import { describe, expect, test, vi } from 'vitest';
 import type { DocumentOfflineOperationDefinition } from '../../../src/main';
+import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from '../../../src/persistentStorage/asyncStorageAdapter';
 import { createCompactListQueryLocalStorageEntry } from '../../../src/persistentStorage/compactListQueryLocalStorageEntry';
-import { upsertManagedLocalStorageSingleEntry } from '../../../src/persistentStorage/localStorageMetadata';
+import {
+  getManagedLocalStorageManifestKeyForPrefix,
+  getManagedLocalStorageManifestKeyForSingle,
+} from '../../../src/persistentStorage/localStorageMetadata';
 import { resetExpirationScanTracking } from '../../../src/persistentStorage/persistentStorageManager';
 import { createDocumentStoreTestEnv } from '../../mocks/documentStoreTestEnv';
 import { advanceTime } from '../../utils/genericTestUtils';
@@ -12,6 +16,7 @@ import {
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
 import {
+  createCollectionEnv,
   createDocumentEnv,
   persistentStore,
   setupSyncStorageEfficiencyTestSuite,
@@ -67,18 +72,18 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.expired-doc (entry)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.fresh-doc (entry)
-      .    | 🔑[3] ✅ #5 tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest)
-      .    | 🔑[4] ✅ #6 external-cache
-      .    | 🔑[5] ✅ #7 feature-flag
-      .    | 📖 ✅ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ #5 tsdf._m.r.s:sess1.fresh-doc.m (root, single, manifest) | 0.05 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.expired-doc (entry)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | 🗑️ ✅->❌ #3 tsdf._m.r.s:sess1.expired-doc.m (root, single, manifest)
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.expired-doc (entry data)
+      .    | 🔑[1] #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.fresh-doc (entry data)
+      .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index)
+      .    | 🔑[4] #6 ✅ external-cache
+      .    | 🔑[5] #7 ✅ feature-flag
+      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.05 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.fresh-doc.m (namespace index) | 0.05 kb
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
       "
     `);
 
@@ -87,17 +92,22 @@ describe('sync storage efficiency: maintenance', () => {
     );
   });
 
-  test('expiration cleanup leaves malformed payload blobs untouched and still snapshots the full manifest scan history', async () => {
+  test('startup cleanup removes malformed manifest entries together with their payload keys', async () => {
     const triggerDoc = persistentStore.scope('trigger', 'sess1');
+    const corruptedKey = 'tsdf.sess1.corrupted';
+    const corruptedManifestKey =
+      getManagedLocalStorageManifestKeyForSingle(corruptedKey);
 
-    // Seed malformed payload data plus managed metadata so cleanup can see the entry without parsing the blob.
+    // Seed a broken manifest together with its payload. Startup cleanup should
+    // drop both keys once the manifest fails to parse.
     localStorage.setItem(
-      'tsdf.sess1.corrupted',
+      corruptedKey,
       JSON.stringify({ data: 'bad', version: 1 }),
     );
-    upsertManagedLocalStorageSingleEntry({
-      storageKey: 'tsdf.sess1.corrupted',
-    });
+    localStorage.setItem(corruptedManifestKey, '{invalid');
+
+    // Seed a valid store in the same session so cleanup discovers the session
+    // and we can verify healthy manifest-backed entries are preserved.
     triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
 
     createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
@@ -106,18 +116,103 @@ describe('sync storage efficiency: maintenance', () => {
     await waitForScheduledCleanup();
     const operationsBreakdown = readCapture.finish().timelineString;
 
-    expect(localStorage.getItem('tsdf.sess1.corrupted')).not.toBeNull();
+    expect({
+      corruptedPayloadExists: localStorage.getItem(corruptedKey) !== null,
+      corruptedManifestExists:
+        localStorage.getItem(corruptedManifestKey) !== null,
+      triggerExists:
+        localStorage.getItem(triggerDoc.document.storageKey()) !== null,
+    }).toMatchInlineSnapshot(`
+      corruptedManifestExists: '❌'
+      corruptedPayloadExists: '❌'
+      triggerExists: '✅'
+    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.corrupted (entry)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.s:sess1.corrupted.m (root, single, manifest)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.trigger (entry)
-      .    | 🔑[3] ✅ #5 tsdf._m.r.s:sess1.trigger.m (root, single, manifest)
-      .    | 📖 ✅ #3 tsdf._m.r.s:sess1.corrupted.m (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ #5 tsdf._m.r.s:sess1.trigger.m (root, single, manifest) | 0.05 kb
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.corrupted (entry data)
+      .    | 🔑[1] #3 ✅ tsdf._m.r.s:sess1.corrupted.m (namespace index)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.trigger (entry data)
+      .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index)
+      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.corrupted.m (namespace index) | 0.02 kb
+      .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.corrupted.m (namespace index)
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess1.trigger.m (namespace index) | 0.05 kb
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.corrupted (entry data)
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      "
+    `);
+  });
+
+  test('startup cleanup checks expiration across multiple sessions', async () => {
+    const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const sess1ExpiredDoc = persistentStore.scope('expired-doc', 'sess1');
+    const sess2ExpiredDoc = persistentStore.scope('expired-doc', 'sess2');
+    const sess2FreshDoc = persistentStore.scope('fresh-doc', 'sess2');
+    const sess1ExpiredKey = sess1ExpiredDoc.document.storageKey();
+    const sess2ExpiredKey = sess2ExpiredDoc.document.storageKey();
+    const sess2FreshKey = sess2FreshDoc.document.storageKey();
+
+    // Seed stale entries in two sessions so startup cleanup has to sweep both namespaces.
+    sess1ExpiredDoc.document.seed(
+      { value: { name: 'sess1-stale', value: 1 } },
+      { timestamp: staleTimestamp },
+    );
+    sess2ExpiredDoc.document.seed(
+      { value: { name: 'sess2-stale', value: 2 } },
+      { timestamp: staleTimestamp },
+    );
+    sess2FreshDoc.document.seed({ value: { name: 'sess2-fresh', value: 3 } });
+
+    // A fresh store mount in a third session should still trigger the global cleanup pass.
+    createDocumentEnv({ storeName: 'trigger-doc', sessionKey: 'sess-trigger' });
+
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      sess1ExpiredEntryExists: localStorage.getItem(sess1ExpiredKey) !== null,
+      sess1ExpiredManifestExists:
+        localStorage.getItem(
+          getManagedLocalStorageManifestKeyForSingle(sess1ExpiredKey),
+        ) !== null,
+      sess2ExpiredEntryExists: localStorage.getItem(sess2ExpiredKey) !== null,
+      sess2ExpiredManifestExists:
+        localStorage.getItem(
+          getManagedLocalStorageManifestKeyForSingle(sess2ExpiredKey),
+        ) !== null,
+      sess2FreshEntryExists: localStorage.getItem(sess2FreshKey) !== null,
+      sess2FreshManifestExists:
+        localStorage.getItem(
+          getManagedLocalStorageManifestKeyForSingle(sess2FreshKey),
+        ) !== null,
+    }).toMatchInlineSnapshot(`
+      sess1ExpiredEntryExists: '❌'
+      sess1ExpiredManifestExists: '❌'
+      sess2ExpiredEntryExists: '❌'
+      sess2ExpiredManifestExists: '❌'
+      sess2FreshEntryExists: '✅'
+      sess2FreshManifestExists: '✅'
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.expired-doc (entry data)
+      .    | 🔑[1] #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
+      .    | 🔑[2] #4 ✅ tsdf.sess2.expired-doc (entry data)
+      .    | 🔑[3] #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index)
+      .    | 🔑[4] #6 ✅ tsdf.sess2.fresh-doc (entry data)
+      .    | 🔑[5] #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index)
+      .    | 📖 #3 ✅ tsdf._m.r.s:sess1.expired-doc.m (namespace index) | 0.05 kb
+      .    | 📖 #5 ✅ tsdf._m.r.s:sess2.expired-doc.m (namespace index) | 0.05 kb
+      .    | 📖 #7 ✅ tsdf._m.r.s:sess2.fresh-doc.m (namespace index) | 0.05 kb
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.expired-doc (entry data)
+      .    | 🗑️ #4 ✅->❌ tsdf.sess2.expired-doc (entry data)
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | 🗑️ #3 ✅->❌ tsdf._m.r.s:sess1.expired-doc.m (namespace index)
+      .    | 🗑️ #5 ✅->❌ tsdf._m.r.s:sess2.expired-doc.m (namespace index)
       "
     `);
   });
@@ -137,6 +232,10 @@ describe('sync storage efficiency: maintenance', () => {
     localStorage.setItem(straySingleKey, JSON.stringify({ timestamp: 1 }));
     localStorage.setItem(strayNamespaceKey, JSON.stringify({ timestamp: 1 }));
     localStorage.setItem('tsdf._m.g', '{invalid');
+    localStorage.setItem(
+      ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+      JSON.stringify({ lca: 123 }),
+    );
     localStorage.setItem(malformedManifestKey, '{invalid');
     localStorage.setItem(malformedCompactQueryKey, '{invalid');
     localStorage.setItem(
@@ -181,9 +280,13 @@ describe('sync storage efficiency: maintenance', () => {
         localStorage.getItem(malformedCompactQueryKey) !== null,
       validCompactQueryExists:
         localStorage.getItem(validCompactQueryKey) !== null,
+      asyncGlobalMaintenance: getParsedLocalStorageValue(
+        ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY,
+      ),
       externalCache: localStorage.getItem('external-cache'),
       globalMaintenance: getParsedLocalStorageValue('tsdf._m.g'),
     }).toMatchInlineSnapshot(`
+      asyncGlobalMaintenance: { lca: 123 }
       externalCache: '{"keep":true}'
       globalMaintenance: { lca: 1735689602000 }
       malformedCompactQueryExists: '❌'
@@ -192,6 +295,77 @@ describe('sync storage efficiency: maintenance', () => {
       straySinglePayloadExists: '❌'
       validCompactQueryExists: '✅'
       validSinglePayloadExists: '✅'
+    `);
+  });
+
+  test('global cleanup removes collection payload keys that are no longer referenced by their manifest', async () => {
+    const collectionScope = persistentStore.scope('orphan-collection', 'sess1');
+    const keptItemKey = collectionScope.collection.seedItem('kept-user', {
+      value: { id: 'kept-user', name: 'Kept User' },
+    });
+    const orphanedItemKey = collectionScope.collection.seedItem('orphan-user', {
+      value: { id: 'orphan-user', name: 'Orphan User' },
+    });
+    const manifestKey = getManagedLocalStorageManifestKeyForPrefix(
+      'tsdf.sess1.orphan-collection.ci.',
+    );
+
+    // Rewrite the manifest so only the kept payload is still owned by the
+    // collection namespace. The orphaned payload key should be pruned by the
+    // strict global sweep before manifest cleanup runs.
+    localStorage.setItem(
+      manifestKey,
+      JSON.stringify({
+        e: [
+          {
+            a: Date.now(),
+            k: collectionScope.collection.itemKey('kept-user'),
+            p: 'kept-user',
+          },
+        ],
+      }),
+    );
+
+    createCollectionEnv({
+      storeName: 'orphan-collection',
+      sessionKey: 'sess1',
+    });
+
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      keptItemExists: localStorage.getItem(keptItemKey) !== null,
+      manifest: getParsedLocalStorageValue(manifestKey),
+      orphanedItemExists: localStorage.getItem(orphanedItemKey) !== null,
+    }).toMatchInlineSnapshot(`
+      keptItemExists: '✅'
+
+      manifest:
+        e:
+          - a: 1735689600000
+            k: '"kept-user'
+            p: 'kept-user'
+
+      orphanedItemExists: '❌'
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.orphan-collection.ci."kept-user
+           |    └ (entry data, <"kept-user>)
+      .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.orphan-collection.ci.m
+           |    └ (namespace index)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.orphan-collection.ci."orphan-user
+           |    └ (entry data, <"orphan-user>)
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.orphan-collection.ci.m
+           |    └ (namespace index) | 0.12 kb
+      .    | 🗑️ #4 ✅->❌ tsdf.sess1.orphan-collection.ci."orphan-user
+           |    └ (entry data, <"orphan-user>)
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      "
     `);
   });
 
@@ -307,31 +481,45 @@ describe('sync storage efficiency: maintenance', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      190ms | 📖 ✅ #1 tsdf._m.g (global maintenance) | 0.04 kb
-      .     | 🔑[0] ✅ #2 tsdf.user@example.com.protected-doc (entry)
-      .     | 🔑[1] ✅ #3 tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest)
-      .     | 🔑[2] ✅ #1 tsdf._m.g (global maintenance)
-      .     | 🔑[3] ✅ #4 tsdf.user@example.com.unprotected-doc (entry)
-      .     | 🔑[4] ✅ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
-      .     | 🔑[5] ✅ #6 tsdf.user@example.com._o_.s (entry, offline session status)
-      .     | 🔑[6] ✅ #7 tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status)
-      .     | 🔑[7] ✅ #8 tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy (entry, offline queue)
-      .     | 🔑[8] ✅ #9 tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue)
-      .     | 🔑[9] ✅ #10 tsdf.user@example.com.protected-doc.oe.document (entry, offline entity)
-      .     | 🔑[10] ✅ #11 tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity)
-      .     | 🔑[11] ✅ #12 tsdf.user@example.com.invalid-stray (entry)
-      .     | 🔑[12] ✅ #13 tsdf.sess-trigger.trigger-doc (entry)
-      .     | 🔑[13] ✅ #14 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest)
-      .     | 📖 ✅ #3 tsdf._m.r.s:user@example.com.protected-doc.m (root, single, manifest) | 0.07 kb
-      .     | 📖 ✅ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest) | 0.05 kb
-      .     | 📖 ✅ #7 tsdf._m.r.s:user@example.com._o_.s.m (root, single, manifest, offline session status) | 0.05 kb
-      .     | 📖 ✅ #9 tsdf._m.r.n:user@example.com.protected-doc.oq.m (root, namespace, manifest, offline queue) | 0.14 kb
-      .     | 📖 ✅ #11 tsdf._m.r.n:user@example.com.protected-doc.oe.m (root, namespace, manifest, offline entity) | 0.08 kb
-      .     | 📖 ✅ #14 tsdf._m.r.s:sess-trigger.trigger-doc.m (root, single, manifest) | 0.05 kb
-      .     | 🗑️ ✅->❌ #12 tsdf.user@example.com.invalid-stray (entry)
-      .     | 🗑️ ✅->❌ #4 tsdf.user@example.com.unprotected-doc (entry)
-      .     | ✍️ ✅->✅ #1 tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
-      .     | 🗑️ ✅->❌ #5 tsdf._m.r.s:user@example.com.unprotected-doc.m (root, single, manifest)
+      190ms | 📖 #1 ✅ tsdf._m.g (global maintenance) | 0.04 kb
+      .     | 🔑[0] #2 ✅ tsdf.user@example.com.protected-doc (entry data)
+      .     | 🔑[1] #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
+            |    └ (namespace index)
+      .     | 🔑[2] #1 ✅ tsdf._m.g (global maintenance)
+      .     | 🔑[3] #4 ✅ tsdf.user@example.com.unprotected-doc (entry data)
+      .     | 🔑[4] #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
+            |    └ (namespace index)
+      .     | 🔑[5] #6 ✅ tsdf.user@example.com._o_.s (entry data)
+      .     | 🔑[6] #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m (namespace index)
+      .     | 🔑[7] #8 ✅ tsdf.user@example.com.protected-doc.oq.protected-doc:1736380803620:4fzzzxjy
+            |    └ (entry data, <protected-doc:1736380803620:4fzzzxjy>)
+      .     | 🔑[8] #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+            |    └ (namespace index)
+      .     | 🔑[9] #10 ✅ tsdf.user@example.com.protected-doc.oe.document
+            |    └ (entry data, <document>)
+      .     | 🔑[10] #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+            |    └ (namespace index)
+      .     | 🔑[11] #12 ✅ tsdf.user@example.com.invalid-stray (entry data)
+      .     | 🔑[12] #13 ✅ tsdf.sess-trigger.trigger-doc (entry data)
+      .     | 🔑[13] #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+            |    └ (namespace index)
+      .     | 📖 #3 ✅ tsdf._m.r.s:user@example.com.protected-doc.m
+            |    └ (namespace index) | 0.07 kb
+      .     | 📖 #5 ✅ tsdf._m.r.s:user@example.com.unprotected-doc.m
+            |    └ (namespace index) | 0.05 kb
+      .     | 📖 #7 ✅ tsdf._m.r.s:user@example.com._o_.s.m
+            |    └ (namespace index) | 0.05 kb
+      .     | 📖 #9 ✅ tsdf._m.r.n:user@example.com.protected-doc.oq.m
+            |    └ (namespace index) | 0.14 kb
+      .     | 📖 #11 ✅ tsdf._m.r.n:user@example.com.protected-doc.oe.m
+            |    └ (namespace index) | 0.08 kb
+      .     | 📖 #14 ✅ tsdf._m.r.s:sess-trigger.trigger-doc.m
+            |    └ (namespace index) | 0.05 kb
+      .     | 🗑️ #12 ✅->❌ tsdf.user@example.com.invalid-stray (entry data)
+      .     | 🗑️ #4 ✅->❌ tsdf.user@example.com.unprotected-doc (entry data)
+      .     | ✍️ #1 ✅->✅ tsdf._m.g (global maintenance) | 0.04 kb -> 0.04 kb
+      .     | 🗑️ #5 ✅->❌ tsdf._m.r.s:user@example.com.unprotected-doc.m
+            |    └ (namespace index)
       "
     `);
     expect(

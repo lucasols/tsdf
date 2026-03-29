@@ -18,7 +18,10 @@ import type {
   CollectionPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
-import { getNextStoreId } from './browserTabsTestUtils';
+import {
+  getNextStoreId,
+  registerMockStoreInstance,
+} from './browserTabsTestUtils';
 import {
   createServerTableMock,
   type ServerTableSharedState,
@@ -72,6 +75,7 @@ export type CollectionStoreTestEnvOptions<
   getSessionKey?: () => string | false;
   sharedServerTableState?: ServerTableSharedState<D>;
   browserTabsTransportFactory?: BrowserTabsTransportFactory;
+  testBrowserTabId?: string;
   browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
   /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
   bindFocusController?: {
@@ -123,6 +127,7 @@ export function createCollectionStoreTestEnv<
     getSessionKey = () => 'test-session',
     sharedServerTableState,
     browserTabsTransportFactory,
+    testBrowserTabId,
     browserTabsLeadershipTimings,
     bindFocusController,
     dynamicRealtimeThrottleMs,
@@ -218,68 +223,91 @@ export function createCollectionStoreTestEnv<
       ? { ...persistentStorage, adapter: storageAdapter }
       : persistentStorage;
 
-  const collectionStore = createCollectionStore<
-    CollectionTestItem<D>,
-    string,
-    TOfflineOperations,
-    StorageState
-  >({
-    id,
-    getSessionKey,
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs,
-    baseCoalescingWindowMs,
-    maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
-    maxItems,
-    onStateCleanup,
-    getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
-    fetchFn: async (payload, signal) => {
-      const value = await serverTable.fetch(payload, signal);
-      return { value };
-    },
-    batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
-    usesRealTimeUpdates,
-    dynamicRealtimeThrottleMs,
-    revalidateOnWindowFocus,
-    transportReconnectCooldownMs,
-    mediumPriorityDelayMs,
-    blockWindowClose: blockWindowClose ?? null,
-    persistentStorage: resolvedPersistentStorage,
-    '~test': {
-      ...testOptions,
-      getWindowIsFocused: bindFocusController?.getWindowIsFocused,
-      onWindowFocus: bindFocusController
-        ? (handler: () => void) => {
-            return bindFocusController.onWindowFocus(handler);
-          }
-        : undefined,
-      onWindowFocusChange: bindFocusController
-        ? (handler: () => void) => {
-            const cleanupFocus = bindFocusController.onWindowFocus(handler);
-            const cleanupBlur = bindFocusController.onWindowBlur(handler);
-            return () => {
-              cleanupFocus();
-              cleanupBlur();
-            };
-          }
-        : undefined,
-      browserTabsTransportFactory,
-      browserTabsLeadershipTimings,
-      onReceiveRemoteMsg: (
-        message: CollectionBrowserTabsMessage<CollectionTestItem<D>, string>,
-      ) => {
-        if (message.kind === 'collection-item-snapshot') {
-          addAction(`<${message.consistency}-snapshot-received`, {
-            actionValue: message.item?.data?.value,
-            itemId: message.item?.payload,
-          });
-        }
+  const unregisterMockStoreInstance =
+    testBrowserTabId === undefined
+      ? () => {}
+      : registerMockStoreInstance({
+          storeId: id,
+          storeType: 'collection',
+          testBrowserTabId,
+        });
+
+  let collectionStore: ReturnType<
+    typeof createCollectionStore<
+      CollectionTestItem<D>,
+      string,
+      TOfflineOperations,
+      StorageState
+    >
+  >;
+
+  try {
+    collectionStore = createCollectionStore<
+      CollectionTestItem<D>,
+      string,
+      TOfflineOperations,
+      StorageState
+    >({
+      id,
+      getSessionKey,
+      errorNormalizer: normalizeError,
+      lowPriorityThrottleMs,
+      baseCoalescingWindowMs,
+      maxBatchSize: useBatchFetch ? maxBatchSize : undefined,
+      maxItems,
+      onStateCleanup,
+      getItemsBatchKey: useBatchFetch ? getItemsBatchKey : undefined,
+      fetchFn: async (payload, signal) => {
+        const value = await serverTable.fetch(payload, signal);
+        return { value };
       },
-    },
-    onSchedulerEvent: (event) => {
-      logSchedulerEvent(event, addAction);
-    },
-  });
+      batchFetchFn: useBatchFetch ? batchFetchFn : undefined,
+      usesRealTimeUpdates,
+      dynamicRealtimeThrottleMs,
+      revalidateOnWindowFocus,
+      transportReconnectCooldownMs,
+      mediumPriorityDelayMs,
+      blockWindowClose: blockWindowClose ?? null,
+      persistentStorage: resolvedPersistentStorage,
+      '~test': {
+        ...testOptions,
+        getWindowIsFocused: bindFocusController?.getWindowIsFocused,
+        onWindowFocus: bindFocusController
+          ? (handler: () => void) => {
+              return bindFocusController.onWindowFocus(handler);
+            }
+          : undefined,
+        onWindowFocusChange: bindFocusController
+          ? (handler: () => void) => {
+              const cleanupFocus = bindFocusController.onWindowFocus(handler);
+              const cleanupBlur = bindFocusController.onWindowBlur(handler);
+              return () => {
+                cleanupFocus();
+                cleanupBlur();
+              };
+            }
+          : undefined,
+        browserTabsTransportFactory,
+        browserTabsLeadershipTimings,
+        onReceiveRemoteMsg: (
+          message: CollectionBrowserTabsMessage<CollectionTestItem<D>, string>,
+        ) => {
+          if (message.kind === 'collection-item-snapshot') {
+            addAction(`<${message.consistency}-snapshot-received`, {
+              actionValue: message.item?.data?.value,
+              itemId: message.item?.payload,
+            });
+          }
+        },
+      },
+      onSchedulerEvent: (event) => {
+        logSchedulerEvent(event, addAction);
+      },
+    });
+  } catch (error) {
+    unregisterMockStoreInstance();
+    throw error;
+  }
 
   if (usesRealTimeUpdates) {
     serverTable.wsEvents.on('data_changed', (event) => {

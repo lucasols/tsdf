@@ -288,6 +288,10 @@ export function createDocumentStore<
             if (sessionKey === false) return [];
             return [
               createProtectedStorageKey({
+                backend:
+                  persistentStorageConfig.adapter !== 'local-sync'
+                    ? 'opfs'
+                    : 'localStorage',
                 sessionKey,
                 storeName: persistentStorageConfig.storeName,
                 kind: 'document',

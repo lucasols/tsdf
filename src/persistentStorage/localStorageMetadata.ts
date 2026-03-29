@@ -15,6 +15,8 @@ import {
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
 
+import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from './asyncStorageAdapter';
+
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;
 const MANIFEST_KEY_PREFIX = `${METADATA_KEY_PREFIX}r.`;
@@ -259,6 +261,7 @@ function isManagedLocalStorageManifestKey(key: string): boolean {
 
 type TsdfLocalStorageKeyClassification =
   | { kind: 'global-maintenance' }
+  | { kind: 'async-global-maintenance' }
   | { kind: 'manifest'; manifestLocation: ManagedLocalStorageManifestLocation }
   | { kind: 'compact-list-query' }
   | { kind: 'manifest-backed-payload' }
@@ -270,6 +273,10 @@ function classifyTsdfLocalStorageKey(
   if (!key.startsWith('tsdf.')) return null;
   if (key === GLOBAL_MAINTENANCE_KEY) {
     return { kind: 'global-maintenance' };
+  }
+
+  if (key === ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY) {
+    return { kind: 'async-global-maintenance' };
   }
 
   const manifestLocation = parseManagedLocalStorageManifestKey(key);
@@ -975,6 +982,18 @@ function runStrictTsdfLocalStorageCleanup(io: ManagedLocalStorageIo): void {
 
     switch (classification.kind) {
       case 'global-maintenance': {
+        if (
+          readParsedMetadataJson(
+            key,
+            managedLocalStorageGlobalMaintenanceSchema,
+            io,
+          ) === null
+        ) {
+          removeMetadataJson(key, io);
+        }
+        break;
+      }
+      case 'async-global-maintenance': {
         if (
           readParsedMetadataJson(
             key,

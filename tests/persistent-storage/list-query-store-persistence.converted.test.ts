@@ -11,11 +11,10 @@ import {
   test,
   vi,
 } from 'vitest';
+import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
 import type {
   ListQueryPersistentStorageConfig,
-  PersistedListQueryItemData,
   PersistentStorageSchema,
-  StorageCacheEntry,
 } from '../../src/persistentStorage/types';
 import {
   createListQueryStoreTestEnv,
@@ -195,18 +194,20 @@ describe('localStorage: converted list query store persistence', () => {
       label: 'Cached',
     });
     const invalidPayloadEntry =
-      invalidPayloadStore.storage.readEntry<
-        StorageCacheEntry<PersistedListQueryItemData<unknown>>
-      >(invalidPayloadKey);
-    if (invalidPayloadEntry === null) {
-      throw new Error(`Missing seeded entry for ${invalidPayloadKey}`);
-    }
-    invalidPayloadStore.setValue(invalidPayloadKey, {
-      ...invalidPayloadEntry,
-      data: { ...invalidPayloadEntry.data, payload: true },
-    } satisfies StorageCacheEntry<
-      PersistedListQueryItemData<unknown> & { payload: boolean }
-    >);
+      invalidPayloadStore.listQuery.readItemEntry<unknown>('users', 1);
+    invalidPayloadStore.setValue(
+      invalidPayloadKey,
+      createCompactLocalStorageEntry(
+        {
+          d: invalidPayloadEntry.data.data,
+          p: true,
+          ...(invalidPayloadEntry.data.loadedFields
+            ? { lf: invalidPayloadEntry.data.loadedFields }
+            : {}),
+        },
+        invalidPayloadEntry.version,
+      ),
+    );
 
     const invalidStorageEnv = createEnv({
       storeName: 'lq-converted-invalid-storage',

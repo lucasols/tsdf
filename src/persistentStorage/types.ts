@@ -1,5 +1,5 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { type RcType } from 'runcheck';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
@@ -9,20 +9,190 @@ import type {
   OfflineModeConfig,
 } from './offline/types';
 
-/** Async adapter used when storage access requires asynchronous I/O. */
+export type AsyncStorageNamespaceKind =
+  | 'document'
+  | 'collection.item'
+  | 'listQuery.item'
+  | 'listQuery.query'
+  | 'offline.queue'
+  | 'offline.conflict'
+  | 'offline.entity'
+  | '__internal.protected';
+
+export function parseAsyncStorageNamespaceKind(
+  value: string,
+): AsyncStorageNamespaceKind | null {
+  switch (value) {
+    case 'document':
+    case 'collection.item':
+    case 'listQuery.item':
+    case 'listQuery.query':
+    case 'offline.queue':
+    case 'offline.conflict':
+    case 'offline.entity':
+    case '__internal.protected':
+      return value;
+    default:
+      return null;
+  }
+}
+
+export type AsyncStorageNamespaceScope = {
+  sessionKey: string;
+  storeName: string;
+  kind: AsyncStorageNamespaceKind;
+};
+
+export type AsyncStorageProtectedEntryRef = AsyncStorageNamespaceScope & {
+  key: string;
+};
+
+export type AsyncStorageTouchMode = 'never' | 'coarse' | 'force';
+
+export type AsyncStorageReadOptions = { touch?: AsyncStorageTouchMode };
+
+export type AsyncStorageMetadataOrder = 'key' | 'lru-asc' | 'lru-desc';
+
+export type AsyncStorageEntryMetadataBase = {
+  key: string;
+  payloadRef: string;
+  writtenAt: number;
+  lastAccessAt: number;
+  sizeBytes?: number;
+  version: number;
+};
+
+export type AsyncStorageEntryMetadata<
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = AsyncStorageEntryMetadataBase & { customMetadata: TCustomMetadata };
+
+export type AsyncStorageNamespaceGetResult<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = { value: TValue; metadata: AsyncStorageEntryMetadata<TCustomMetadata> };
+
+export type AsyncStorageNamespaceCommitUpsert<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = { key: string; value: TValue; version: number; metadata?: TCustomMetadata };
+
+export type AsyncStorageNamespaceCommitTouch = {
+  key: string;
+  lastAccessAt?: number;
+};
+
+export type AsyncStorageNamespaceStaticPolicy = {
+  maxEntries?: number;
+  pinnedKeys?: string[];
+};
+
+export type AsyncStorageNamespaceCommitArgs<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  upserts?: AsyncStorageNamespaceCommitUpsert<TValue, TCustomMetadata>[];
+  removes?: string[];
+  staticPolicy?: AsyncStorageNamespaceStaticPolicy | null;
+  touches?: AsyncStorageNamespaceCommitTouch[];
+};
+
+export type AsyncStorageMaintenanceState = {
+  lastSuccessfulCleanupAt: number | null;
+};
+
+export type AsyncStorageDriverSetEntry = { key: string; value: unknown };
+
+export type AsyncStorageDiscoveredScope = {
+  /** Known raw record keys for this scope. `null` if keys were not enumerated during discovery. */
+  knownRecordKeys: string[] | null;
+  scope: AsyncStorageNamespaceScope;
+};
+
+/** Low-level async backend contract implemented by custom storage drivers. */
+export type AsyncStorageDriver = {
+  /** Read a single raw record from a logical namespace. */
+  get(scope: AsyncStorageNamespaceScope, key: string): Promise<unknown>;
+  /** Write a single raw record to a logical namespace. */
+  set(
+    scope: AsyncStorageNamespaceScope,
+    key: string,
+    value: unknown,
+  ): Promise<void>;
+  /** Remove a single raw record from a logical namespace. */
+  remove(scope: AsyncStorageNamespaceScope, key: string): Promise<void>;
+  /** List raw record keys within a logical namespace. */
+  listKeys(scope: AsyncStorageNamespaceScope): Promise<string[]>;
+  /** Remove every record from a logical namespace. */
+  clear(scope: AsyncStorageNamespaceScope): Promise<void>;
+  /** Namespace discovery used for cold cleanup, protected-key restore, and session clearing. */
+  listScopes(sessionKey?: string): Promise<AsyncStorageNamespaceScope[]>;
+  /** Returns discovered scopes together with known raw record keys. Used for cleanup. */
+  listScopesWithKnownRecordKeys(
+    sessionKey?: string,
+  ): Promise<AsyncStorageDiscoveredScope[]>;
+  /** Bulk read for multiple keys in a single call. */
+  getMany(
+    scope: AsyncStorageNamespaceScope,
+    keys: string[],
+  ): Promise<unknown[]>;
+  /** Bulk write for multiple entries in a single call. */
+  setMany(
+    scope: AsyncStorageNamespaceScope,
+    entries: AsyncStorageDriverSetEntry[],
+  ): Promise<void>;
+  /** Bulk remove for multiple keys in a single call. */
+  removeMany(scope: AsyncStorageNamespaceScope, keys: string[]): Promise<void>;
+  /** @internal Test-only reset hook used by TSDF internals. */
+  __resetForTests?(): void;
+};
+
+export type AsyncStorageNamespaceHandle<
+  TValue,
+  TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  get(
+    key: string,
+    options?: AsyncStorageReadOptions,
+  ): Promise<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>;
+  getMany(
+    keys: string[],
+    options?: AsyncStorageReadOptions,
+  ): Promise<
+    Array<AsyncStorageNamespaceGetResult<TValue, TCustomMetadata> | null>
+  >;
+  listKeys(): Promise<string[]>;
+  commit(
+    args: AsyncStorageNamespaceCommitArgs<TValue, TCustomMetadata>,
+  ): Promise<void>;
+  listMetadata(args?: {
+    order?: AsyncStorageMetadataOrder;
+  }): Promise<AsyncStorageEntryMetadata<TCustomMetadata>[]>;
+  clear(): Promise<void>;
+};
+
+/** Managed async adapter consumed by TSDF persistence internals. */
 export type AsyncStorageAdapter = {
   /** Adapter mode marker used by persistence internals to pick async behavior. */
   kind: 'async';
-  /** Read an entry using async storage APIs. */
-  read<T>(key: string): Promise<T | null>;
-  /** Persist an entry using async storage APIs. */
-  write<T>(key: string, value: T): Promise<void>;
-  /** Remove a single key using async storage APIs. */
-  remove(key: string): Promise<void>;
-  /** Remove all keys that start with a prefix using async storage APIs. */
-  removeByPrefix(prefix: string): Promise<void>;
-  /** Return all matching keys in async storage. */
-  listKeys(prefix: string): Promise<string[]>;
+  /** Open a logical namespace with managed batching and touch guarantees. */
+  openNamespace<
+    TValue,
+    TCustomMetadata extends Record<string, unknown> = Record<string, unknown>,
+  >(
+    scope: AsyncStorageNamespaceScope,
+  ): AsyncStorageNamespaceHandle<TValue, TCustomMetadata>;
+  /** Reconstruct offline-protected entry refs for a session from persisted metadata. */
+  readProtectedStorageKeys(sessionKey: string): Promise<Set<string>>;
+  /** Eagerly sync offline protection changes into persisted metadata for already-cached entries. */
+  syncSessionProtectedKeys(
+    sessionKey: string,
+    protectedKeys: Iterable<string>,
+    previousProtectedKeys?: Iterable<string>,
+  ): Promise<void>;
+  /** Remove all namespaces for a session key. */
+  clearSession(sessionKey: string): Promise<void>;
+  /** Test-only reset hook used by TSDF internals. */
+  resetForTests?(): void;
 };
 
 /** Injected persistent storage adapter. */

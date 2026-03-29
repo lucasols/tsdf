@@ -11,14 +11,16 @@ import {
   vi,
 } from 'vitest';
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
-import type {
-  PersistedDocumentData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import type { StorageCacheEntry } from '../../src/persistentStorage/types';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
 
 const wrappedSchema = rc_object({
   value: rc_object({ name: rc_string, value: rc_number }),
@@ -33,14 +35,12 @@ function createDocPersistenceEnv(options: {
   version?: number;
   getSessionKey?: () => string | false;
   serverData?: TestData;
-  storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
 }) {
   const getSessionKey =
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
 
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
     getSessionKey,
-    storageAdapter: options.storageAdapter,
     persistentStorage: {
       storeName: options.storeName,
       adapter: opfsPersistentStorage,
@@ -51,17 +51,17 @@ function createDocPersistenceEnv(options: {
 }
 
 function populateStorage(
-  mockAdapter: ReturnType<typeof createMockOpfsStorageAdapter>,
+  mockAdapter: ReturnType<typeof createOpfsPersistentStorageTestStore>,
   storeName: string,
   sessionKey: string,
   data: TestData,
   version: number | undefined = undefined,
 ) {
   const key = `tsdf.${sessionKey}.${storeName}`;
-  const entry: StorageCacheEntry<PersistedDocumentData<{ value: TestData }>> =
+  const entry: StorageCacheEntry<{ d: { value: TestData } }> =
     version === undefined
-      ? { data: { data: { value: data } }, timestamp: Date.now() }
-      : { data: { data: { value: data } }, timestamp: Date.now(), version };
+      ? { data: { d: { value: data } }, timestamp: Date.now() }
+      : { data: { d: { value: data } }, timestamp: Date.now(), version };
 
   mockAdapter.setValue(key, entry);
 
@@ -74,16 +74,20 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 describe('opfs: document store persistence', () => {
   test('version mismatch cleans up stored entry', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter();
+    const mockAdapter = createOpfsPersistentStorageTestStore();
     const key = populateStorage(
       mockAdapter,
       'opfs-version-mismatch',
@@ -96,64 +100,55 @@ describe('opfs: document store persistence', () => {
       storeName: 'opfs-version-mismatch',
       sessionKey: 'sess1',
       version: 2,
-      storageAdapter: mockAdapter.adapter,
     });
 
     await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(true);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
-      `['tsdf.sess1.opfs-version-mismatch']`,
-    );
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
-    await env.apiStore.preloadPersistentStorage();
-    await advanceTime(2100);
+    const preloadPromise = env.apiStore.preloadPersistentStorage();
+    await resolveAfterAllTimers(preloadPromise);
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key, key]);
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
   test('schema validation failure triggers cleanup', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 50 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = 'tsdf.session1.opfs-cleanup';
-    const entry: StorageCacheEntry<PersistedDocumentData<{ badField: true }>> =
-      { data: { data: { badField: true } }, timestamp: Date.now(), version: 1 };
+    const entry: StorageCacheEntry<{ d: { badField: true } }> = {
+      data: { d: { badField: true } },
+      timestamp: Date.now(),
+      version: 1,
+    };
     mockAdapter.setValue(key, entry);
 
-    const env = createDocPersistenceEnv({
-      storeName: 'opfs-cleanup',
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocPersistenceEnv({ storeName: 'opfs-cleanup' });
 
     await advanceTime(2100);
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
-      `['tsdf.session1.opfs-cleanup']`,
-    );
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await advanceTime(50);
-    await preloadPromise;
-    await advanceTime(3000);
+    await resolveAfterAllTimers(preloadPromise);
+    await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key, key]);
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
     expect(mockAdapter.has(key)).toBe(false);
   });
 
   test('loads cached data on first read and refetches on mount', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     const key = populateStorage(mockAdapter, 'opfs-doc', 'session1', {
       name: 'cached',
       value: 42,
     });
 
-    const env = createDocPersistenceEnv({
-      storeName: 'opfs-doc',
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocPersistenceEnv({ storeName: 'opfs-doc' });
 
     await advanceTime(2100);
     await flushAllTimers();
@@ -166,9 +161,7 @@ describe('opfs: document store persistence', () => {
       refetchOnMount: '❌'
       status: 'idle'
     `);
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(
-      `['tsdf.session1.opfs-doc']`,
-    );
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     renderHook(() => {
       const { data, status } = env.apiStore.useDocument({
@@ -180,7 +173,7 @@ describe('opfs: document store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.readRequests).toEqual([key, key]);
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -193,7 +186,7 @@ describe('opfs: document store persistence', () => {
   });
 
   test('explicit preload hydrates cached data before mount', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     populateStorage(mockAdapter, 'opfs-preload', 'session1', {
       name: 'cached',
       value: 7,
@@ -201,13 +194,11 @@ describe('opfs: document store persistence', () => {
 
     const env = createDocPersistenceEnv({
       storeName: 'opfs-preload',
-      storageAdapter: mockAdapter.adapter,
       serverData: { name: 'fresh', value: 8 },
     });
 
     const preloadPromise = env.apiStore.preloadPersistentStorage();
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore();
 
@@ -230,21 +221,56 @@ describe('opfs: document store persistence', () => {
     `);
   });
 
+  test('remount does not reread OPFS after the document is already hydrated in memory', async () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
+    const key = populateStorage(mockAdapter, 'opfs-remount', 'session1', {
+      name: 'cached',
+      value: 7,
+    });
+
+    const env = createDocPersistenceEnv({
+      storeName: 'opfs-remount',
+      serverData: { name: 'fresh', value: 8 },
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    const firstHook = renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushAllTimers();
+
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+
+    firstHook.unmount();
+
+    renderHook(() =>
+      env.apiStore.useDocument({
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      }),
+    );
+    await flushAllTimers();
+
+    expect(mockAdapter.payloadGetRequests).toEqual([key]);
+  });
+
   test('reset prevents stale OPFS hydration from modifying store', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    const mockAdapter = createOpfsPersistentStorageTestStore({});
     populateStorage(mockAdapter, 'test-dispose', 'session1', {
       name: 'stale',
       value: 999,
     });
 
-    const env = createDocPersistenceEnv({
-      storeName: 'test-dispose',
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createDocPersistenceEnv({ storeName: 'test-dispose' });
 
     env.apiStore.reset();
 
-    await advanceTime(200);
+    await flushAllTimers();
 
     expect(env.store.state).toMatchInlineSnapshot(`
       data: null

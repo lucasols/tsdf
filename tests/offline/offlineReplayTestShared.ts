@@ -88,5 +88,8 @@ export function getOfflineQueueEntries(
 export function getOfflineQueueEntryData(
   entry: Record<string, unknown>,
 ): Record<string, unknown> {
-  return toRecord(entry.data, 'Expected persisted queue data to be an object');
+  return toRecord(
+    'd' in entry ? entry.d : entry.data,
+    'Expected persisted queue data to be an object',
+  );
 }

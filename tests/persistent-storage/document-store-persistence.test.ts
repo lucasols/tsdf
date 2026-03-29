@@ -13,6 +13,10 @@ import {
 } from 'vitest';
 import { createDocumentStore } from '../../src/documentStore';
 import {
+  createCompactLocalStorageEntry,
+  parseCompactLocalStorageEntry,
+} from '../../src/persistentStorage/compactLocalStorageEntry';
+import {
   readManagedLocalStorageSingleEntryByPayload,
   upsertManagedLocalStorageSingleEntry,
 } from '../../src/persistentStorage/localStorageMetadata';
@@ -227,7 +231,12 @@ describe('localStorage: document store persistence', () => {
       timestamp: Date.now(),
       version: 1,
     };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
     registerManagedDocumentKey('doc4', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
@@ -255,11 +264,8 @@ describe('localStorage: document store persistence', () => {
     const cached = localStorage.getItem('tsdf.sess1.doc5');
     expect(cached).not.toBeNull();
 
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    expect(parsed.data.data).toMatchInlineSnapshot(
+    const parsed = parseCompactLocalStorageEntry(cached);
+    expect(parsed?.value.d).toMatchInlineSnapshot(
       `value: { name: 'test', value: 42 }`,
     );
   });
@@ -401,11 +407,12 @@ describe('localStorage: document store persistence', () => {
 
     // Saved data should be the final state
     const cached = localStorage.getItem('tsdf.sess1.doc6');
-    const parsed = __LEGIT_CAST__<
-      StorageCacheEntry<PersistedDocumentData<{ value: TestData }>>,
-      unknown
-    >(JSON.parse(cached ?? ''));
-    expect(parsed.data.data.value).toMatchInlineSnapshot(`
+    const parsed = parseCompactLocalStorageEntry(cached);
+    expect(
+      __LEGIT_CAST__<PersistedDocumentData<{ value: TestData }>, unknown>({
+        data: parsed?.value.d,
+      }).data.value,
+    ).toMatchInlineSnapshot(`
       name: 'final'
       value: 99
     `);
@@ -628,7 +635,12 @@ describe('localStorage: invalid data cleanup', () => {
       data: { data: { invalid: true } },
       timestamp: Date.now(),
     };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
     registerManagedDocumentKey('cleanup-schema', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
@@ -647,10 +659,7 @@ describe('localStorage: invalid data cleanup', () => {
 
   test('malformed cache entry cleans up localStorage entry', async () => {
     const key = documentStorageKey('cleanup-malformed', 'sess1');
-    localStorage.setItem(
-      key,
-      JSON.stringify({ timestamp: Date.now(), wrongShape: true }),
-    );
+    localStorage.setItem(key, JSON.stringify({ wrongShape: true }));
     registerManagedDocumentKey('cleanup-malformed', 'sess1');
 
     const env = createDocPersistenceEnv({
@@ -694,7 +703,12 @@ describe('localStorage: invalid data cleanup', () => {
         data: { data: { value: { name: 'cached', value: 1 } } },
         timestamp: originalTimestamp,
       };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
     registerManagedDocumentKey('ts-refresh', 'sess1', entry.timestamp);
 
     const env = createDocPersistenceEnv({
@@ -720,7 +734,12 @@ describe('localStorage: invalid data cleanup', () => {
         data: { data: { value: { name: 'cached', value: 1 } } },
         timestamp: originalTimestamp,
       };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, entry.version),
+      ),
+    );
     registerManagedDocumentKey(
       'ts-refresh-throttled',
       'sess1',
@@ -747,7 +766,12 @@ describe('standard schema support', () => {
       data: { data: { name: 'standard', value: 99 } },
       timestamp: Date.now(),
     };
-    localStorage.setItem(key, JSON.stringify(entry));
+    localStorage.setItem(
+      key,
+      JSON.stringify(
+        createCompactLocalStorageEntry({ d: entry.data.data }, undefined),
+      ),
+    );
     registerManagedDocumentKey('std-doc', 'sess-std', entry.timestamp);
 
     const store = createDocumentStore<TestData>({

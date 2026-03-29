@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { localPersistentStorage } from '../../../src/persistentStorage/storageAdapter';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
+  getLocalStorageTree,
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -54,10 +55,75 @@ describe('sync storage efficiency: document', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.05 kb
-      .    | 📖 ✅ #2 tsdf.sess1.doc-remount-flow (entry) | 0.18 kb
-      2s   | 📖 ✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.05 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.s:sess1.doc-remount-flow.m (root, single, manifest) | 0.05 kb -> 0.05 kb
+      0    | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m
+           |    └ (namespace index) | 0.05 kb
+      .    | 📖 #2 ✅ tsdf.sess1.doc-remount-flow (entry data) | 0.10 kb
+           ·
+      2s   | 📖 #1 ✅ tsdf._m.r.s:sess1.doc-remount-flow.m
+           |    └ (namespace index) | 0.05 kb
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.s:sess1.doc-remount-flow.m
+           |    └ (namespace index) | 0.05 kb -> 0.05 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.30 kb)
+      ├ _m (0.15 kb)
+      │ ├ g (0.04 kb)
+      │ └ r (0.10 kb)
+      │   └ s:sess1 (0.10 kb)
+      │     └ doc-remount-flow (0.09 kb)
+      │       └ m (0.05 kb)
+      └ sess1 (0.14 kb)
+        └ doc-remount-flow (0.13 kb)"
+    `);
+
+    expect(getParsedLocalStorageValue('tsdf.sess1.doc-remount-flow'))
+      .toMatchInlineSnapshot(`
+        d:
+          value: { name: 'Cached document', value: 7 }
+      `);
+
+    expect(getParsedLocalStorageValue('tsdf._m.r.s:sess1.doc-remount-flow.m'))
+      .toMatchInlineSnapshot(`
+        e:
+          - a: 1735689604100
+      `);
+  });
+
+  test('document hook cache miss writes the fetched document once and remount stays fully in memory', async () => {
+    const storeName = 'doc-remount-no-cache';
+    const sessionKey = 'sess1';
+
+    const env = createDocumentEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so this capture focuses only on hook mount behavior.
+    await settleStartupBackgroundScan();
+
+    // With no persisted document, the first mount should miss storage, fetch the
+    // document, and write it once. The remount should then stay fully in memory.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useDocument({
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(
+      `value: { name: 'test', value: 42 }`,
+    );
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | 📖 #1 ❌ tsdf._m.r.s:sess1.doc-remount-no-cache.m (namespace index)
+            ·
+      1.81s | ✍️ #2 ❌->✅ tsdf.sess1.doc-remount-no-cache
+            |    └ (entry data) | ❌ -> 0.08 kb
+      .     | 📖 #1 ❌ tsdf._m.r.s:sess1.doc-remount-no-cache.m (namespace index)
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.s:sess1.doc-remount-no-cache.m
+            |    └ (namespace index) | ❌ -> 0.05 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -190,9 +256,12 @@ describe('sync storage efficiency: document', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | ✍️ ✅->✅ #1 tsdf.sess1.doc-mutation-flow (entry) | 0.18 kb -> 0.18 kb
-      .    | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.05 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-mutation-flow.m (root, single, manifest) | 0.05 kb -> 0.05 kb
+      1s   | ✍️ #1 ✅->✅ tsdf.sess1.doc-mutation-flow
+           |    └ (entry data) | 0.10 kb -> 0.10 kb
+      .    | 📖 #2 ✅ tsdf._m.r.s:sess1.doc-mutation-flow.m
+           |    └ (namespace index) | 0.05 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.s:sess1.doc-mutation-flow.m
+           |    └ (namespace index) | 0.05 kb -> 0.05 kb
       "
     `);
   });
@@ -240,9 +309,12 @@ describe('sync storage efficiency: document', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | ✍️ ✅->✅ #1 tsdf.sess1.doc-invalidation-flow (entry) | 0.18 kb -> 0.18 kb
-      .     | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.05 kb
-      .     | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-invalidation-flow.m (root, single, manifest) | 0.05 kb -> 0.05 kb
+      1.81s | ✍️ #1 ✅->✅ tsdf.sess1.doc-invalidation-flow
+            |    └ (entry data) | 0.10 kb -> 0.10 kb
+      .     | 📖 #2 ✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m
+            |    └ (namespace index) | 0.05 kb
+      .     | ✍️ #2 ✅->✅ tsdf._m.r.s:sess1.doc-invalidation-flow.m
+            |    └ (namespace index) | 0.05 kb -> 0.05 kb
       "
     `);
   });
@@ -307,9 +379,12 @@ describe('sync storage efficiency: document', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | ✍️ ✅->✅ #1 tsdf.sess1.doc-coalesced-invalidations (entry) | 0.18 kb -> 0.18 kb
-      .     | 📖 ✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m (root, single, manifest) | 0.05 kb
-      .     | ✍️ ✅->✅ #2 tsdf._m.r.s:sess1.doc-coalesced-invalidations.m (root, single, manifest) | 0.05 kb -> 0.05 kb
+      1.81s | ✍️ #1 ✅->✅ tsdf.sess1.doc-coalesced-invalidations
+            |    └ (entry data) | 0.10 kb -> 0.11 kb
+      .     | 📖 #2 ✅ tsdf._m.r.s:sess1.doc-coalesced-invalidations.m
+            |    └ (namespace index) | 0.05 kb
+      .     | ✍️ #2 ✅->✅ tsdf._m.r.s:sess1.doc-coalesced-invalidations.m
+            |    └ (namespace index) | 0.05 kb -> 0.05 kb
       "
     `);
   });

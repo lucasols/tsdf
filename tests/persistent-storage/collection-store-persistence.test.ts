@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
-import { rc_number, rc_object, rc_parse_json, rc_string } from 'runcheck';
+import { rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
   beforeAll,
@@ -11,12 +11,12 @@ import {
   test,
   vi,
 } from 'vitest';
+import {
+  createCompactLocalStorageEntry,
+  parseCompactLocalStorageEntry,
+} from '../../src/persistentStorage/compactLocalStorageEntry';
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
-import type {
-  PersistedCollectionItemData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
@@ -24,11 +24,6 @@ import { createLocalStoragePersistentTestStore } from '../utils/persistentStorag
 
 const wrappedItemSchema = rc_object({
   value: rc_object({ id: rc_string, name: rc_string }),
-});
-const cachedCollectionItemEntrySchema = rc_object({
-  data: rc_object({ data: wrappedItemSchema, payload: rc_string }),
-  timestamp: rc_number,
-  version: rc_number.optional(),
 });
 const persistentStore = createLocalStoragePersistentTestStore();
 
@@ -93,10 +88,10 @@ function listStoredItemPayloads(
     const rawEntry = localStorage.getItem(key);
     if (!rawEntry) continue;
 
-    const parsed = rc_parse_json(rawEntry, cachedCollectionItemEntrySchema);
-    if (!parsed.ok) continue;
+    const parsed = parseCompactLocalStorageEntry(rawEntry);
+    if (parsed === null || typeof parsed.value.p !== 'string') continue;
 
-    payloads.push(parsed.value.data.payload);
+    payloads.push(parsed.value.p);
   }
 
   return payloads;
@@ -603,6 +598,27 @@ describe('localStorage: collection store persistence', () => {
     expect(localStorage.getItem(key)).toBeNull();
   });
 
+  test('scheduled maintenance does not clean invalid cached entries before they are read', async () => {
+    const key = setCachedCollectionItem(
+      'col-invalid-maintenance',
+      'sess1',
+      'bad',
+      { value: { id: 'bad', name: 'Old' } },
+      1,
+    );
+
+    createEnv({
+      storeName: 'col-invalid-maintenance',
+      sessionKey: 'sess1',
+      version: 2,
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(key)).not.toBeNull();
+  });
+
   test('invalid cached entries are also cleaned up after a hook read', async () => {
     const key = setCachedCollectionItem(
       'col-invalid-hook',
@@ -638,21 +654,17 @@ describe('localStorage: collection store persistence', () => {
     setCachedCollectionItem('col-invalid-payload', 'sess1', 'bad', {
       value: { id: 'bad', name: 'Old' },
     });
-    const entry =
-      persistentStore.storage.readEntry<
-        StorageCacheEntry<PersistedCollectionItemData<PersistedItemState>>
-      >(key);
-    if (entry === null) {
-      throw new Error(`Missing seeded entry for ${key}`);
-    }
+    const entry = persistentStore
+      .scope('col-invalid-payload', 'sess1')
+      .collection.readItemEntry<PersistedItemState>('bad');
     localStorage.setItem(
       key,
-      JSON.stringify({
-        ...entry,
-        data: { ...entry.data, payload: true },
-      } satisfies StorageCacheEntry<
-        PersistedCollectionItemData<PersistedItemState> & { payload: boolean }
-      >),
+      JSON.stringify(
+        createCompactLocalStorageEntry(
+          { d: entry.data.data, p: true },
+          entry.version,
+        ),
+      ),
     );
 
     const env = createEnv({

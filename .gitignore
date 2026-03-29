@@ -19,4 +19,5 @@ dist
 test-results/.last-run.json
 notes
 .vscode/review-state.json
+.jscpd-review/jscpd-report.json
 report/jscpd-report.json

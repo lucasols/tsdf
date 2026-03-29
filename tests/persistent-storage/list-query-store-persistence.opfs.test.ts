@@ -1,6 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { renderHook } from '@testing-library/react';
+import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import {
   afterEach,
@@ -24,12 +25,25 @@ import type {
 import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createListQueryStoreTestEnv,
+  type ListQueryParams,
   type Row,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
-import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
+import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
+import {
+  createOpfsPersistentStorageTestStore,
+  type OpfsPersistentStorageTestStoreOptions,
+} from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
+import {
+  advanceTime,
+  flushAllTimers,
+  resolveAfterAllTimers,
+} from '../utils/genericTestUtils';
+import {
+  getParsedOpfsFileData,
+  startOpfsPersistentStorageOperationCapture,
+} from '../utils/persistentStorageOptimizationTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(
   rc_object({
@@ -59,9 +73,12 @@ const partialResourcesConfig: PartialResourcesConfig<Row> = {
 function createEnv(options: {
   storeName: string;
   sessionKey?: string;
-  storageAdapter: ReturnType<typeof createMockOpfsStorageAdapter>['adapter'];
+  maxItems?: number;
+  maxQueries?: number;
   maxQuerySize?: number;
   ignoreItems?: string[] | ((payload: string) => boolean);
+  pinnedItems?: string[];
+  pinnedQueries?: ListQueryParams[];
   serverData?: Tables<Row>;
   partialResources?: PartialResourcesConfig<Row>;
   offsetPagination?: OffsetPaginationConfig;
@@ -70,7 +87,6 @@ function createEnv(options: {
   return createListQueryStoreTestEnv(options.serverData ?? {}, {
     id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
-    storageAdapter: options.storageAdapter,
     partialResources: options.partialResources,
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
@@ -80,8 +96,12 @@ function createEnv(options: {
       schema: rowSchema,
       itemPayloadSchema: rc_string,
       queryPayloadSchema: listQueryParamsSchema,
+      maxItems: options.maxItems,
+      maxQueries: options.maxQueries,
       maxQuerySize: options.maxQuerySize,
       ignoreItems: options.ignoreItems,
+      pinnedItems: options.pinnedItems,
+      pinnedQueries: options.pinnedQueries,
     },
   });
 }
@@ -111,17 +131,47 @@ function createPersistedListQueryState(
   };
 }
 
+function createListQueryOpfsTestStore(options: {
+  storeName: string;
+  sessionKey: string;
+  initialState?: NonNullable<
+    OpfsPersistentStorageTestStoreOptions['initialState']
+  >['listQuery'];
+}) {
+  const mockAdapter = createOpfsPersistentStorageTestStore({
+    ...(options.initialState !== undefined
+      ? {
+          initialState: {
+            storeName: options.storeName,
+            sessionKey: options.sessionKey,
+            listQuery: options.initialState,
+          },
+        }
+      : {}),
+  });
+  const listQueryScope = mockAdapter.scope(
+    options.storeName,
+    options.sessionKey,
+  ).listQuery;
+
+  return { mockAdapter, listQueryScope };
+}
+
 beforeAll(() => {
   vi.useFakeTimers();
 });
 
 beforeEach(() => {
   vi.setSystemTime(TEST_INITIAL_TIME);
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   localStorage.clear();
+  resetMockBrowserOpfsForTests();
+  opfsPersistentStorage.resetForTests?.();
 });
 
 describe('opfs: list query store persistence', () => {
@@ -129,26 +179,20 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-hook';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    const { mockAdapter } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [
-            { tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } },
-            { tableId: 'projects', id: 1, data: { id: 1, name: 'Cold' } },
-          ],
-          queries: [
-            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
-          ],
-        },
+        items: [
+          { tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } },
+          { tableId: 'projects', id: 1, data: { id: 1, name: 'Cold' } },
+        ],
+        queries: [{ params: usersQuery, items: [{ tableId: 'users', id: 1 }] }],
       },
     });
     const env = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
@@ -158,7 +202,7 @@ describe('opfs: list query store persistence', () => {
     expect(env.apiStore.getItemState(() => true)).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getQueryState(usersQuery)).toBeUndefined();
     expect(env.apiStore.getItemState('users||1')).toBeUndefined();
-    expect(mockAdapter.readRequests).toMatchInlineSnapshot(`[]`);
+    expect(mockAdapter.payloadGetRequests).toMatchInlineSnapshot(`[]`);
 
     const renders = createLoggerStore({ arrays: 'all' });
 
@@ -172,9 +216,10 @@ describe('opfs: list query store persistence', () => {
 
     await flushAllTimers();
 
-    expect(mockAdapter.scopeReadRequests().slice(0, 2)).toMatchInlineSnapshot(`
-      ['lq.{tableId:"users"}', 'li."users||1']
-    `);
+    expect(mockAdapter.scopeReadRequests({ storeName, sessionKey }).slice(0, 2))
+      .toMatchInlineSnapshot(`
+        ['lq.{tableId:"users"}', 'li."users||1']
+      `);
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -190,30 +235,24 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-preload-query';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    createListQueryOpfsTestStore({
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } }],
-          queries: [
-            { params: usersQuery, items: [{ tableId: 'users', id: 1 }] },
-          ],
-        },
+        items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } }],
+        queries: [{ params: usersQuery, items: [{ tableId: 'users', id: 1 }] }],
       },
     });
 
     const env = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(200);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
         preloaded: '✅'
     `);
@@ -239,43 +278,179 @@ describe('opfs: list query store persistence', () => {
     `);
   });
 
+  test('large list item keys use hashed OPFS filenames and still hydrate correctly', async () => {
+    const storeName = 'lq-opfs-large-item-key';
+    const sessionKey = 'sess1';
+    const longTableId = `users-${'x'.repeat(320)}`;
+    const { mockAdapter } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+      initialState: {
+        items: [
+          { tableId: longTableId, id: 1, data: { id: 1, name: 'Cached' } },
+        ],
+      },
+    });
+
+    // The physical OPFS filename should stay short even when the logical item key is huge.
+    const storeEntries = mockAdapter.mockBrowserOpfs
+      .listEntries(`tsdf/${sessionKey}/${storeName}`)
+      .sort();
+    expect({
+      payloadFileLengths: storeEntries
+        .filter((entry) => entry.endsWith('.p.json'))
+        .map((entry) => entry.length),
+      storeEntries,
+    }).toMatchInlineSnapshot(`
+      payloadFileLengths: [27]
+      storeEntries: ['file:li._i.r.json', 'file:li.h~2529159976.p.json']
+    `);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { [longTableId]: [{ id: 1, name: 'Fresh' }] },
+    });
+
+    // Item hydration should keep using the raw logical key even though the OPFS file is hashed.
+    const preloadPromise = env.apiStore.preloadItemFromStorage(
+      `${longTableId}||1`,
+    );
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - payload: 'users-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx||1'
+        preloaded: '✅'
+    `);
+
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    renderHook(() => {
+      const { data, status } = env.apiStore.useItem(`${longTableId}||1`, {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, name: data?.name ?? null });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ name: Cached
+      -> status: refetching ⋅ name: Cached
+      -> status: success ⋅ name: Fresh
+      "
+    `);
+  });
+
+  test('large list query payloads use hashed OPFS filenames and still hydrate correctly', async () => {
+    const storeName = 'lq-opfs-large-query-key';
+    const sessionKey = 'sess1';
+    const longSearch = `user-${'x'.repeat(320)}`;
+    const query: ListQueryParams = {
+      filters: [{ field: 'name', op: 'eq', value: longSearch }],
+      tableId: 'users',
+    };
+    const { mockAdapter } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+      initialState: {
+        items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Cached' } }],
+        queries: [{ params: query, items: [{ tableId: 'users', id: 1 }] }],
+      },
+    });
+
+    // Large serialized query payloads should also map to short OPFS payload filenames.
+    const storeEntries = mockAdapter.mockBrowserOpfs
+      .listEntries(`tsdf/${sessionKey}/${storeName}`)
+      .sort();
+    expect({
+      payloadFileLengths: storeEntries
+        .filter((entry) => entry.endsWith('.p.json'))
+        .map((entry) => entry.length)
+        .sort((left, right) => left - right),
+      storeEntries,
+    }).toMatchInlineSnapshot(`
+      payloadFileLengths: [26, 27]
+      storeEntries:
+        - 'file:li._i.r.json'
+        - 'file:li.h~228010772.p.json'
+        - 'file:lq._i.r.json'
+        - 'file:lq.h~2854012034.p.json'
+    `);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+    });
+
+    // Query hydration should still find the large logical query payload through the hashed file.
+    const preloadPromise = env.apiStore.preloadQueryFromStorage(query);
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - payload:
+          filters:
+            - field: 'name'
+              op: 'eq'
+              value: 'user-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+          tableId: 'users'
+        preloaded: '✅'
+    `);
+
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    renderHook(() => {
+      const { items, status } = env.apiStore.useListQuery(query, {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached]
+      -> status: refetching ⋅ names: [Cached]
+      -> status: success ⋅ names: []
+      "
+    `);
+  });
+
   test('ignored cached items are skipped during query preload and removed from opfs', async () => {
     const storeName = 'lq-opfs-ignore';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 50,
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [
-            { tableId: 'users', id: 1, data: { id: 1, name: 'Kept' } },
-            { tableId: 'users', id: 2, data: { id: 2, name: 'Ignored' } },
-          ],
-          queries: [
-            {
-              params: usersQuery,
-              items: [
-                { tableId: 'users', id: 1 },
-                { tableId: 'users', id: 2 },
-              ],
-            },
-          ],
-        },
+        items: [
+          { tableId: 'users', id: 1, data: { id: 1, name: 'Kept' } },
+          { tableId: 'users', id: 2, data: { id: 2, name: 'Ignored' } },
+        ],
+        queries: [
+          {
+            params: usersQuery,
+            items: [
+              { tableId: 'users', id: 1 },
+              { tableId: 'users', id: 2 },
+            ],
+          },
+        ],
       },
     });
 
     const env = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       ignoreItems: (payload) => payload.endsWith('||2'),
     });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
     await advanceTime(2100);
     await flushAllTimers();
 
@@ -284,17 +459,16 @@ describe('opfs: list query store persistence', () => {
         ['"users||1']
       `);
     expect(env.apiStore.getItemState('users||2')).toBeUndefined();
-    expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 2)),
-    ).toBe(false);
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 2))).toBe(
+      false,
+    );
   });
 
   test('round-trip persistence preserves partial-resource metadata for cached list queries', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-partial-roundtrip';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    const { listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
@@ -302,7 +476,6 @@ describe('opfs: list query store persistence', () => {
     const writerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       partialResources: partialResourcesConfig,
       serverData: { users: [{ id: 1, name: 'Cached' }] },
     });
@@ -318,7 +491,6 @@ describe('opfs: list query store persistence', () => {
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       partialResources: partialResourcesConfig,
       serverData: { users: [{ id: 1, name: 'Fresh' }] },
     });
@@ -335,7 +507,7 @@ describe('opfs: list query store persistence', () => {
       renders.add({ status, names: items.map((item) => item.name) });
     });
 
-    await advanceTime(200);
+    await flushAllTimers();
 
     expect(renders.changesSnapshot).toMatchInlineSnapshot(`
       "
@@ -346,7 +518,7 @@ describe('opfs: list query store persistence', () => {
     expect(readerEnv.serverTable.numOfFinishedFetches).toBe(0);
     expect(
       readerEnv.store.state.itemLoadedFields[
-        mockAdapter.listQuery.itemKey('users', 1)
+        listQueryScope.itemKey('users', 1)
       ],
     ).toMatchInlineSnapshot(`
       ['id', 'name']
@@ -356,8 +528,7 @@ describe('opfs: list query store persistence', () => {
   test('hydrated partial-resource items keep loading until missing fields are fetched', async () => {
     const storeName = 'lq-opfs-item-partial-missing-fields';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    const { listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
@@ -366,7 +537,6 @@ describe('opfs: list query store persistence', () => {
     const writerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       partialResources: partialResourcesConfig,
       serverData: {
         users: [{ id: 1, name: 'Cached', age: 20, email: 'cached@site.test' }],
@@ -386,7 +556,6 @@ describe('opfs: list query store persistence', () => {
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       partialResources: partialResourcesConfig,
       serverData: {
         users: [{ id: 1, name: 'Fresh', age: 21, email: 'fresh@site.test' }],
@@ -427,7 +596,7 @@ describe('opfs: list query store persistence', () => {
     `);
     expect(
       readerEnv.store.state.itemLoadedFields[
-        mockAdapter.listQuery.itemKey('users', 1)
+        listQueryScope.itemKey('users', 1)
       ],
     ).toMatchInlineSnapshot(`
       ['age', 'email', 'id', 'name']
@@ -438,8 +607,7 @@ describe('opfs: list query store persistence', () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-partial-missing-fields';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    const { listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
@@ -447,7 +615,6 @@ describe('opfs: list query store persistence', () => {
     const writerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       partialResources: partialResourcesConfig,
       serverData: {
         users: [{ id: 1, name: 'Cached', age: 20, email: 'cached@site.test' }],
@@ -467,7 +634,6 @@ describe('opfs: list query store persistence', () => {
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       partialResources: partialResourcesConfig,
       serverData: {
         users: [{ id: 1, name: 'Fresh', age: 21, email: 'fresh@site.test' }],
@@ -516,7 +682,7 @@ describe('opfs: list query store persistence', () => {
     `);
     expect(
       readerEnv.store.state.itemLoadedFields[
-        mockAdapter.listQuery.itemKey('users', 1)
+        listQueryScope.itemKey('users', 1)
       ],
     ).toMatchInlineSnapshot(`
       ['age', 'email', 'id', 'name']
@@ -524,7 +690,7 @@ describe('opfs: list query store persistence', () => {
   });
 
   test('round-trip persistence preserves offset-pagination progress for loadMore', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    createOpfsPersistentStorageTestStore();
     const productsQuery = { tableId: 'products' };
     const products = Array.from({ length: 20 }, (_, index) => ({
       id: index + 1,
@@ -536,7 +702,6 @@ describe('opfs: list query store persistence', () => {
     const writerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: { products },
       defaultQuerySize: 5,
       offsetPagination: { maxInvalidationLimit: 100 },
@@ -553,7 +718,6 @@ describe('opfs: list query store persistence', () => {
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: { products },
       defaultQuerySize: 5,
       offsetPagination: { maxInvalidationLimit: 100 },
@@ -561,8 +725,7 @@ describe('opfs: list query store persistence', () => {
 
     const preloadPromise =
       readerEnv.apiStore.preloadQueryFromStorage(productsQuery);
-    await advanceTime(200);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore();
 
@@ -611,8 +774,7 @@ describe('opfs: list query store persistence', () => {
     const productsQuery = { tableId: 'products' };
     const storeName = 'lq-opfs-hook-loadsize-smaller';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    createListQueryOpfsTestStore({
       storeName,
       sessionKey,
       initialState: createPersistedListQueryState(
@@ -622,13 +784,12 @@ describe('opfs: list query store persistence', () => {
           name: `Cached Product ${index + 1}`,
         })),
         10,
-      ),
+      ).listQuery,
     });
 
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: {
         products: Array.from({ length: 20 }, (_, index) => ({
           id: index + 1,
@@ -687,21 +848,16 @@ describe('opfs: list query store persistence', () => {
     }));
     const storeName = 'lq-opfs-hook-loadsize-larger';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    createListQueryOpfsTestStore({
       storeName,
       sessionKey,
-      initialState: createPersistedListQueryState(
-        'products',
-        cachedProducts,
-        5,
-      ),
+      initialState: createPersistedListQueryState('products', cachedProducts, 5)
+        .listQuery,
     });
 
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: { products: freshProducts },
       defaultQuerySize: 5,
     });
@@ -744,7 +900,7 @@ describe('opfs: list query store persistence', () => {
   });
 
   test('round-trip persistence keeps state-manipulated query membership and item updates', async () => {
-    const mockAdapter = createMockOpfsStorageAdapter({ readDelayMs: 100 });
+    createOpfsPersistentStorageTestStore();
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-state-roundtrip';
     const sessionKey = 'sess1';
@@ -752,7 +908,6 @@ describe('opfs: list query store persistence', () => {
     const writerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: {
         users: [
           { id: 1, name: 'Alice' },
@@ -779,7 +934,6 @@ describe('opfs: list query store persistence', () => {
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: {
         users: [
           { id: 1, name: 'Alice' },
@@ -790,8 +944,7 @@ describe('opfs: list query store persistence', () => {
 
     const preloadPromise =
       readerEnv.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(200);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     const renders = createLoggerStore({ arrays: 'all' });
 
@@ -822,20 +975,15 @@ describe('opfs: list query store persistence', () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-delete-persisted-item';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
-    const deletedItemStorageKey = mockAdapter.listQuery.itemStorageKey(
-      'users',
-      1,
-    );
+    const deletedItemStorageKey = listQueryScope.itemStorageKey('users', 1);
 
     const env = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       serverData: {
         users: [
           { id: 1, name: 'Alice' },
@@ -850,13 +998,15 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(true);
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery)).toMatchObject({
-      data: {
-        items: [
-          mockAdapter.listQuery.itemKey('users', 1),
-          mockAdapter.listQuery.itemKey('users', 2),
-        ],
-      },
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
+      ),
+    ).toMatchObject({
+      i: [
+        listQueryScope.itemKey('users', 1),
+        listQueryScope.itemKey('users', 2),
+      ],
     });
 
     env.apiStore.deleteItemState('users||1');
@@ -864,37 +1014,104 @@ describe('opfs: list query store persistence', () => {
     await flushAllTimers();
 
     expect(mockAdapter.has(deletedItemStorageKey)).toBe(false);
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery)).toMatchObject({
-      data: { items: [mockAdapter.listQuery.itemKey('users', 2)] },
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-delete-persisted-item/lq.<{tableId:"users"}>.p.json',
+      ),
+    ).toMatchObject({ i: [listQueryScope.itemKey('users', 2)] });
+  });
+
+  test('cold persisted query items can be evicted during unrelated maxItems cleanup and later hydrate with missing items filtered out', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-opfs-cold-query-items';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
     });
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Older cached' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 2, { id: 2, name: 'Newer cached' });
+    listQueryScope.seedQuery(usersQuery, [
+      listQueryScope.itemKey('users', 1),
+      listQueryScope.itemKey('users', 2),
+    ]);
+    const writerEnv = createEnv({ storeName, sessionKey, maxItems: 2 });
+
+    writerEnv.apiStore.addItemToState('users||3', {
+      id: 3,
+      name: 'Fresh standalone',
+    });
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
+      ['{tableId:"users"}']
+    `);
+    expect(listQueryScope.listStoredItemKeys().sort()).toMatchInlineSnapshot(`
+      ['"users||2', '"users||3']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-query-items/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchInlineSnapshot(`i: ['"users||1', '"users||2']`);
+
+    const readerEnv = createEnv({
+      storeName,
+      sessionKey,
+      maxItems: 2,
+      serverData: {
+        users: [
+          { id: 1, name: 'Older cached' },
+          { id: 2, name: 'Newer cached' },
+          { id: 3, name: 'Fresh standalone' },
+        ],
+      },
+    });
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    renderHook(() => {
+      const { items, status } = readerEnv.apiStore.useListQuery(usersQuery, {
+        disableRefetchOnMount: true,
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name) });
+    });
+
+    await flushAllTimers();
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ names: []
+      -> status: success ⋅ names: [Newer cached]
+      "
+    `);
+    expect(
+      readerEnv.serverTable.getRequestHistory('all'),
+    ).toMatchInlineSnapshot(`[]`);
   });
 
   test('explicit item preload hydrates only the targeted item', async () => {
     const storeName = 'lq-opfs-preload-item';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    createListQueryOpfsTestStore({
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [
-            { tableId: 'users', id: 1, data: { id: 1, name: 'Alice' } },
-            { tableId: 'users', id: 2, data: { id: 2, name: 'Bob' } },
-          ],
-        },
+        items: [
+          { tableId: 'users', id: 1, data: { id: 1, name: 'Alice' } },
+          { tableId: 'users', id: 2, data: { id: 2, name: 'Bob' } },
+        ],
       },
     });
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(100);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '✅' }
     `);
 
@@ -908,15 +1125,215 @@ describe('opfs: list query store persistence', () => {
       `);
   });
 
-  test('invalid cached items are removed during targeted preload', async () => {
-    const storeName = 'lq-opfs-invalid';
+  test('missing item preloads still recheck storage on later retries', async () => {
+    const storeName = 'lq-opfs-missing-item-cache';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 50,
+    const { mockAdapter } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
-    const key = mockAdapter.listQuery.itemStorageKey('users', 1);
+
+    const env = createEnv({ storeName, sessionKey });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    const firstCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const firstPreloadPromise = env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(firstPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
+    `);
+    const firstOperations = firstCapture.finish().timelineString;
+
+    expect(firstOperations).not.toBe('empty');
+
+    const secondCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const secondPreloadPromise =
+      env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(secondPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
+    `);
+    const secondOperations = secondCapture.finish().timelineString;
+    expect(secondOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📂 dir-open ❌ tsdf/sess1 (session directory)
+      1ms  | end
+      "
+    `);
+  });
+
+  test('persisted list item maxItems policy is enforced on cold startup before the store mounts', async () => {
+    const storeName = 'lq-opfs-cold-policy-max-items';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Older cached' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 2, { id: 2, name: 'Older kept' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 3, { id: 3, name: 'Newest kept' });
+    listQueryScope.setItemStaticPolicy({ m: 2 });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||2', '"users||3']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-max-items/li._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "users||2: { a: 1735689600100, p: 'users||2' }
+        "users||3: { a: 1735689600200, p: 'users||3' }
+
+      s: { m: 2 }
+    `);
+  });
+
+  test('persisted list query maxQueries policy is enforced on cold startup before the store mounts', async () => {
+    const storeName = 'lq-opfs-cold-policy-max-queries';
+    const sessionKey = 'sess1';
+    const firstQuery = { tableId: 'users-1' };
+    const secondQuery = { tableId: 'users-2' };
+    const thirdQuery = { tableId: 'users-3' };
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedQuery(firstQuery, []);
+    await advanceTime(100);
+    listQueryScope.seedQuery(secondQuery, []);
+    await advanceTime(100);
+    listQueryScope.seedQuery(thirdQuery, []);
+    listQueryScope.setQueryStaticPolicy({ m: 2 });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
+      ['{tableId:"users-2"}', '{tableId:"users-3"}']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-max-queries/lq._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        {tableId:"users-2"}:
+          a: 1735689600100
+          p: { tableId: 'users-2' }
+        {tableId:"users-3"}:
+          a: 1735689600200
+          p: { tableId: 'users-3' }
+
+      s: { m: 2 }
+    `);
+  });
+
+  test('persisted pinned list item keys survive cold startup cleanup', async () => {
+    const storeName = 'lq-opfs-cold-policy-pinned-item';
+    const sessionKey = 'sess1';
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Pinned older' });
+    await advanceTime(100);
+    listQueryScope.seedItem('users', 2, { id: 2, name: 'Newer other' });
+    listQueryScope.setItemStaticPolicy({
+      k: [listQueryScope.itemKey('users', 1)],
+      m: 1,
+    });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||1']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-pinned-item/li._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        "users||1: { a: 1735689600000, p: 'users||1' }
+
+      s:
+        k: ['"users||1']
+        m: 1
+    `);
+  });
+
+  test('persisted pinned query keys survive cold startup cleanup', async () => {
+    const storeName = 'lq-opfs-cold-policy-pinned-query';
+    const sessionKey = 'sess1';
+    const pinnedQuery = { tableId: 'users-pinned' };
+    const otherQuery = { tableId: 'users-other' };
+    const { listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+
+    listQueryScope.seedQuery(pinnedQuery, []);
+    await advanceTime(100);
+    listQueryScope.seedQuery(otherQuery, []);
+    listQueryScope.setQueryStaticPolicy({
+      k: [listQueryScope.queryKey(pinnedQuery)],
+      m: 1,
+    });
+
+    opfsPersistentStorage.resetForTests?.();
+    createEnv({ storeName: 'trigger-list-query', sessionKey });
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredQueryKeys()).toMatchInlineSnapshot(`
+      ['{tableId:"users-pinned"}']
+    `);
+    expect(
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-cold-policy-pinned-query/lq._i.r.json',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        {tableId:"users-pinned"}:
+          a: 1735689600000
+          p: { tableId: 'users-pinned' }
+
+      s:
+        k: ['{tableId:"users-pinned"}']
+        m: 1
+    `);
+  });
+
+  test('invalid cached items are removed during targeted preload', async () => {
+    const storeName = 'lq-opfs-invalid';
+    const sessionKey = 'sess1';
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+    const key = listQueryScope.itemStorageKey('users', 1);
     const entry: StorageCacheEntry<PersistedListQueryItemData<{ bad: true }>> =
       {
         data: { data: { bad: true }, payload: 'users||1' },
@@ -925,32 +1342,89 @@ describe('opfs: list query store persistence', () => {
       };
     mockAdapter.storage.writeValue(key, entry);
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(50);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);
   });
 
-  test('invalid cached item payloads are removed during targeted preload', async () => {
-    const storeName = 'lq-opfs-invalid-item-payload';
+  test('items marked missing can be re-persisted and later preloaded again', async () => {
+    const usersQuery = { tableId: 'users' };
+    const storeName = 'lq-opfs-repersist-missing-item';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 50,
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
-    const key = mockAdapter.listQuery.itemStorageKey('users', 1);
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Alice' }] },
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    const missingPreloadPromise =
+      env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(missingPreloadPromise)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '❌' }
+    `);
+
+    env.scheduleFetch('highPriority', usersQuery);
+    await flushAllTimers();
+    await advanceTime(1100);
+    await flushAllTimers();
+
+    expect(listQueryScope.listStoredItemKeys()).toMatchInlineSnapshot(`
+      ['"users||1']
+    `);
+
+    // Drop the in-memory item without touching the persisted copy so the next
+    // preload must go back to storage.
+    act(() => {
+      env.store.produceState((draft) => {
+        delete draft.items['users||1'];
+        delete draft.itemQueries['users||1'];
+        delete draft.itemLoadedFields['users||1'];
+      });
+    });
+
+    // Clearing adapter caches and pending commits keeps the assertion focused on
+    // whether the next preload really goes back to storage.
+    opfsPersistentStorage.resetForTests?.();
+
+    const reloadCapture =
+      startOpfsPersistentStorageOperationCapture(mockAdapter);
+    const reloadedItem = env.apiStore.preloadItemFromStorage('users||1');
+    await expect(resolveAfterAllTimers(reloadedItem)).resolves
+      .toMatchInlineSnapshot(`
+      - { payload: 'users||1', preloaded: '✅' }
+    `);
+    expect(reloadCapture.finish().timelineString).toContain(
+      '(item data, <"users||1>)',
+    );
+    expect(env.apiStore.getItemState('users||1')).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Alice'
+    `);
+  });
+
+  test('invalid cached item payloads are removed during targeted preload', async () => {
+    const storeName = 'lq-opfs-invalid-item-payload';
+    const sessionKey = 'sess1';
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
+    const key = listQueryScope.itemStorageKey('users', 1);
     const entry: StorageCacheEntry<
       PersistedListQueryItemData<Row> & { payload: boolean }
     > = {
@@ -960,18 +1434,13 @@ describe('opfs: list query store persistence', () => {
     };
     mockAdapter.storage.writeValue(key, entry);
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
-    await advanceTime(50);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - { payload: 'users||1', preloaded: '❌' }
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);
@@ -981,39 +1450,33 @@ describe('opfs: list query store persistence', () => {
     const storeName = 'lq-opfs-invalid-query';
     const sessionKey = 'sess1';
     const usersQuery = { tableId: 'users' };
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 50,
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
       storeName,
       sessionKey,
     });
-    const key = mockAdapter.listQuery.queryStorageKey(usersQuery);
+    const key = listQueryScope.queryStorageKey(usersQuery);
     const entry: StorageCacheEntry<
       PersistedListQueryData & { payload: boolean }
     > = {
       data: {
         payload: true,
-        items: [mockAdapter.listQuery.itemKey('users', 1)],
+        items: [listQueryScope.itemKey('users', 1)],
         hasMore: false,
       },
       timestamp: Date.now(),
       version: 1,
     };
     mockAdapter.storage.writeValue(key, entry);
-    mockAdapter.listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
+    listQueryScope.seedItem('users', 1, { id: 1, name: 'Alice' });
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadQueryFromStorage(usersQuery);
-    await advanceTime(50);
-    await expect(preloadPromise).resolves.toMatchInlineSnapshot(`
+    await expect(resolveAfterAllTimers(preloadPromise)).resolves
+      .toMatchInlineSnapshot(`
       - payload: { tableId: 'users' }
         preloaded: '❌'
     `);
-    await advanceTime(2100);
     await flushAllTimers();
 
     expect(mockAdapter.has(key)).toBe(false);
@@ -1022,29 +1485,21 @@ describe('opfs: list query store persistence', () => {
   test('reset cancels stale async hydrations', async () => {
     const storeName = 'lq-opfs-reset';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({
-      readDelayMs: 100,
+    createListQueryOpfsTestStore({
       storeName,
       sessionKey,
       initialState: {
-        listQuery: {
-          items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Stale' } }],
-        },
+        items: [{ tableId: 'users', id: 1, data: { id: 1, name: 'Stale' } }],
       },
     });
 
-    const env = createEnv({
-      storeName,
-      sessionKey,
-      storageAdapter: mockAdapter.adapter,
-    });
+    const env = createEnv({ storeName, sessionKey });
 
     const preloadPromise = env.apiStore.preloadItemFromStorage('users||1');
 
     env.apiStore.reset();
 
-    await advanceTime(100);
-    await preloadPromise;
+    await resolveAfterAllTimers(preloadPromise);
 
     expect(env.apiStore.getItemState('users||1')).toBeUndefined();
   });
@@ -1053,11 +1508,13 @@ describe('opfs: list query store persistence', () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-opfs-max-query-size';
     const sessionKey = 'sess1';
-    const mockAdapter = createMockOpfsStorageAdapter({ storeName, sessionKey });
+    const { mockAdapter, listQueryScope } = createListQueryOpfsTestStore({
+      storeName,
+      sessionKey,
+    });
     const writerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       maxQuerySize: 2,
       serverData: {
         users: [
@@ -1073,24 +1530,24 @@ describe('opfs: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    expect(mockAdapter.listQuery.readQueryEntry(usersQuery).data.items)
-      .toMatchInlineSnapshot(`
-        ['"users||1', '"users||2']
-      `);
     expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 1)),
-    ).toBe(true);
-    expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 2)),
-    ).toBe(true);
-    expect(
-      mockAdapter.has(mockAdapter.listQuery.itemStorageKey('users', 3)),
-    ).toBe(false);
+      getParsedOpfsFileData(
+        'tsdf/sess1/lq-opfs-max-query-size/lq.%7BtableId%3A%22users%22%7D.p.json',
+      ),
+    ).toMatchObject({ i: ['"users||1', '"users||2'] });
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 1))).toBe(
+      true,
+    );
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 2))).toBe(
+      true,
+    );
+    expect(mockAdapter.has(listQueryScope.itemStorageKey('users', 3))).toBe(
+      false,
+    );
 
     const readerEnv = createEnv({
       storeName,
       sessionKey,
-      storageAdapter: mockAdapter.adapter,
       maxQuerySize: 2,
       serverData: {
         users: [

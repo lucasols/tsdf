@@ -467,6 +467,10 @@ export function createCollectionStore<
             if (sessionKey === false) return [];
             return entityRefs.map((ref) =>
               createProtectedStorageKey({
+                backend:
+                  persistentStorageConfig.adapter !== 'local-sync'
+                    ? 'opfs'
+                    : 'localStorage',
                 sessionKey,
                 storeName: persistentStorageConfig.storeName,
                 kind: 'collection.item',

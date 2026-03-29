@@ -7,12 +7,11 @@ export default lsStackEslintCfg({
   ignore: ['src-old/**/*', 'test-old/**/*'],
   extraRuleGroups: [
     {
-      plugins: {
-        'react-hooks': reactHooks,
-      },
+      plugins: { 'react-hooks': reactHooks },
       rules: {
         'react-hooks/rules-of-hooks': 'error',
         'react-hooks/exhaustive-deps': 'warn',
+        '@ls-stack/prefer-named-functions': 0,
         'no-restricted-imports': [
           'error',
           {
@@ -34,13 +33,19 @@ export default lsStackEslintCfg({
             ],
           },
         ],
+        'no-restricted-syntax': [
+          'error',
+          {
+            selector:
+              ':matches(PropertyDefinition, MethodDefinition)[accessibility="private"]',
+            message: 'Use #private instead',
+          },
+        ],
       },
     },
     {
       files: ['tests/**/*.test.{ts,tsx}'],
-      rules: {
-        '@typescript-eslint/no-non-null-assertion': 'off',
-      },
+      rules: { '@typescript-eslint/no-non-null-assertion': 'off' },
     },
   ],
 });

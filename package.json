@@ -69,7 +69,7 @@
     "@evtmitter/react": "^0.1.0",
     "@ls-stack/browser-utils": "^0.3.0",
     "@ls-stack/react-utils": "^0.12.1",
-    "@ls-stack/utils": "^3.73.1",
+    "@ls-stack/utils": "^3.75.0",
     "@standard-schema/spec": "^1.1.0",
     "evtmitter": "^1.0.2",
     "immer": "^11.1.3",

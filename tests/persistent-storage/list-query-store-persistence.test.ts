@@ -16,13 +16,10 @@ import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
-import type {
-  PersistedListQueryItemData,
-  PersistentStorageSchema,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import type { PersistentStorageSchema } from '../../src/persistentStorage/types';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -1323,7 +1320,7 @@ describe('localStorage: list query store persistence', () => {
     ).toMatchInlineSnapshot(`['"users||1', '"users||3']`);
   });
 
-  test('cold persisted query items survive unrelated writes and keep their query protection during maxItems cleanup', async () => {
+  test('cold persisted query items are trimmed by recency during unrelated maxItems cleanup', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-cold-query-items';
     const sessionKey = 'sess1';
@@ -1353,16 +1350,24 @@ describe('localStorage: list query store persistence', () => {
     await advanceTime(1100);
     await flushAllTimers();
 
-    // The cold query stays persisted, and maintenance prefers its referenced
-    // cached items over the unrelated standalone item.
+    // The cold query stays persisted, but maintenance now keeps the newer
+    // cached item and the unrelated standalone item by recency.
     expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`))
       .toMatchInlineSnapshot(`
         ['{tableId:"users"}']
       `);
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`))
-      .toMatchInlineSnapshot(`
-        ['"users||1', '"users||2']
-      `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry(usersQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||2']
+      payload: { tableId: 'users' }
+    `);
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
   });
 
   test('items and queries are saved per entry and pinned entries survive eviction', async () => {
@@ -1644,6 +1649,28 @@ describe('localStorage: list query store persistence', () => {
     expect(localStorage.getItem(key)).toBeNull();
   });
 
+  test('scheduled maintenance does not clean invalid cached query entries before they are read', async () => {
+    const key = setCachedQuery(
+      'lq-invalid-maintenance',
+      'sess1',
+      { tableId: 'users' },
+      [storeItemKey('users', 1)],
+      false,
+      1,
+    );
+
+    createEnv({
+      storeName: 'lq-invalid-maintenance',
+      sessionKey: 'sess1',
+      version: 2,
+    });
+
+    await advanceTime(2100);
+    await flushAllTimers();
+
+    expect(localStorage.getItem(key)).not.toBeNull();
+  });
+
   test('invalid cached query entries are also cleaned up after a hook read', async () => {
     const usersQuery = { tableId: 'users' };
     const key = setCachedQuery(
@@ -1682,21 +1709,21 @@ describe('localStorage: list query store persistence', () => {
     persistentStore
       .scope('lq-invalid-item-payload', 'sess1')
       .listQuery.seedItem('users', 1, { id: 1, name: 'Alice' });
-    const entry =
-      persistentStore.storage.readEntry<
-        StorageCacheEntry<PersistedListQueryItemData<Row>>
-      >(key);
-    if (entry === null) {
-      throw new Error(`Missing seeded entry for ${key}`);
-    }
+    const entry = persistentStore
+      .scope('lq-invalid-item-payload', 'sess1')
+      .listQuery.readItemEntry<Row>('users', 1);
     localStorage.setItem(
       key,
-      JSON.stringify({
-        ...entry,
-        data: { ...entry.data, payload: true },
-      } satisfies StorageCacheEntry<
-        PersistedListQueryItemData<Row> & { payload: boolean }
-      >),
+      JSON.stringify(
+        createCompactLocalStorageEntry(
+          {
+            d: entry.data.data,
+            p: true,
+            ...(entry.data.loadedFields ? { lf: entry.data.loadedFields } : {}),
+          },
+          entry.version,
+        ),
+      ),
     );
 
     const env = createEnv({

@@ -6,6 +6,7 @@ import { localPersistentStorage } from '../../../src/persistentStorage/storageAd
 import type { ListQueryParams } from '../../mocks/listQueryStoreTestEnv';
 import { advanceTime, flushAllTimers } from '../../utils/genericTestUtils';
 import {
+  getLocalStorageTree,
   getParsedLocalStorageValue,
   startPersistentStorageOperationCapture,
 } from '../../utils/persistentStorageOptimizationTestUtils';
@@ -83,20 +84,141 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.list-query-expiration.li."expired-users||1 (item entry)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.list-query-expiration.li."fresh-users||2 (item entry)
-      .    | 🔑[4] ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (query entry)
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.27 kb
-      .    | 📖 ✅ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry) | 0.15 kb
-      .    | 📖 ✅ #6 tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"} (query entry) | 0.14 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.list-query-expiration.li."expired-users||1 (item entry)
-      .    | 🗑️ ✅->❌ #4 tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"} (query entry)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.list-query-expiration.li.m (root, namespace, manifest) | 0.27 kb -> 0.14 kb
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.list-query-expiration.li."expired-users||1
+           |    └ (item data, <"expired-users||1>)
+      .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
+           |    └ (items index)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
+           |    └ (query data, <{tableId:"expired-users"}>)
+      .    | 🔑[3] #5 ✅ tsdf.sess1.list-query-expiration.li."fresh-users||2
+           |    └ (item data, <"fresh-users||2>)
+      .    | 🔑[4] #6 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
+           |    └ (query data, <{tableId:"fresh-users"}>)
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
+           |    └ (items index) | 0.27 kb
+      .    | 📖 #4 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
+           |    └ (query data, <{tableId:"expired-users"}>) | 0.15 kb
+      .    | 📖 #6 ✅ tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}
+           |    └ (query data, <{tableId:"fresh-users"}>) | 0.14 kb
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.list-query-expiration.li."expired-users||1
+           |    └ (item data, <"expired-users||1>)
+      .    | 🗑️ #4 ✅->❌ tsdf.sess1.list-query-expiration.lq.{tableId:"expired-users"}
+           |    └ (query data, <{tableId:"expired-users"}>)
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.list-query-expiration.li.m
+           |    └ (items index) | 0.27 kb -> 0.14 kb
       "
+    `);
+
+    expect(getLocalStorageTree()).toMatchInlineSnapshot(`
+      "tsdf (0.64 kb)
+      ├ _m (0.25 kb)
+      │ ├ g (0.04 kb)
+      │ └ r (0.20 kb)
+      │   └ n:sess1 (0.20 kb)
+      │     └ list-query-expiration (0.19 kb)
+      │       └ li (0.14 kb)
+      │         └ m (0.14 kb)
+      └ sess1 (0.38 kb)
+        └ list-query-expiration (0.38 kb)
+          ├ li (0.14 kb)
+          │ └ "fresh-users||2 (0.14 kb)
+          └ lq (0.19 kb)
+            └ {tableId:"fresh-users"} (0.19 kb)"
+    `);
+
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf._m.r.n:sess1.list-query-expiration.li.m',
+      ),
+    ).toMatchInlineSnapshot(`
+      e:
+        - a: 1735689600000
+          k: '"fresh-users||2'
+          p: 'fresh-users||2'
+    `);
+
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.list-query-expiration.li."fresh-users||2',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 2, name: 'Fresh Item' }
+      p: 'fresh-users||2'
+    `);
+
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.list-query-expiration.lq.{tableId:"fresh-users"}',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600000
+      i: ['"fresh-users||2']
+      p: { tableId: 'fresh-users' }
+    `);
+  });
+
+  test('startup cleanup enforces maxQueries against preloaded persisted entries', async () => {
+    const firstQuery = { tableId: 'first' };
+    const secondQuery = { tableId: 'second' };
+    const thirdQuery = { tableId: 'third' };
+    const storeName = 'lq-startup-max-queries';
+    const sessionKey = 'sess1';
+
+    // Seed an over-limit query cache so startup maintenance has to trim it.
+    setCachedQuery(storeName, sessionKey, firstQuery, []);
+    await advanceTime(100);
+    setCachedQuery(storeName, sessionKey, secondQuery, []);
+    await advanceTime(100);
+    setCachedQuery(storeName, sessionKey, thirdQuery, []);
+
+    // Startup should only schedule the cleanup work.
+    const startupOperationCapture = startPersistentStorageOperationCapture();
+    createListQueryEnv({ storeName, sessionKey, maxQueries: 2 });
+    const startupOperationBreakdown =
+      startupOperationCapture.finish().timelineString;
+
+    expect(startupOperationBreakdown).toMatchInlineSnapshot(`"empty"`);
+
+    // Once the startup pass runs, it should evict only the oldest persisted query.
+    const readCapture = startPersistentStorageOperationCapture();
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.lq.`).sort(),
+    ).toMatchInlineSnapshot(`['{tableId:"second"}', '{tableId:"third"}']`);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time |
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+           |    └ (query data, <{tableId:"first"}>)
+      .    | 🔑[1] #3 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
+           |    └ (query data, <{tableId:"second"}>)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
+           |    └ (query data, <{tableId:"third"}>)
+      .    | 📖 #2 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+           |    └ (query data, <{tableId:"first"}>) | 0.10 kb
+      .    | 📖 #3 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"second"}
+           |    └ (query data, <{tableId:"second"}>) | 0.10 kb
+      .    | 📖 #4 ✅ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}
+           |    └ (query data, <{tableId:"third"}>) | 0.10 kb
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.lq-startup-max-queries.lq.{tableId:"first"}
+           |    └ (query data, <{tableId:"first"}>)
+      .    | 📖 #5 ❌ tsdf._m.r.n:sess1.lq-startup-max-queries.li.m (items index)
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      "
+    `);
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-startup-max-queries.lq.{tableId:"third"}',
+      ),
+    ).toMatchInlineSnapshot(`
+      a: 1735689600200
+      i: []
+      p: { tableId: 'third' }
     `);
   });
 
@@ -136,24 +258,37 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry) | ❌ -> 0.12 kb
-      .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
-      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry) | ❌ -> 0.17 kb
-      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | ❌ -> 0.12 kb
-      3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest) | 0.12 kb
-      .     | 🔑[0] ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
-      .     | 🔑[1] ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (query entry)
-      .     | 🔑[2] ✅ #6 tsdf._m.g (global maintenance)
-      .     | 🔑[3] ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry)
-      .     | 🔑[4] ✅ #3 tsdf.sess1.lq-query-metadata.li."third||1 (item entry)
-      .     | 🔑[5] ✅ #1 tsdf._m.r.n:sess1.lq-query-metadata.li.m (root, namespace, manifest)
-      .     | 📖 ✅ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry) | 0.10 kb
-      .     | 📖 ✅ #5 tsdf.sess1.lq-query-metadata.lq.{tableId:"second"} (query entry) | 0.10 kb
-      .     | 📖 ✅ #2 tsdf.sess1.lq-query-metadata.lq.{tableId:"third"} (query entry) | 0.12 kb
-      .     | 🗑️ ✅->❌ #4 tsdf.sess1.lq-query-metadata.lq.{tableId:"first"} (query entry)
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
+      .     | 📖 #2 ❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>)
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>) | ❌ -> 0.12 kb
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
+      .     | ✍️ #3 ❌->✅ tsdf.sess1.lq-query-metadata.li."third||1
+            |    └ (item data, <"third||1>) | ❌ -> 0.09 kb
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m
+            |    └ (items index) | ❌ -> 0.12 kb
+            ·
+      3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m
+            |    └ (items index) | 0.12 kb
+      .     | 🔑[0] #4 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
+            |    └ (query data, <{tableId:"first"}>)
+      .     | 🔑[1] #5 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"}
+            |    └ (query data, <{tableId:"second"}>)
+      .     | 🔑[2] #6 ✅ tsdf._m.g (global maintenance)
+      .     | 🔑[3] #2 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>)
+      .     | 🔑[4] #3 ✅ tsdf.sess1.lq-query-metadata.li."third||1
+            |    └ (item data, <"third||1>)
+      .     | 🔑[5] #1 ✅ tsdf._m.r.n:sess1.lq-query-metadata.li.m (items index)
+      .     | 📖 #4 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
+            |    └ (query data, <{tableId:"first"}>) | 0.10 kb
+      .     | 📖 #5 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"second"}
+            |    └ (query data, <{tableId:"second"}>) | 0.10 kb
+      .     | 📖 #2 ✅ tsdf.sess1.lq-query-metadata.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>) | 0.12 kb
+      .     | 🗑️ #4 ✅->❌ tsdf.sess1.lq-query-metadata.lq.{tableId:"first"}
+            |    └ (query data, <{tableId:"first"}>)
       "
     `);
 
@@ -164,6 +299,12 @@ describe('sync storage efficiency: list-query', () => {
         - a: 1735689604010
           k: '"third||1'
           p: 'third||1'
+    `);
+    expect(
+      getParsedLocalStorageValue('tsdf.sess1.lq-query-metadata.li."third||1'),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Third' }
+      p: 'third||1'
     `);
     expect(
       getParsedLocalStorageValue(
@@ -224,35 +365,61 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry) | ❌ -> 0.12 kb
-      .     | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry)
-      .     | ✍️ ❌->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry) | ❌ -> 0.17 kb
-      .     | ✍️ ❌->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | ❌ -> 0.12 kb
-      3.62s | 📖 ❌ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry)
-      .     | ✍️ ❌->✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry) | ❌ -> 0.13 kb
-      .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry) | 0.17 kb -> 0.26 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.12 kb
-      .     | 📖 ❌ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry)
-      .     | ✍️ ❌->✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry) | ❌ -> 0.18 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.12 kb -> 0.22 kb
-      3.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest) | 0.22 kb
-      .     | 🔑[0] ✅ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (query entry)
-      .     | 🔑[1] ✅ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (query entry)
-      .     | 🔑[2] ✅ #8 tsdf._m.g (global maintenance)
-      .     | 🔑[3] ✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry)
-      .     | 🔑[4] ✅ #3 tsdf.sess1.lq-coalesced-query-maintenance.li."third||1 (item entry)
-      .     | 🔑[5] ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m (root, namespace, manifest)
-      .     | 🔑[6] ✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry)
-      .     | 🔑[7] ✅ #5 tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2 (item entry)
-      .     | 📖 ✅ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (query entry) | 0.10 kb
-      .     | 📖 ✅ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (query entry) | 0.10 kb
-      .     | 📖 ✅ #2 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"} (query entry) | 0.12 kb
-      .     | 📖 ✅ #4 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"} (query entry) | 0.13 kb
-      .     | 🗑️ ✅->❌ #7 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"} (query entry)
-      .     | 🗑️ ✅->❌ #6 tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"} (query entry)
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+            |    └ (items index)
+      .     | 📖 #2 ❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>)
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>) | ❌ -> 0.12 kb
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+            |    └ (items index)
+      .     | ✍️ #3 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
+            |    └ (item data, <"third||1>) | ❌ -> 0.09 kb
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+            |    └ (items index) | ❌ -> 0.12 kb
+            ·
+      3.62s | 📖 #4 ❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+            |    └ (query data, <{tableId:"fourth"}>)
+      .     | ✍️ #4 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+            |    └ (query data, <{tableId:"fourth"}>) | ❌ -> 0.13 kb
+      .     | ✍️ #3 ✅->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
+            |    └ (item data, <"third||1>) | 0.09 kb -> 0.15 kb
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+            |    └ (items index) | 0.12 kb
+      .     | ✍️ #5 ❌->✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
+            |    └ (item data, <"fourth||2>) | ❌ -> 0.09 kb
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+            |    └ (items index) | 0.12 kb -> 0.22 kb
+            ·
+      3.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+            |    └ (items index) | 0.22 kb
+      .     | 🔑[0] #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
+            |    └ (query data, <{tableId:"first"}>)
+      .     | 🔑[1] #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
+            |    └ (query data, <{tableId:"second"}>)
+      .     | 🔑[2] #8 ✅ tsdf._m.g (global maintenance)
+      .     | 🔑[3] #2 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>)
+      .     | 🔑[4] #3 ✅ tsdf.sess1.lq-coalesced-query-maintenance.li."third||1
+            |    └ (item data, <"third||1>)
+      .     | 🔑[5] #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-query-maintenance.li.m
+            |    └ (items index)
+      .     | 🔑[6] #4 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+            |    └ (query data, <{tableId:"fourth"}>)
+      .     | 🔑[7] #5 ✅ tsdf.sess1.lq-coalesced-query-maintenance.li."fourth||2
+            |    └ (item data, <"fourth||2>)
+      .     | 📖 #6 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
+            |    └ (query data, <{tableId:"first"}>) | 0.10 kb
+      .     | 📖 #7 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
+            |    └ (query data, <{tableId:"second"}>) | 0.10 kb
+      .     | 📖 #2 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"third"}
+            |    └ (query data, <{tableId:"third"}>) | 0.12 kb
+      .     | 📖 #4 ✅ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"fourth"}
+            |    └ (query data, <{tableId:"fourth"}>) | 0.13 kb
+      .     | 🗑️ #7 ✅->❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"second"}
+            |    └ (query data, <{tableId:"second"}>)
+      .     | 🗑️ #6 ✅->❌ tsdf.sess1.lq-coalesced-query-maintenance.lq.{tableId:"first"}
+            |    └ (query data, <{tableId:"first"}>)
       "
     `);
   });
@@ -295,9 +462,11 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ❌ #1 tsdf._m.r.n:sess1.lq-empty-query-manifest.li.m (root, namespace, manifest)
-      .     | 📖 ❌ #2 tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (query entry)
-      .     | ✍️ ❌->✅ #2 tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"} (query entry) | ❌ -> 0.22 kb
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-empty-query-manifest.li.m (items index)
+      .     | 📖 #2 ❌ tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
+            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>)
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-empty-query-manifest.lq.{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}
+            |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Missing user"}],tableId:"users"}>) | ❌ -> 0.22 kb
       "
     `);
   });
@@ -382,20 +551,35 @@ describe('sync storage efficiency: list-query', () => {
       i: []
       p: { tableId: 'users' }
     `);
+    expect(
+      getParsedLocalStorageValue(
+        'tsdf.sess1.lq-query-becomes-empty.li."users||1',
+      ),
+    ).toMatchInlineSnapshot(`
+      d: { id: 1, name: 'Cached user' }
+      lf: ['age', 'email', 'id', 'name']
+      p: 'users||1'
+    `);
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m (root, namespace, manifest) | 0.12 kb
-      .     | 📖 ✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (query entry) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.10 kb
-      .     | ✍️ ✅->✅ #3 tsdf.sess1.lq-query-becomes-empty.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
+            |    └ (items index) | 0.12 kb
+      .     | 📖 #2 ✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>) | 0.12 kb
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-query-becomes-empty.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.10 kb
+      .     | ✍️ #3 ✅->✅ tsdf.sess1.lq-query-becomes-empty.li."users||1
+            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
+            |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-becomes-empty.li.m
+            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
 
-  test('when maxItems limit is reached a full store cleanup occurs', async () => {
+  test('when maxItems limit is reached cleanup evicts the oldest unprotected item and rewrites the query', async () => {
     const storeName = 'lq-item-metadata';
     const sessionKey = 'sess1';
 
@@ -431,31 +615,55 @@ describe('sync storage efficiency: list-query', () => {
 
     expect(
       listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
-    ).toMatchInlineSnapshot(`['"users||1', '"users||2']`);
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3']`);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry({ tableId: 'users' }).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||2']
+      payload: { tableId: 'users' }
+    `);
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb
-      .    | 📖 ❌ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
-      .    | ✍️ ❌->✅ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry) | ❌ -> 0.17 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.22 kb -> 0.32 kb
-      3s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb
-      .    | 🔑[0] ✅ #3 tsdf.sess1.lq-item-metadata.li."users||1 (item entry)
-      .    | 🔑[1] ✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.lq-item-metadata.li."users||2 (item entry)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (query entry)
-      .    | 🔑[4] ✅ #6 tsdf._m.g (global maintenance)
-      .    | 🔑[5] ✅ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
-      .    | 📖 ✅ #5 tsdf.sess1.lq-item-metadata.lq.{tableId:"users"} (query entry) | 0.15 kb
-      .    | 🗑️ ✅->❌ #2 tsdf.sess1.lq-item-metadata.li."users||3 (item entry)
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-metadata.li.m (root, namespace, manifest) | 0.32 kb -> 0.22 kb
+      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
+           |    └ (items index) | 0.22 kb
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
+           |    └ (items index) | 0.22 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .    | ✍️ #2 ❌->✅ tsdf.sess1.lq-item-metadata.li."users||3
+           |    └ (item data, <"users||3>) | ❌ -> 0.09 kb
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
+           |    └ (items index) | 0.22 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
+           |    └ (items index) | 0.22 kb -> 0.32 kb
+           ·
+      3s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
+           |    └ (items index) | 0.32 kb
+      .    | 🔑[0] #3 ✅ tsdf.sess1.lq-item-metadata.li."users||1
+           |    └ (item data, <"users||1>)
+      .    | 🔑[1] #1 ✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m (items index)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.lq-item-metadata.li."users||2
+           |    └ (item data, <"users||2>)
+      .    | 🔑[3] #5 ✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>)
+      .    | 🔑[4] #6 ✅ tsdf._m.g (global maintenance)
+      .    | 🔑[5] #2 ✅ tsdf.sess1.lq-item-metadata.li."users||3
+           |    └ (item data, <"users||3>)
+      .    | 📖 #5 ✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.15 kb
+      .    | 🗑️ #3 ✅->❌ tsdf.sess1.lq-item-metadata.li."users||1
+           |    └ (item data, <"users||1>)
+      .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-item-metadata.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.12 kb
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-metadata.li.m
+           |    └ (items index) | 0.32 kb -> 0.22 kb
       "
     `);
   });
 
-  test('maxItems cleanup evicts standalone items before query-related shared items', async () => {
+  test('maxItems cleanup falls back to protected pinned and recency for preloaded query items and rewrites affected queries', async () => {
     const storeName = 'lq-shared-item-cleanup';
     const sessionKey = 'sess1';
     const firstUsersQuery = {
@@ -499,6 +707,12 @@ describe('sync storage efficiency: list-query', () => {
       bobOnlyItemKey,
     ]);
 
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).sort(),
+    ).toMatchInlineSnapshot(
+      `['"users||1', '"users||2', '"users||3', '"users||4']`,
+    );
+
     createListQueryEnv({ storeName, sessionKey, maxItems: 3 });
 
     // Let the startup-scheduled maintenance enforce maxItems against the preloaded cache.
@@ -506,19 +720,18 @@ describe('sync storage efficiency: list-query', () => {
     await waitForScheduledCleanup();
     const cleanupOperations = cleanupCapture.finish().timelineString;
 
-    // The standalone newest item should be evicted before any item referenced
-    // by the persisted queries, so both query entries stay untouched.
-    expect(listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).sort())
-      .toMatchInlineSnapshot(`
-        ['"users||1', '"users||2', '"users||3']
-      `);
+    // The oldest item should be evicted by recency, and both query entries
+    // should be rewritten to drop it.
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`).sort(),
+    ).toMatchInlineSnapshot(`['"users||2', '"users||3', '"users||4']`);
     expect(
       persistentStore
         .scope(storeName, sessionKey)
         .listQuery.readQueryEntry(firstUsersQuery).data,
     ).toMatchInlineSnapshot(`
       hasMore: '❌'
-      items: ['"users||1', '"users||2']
+      items: ['"users||2']
 
       payload:
         filters:
@@ -531,7 +744,7 @@ describe('sync storage efficiency: list-query', () => {
         .listQuery.readQueryEntry(secondUsersQuery).data,
     ).toMatchInlineSnapshot(`
       hasMore: '❌'
-      items: ['"users||1', '"users||3']
+      items: ['"users||3']
 
       payload:
         filters:
@@ -541,20 +754,36 @@ describe('sync storage efficiency: list-query', () => {
     expect(cleanupOperations).toMatchInlineSnapshot(`
       "
       time |
-      2s   | 📖 ❌ #1 tsdf._m.g (global maintenance)
-      .    | 🔑[0] ✅ #2 tsdf.sess1.lq-shared-item-cleanup.li."users||1 (item entry)
-      .    | 🔑[1] ✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m (root, namespace, manifest)
-      .    | 🔑[2] ✅ #4 tsdf.sess1.lq-shared-item-cleanup.li."users||2 (item entry)
-      .    | 🔑[3] ✅ #5 tsdf.sess1.lq-shared-item-cleanup.li."users||3 (item entry)
-      .    | 🔑[4] ✅ #6 tsdf.sess1.lq-shared-item-cleanup.li."users||4 (item entry)
-      .    | 🔑[5] ✅ #7 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry)
-      .    | 🔑[6] ✅ #8 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (query entry)
-      .    | 📖 ✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m (root, namespace, manifest) | 0.42 kb
-      .    | 📖 ✅ #7 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.25 kb
-      .    | 📖 ✅ #8 tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"} (query entry) | 0.25 kb
-      .    | 🗑️ ✅->❌ #6 tsdf.sess1.lq-shared-item-cleanup.li."users||4 (item entry)
-      .    | ✍️ ❌->✅ #1 tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
-      .    | ✍️ ✅->✅ #3 tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m (root, namespace, manifest) | 0.42 kb -> 0.32 kb
+      2s   | 📖 #1 ❌ tsdf._m.g (global maintenance)
+      .    | 🔑[0] #2 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||1
+           |    └ (item data, <"users||1>)
+      .    | 🔑[1] #3 ✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+           |    └ (items index)
+      .    | 🔑[2] #4 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||2
+           |    └ (item data, <"users||2>)
+      .    | 🔑[3] #5 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||3
+           |    └ (item data, <"users||3>)
+      .    | 🔑[4] #6 ✅ tsdf.sess1.lq-shared-item-cleanup.li."users||4
+           |    └ (item data, <"users||4>)
+      .    | 🔑[5] #7 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>)
+      .    | 🔑[6] #8 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>)
+      .    | 📖 #3 ✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+           |    └ (items index) | 0.42 kb
+      .    | 📖 #7 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb
+      .    | 📖 #8 ✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb
+      .    | 🗑️ #2 ✅->❌ tsdf.sess1.lq-shared-item-cleanup.li."users||1
+           |    └ (item data, <"users||1>)
+      .    | ✍️ #7 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.25 kb -> 0.23 kb
+      .    | ✍️ #8 ✅->✅ tsdf.sess1.lq-shared-item-cleanup.lq.{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Bob"}],tableId:"users"}>) | 0.25 kb -> 0.22 kb
+      .    | ✍️ #1 ❌->✅ tsdf._m.g (global maintenance) | ❌ -> 0.04 kb
+      .    | ✍️ #3 ✅->✅ tsdf._m.r.n:sess1.lq-shared-item-cleanup.li.m
+           |    └ (items index) | 0.42 kb -> 0.32 kb
       "
     `);
   });
@@ -627,14 +856,22 @@ describe('sync storage efficiency: list-query', () => {
     expect(deleteOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (query entry) | 0.15 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-delete-flow.lq.{tableId:"users"} (query entry) | 0.15 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.23 kb
-      .    | ✍️ ✅->✅ #2 tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"} (query entry) | 0.23 kb -> 0.21 kb
-      .    | 🗑️ ✅->❌ #3 tsdf.sess1.lq-delete-flow.li."users||1 (item entry)
-      .    | 📖 ✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb
-      .    | ✍️ ✅->✅ #5 tsdf.sess1.lq-delete-flow.li."users||2 (item entry) | 0.17 kb -> 0.25 kb
-      .    | ✍️ ✅->✅ #4 tsdf._m.r.n:sess1.lq-delete-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.12 kb
+      1s   | 📖 #1 ✅ tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.15 kb
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-delete-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.15 kb -> 0.12 kb
+      .    | 📖 #2 ✅ tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.23 kb
+      .    | ✍️ #2 ✅->✅ tsdf.sess1.lq-delete-flow.lq.{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}
+           |    └ (query data, <{filters:[{field:"name",op:"eq",value:"Alice"}],tableId:"users"}>) | 0.23 kb -> 0.21 kb
+      .    | 🗑️ #3 ✅->❌ tsdf.sess1.lq-delete-flow.li."users||1
+           |    └ (item data, <"users||1>)
+      .    | 📖 #4 ✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
+           |    └ (items index) | 0.22 kb
+      .    | ✍️ #5 ✅->✅ tsdf.sess1.lq-delete-flow.li."users||2
+           |    └ (item data, <"users||2>) | 0.08 kb -> 0.15 kb
+      .    | ✍️ #4 ✅->✅ tsdf._m.r.n:sess1.lq-delete-flow.li.m
+           |    └ (items index) | 0.22 kb -> 0.12 kb
       "
     `);
   });
@@ -714,13 +951,21 @@ describe('sync storage efficiency: list-query', () => {
     expect(operationsBreakdown).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-direct-get-query-state.li."users||1 (item entry) | 0.18 kb
-      2s   | 📖 ✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      0    | 📖 #1 ✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
+           |    └ (items index) | 0.12 kb
+      .    | 📖 #3 ✅ tsdf.sess1.lq-direct-get-query-state.li."users||1
+           |    └ (item data, <"users||1>) | 0.10 kb
+           ·
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-direct-get-query-state.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
+           |    └ (items index) | 0.12 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-direct-get-query-state.li.m
+           |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
@@ -863,10 +1108,14 @@ describe('sync storage efficiency: list-query', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-query-invalidation-flow.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
+            |    └ (items index) | 0.12 kb
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-query-invalidation-flow.li."users||1
+            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
+            |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-query-invalidation-flow.li.m
+            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
@@ -946,10 +1195,14 @@ describe('sync storage efficiency: list-query', () => {
     expect(secondInvalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-coalesced-invalidations.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
+            |    └ (items index) | 0.12 kb
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-coalesced-invalidations.li."users||1
+            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
+            |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-coalesced-invalidations.li.m
+            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
@@ -1088,13 +1341,113 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-remount-flow.li."users||1 (item entry) | 0.18 kb
-      2s   | 📖 ✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-remount-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      0    | 📖 #1 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
+           |    └ (items index) | 0.12 kb
+      .    | 📖 #3 ✅ tsdf.sess1.lq-remount-flow.li."users||1
+           |    └ (item data, <"users||1>) | 0.10 kb
+           ·
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
+           |    └ (items index) | 0.12 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-remount-flow.li.m
+           |    └ (items index) | 0.12 kb -> 0.12 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('query hook remount reuses a persisted empty query without treating it as a cache miss', async () => {
+    const storeName = 'lq-empty-remount-flow';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    // Persist an explicit empty query so this is an empty-cache remount, not a
+    // missing-cache remount.
+    setCachedQuery(storeName, sessionKey, usersQuery, []);
+
+    const env = createListQueryEnv({ storeName, sessionKey });
+
+    // Drain the startup scan so the capture focuses on the mounted query flow.
+    await settleStartupBackgroundScan();
+
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useListQuery(usersQuery, {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.items).toMatchInlineSnapshot(`[]`);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time |
+      0    | 📖 #1 ✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.10 kb
+           ·
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.10 kb
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-empty-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.10 kb -> 0.10 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('query hook cache miss writes the fetched query once and remount stays fully in memory', async () => {
+    const storeName = 'lq-query-remount-no-cache';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fetched user' }] },
+    });
+
+    // Drain the startup scan so the capture focuses on the mounted query flow.
+    await settleStartupBackgroundScan();
+
+    // With no persisted query, the first mount should pay the cache miss once,
+    // then keep the fetched result in memory for the remount.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useListQuery(usersQuery, {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.items).toMatchInlineSnapshot(`
+      - { id: 1, name: 'Fetched user' }
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>)
+      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>)
+      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>)
+            ·
+      1.81s | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+            |    └ (items index)
+      .     | 📖 #1 ❌ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>)
+      .     | ✍️ #1 ❌->✅ tsdf.sess1.lq-query-remount-no-cache.lq.{tableId:"users"}
+            |    └ (query data, <{tableId:"users"}>) | ❌ -> 0.12 kb
+      .     | 📖 #2 ❌ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+            |    └ (items index)
+      .     | ✍️ #3 ❌->✅ tsdf.sess1.lq-query-remount-no-cache.li."users||1
+            |    └ (item data, <"users||1>) | ❌ -> 0.10 kb
+      .     | ✍️ #2 ❌->✅ tsdf._m.r.n:sess1.lq-query-remount-no-cache.li.m
+            |    └ (items index) | ❌ -> 0.12 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1150,10 +1503,14 @@ describe('sync storage efficiency: list-query', () => {
     expect(invalidationOperations).toMatchInlineSnapshot(`
       "
       time  |
-      1.81s | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #2 tsdf.sess1.lq-item-invalidation-flow.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
-      .     | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .     | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      1.81s | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
+            |    └ (items index) | 0.12 kb
+      .     | ✍️ #2 ✅->✅ tsdf.sess1.lq-item-invalidation-flow.li."users||1
+            |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+      .     | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
+            |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .     | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-invalidation-flow.li.m
+            |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
@@ -1188,10 +1545,71 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-item-remount-flow.li."users||1 (item entry) | 0.18 kb
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-item-remount-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      0    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
+           |    └ (items index) | 0.12 kb
+      .    | 📖 #2 ✅ tsdf.sess1.lq-item-remount-flow.li."users||1
+           |    └ (item data, <"users||1>) | 0.10 kb
+           ·
+      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
+           |    └ (items index) | 0.12 kb
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-item-remount-flow.li.m
+           |    └ (items index) | 0.12 kb -> 0.12 kb
+      "
+    `);
+    expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
+  });
+
+  test('item hook cache miss writes the fetched item once and remount stays fully in memory', async () => {
+    const storeName = 'lq-item-remount-no-cache';
+    const sessionKey = 'sess1';
+    const itemPayload = rawItemPayload('users', 1);
+
+    const env = createListQueryEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fetched user' }] },
+    });
+
+    // Drain the startup scan so the capture focuses on the mounted item flow.
+    await settleStartupBackgroundScan();
+
+    // With no persisted item, the first mount should pay the cache miss once,
+    // then keep the fetched result in memory for the remount.
+    const { secondHook, firstMountOperations, remountOperations } =
+      await captureHookRemount(() =>
+        env.apiStore.useItem(itemPayload, {
+          disableRefetchOnMount: true,
+          returnRefetchingStatus: true,
+        }),
+      );
+
+    expect(secondHook.result.current.data).toMatchInlineSnapshot(`
+      id: 1
+      name: 'Fetched user'
+    `);
+    expect(firstMountOperations).toMatchInlineSnapshot(`
+      "
+      time  |
+      0     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+      10ms  | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+            ·
+      810ms | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+            ·
+      1.81s | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+      .     | ✍️ #2 ❌->✅ tsdf.sess1.lq-item-remount-no-cache.li."users||1
+            |    └ (item data, <"users||1>) | ❌ -> 0.10 kb
+      .     | 📖 #1 ❌ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index)
+      .     | ✍️ #1 ❌->✅ tsdf._m.r.n:sess1.lq-item-remount-no-cache.li.m
+            |    └ (items index) | ❌ -> 0.12 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1235,14 +1653,23 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m (root, namespace, manifest) | 0.22 kb
-      .    | 📖 ✅ #2 tsdf.sess1.lq-multi-item-remount-flow.li."users||1 (item entry) | 0.19 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m (root, namespace, manifest) | 0.22 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-multi-item-remount-flow.li."users||2 (item entry) | 0.19 kb
-      2s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m (root, namespace, manifest) | 0.22 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.22 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m (root, namespace, manifest) | 0.22 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m (root, namespace, manifest) | 0.22 kb -> 0.22 kb
+      0    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+           |    └ (items index) | 0.22 kb
+      .    | 📖 #2 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||1
+           |    └ (item data, <"users||1>) | 0.10 kb
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+           |    └ (items index) | 0.22 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .    | 📖 #3 ✅ tsdf.sess1.lq-multi-item-remount-flow.li."users||2
+           |    └ (item data, <"users||2>) | 0.10 kb
+           ·
+      2s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+           |    └ (items index) | 0.22 kb
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+           |    └ (items index) | 0.22 kb -> 0.22 kb
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+           |    └ (items index) | 0.22 kb
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-multi-item-remount-flow.li.m
+           |    └ (items index) | 0.22 kb -> 0.22 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1294,20 +1721,35 @@ describe('sync storage efficiency: list-query', () => {
     expect(firstMountOperations).toMatchInlineSnapshot(`
       "
       time |
-      0    | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #3 tsdf.sess1.lq-multi-query-remount-flow.li."users||1 (item entry) | 0.18 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.13 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | 📖 ✅ #5 tsdf.sess1.lq-multi-query-remount-flow.li."projects||1 (item entry) | 0.20 kb
-      2s   | 📖 ✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"} (query entry) | 0.12 kb -> 0.12 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb -> 0.23 kb
-      .    | 📖 ✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.13 kb
-      .    | ✍️ ✅->✅ #4 tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"} (query entry) | 0.13 kb -> 0.13 kb
-      .    | 📖 ✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb
-      .    | ✍️ ✅->✅ #2 tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m (root, namespace, manifest) | 0.23 kb -> 0.23 kb
+      0    | 📖 #1 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+           |    └ (items index) | 0.23 kb
+      .    | 📖 #3 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."users||1
+           |    └ (item data, <"users||1>) | 0.10 kb
+      .    | 📖 #4 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
+           |    └ (query data, <{tableId:"projects"}>) | 0.13 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+           |    └ (items index) | 0.23 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .    | 📖 #5 ✅ tsdf.sess1.lq-multi-query-remount-flow.li."projects||1
+           |    └ (item data, <"projects||1>) | 0.11 kb
+           ·
+      2s   | 📖 #1 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb
+      .    | ✍️ #1 ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"users"}
+           |    └ (query data, <{tableId:"users"}>) | 0.12 kb -> 0.12 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+           |    └ (items index) | 0.23 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+           |    └ (items index) | 0.23 kb -> 0.23 kb
+      .    | 📖 #4 ✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
+           |    └ (query data, <{tableId:"projects"}>) | 0.13 kb
+      .    | ✍️ #4 ✅->✅ tsdf.sess1.lq-multi-query-remount-flow.lq.{tableId:"projects"}
+           |    └ (query data, <{tableId:"projects"}>) | 0.13 kb -> 0.13 kb
+      .    | 📖 #2 ✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+           |    └ (items index) | 0.23 kb
+      .    | ✍️ #2 ✅->✅ tsdf._m.r.n:sess1.lq-multi-query-remount-flow.li.m
+           |    └ (items index) | 0.23 kb -> 0.23 kb
       "
     `);
     expect(remountOperations).toMatchInlineSnapshot(`"empty"`);
@@ -1357,10 +1799,14 @@ describe('sync storage efficiency: list-query', () => {
     expect(mutationOperations).toMatchInlineSnapshot(`
       "
       time |
-      1s   | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | ✍️ ✅->✅ #2 tsdf.sess1.lq-mutation-flow.li."users||1 (item entry) | 0.18 kb -> 0.27 kb
-      .    | 📖 ✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.12 kb
-      .    | ✍️ ✅->✅ #1 tsdf._m.r.n:sess1.lq-mutation-flow.li.m (root, namespace, manifest) | 0.12 kb -> 0.12 kb
+      1s   | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
+           |    └ (items index) | 0.12 kb
+      .    | ✍️ #2 ✅->✅ tsdf.sess1.lq-mutation-flow.li."users||1
+           |    └ (item data, <"users||1>) | 0.10 kb -> 0.16 kb
+      .    | 📖 #1 ✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
+           |    └ (items index) | 0.12 kb ⚠️ REPEATED READ <10ms UNCHANGED
+      .    | ✍️ #1 ✅->✅ tsdf._m.r.n:sess1.lq-mutation-flow.li.m
+           |    └ (items index) | 0.12 kb -> 0.12 kb
       "
     `);
   });
