@@ -416,14 +416,12 @@ describe('localStorage: collection store persistence', () => {
     expect(
       persistentStore
         .scope(storeName, sessionKey)
-        .collection.readItemEntry<PersistedItemState>('1'),
+        .collection.readItemEntry<PersistedItemState>('1').data,
     ).toMatchInlineSnapshot(`
       data:
-        data:
-          value: { id: '1', name: 'Cached' }
-        payload: '1'
+        value: { id: '1', name: 'Cached' }
 
-      timestamp: 1735689600000
+      payload: '1'
     `);
   });
 

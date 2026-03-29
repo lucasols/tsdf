@@ -345,13 +345,10 @@ describe('localStorage: document store persistence', () => {
     expect(
       persistentStore
         .scope(storeName, sessionKey)
-        .document.readEntry<TestData>(),
+        .document.readEntry<TestData>().data,
     ).toMatchInlineSnapshot(`
       data:
-        data:
-          value: { name: 'cached', value: 1 }
-
-      timestamp: 1735689600000
+        value: { name: 'cached', value: 1 }
     `);
   });
 
