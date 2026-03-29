@@ -270,6 +270,91 @@ describe('localStorage: document store persistence', () => {
     );
   });
 
+  test('failed hook fetch does not create a persisted cache entry', async () => {
+    const storeName = 'doc-fetch-error-no-persist';
+    const sessionKey = 'sess1';
+    const env = createDocPersistenceEnv({ storeName, sessionKey });
+    const renders = createLoggerStore();
+
+    // Fail the first hook-triggered fetch through the normal request path.
+    env.errorInNextFetch('Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useDocument();
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+
+    // Wait past the save debounce window in case the error path accidentally schedules persistence.
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: null
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore.storage.readEntry(
+        documentStorageKey(storeName, sessionKey),
+      ),
+    ).toBeNull();
+  });
+
+  test('failed refetch keeps the previous persisted success snapshot', async () => {
+    const storeName = 'doc-refetch-error-keeps-cache';
+    const sessionKey = 'sess1';
+
+    // Seed a realistic persisted success snapshot that the hook will hydrate first.
+    setCachedDocumentData(storeName, sessionKey, { name: 'cached', value: 1 });
+
+    const env = createDocPersistenceEnv({ storeName, sessionKey });
+    const renders = createLoggerStore();
+
+    // The refetch after hydration should fail, but the previous cached value should remain the persisted snapshot.
+    env.errorInNextFetch('Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useDocument({
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {name:cached, value:1} ⋅ error: null
+      -> status: refetching ⋅ data: {name:cached, value:1} ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: {name:cached, value:1}
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .document.readEntry<TestData>(),
+    ).toMatchInlineSnapshot(`
+      data:
+        data:
+          value: { name: 'cached', value: 1 }
+
+      timestamp: 1735689600000
+    `);
+  });
+
   test('preload reports unavailable async preload through persistent storage error handler', async () => {
     const onPersistentStorageError = vi.fn();
     const env = createDocPersistenceEnv({

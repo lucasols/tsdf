@@ -557,6 +557,113 @@ describe('localStorage: list query store persistence', () => {
     );
   });
 
+  test('failed list-query hook fetch does not create persisted query or item entries', async () => {
+    const storeName = 'lq-fetch-error-no-persist';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Alice' }] },
+    });
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    // Fail the first hook-triggered list fetch before anything can be cached.
+    env.serverTable.setNextListFetchError('Network error');
+
+    renderHook(() => {
+      const { items, status, error } = env.apiStore.useListQuery(usersQuery);
+
+      renders.add({ status, names: items.map((item) => item.name), error });
+    });
+
+    await flushAllTimers();
+
+    // Wait past the debounced persistence window so accidental writes would materialize.
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ names: [] ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ names: []
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore.storage.readEntry(
+        queryStorageKey(storeName, sessionKey, usersQuery),
+      ),
+    ).toBeNull();
+    expect(
+      listStoredKeys(`tsdf.${sessionKey}.${storeName}.li.`),
+    ).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('failed refetch keeps the previous persisted list-query snapshots', async () => {
+    const storeName = 'lq-refetch-error-keeps-cache';
+    const sessionKey = 'sess1';
+    const usersQuery = { tableId: 'users' };
+
+    // Seed both the cached query metadata and its hydrated item snapshot.
+    setCachedItem(storeName, sessionKey, 'users', 1, { id: 1, name: 'Cached' });
+    setCachedQuery(storeName, sessionKey, usersQuery, [
+      storeItemKey('users', 1),
+    ]);
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { users: [{ id: 1, name: 'Fresh' }] },
+    });
+    const renders = createLoggerStore({ arrays: 'all' });
+
+    env.serverTable.setNextListFetchError('Network error');
+
+    renderHook(() => {
+      const { items, status, error } = env.apiStore.useListQuery(usersQuery, {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, names: items.map((item) => item.name), error });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ names: [Cached] ⋅ error: null
+      -> status: refetching ⋅ names: [Cached] ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ names: [Cached]
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readQueryEntry(usersQuery).data,
+    ).toMatchInlineSnapshot(`
+      hasMore: '❌'
+      items: ['"users||1']
+      payload: { tableId: 'users' }
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .listQuery.readItemEntry<Row>('users', 1).data,
+    ).toMatchInlineSnapshot(`
+      data: { id: 1, name: 'Cached' }
+      loadedFields: ['age', 'email', 'id', 'name']
+      payload: 'users||1'
+    `);
+  });
+
   test('round-trip persistence preserves partial-resource metadata for cached list queries', async () => {
     const usersQuery = { tableId: 'users' };
     const storeName = 'lq-partial-roundtrip';

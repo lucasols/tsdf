@@ -128,6 +128,46 @@ describe('offline replay list-query behavior', () => {
           input: { itemId: 'users||1', name: 'Ada offline' },
         },
       });
+
+      async function queuedOfflineResultType_() {
+        const queued = await typedEnv.apiStore.performMutation('users||1', {
+          mutation: () => Promise.resolve({ name: 'Ada offline' }),
+          offline: {
+            operation: 'patchUserName',
+            input: { itemId: 'users||1', name: 'Ada offline' },
+          },
+        });
+
+        if (queued.ok) {
+          const queuedValue:
+            | { kind: 'online'; data: { name: string } }
+            | { kind: 'queued' } = queued.value;
+          void queuedValue;
+
+          if (queued.value.kind === 'online') {
+            const serverValue: { name: string } = queued.value.data;
+            void serverValue;
+          }
+
+          // @ts-expect-error - queued offline mutations do not always expose a server payload directly
+          const serverValue: { name: string } = queued.value.data;
+          void serverValue;
+        }
+      }
+
+      async function onlineResultType_() {
+        const result = await typedEnv.apiStore.performMutation('users||1', {
+          mutation: () => Promise.resolve({ name: 'Ada offline' }),
+        });
+
+        if (result.ok) {
+          const serverValue: { name: string } = result.value;
+          void serverValue;
+        }
+      }
+
+      void queuedOfflineResultType_;
+      void onlineResultType_;
     }
 
     void typeCheck_;

@@ -9,6 +9,7 @@ import {
 } from '../storageEntryPrefixes';
 import type { StorageAdapter } from '../types';
 import { validateWithSchema } from '../validateWithSchema';
+import type { PreparedOfflineMutation } from './mutationRuntime';
 import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
 import type {
   AnyOfflineOperationDefinition,
@@ -125,6 +126,10 @@ export type OfflineStoreController<
 > = {
   hydrateIfNeeded: () => Promise<void>;
   canQueueMutation: () => boolean;
+  prepareForMutation: <TName extends keyof TOperations>(args: {
+    operationName: TName;
+    input: OperationInput<TOperations, TName>;
+  }) => Promise<PreparedOfflineMutation>;
   queueMutation: <TName extends keyof TOperations>(args: {
     operationName: TName;
     input: OperationInput<TOperations, TName>;
@@ -225,7 +230,18 @@ export function createOfflineStoreController<
 
   function ensureActiveSession(): ActiveSessionState | null {
     const sessionKey = getSessionKey();
-    if (sessionKey === false) return null;
+    if (sessionKey === false) {
+      if (activeSession) {
+        activeSession.unregister?.();
+        activeSession = null;
+        resetConfirmationRetries();
+        queueEntries.clear();
+        conflicts.clear();
+        hydratedSessionKey = null;
+        hydratedPromise = null;
+      }
+      return null;
+    }
 
     if (activeSession?.sessionKey === sessionKey) return activeSession;
 
@@ -565,6 +581,19 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     args: { operationName: TName; input: unknown },
   ): Promise<void> {
+    const prepared = prepareMutationWithSession(current, args);
+    await queuePreparedMutation(prepared);
+  }
+
+  function prepareMutationWithSession<TName extends keyof TOperations>(
+    current: ActiveSessionState,
+    args: { operationName: TName; input: unknown },
+  ): {
+    currentSessionKey: string;
+    operationName: string;
+    operation: AnyOfflineOperationDefinition;
+    validatedInput: unknown;
+  } {
     const operationName = String(args.operationName);
     const operation = offlineMode.operations[operationName];
     if (!operation) {
@@ -580,6 +609,26 @@ export function createOfflineStoreController<
     if (validatedInput === null) {
       throw new Error(`Invalid offline operation input for "${operationName}"`);
     }
+
+    return {
+      currentSessionKey: current.sessionKey,
+      operationName,
+      operation,
+      validatedInput,
+    };
+  }
+
+  async function queuePreparedMutation(args: {
+    currentSessionKey: string;
+    operationName: string;
+    operation: AnyOfflineOperationDefinition;
+    validatedInput: unknown;
+  }): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current || current.sessionKey !== args.currentSessionKey) {
+      throw offlineSessionUnavailableError;
+    }
+    const { operation, operationName, validatedInput } = args;
 
     const tempEntity = operation.tempEntity;
     const tempId = tempEntity?.createTempId(validatedInput);
@@ -847,6 +896,54 @@ export function createOfflineStoreController<
     await queueMutationWithSession(current, args);
   }
 
+  async function prepareForMutation<TName extends keyof TOperations>(args: {
+    operationName: TName;
+    input: OperationInput<TOperations, TName>;
+  }): Promise<PreparedOfflineMutation> {
+    await hydrateIfNeeded();
+    const current = ensureActiveSession();
+    if (!current) {
+      throw offlineSessionUnavailableError;
+    }
+
+    const prepared = prepareMutationWithSession(current, args);
+    await current.session.refreshNetworkState();
+
+    return {
+      effectiveOffline: current.session.getStatus().effectiveOffline,
+      queueMutation: () => queuePreparedMutation(prepared),
+      classifyError: async (error) => {
+        const preparedCurrent = ensureActiveSession();
+        if (
+          !preparedCurrent ||
+          preparedCurrent.sessionKey !== prepared.currentSessionKey
+        ) {
+          throw offlineSessionUnavailableError;
+        }
+
+        await preparedCurrent.session.refreshNetworkState();
+        if (preparedCurrent.session.getStatus().effectiveOffline) {
+          return true;
+        }
+
+        const classification = await preparedCurrent.session.classifyFailure(
+          error,
+          {
+            phase: 'mutation',
+            storeType,
+            operationName: prepared.operationName,
+            sessionKey: preparedCurrent.sessionKey,
+          },
+        );
+
+        return (
+          classification === 'outage' ||
+          preparedCurrent.session.getStatus().effectiveOffline
+        );
+      },
+    };
+  }
+
   function getOfflineEntities(): GlobalOfflineEntity[] {
     const current = ensureActiveSession();
     if (!current) return [];
@@ -941,6 +1038,7 @@ export function createOfflineStoreController<
   return {
     hydrateIfNeeded,
     canQueueMutation,
+    prepareForMutation,
     queueMutation,
     getOfflineEntities,
     getOfflineConflicts,

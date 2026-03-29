@@ -17,6 +17,10 @@ import {
 } from '../../src/persistentStorage/compactLocalStorageEntry';
 import { readManagedLocalStorageNamespaceEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { SYNC_STORAGE_TOUCH_THROTTLE_MS } from '../../src/persistentStorage/persistentStorageManager';
+import type {
+  PersistedCollectionItemData,
+  StorageCacheEntry,
+} from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
@@ -330,6 +334,101 @@ describe('localStorage: collection store persistence', () => {
       itemKey('a'),
       itemKey('b'),
     ]);
+  });
+
+  test('failed item hook fetch does not create a persisted cache entry', async () => {
+    const storeName = 'col-fetch-error-no-persist';
+    const sessionKey = 'sess1';
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { '1': { id: '1', name: 'Server value' } },
+    });
+    const renders = createLoggerStore();
+
+    // Fail the first hook-triggered item fetch.
+    env.serverTable.setNextFetchError('1', 'Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useItem('1');
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+
+    // Wait past the debounced persistence window to catch accidental writes from the error state.
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: loading ⋅ data: null ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: null
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore.storage.readEntry(
+        itemStorageKey(storeName, sessionKey, '1'),
+      ),
+    ).toBeNull();
+  });
+
+  test('failed refetch keeps the previous persisted item snapshot', async () => {
+    const storeName = 'col-refetch-error-keeps-cache';
+    const sessionKey = 'sess1';
+
+    // Hydrate from a previously successful cache entry, then fail the background refetch.
+    setCachedCollectionItem(storeName, sessionKey, '1', {
+      value: { id: '1', name: 'Cached' },
+    });
+
+    const env = createEnv({
+      storeName,
+      sessionKey,
+      serverData: { '1': { id: '1', name: 'Fresh' } },
+    });
+    const renders = createLoggerStore();
+
+    env.serverTable.setNextFetchError('1', 'Network error');
+
+    renderHook(() => {
+      const { data, status, error } = env.apiStore.useItem('1', {
+        returnRefetchingStatus: true,
+      });
+
+      renders.add({ status, data: data?.value ?? null, error });
+    });
+
+    await flushAllTimers();
+    await advanceTime(1100);
+
+    expect(renders.changesSnapshot).toMatchInlineSnapshot(`
+      "
+      -> status: success ⋅ data: {id:1, name:Cached} ⋅ error: null
+      -> status: refetching ⋅ data: {id:1, name:Cached} ⋅ error: null
+      ┌─
+      ⋅ status: error
+      ⋅ data: {id:1, name:Cached}
+      ⋅ error: {code:500, id:fetch-error, message:Network error}
+      └─
+      "
+    `);
+    expect(
+      persistentStore
+        .scope(storeName, sessionKey)
+        .collection.readItemEntry<PersistedItemState>('1'),
+    ).toMatchInlineSnapshot(`
+      data:
+        data:
+          value: { id: '1', name: 'Cached' }
+        payload: '1'
+
+      timestamp: 1735689600000
+    `);
   });
 
   test('ignoreItems predicate skips matching payloads and removes stale cached entries on flush', async () => {

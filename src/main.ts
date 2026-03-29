@@ -103,6 +103,8 @@ export type {
   OfflineSyncState,
 } from './persistentStorage/offline/types';
 
+export type { OfflineMutationResult } from './persistentStorage/offline/mutationRuntime';
+
 export {
   getGlobalOfflineEntities,
   getGlobalOfflineStatus,

@@ -38,6 +38,10 @@ import {
   offlineConnectivityError,
 } from './persistentStorage/offline/fetchRuntime';
 import {
+  type OfflineMutationResult,
+  runHybridOfflineMutation,
+} from './persistentStorage/offline/mutationRuntime';
+import {
   createOfflineStoreController,
   initializeOfflineStoreController,
   offlineSessionUnavailableError,
@@ -276,6 +280,9 @@ export function createDocumentStore<
           getEntityRefs: () => [
             { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
           ],
+          normalizeEntityRefs: () => [
+            { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
+          ],
           getProtectedCacheKeys: () => {
             const sessionKey = getSessionKey();
             if (sessionKey === false) return [];
@@ -295,6 +302,18 @@ export function createDocumentStore<
           applyPendingEntity: ({ pendingEntity }) => {
             if (!pendingEntity || typeof pendingEntity !== 'object') return;
             updateState((draft) => Object.assign(draft, pendingEntity));
+          },
+          reconcileTempEntity: ({ reconciliation }) => {
+            if (
+              !reconciliation.finalData ||
+              typeof reconciliation.finalData !== 'object'
+            ) {
+              return;
+            }
+
+            updateState((draft) =>
+              Object.assign(draft, reconciliation.finalData),
+            );
           },
         },
       })
@@ -766,6 +785,44 @@ export function createDocumentStore<
     return scheduler.startMutation(DOC_REQUEST_ID);
   }
 
+  type DocumentMutationArgs<T> = {
+    optimisticUpdate?: (currentState: State | null) => void | boolean;
+    mutation: (ctx: {
+      updateState: typeof updateState;
+      currentState: State | null;
+    }) => Promise<T>;
+    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
+    dontShowErrorToast?: boolean;
+    revalidateOnSuccess?: boolean;
+  };
+
+  type DocumentOnlineMutationArgs<T> = DocumentMutationArgs<T> & {
+    offline?: undefined;
+  };
+
+  type DocumentOfflineMutationArgs<T> = DocumentMutationArgs<T> & {
+    /**
+     * When provided, the mutation tries the direct request while the session is
+     * online, but degrades into durable offline queueing when the session is
+     * already offline or the failure is classified as offline/outage. Callers
+     * must not assume a successful result always includes the server payload.
+     */
+    offline: TOfflineOperations extends null
+      ? never
+      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
+  };
+
+  async function performMutation<T>(
+    args: DocumentOnlineMutationArgs<T>,
+  ): Promise<ResultType<Awaited<T>, StoreError | true>>;
+  async function performMutation<T>(
+    args: DocumentOfflineMutationArgs<T>,
+  ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
+  async function performMutation<T>(
+    args: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>,
+  ): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  >;
   async function performMutation<T>({
     optimisticUpdate,
     mutation,
@@ -773,29 +830,19 @@ export function createDocumentStore<
     dontShowErrorToast,
     revalidateOnSuccess,
     offline,
-  }: {
-    optimisticUpdate?: (currentState: State | null) => void | boolean;
-    debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
-    dontShowErrorToast?: boolean;
-    mutation: (ctx: {
-      updateState: typeof updateState;
-      currentState: State | null;
-    }) => Promise<T>;
-    revalidateOnSuccess?: boolean;
-    /**
-     * When provided, the mutation is durably queued and replayed by the offline
-     * sync controller. The immediate result only reflects queue persistence.
-     */
-    offline?: TOfflineOperations extends null
-      ? never
-      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
-  }): Promise<ResultType<Awaited<T>, StoreError | true>> {
+  }: DocumentOnlineMutationArgs<T> | DocumentOfflineMutationArgs<T>): Promise<
+    ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
+  > {
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(offlineSessionUnavailableError);
     }
 
     const mutationId = getAutoIncrementId();
     storeEvents.emit('mutationStart', { mutationId });
+
+    const directMutation = () =>
+      mutation({ updateState, currentState: store.state.data });
+
     const result = await performMutationWithLifecycle({
       startMutation,
       optimisticUpdate: optimisticUpdate
@@ -806,19 +853,19 @@ export function createDocumentStore<
         : undefined,
       debounce,
       blockWindowClose: blockWindowClose ?? undefined,
-      mutation: async () => {
-        if (offline && offlineController) {
-          await offlineController.queueMutation({
-            operationName: offline.operation,
-            input: offline.input,
-          });
-          return __LEGIT_CAST__<Awaited<T>, undefined>(undefined);
-        }
-
-        return mutation({ updateState, currentState: store.state.data });
-      },
-      onSuccess: () => {
-        if (revalidateOnSuccess && !offline) {
+      mutation: offline
+        ? () =>
+            runHybridOfflineMutation({
+              controller: offlineController,
+              offline,
+              directMutation,
+            })
+        : async () => ({
+            kind: 'online' as const,
+            data: await directMutation(),
+          }),
+      onSuccess: (result) => {
+        if (revalidateOnSuccess && result.kind === 'online') {
           invalidateData();
         }
       },
@@ -834,6 +881,10 @@ export function createDocumentStore<
     });
 
     storeEvents.emit('mutationEnd', { mutationId, success: result.ok });
+
+    if (!offline && result.ok && result.value.kind === 'online') {
+      return Result.ok(result.value.data);
+    }
 
     return result;
   }
