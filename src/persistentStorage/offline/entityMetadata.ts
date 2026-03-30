@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
-import type { GlobalOfflineEntity } from './types';
+
 import { useOfflineStoreEntities } from './sessionCoordinator';
+import type { GlobalOfflineEntity } from './types';
 
 /**
  * React hook that returns a memoized `getPendingSync` callback for checking

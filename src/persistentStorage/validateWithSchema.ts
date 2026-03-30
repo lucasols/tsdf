@@ -1,5 +1,6 @@
 import { isPromise } from '@ls-stack/utils/typeGuards';
 import { rc_parse } from 'runcheck';
+
 import type { PersistentStorageSchema } from './types';
 
 /**

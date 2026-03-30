@@ -1,8 +1,9 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
+
 import type { DocumentStoreState } from '../documentStore';
-import type { AnyOfflineOperationDefinition } from './offline/types';
 import type { ValidStoreState } from '../utils/storeShared';
+import type { AnyOfflineOperationDefinition } from './offline/types';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,

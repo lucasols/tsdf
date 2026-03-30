@@ -10,13 +10,14 @@ import {
   test,
   vi,
 } from 'vitest';
+
+import type { TSFDUseCollectionItemReturn } from '../../src/collectionStore/collectionStore';
+import type { TSFDUseListItemReturn } from '../../src/listQueryStore/types';
 import type {
   DefineCollectionOfflineOperations,
   DefineListQueryOfflineOperations,
   DefineOfflineOperation,
 } from '../../src/main';
-import type { TSFDUseCollectionItemReturn } from '../../src/collectionStore/collectionStore';
-import type { TSFDUseListItemReturn } from '../../src/listQueryStore/types';
 import type { CollectionTestItem } from '../mocks/collectionStoreTestEnv';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -25,15 +26,15 @@ import {
   type ListQueryParams,
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
-import {
-  collectionSchema,
-  listQueryQueryPayloadSchema,
-} from '../offline/offlineTestShared';
+import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   userPatchSchema,
   userRowSchema,
 } from '../offline/offlineReplayTestShared';
-import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
+import {
+  collectionSchema,
+  listQueryQueryPayloadSchema,
+} from '../offline/offlineTestShared';
 import { flushAllTimers, range } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 

@@ -12,17 +12,18 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
 } from '../../src/listQueryStore/types';
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   PersistedListQueryData,
   PersistedListQueryItemData,
   PersistentStorageSchema,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
-import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
@@ -30,16 +31,16 @@ import {
   type Tables,
 } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import {
-  createOpfsPersistentStorageTestStore,
-  type OpfsPersistentStorageTestStoreOptions,
-} from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import {
+  createOpfsPersistentStorageTestStore,
+  type OpfsPersistentStorageTestStoreOptions,
+} from '../utils/opfsPersistentStorageTestStore';
 import {
   getParsedOpfsFileData,
   startOpfsPersistentStorageOperationCapture,

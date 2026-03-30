@@ -4,18 +4,19 @@ import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
+
 import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
   type OfflineAwareMutationController,
 } from '../persistentStorage/offline/mutationRuntime';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
-import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
   OfflineMutationInput,
 } from '../persistentStorage/offline/types';
+import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
 import {
   performMutationWithLifecycle,

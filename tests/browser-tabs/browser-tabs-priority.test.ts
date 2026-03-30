@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+
 import { createBrowserTabsPriority } from '../../src/utils/browserTabsPriority';
 
 beforeEach(() => {

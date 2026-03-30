@@ -1,4 +1,5 @@
 import { rc_number, rc_object, rc_string } from 'runcheck';
+
 import type {
   CollectionOfflineOperationDefinition,
   DocumentOfflineOperationDefinition,

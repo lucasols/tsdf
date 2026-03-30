@@ -12,6 +12,7 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import type { ListQueryStore } from '../../src/listQueryStore/listQueryStore';
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {

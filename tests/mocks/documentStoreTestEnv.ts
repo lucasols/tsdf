@@ -1,5 +1,6 @@
-import { act } from 'react';
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { act } from 'react';
+
 import {
   createDocumentStore,
   type DocumentBrowserTabsMessage,

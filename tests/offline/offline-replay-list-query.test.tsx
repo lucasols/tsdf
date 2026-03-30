@@ -2,20 +2,21 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
 import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import {
-  collectionCreateInputSchema,
-  listQueryQueryPayloadSchema,
-} from './offlineTestShared';
 import {
   type CreateListQueryUserOperations,
   type PatchUserOperations,
   userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
+import {
+  collectionCreateInputSchema,
+  listQueryQueryPayloadSchema,
+} from './offlineTestShared';
 
 describe('offline replay list-query behavior', () => {
   let network = createOfflineNetworkMock();

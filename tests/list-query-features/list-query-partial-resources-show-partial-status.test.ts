@@ -11,6 +11,7 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   createListQueryStoreTestEnv,

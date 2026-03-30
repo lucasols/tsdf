@@ -1,6 +1,7 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
+
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import {
@@ -10,8 +11,8 @@ import {
   METADATA_RECORD_PREFIX,
   PAYLOAD_RECORD_PREFIX,
 } from './opfsFileNaming';
-import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import { createEvictionComparator } from './persistenceUtils';
+import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
   AsyncStorageAdapter,
   AsyncStorageDiscoveredScope,

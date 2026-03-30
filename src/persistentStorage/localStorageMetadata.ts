@@ -8,14 +8,14 @@ import {
   rc_unknown,
   type RcType,
 } from 'runcheck';
+
+import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from './asyncStorageAdapter';
 import {
   type CompactListQueryLocalStorageEntry,
   createCompactListQueryLocalStorageEntry,
   isCompactListQueryLocalStorageKey,
   parseCompactListQueryLocalStorageEntry,
 } from './compactListQueryLocalStorageEntry';
-
-import { ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY } from './asyncStorageAdapter';
 
 const METADATA_KEY_PREFIX = 'tsdf._m.';
 const GLOBAL_MAINTENANCE_KEY = `${METADATA_KEY_PREFIX}g`;

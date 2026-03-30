@@ -10,6 +10,7 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import { IsOffScreenContext } from '../../src/isOffScreenContext';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';

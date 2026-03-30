@@ -5,6 +5,7 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import {
   createFocusChangeCoordinator,

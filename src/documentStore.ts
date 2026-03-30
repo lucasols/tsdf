@@ -13,15 +13,32 @@ import { produce } from 'immer';
 import { useCallback, useContext, useEffect } from 'react';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
+
 import { useListItem as useListItemBase } from './hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
+import { getIsPendingOfflineSync } from './persistentStorage/offline/entityMetadata';
+import {
+  runOfflineAwareFetch,
+  offlineConnectivityError,
+} from './persistentStorage/offline/fetchRuntime';
+import {
+  type OfflineMutationResult,
+  runHybridOfflineMutation,
+} from './persistentStorage/offline/mutationRuntime';
+import { useOfflineStoreEntities } from './persistentStorage/offline/sessionCoordinator';
+import {
+  createOfflineStoreController,
+  initializeOfflineStoreController,
+  offlineSessionUnavailableError,
+} from './persistentStorage/offline/storeController';
 import type {
   AnyOfflineOperationDefinition,
   OfflineMutationInput,
 } from './persistentStorage/offline/types';
+import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import {
   BatchRequest,
@@ -34,21 +51,7 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
-import {
-  runOfflineAwareFetch,
-  offlineConnectivityError,
-} from './persistentStorage/offline/fetchRuntime';
-import {
-  type OfflineMutationResult,
-  runHybridOfflineMutation,
-} from './persistentStorage/offline/mutationRuntime';
-import {
-  createOfflineStoreController,
-  initializeOfflineStoreController,
-  offlineSessionUnavailableError,
-} from './persistentStorage/offline/storeController';
-import { getIsPendingOfflineSync } from './persistentStorage/offline/entityMetadata';
-import { useOfflineStoreEntities } from './persistentStorage/offline/sessionCoordinator';
+import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import {
   type BrowserTabsPriorityTimings,
   type BrowserTabsTabStatusMessage,
@@ -75,9 +78,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
-import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
-import { createProtectedStorageKey } from './persistentStorage/persistentStorageManager';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
 

@@ -2,17 +2,12 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import {
-  collectionCreateInputSchema,
-  collectionSchema,
-  docMutationInputSchema,
-  docSchema,
-} from './offlineTestShared';
 import {
   type CreateUserOperations,
   getLocalStorageKeys,
@@ -20,6 +15,12 @@ import {
   getOfflineQueueEntryData,
   type UpdateValueOperations,
 } from './offlineReplayTestShared';
+import {
+  collectionCreateInputSchema,
+  collectionSchema,
+  docMutationInputSchema,
+  docSchema,
+} from './offlineTestShared';
 
 async function waitForMicrotaskCondition(
   condition: () => boolean,

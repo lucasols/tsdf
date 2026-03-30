@@ -5,17 +5,33 @@ import {
   type __LEGIT_ANY__,
 } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
+
 import type {
   TSFDCollectionItem,
   TSFDCollectionState,
 } from '../collectionStore/collectionStore';
+import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  ASYNC_STORAGE_MAX_AGE_MS,
+  buildPersistedStaticPolicy,
+  readAsyncStorageNamespaceIndexStateUsingDriver,
+  registerAsyncStartupStoreCleanup,
+  getProtectedKeysFromMetadata,
+  serializeProtectedRef,
+  unregisterAsyncStartupStoreCleanup,
+  type AsyncStartupCleanupScopePlan,
+  type AsyncStartupCleanupStoreDeletePlan,
+} from './asyncStorageAdapter';
+import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
+import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
 } from './offline/types';
-import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
-import { isManagedLocalStorageEntryOfflineProtected } from './localStorageMetadata';
-import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from './opfsFileNaming';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -25,9 +41,9 @@ import {
   type ParsedPersistedCollectionItemData,
 } from './parsePersistedData';
 import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getPayloadRecordKey,
-} from './opfsFileNaming';
+  createShouldIgnoreItemPredicate,
+  createEvictionComparator,
+} from './persistenceUtils';
 import {
   assertValidPersistentStoreName,
   createPersistentStorageNamespaceHandle,
@@ -41,10 +57,6 @@ import {
   readStorageEntryFromLocalStorageSync,
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
-import {
-  createShouldIgnoreItemPredicate,
-  createEvictionComparator,
-} from './persistenceUtils';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import { COLLECTION_STORAGE_ENTRY_PREFIX } from './storageEntryPrefixes';
 import type {
@@ -54,17 +66,6 @@ import type {
   PersistedCollectionItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
-import {
-  ASYNC_STORAGE_MAX_AGE_MS,
-  buildPersistedStaticPolicy,
-  readAsyncStorageNamespaceIndexStateUsingDriver,
-  registerAsyncStartupStoreCleanup,
-  getProtectedKeysFromMetadata,
-  serializeProtectedRef,
-  unregisterAsyncStartupStoreCleanup,
-  type AsyncStartupCleanupScopePlan,
-  type AsyncStartupCleanupStoreDeletePlan,
-} from './asyncStorageAdapter';
 
 const DEFAULT_MAX_ITEMS = 50;
 const SAVE_DEBOUNCE_MS = 1000;

@@ -11,6 +11,7 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import { createDocumentStore } from '../../src/documentStore';
 import {
   createCompactLocalStorageEntry,

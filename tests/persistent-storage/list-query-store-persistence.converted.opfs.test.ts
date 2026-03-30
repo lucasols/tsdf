@@ -11,24 +11,25 @@ import {
   test,
   vi,
 } from 'vitest';
+
+import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import type {
   ListQueryPersistentStorageConfig,
   PersistentStorageSchema,
 } from '../../src/persistentStorage/types';
-import { opfsPersistentStorage } from '../../src/persistentStorage/storageAdapter';
 import {
   createListQueryStoreTestEnv,
   type ListQueryParams,
   type Row,
 } from '../mocks/listQueryStoreTestEnv';
 import { resetMockBrowserOpfsForTests } from '../mocks/mockBrowserOpfs';
-import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import {
   advanceTime,
   flushAllTimers,
   resolveAfterAllTimers,
 } from '../utils/genericTestUtils';
+import { createOpfsPersistentStorageTestStore } from '../utils/opfsPersistentStorageTestStore';
 import { getParsedOpfsFileData } from '../utils/persistentStorageOptimizationTestUtils';
 
 const rowSchema = __LEGIT_CAST__<PersistentStorageSchema<Row>, unknown>(

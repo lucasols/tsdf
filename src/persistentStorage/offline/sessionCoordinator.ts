@@ -2,6 +2,7 @@ import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store } from 't-state';
+
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
 import {
   createBrowserTabsCoordinatorWithPriority,

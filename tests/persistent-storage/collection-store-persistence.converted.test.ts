@@ -11,6 +11,7 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
 import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';

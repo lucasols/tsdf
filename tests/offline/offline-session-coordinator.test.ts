@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
 import { SessionOfflineCoordinator } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 

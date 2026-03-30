@@ -10,6 +10,7 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import type { DocumentStatus } from '../../src/documentStore';
 import type { StoreError } from '../../src/utils/storeShared';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';

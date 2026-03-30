@@ -2,12 +2,13 @@ import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
-import { BatchRequest, FetchContext } from '../requestScheduler';
+
 import {
   offlineConnectivityError,
   runOfflineAwareFetch,
   type OfflineAwareFetchController,
 } from '../persistentStorage/offline/fetchRuntime';
+import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
   StoreError,

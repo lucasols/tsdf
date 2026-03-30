@@ -1,5 +1,6 @@
-import { afterEach } from 'vitest';
 import { klona } from 'klona/json';
+import { afterEach } from 'vitest';
+
 import type {
   BrowserTabsTransport,
   BrowserTabsTransportFactory,

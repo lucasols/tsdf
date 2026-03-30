@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';

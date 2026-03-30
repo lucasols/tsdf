@@ -11,6 +11,7 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import { clearSessionStorage } from '../../src/main';
 import { resetManagedLocalStorageState } from '../../src/persistentStorage/localStorageMetadata';
 import type { PersistentStorageSchema } from '../../src/persistentStorage/types';

@@ -1,8 +1,6 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import {
-  getNavigatorLockManager,
-  warnIfNavigatorLockUnavailable,
-} from './navigatorLocks';
+
+import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import {
   clearManagedLocalStorageManifest,
   clearManagedLocalStorageSession,
@@ -26,7 +24,10 @@ import {
   upsertManagedLocalStorageSingleEntry,
   type ManagedLocalStorageIo,
 } from './localStorageMetadata';
-import { createAsyncStorageAdapter } from './asyncStorageAdapter';
+import {
+  getNavigatorLockManager,
+  warnIfNavigatorLockUnavailable,
+} from './navigatorLocks';
 import { OpfsAsyncStorageDriver } from './opfsAsyncStorageAdapter';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type { AsyncStorageAdapter } from './types';

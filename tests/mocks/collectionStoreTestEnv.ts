@@ -1,5 +1,6 @@
-import { act } from 'react';
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { act } from 'react';
+
 import {
   createCollectionStore,
   type CollectionBrowserTabsMessage,
@@ -10,14 +11,14 @@ import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
 } from '../../src/persistentStorage/offline/types';
-import type { FetchType } from '../../src/requestScheduler';
-import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
-import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
-import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import type {
   CollectionPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
+import type { FetchType } from '../../src/requestScheduler';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
+import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import {
   getNextStoreId,
   registerMockStoreInstance,

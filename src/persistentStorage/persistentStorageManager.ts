@@ -1,16 +1,17 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-import {
-  getManagedLocalStorageRuntimeConfig,
-  isManagedLocalStorageEntryOfflineProtected,
-  resetManagedLocalStorageState,
-  setManagedLocalStorageEntryOfflineProtected,
-} from './localStorageMetadata';
+
 import { serializeProtectedRef } from './asyncStorageAdapter';
 import {
   createCompactLocalStorageEntry,
   type CompactLocalStorageEntryValue,
   parseCompactLocalStorageEntry,
 } from './compactLocalStorageEntry';
+import {
+  getManagedLocalStorageRuntimeConfig,
+  isManagedLocalStorageEntryOfflineProtected,
+  resetManagedLocalStorageState,
+  setManagedLocalStorageEntryOfflineProtected,
+} from './localStorageMetadata';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import {

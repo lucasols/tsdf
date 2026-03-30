@@ -5,11 +5,23 @@ import {
   type __LEGIT_ANY__,
 } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
+
 import type {
   TSDFItemQuery,
   TSFDListQuery,
   TSFDListQueryState,
 } from '../listQueryStore/types';
+import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  buildPersistedStaticPolicy,
+  getProtectedKeysFromMetadata,
+  readAsyncStorageNamespaceIndexStateUsingDriver,
+  registerAsyncStartupStoreCleanup,
+  serializeProtectedRef,
+  unregisterAsyncStartupStoreCleanup,
+  type AsyncStartupCleanupScopePlan,
+  type AsyncStartupCleanupStoreDeletePlan,
+} from './asyncStorageAdapter';
 import {
   createCompactListQueryLocalStorageEntry,
   parseCompactListQueryLocalStorageEntry,
@@ -20,8 +32,10 @@ import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
 } from './offline/types';
-
-import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import {
+  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
+  getPayloadRecordKey,
+} from './opfsFileNaming';
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -66,20 +80,6 @@ import type {
   PersistedListQueryItemData,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
-import {
-  ASYNC_NAMESPACE_INDEX_RECORD_KEY,
-  getPayloadRecordKey,
-} from './opfsFileNaming';
-import {
-  buildPersistedStaticPolicy,
-  getProtectedKeysFromMetadata,
-  readAsyncStorageNamespaceIndexStateUsingDriver,
-  registerAsyncStartupStoreCleanup,
-  serializeProtectedRef,
-  unregisterAsyncStartupStoreCleanup,
-  type AsyncStartupCleanupScopePlan,
-  type AsyncStartupCleanupStoreDeletePlan,
-} from './asyncStorageAdapter';
 
 const DEFAULT_MAX_ITEMS = 500;
 const DEFAULT_MAX_QUERIES = 100;

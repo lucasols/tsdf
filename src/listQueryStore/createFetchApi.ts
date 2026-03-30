@@ -1,5 +1,7 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { Store } from 't-state';
+
+import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
 import {
   BatchRequest,
   FetchContext,
@@ -16,8 +18,6 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-
-import type { OfflineAwareFetchController } from '../persistentStorage/offline/fetchRuntime';
 import { executeItemBatchFetch } from './executeItemBatchFetch';
 import { executeQueryFetch } from './executeQueryFetch';
 import {

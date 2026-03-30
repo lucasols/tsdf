@@ -1,4 +1,5 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type { PersistentStorageSchema } from '../types';
 

@@ -3,12 +3,14 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
+import { type UpdateValueConflictOperations } from './offlineReplayTestShared';
 import {
   collectionCreateInputSchema,
   collectionSchema,
@@ -16,7 +18,6 @@ import {
   docMutationInputSchema,
   docSchema,
 } from './offlineTestShared';
-import { type UpdateValueConflictOperations } from './offlineReplayTestShared';
 
 async function waitForMicrotaskCondition(
   condition: () => boolean,

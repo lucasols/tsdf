@@ -1,6 +1,7 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
+
 import type { PartialResourcesConfig } from '../../src/listQueryStore/types';
 import type { Row } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';

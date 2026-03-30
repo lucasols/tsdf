@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_boolean, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
@@ -11,13 +12,6 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import {
-  collectionCreateInputSchema,
-  collectionSchema,
-  docMutationInputSchema,
-  docSchema,
-  listQueryQueryPayloadSchema,
-} from './offlineTestShared';
 import {
   type CreateUserOperations,
   getOfflineQueueEntries,
@@ -28,6 +22,13 @@ import {
   userPatchSchema,
   userRowSchema,
 } from './offlineReplayTestShared';
+import {
+  collectionCreateInputSchema,
+  collectionSchema,
+  docMutationInputSchema,
+  docSchema,
+  listQueryQueryPayloadSchema,
+} from './offlineTestShared';
 
 const renameCollectionInputSchema = rc_object({
   id: rc_string,

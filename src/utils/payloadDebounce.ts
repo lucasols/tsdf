@@ -1,4 +1,5 @@
 import type { DebounceOptions } from '@ls-stack/utils/debounce';
+
 import type { PayloadDebounce } from './storeShared';
 
 export function shouldDebouncePayload(
