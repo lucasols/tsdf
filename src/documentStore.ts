@@ -33,6 +33,7 @@ import {
   ScheduleFetchOptions,
   ScheduleFetchResults,
 } from './requestScheduler';
+import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import {
   type BrowserTabsPriorityTimings,
   type BrowserTabsTabStatusMessage,
@@ -59,7 +60,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from './utils/storeShared';
-import { shouldScheduleAutomaticFetch } from './utils/automaticFetchPolicy';
 import { useEnsureIsLoaded } from './utils/useEnsureIsLoaded';
 
 export type DocumentStatus = 'idle' | TSDFStatus;
