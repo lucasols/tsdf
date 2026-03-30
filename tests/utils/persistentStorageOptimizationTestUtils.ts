@@ -1155,11 +1155,8 @@ function describeOpfsInternalRecord(key: string): string {
   }
 }
 
-function formatGlobalRecordKey(
-  key: string,
-  kind: 'payload' | 'metadata',
-): string {
-  const kindLabel = kind === 'payload' ? 'entry data' : kind;
+function formatGlobalRecordKey(key: string): string {
+  const kindLabel = 'entry data';
   return key.includes('._o_.p')
     ? `${key} (protected registry ${kindLabel})`
     : `${key} (${kindLabel})`;
@@ -1198,7 +1195,7 @@ function formatRecordLabel(
   record: {
     key: string;
     logicalKey: string | null;
-    recordKind: 'payload' | 'metadata' | 'internal';
+    recordKind: 'payload' | 'internal';
   },
   scope: AsyncStorageNamespaceScope | null,
 ): string {
@@ -1207,7 +1204,7 @@ function formatRecordLabel(
     record.logicalKey !== null &&
     isPlainDocumentLogicalKey(scope, record.logicalKey)
   ) {
-    return record.recordKind === 'payload' ? 'entry data' : record.recordKind;
+    return record.recordKind === 'payload' ? 'entry data' : 'internal';
   }
 
   if (scope !== null) {
@@ -1228,18 +1225,12 @@ function formatRecordLabel(
 
     const scopedRecordLabel = formatScopedRecordKeyLabel(scope, record.key);
     if (scopedRecordLabel !== null) {
-      return record.recordKind === 'payload'
-        ? scopedRecordLabel.description
-        : `${record.recordKind}, ${formatStorageEntryLabel(scopedRecordLabel.userKey)}`;
+      return scopedRecordLabel.description;
     }
   }
 
   if (record.recordKind === 'payload' && record.logicalKey !== null) {
-    return formatGlobalRecordKey(record.logicalKey, 'payload');
-  }
-
-  if (record.recordKind === 'metadata' && record.logicalKey !== null) {
-    return formatGlobalRecordKey(record.logicalKey, 'metadata');
+    return formatGlobalRecordKey(record.logicalKey);
   }
 
   return describeOpfsInternalRecord(record.key);

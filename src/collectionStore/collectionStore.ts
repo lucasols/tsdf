@@ -699,7 +699,7 @@ export function createCollectionStore<
     return scheduler;
   }
 
-  // Per-item schedulers for backward compatibility (when batchFetchFn is NOT provided)
+  // Per-item schedulers used when batch scheduling is disabled for a request.
   const perItemSchedulers = new Map<string, RequestScheduler<ItemPayload>>();
 
   function getOrCreateItemScheduler(

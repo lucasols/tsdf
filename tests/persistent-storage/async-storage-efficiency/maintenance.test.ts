@@ -105,64 +105,6 @@ describe('async storage efficiency: maintenance', () => {
     ).toMatchInlineSnapshot(`lca: 1735689602009`);
   });
 
-  test('startup cleanup removes malformed metadata entries together with their entry data files', async () => {
-    const mockAdapter = createOpfsPersistentStorageTestStore();
-    const corruptedDoc = mockAdapter.scope('corrupted', 'sess1');
-    const triggerDoc = mockAdapter.scope('trigger', 'sess1');
-    const corruptedKey = corruptedDoc.document.storageKey();
-    const triggerKey = triggerDoc.document.storageKey();
-    const corruptedMetadataPath = 'tsdf/sess1/corrupted/d.e.m.json';
-    const corruptedPayloadPath = 'tsdf/sess1/corrupted/d.e.p.json';
-
-    // Seed a broken metadata record and its entry data. Cleanup should treat the
-    // pair as orphaned data and delete both files in one pass.
-    corruptedDoc.document.setPayload({
-      d: { value: { name: 'bad', value: 1 } },
-    });
-    corruptedDoc.document.setMetadata('{invalid');
-
-    // Seed a valid store in the same session so startup cleanup discovers the
-    // namespace and we can verify healthy entries are preserved.
-    triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
-    createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
-
-    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
-    await waitForScheduledCleanup();
-    const operationsBreakdown = readCapture.finish().timelineString;
-
-    expect({
-      corruptedExists: mockAdapter.has(corruptedKey),
-      corruptedMetadataFileExists: mockAdapter.mockBrowserOpfs.fileExists(
-        corruptedMetadataPath,
-      ),
-      corruptedPayloadFileExists:
-        mockAdapter.mockBrowserOpfs.fileExists(corruptedPayloadPath),
-      triggerExists: mockAdapter.has(triggerKey),
-    }).toMatchInlineSnapshot(`
-      corruptedExists: '❌'
-      corruptedMetadataFileExists: '❌'
-      corruptedPayloadFileExists: '❌'
-      triggerExists: '✅'
-    `);
-    expect(operationsBreakdown).toMatchInlineSnapshot(`
-      "
-      time   |
-      2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
-      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
-      2.003s | 🗂️ list-dir-values tsdf/sess1
-             |    └ (session directory) entries=["dir:corrupted","dir:trigger"]
-      2.004s | 🗂️ list-dir-entries tsdf/sess1/corrupted
-             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      .      | 🗂️ list-dir-entries tsdf/sess1/trigger
-             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
-      2.005s | 📖 #1 tsdf/sess1/corrupted/d._i.r.json (namespace index) | 0.02 kb
-      .      | 📖 #2 tsdf/sess1/trigger/d._i.r.json (namespace index) | 0.07 kb
-      2.008s | 🧹 del-dir recursive ✅ tsdf/sess1/corrupted (store directory)
-      2.009s | end
-      "
-    `);
-  });
-
   test('startup cleanup deletes invalid OPFS entries while keeping valid stores', async () => {
     const staleTimestamp = Date.now() - 15 * 24 * 60 * 60 * 1000;
     const mockAdapter = createOpfsPersistentStorageTestStore();
@@ -265,6 +207,61 @@ describe('async storage efficiency: maintenance', () => {
       .      | 📖 #7 tsdf/sess1/fresh-doc/d._i.r.json (namespace index) | 0.07 kb
       2.014s | 🧹 del-dir recursive ✅ tsdf/sess1/expired-doc (store directory)
       2.015s | end
+      "
+    `);
+  });
+
+  test('startup cleanup removes malformed namespace indexes together with their entry data files', async () => {
+    const mockAdapter = createOpfsPersistentStorageTestStore();
+    const corruptedDoc = mockAdapter.scope('corrupted', 'sess1');
+    const triggerDoc = mockAdapter.scope('trigger', 'sess1');
+    const corruptedKey = corruptedDoc.document.storageKey();
+    const triggerKey = triggerDoc.document.storageKey();
+    const corruptedIndexPath = 'tsdf/sess1/corrupted/d._i.r.json';
+    const corruptedPayloadPath = 'tsdf/sess1/corrupted/d.e.p.json';
+
+    // Seed a valid document store, then corrupt its namespace index so cleanup
+    // has to treat the whole scope as junk and delete the orphaned payload file.
+    corruptedDoc.document.seed({ value: { name: 'bad', value: 1 } });
+    mockAdapter.mockBrowserOpfs.writeFile(corruptedIndexPath, '{invalid');
+
+    // Keep a healthy sibling store in the same session so we can verify startup
+    // cleanup only prunes the malformed scope.
+    triggerDoc.document.seed({ value: { name: 'ok', value: 1 } });
+    createDocumentEnv({ storeName: 'trigger', sessionKey: 'sess1' });
+
+    const readCapture = startOpfsPersistentStorageOperationCapture(mockAdapter);
+    await waitForScheduledCleanup();
+    const operationsBreakdown = readCapture.finish().timelineString;
+
+    expect({
+      corruptedExists: mockAdapter.has(corruptedKey),
+      corruptedIndexFileExists:
+        mockAdapter.mockBrowserOpfs.fileExists(corruptedIndexPath),
+      corruptedPayloadFileExists:
+        mockAdapter.mockBrowserOpfs.fileExists(corruptedPayloadPath),
+      triggerExists: mockAdapter.has(triggerKey),
+    }).toMatchInlineSnapshot(`
+      corruptedExists: '❌'
+      corruptedIndexFileExists: '❌'
+      corruptedPayloadFileExists: '❌'
+      triggerExists: '✅'
+    `);
+    expect(operationsBreakdown).toMatchInlineSnapshot(`
+      "
+      time   |
+      2.001s | 📁 dir-open-or-create ✅ tsdf (root directory)
+      2.002s | 🗂️ list-dir-values tsdf (root directory) entries=["dir:sess1"]
+      2.003s | 🗂️ list-dir-values tsdf/sess1
+             |    └ (session directory) entries=["dir:corrupted","dir:trigger"]
+      2.004s | 🗂️ list-dir-entries tsdf/sess1/corrupted
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      .      | 🗂️ list-dir-entries tsdf/sess1/trigger
+             |    └ (store directory) entries=["file:d._i.r.json","file:d.e.p.json"]
+      2.005s | 📖 #1 tsdf/sess1/corrupted/d._i.r.json (namespace index) | 0.02 kb
+      .      | 📖 #2 tsdf/sess1/trigger/d._i.r.json (namespace index) | 0.07 kb
+      2.008s | 🧹 del-dir recursive ✅ tsdf/sess1/corrupted (store directory)
+      2.009s | end
       "
     `);
   });
@@ -869,9 +866,6 @@ describe('async storage efficiency: maintenance', () => {
     expect(
       getParsedLocalStorageValue(ASYNC_MAINTENANCE_LOCAL_STORAGE_KEY),
     ).toMatchInlineSnapshot(`lca: 1736985605681`);
-    expect(
-      getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.m.json'),
-    ).toMatchInlineSnapshot(`null`);
     expect(
       getParsedOpfsFileData('tsdf/user%40example.com/protected-doc/d.e.p.json'),
     ).toMatchInlineSnapshot(`

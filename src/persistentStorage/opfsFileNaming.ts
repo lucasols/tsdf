@@ -11,7 +11,6 @@ export function getNamespaceId(scope: AsyncStorageNamespaceScope): string {
 }
 export const JSON_FILE_EXTENSION = '.json';
 export const PAYLOAD_RECORD_PREFIX = '__tsdf_payload__:';
-export const METADATA_RECORD_PREFIX = '__tsdf_meta__:';
 export const ASYNC_NAMESPACE_INDEX_RECORD_KEY = '_i';
 
 const OPFS_SINGLETON_ENTRY_TOKEN = 'e';
@@ -48,10 +47,6 @@ export function joinPath(...segments: string[]): string {
 
 export function getPayloadRecordKey(key: string): string {
   return `${PAYLOAD_RECORD_PREFIX}${key}`;
-}
-
-export function getMetadataRecordKey(key: string): string {
-  return `${METADATA_RECORD_PREFIX}${key}`;
 }
 
 export function getFileNameKindAlias(
@@ -102,14 +97,12 @@ export function parseFileNameKindAlias(
   }
 }
 
-export type OpfsRecordKind = 'metadata' | 'payload' | 'raw';
+export type OpfsRecordKind = 'payload' | 'raw';
 
 export function getRecordKindAlias(kind: OpfsRecordKind): string {
   switch (kind) {
     case 'payload':
       return 'p';
-    case 'metadata':
-      return 'm';
     case 'raw':
       return 'r';
   }
@@ -119,8 +112,6 @@ export function parseRecordKindAlias(value: string): OpfsRecordKind | null {
   switch (value) {
     case 'p':
       return 'payload';
-    case 'm':
-      return 'metadata';
     case 'r':
       return 'raw';
     default:
@@ -153,19 +144,12 @@ export function parseEntryToken(
 export function parseRecordKey(
   key: string,
 ):
-  | { recordKind: 'payload' | 'metadata'; userKey: string }
+  | { recordKind: 'payload'; userKey: string }
   | { rawKey: string; recordKind: 'raw' } {
   if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
     return {
       recordKind: 'payload',
       userKey: key.slice(PAYLOAD_RECORD_PREFIX.length),
-    };
-  }
-
-  if (key.startsWith(METADATA_RECORD_PREFIX)) {
-    return {
-      recordKind: 'metadata',
-      userKey: key.slice(METADATA_RECORD_PREFIX.length),
     };
   }
 
@@ -179,8 +163,6 @@ export function toRecordKey(
   switch (recordKind) {
     case 'payload':
       return getPayloadRecordKey(userKey);
-    case 'metadata':
-      return getMetadataRecordKey(userKey);
     case 'raw':
       return userKey;
   }
@@ -203,18 +185,13 @@ export function buildFileName(
     );
   }
 
-  const entryToken =
-    parsedRecordKey.recordKind === 'payload' &&
-    shouldHashPayloadRecordForKind(scope.kind)
-      ? `${HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX}${murmur3(key, 'uint32')}`
-      : getEntryToken(scope, parsedRecordKey.userKey);
+  const entryToken = shouldHashPayloadRecordForKind(scope.kind)
+    ? `${HASHED_PAYLOAD_ENTRY_TOKEN_PREFIX}${murmur3(key, 'uint32')}`
+    : getEntryToken(scope, parsedRecordKey.userKey);
 
   return (
-    [
-      kindAlias,
-      entryToken,
-      getRecordKindAlias(parsedRecordKey.recordKind),
-    ].join('.') + JSON_FILE_EXTENSION
+    [kindAlias, entryToken, getRecordKindAlias('payload')].join('.') +
+    JSON_FILE_EXTENSION
   );
 }
 

@@ -53,7 +53,7 @@ export function useGetPendingSyncForItemKeys(args: {
 }
 
 export function createOfflineEntityLookup(
-  entities: GlobalOfflineEntity[],
+  entities: readonly GlobalOfflineEntity[],
 ): ReadonlyMap<string, GlobalOfflineEntity> {
   const entitiesByKey = new Map<string, GlobalOfflineEntity>();
 

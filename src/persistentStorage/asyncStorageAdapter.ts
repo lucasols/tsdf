@@ -18,7 +18,6 @@ import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
   getNamespaceId,
   getPayloadRecordKey,
-  METADATA_RECORD_PREFIX,
   PAYLOAD_RECORD_PREFIX,
 } from './opfsFileNaming';
 import { createEvictionComparator } from './persistenceUtils';
@@ -2001,14 +2000,11 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       rawKeys,
     );
     const payloadKeys = new Set<string>();
-    const legacyMetadataRecordKeys: string[] = [];
     const rawKeysToRemove: string[] = [];
 
     for (const key of rawKeys) {
       if (key.startsWith(PAYLOAD_RECORD_PREFIX)) {
         payloadKeys.add(key.slice(PAYLOAD_RECORD_PREFIX.length));
-      } else if (key.startsWith(METADATA_RECORD_PREFIX)) {
-        legacyMetadataRecordKeys.push(key);
       } else if (key !== ASYNC_NAMESPACE_INDEX_RECORD_KEY) {
         rawKeysToRemove.push(key);
       }
@@ -2044,10 +2040,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       args.scope,
       nextPersistedStaticPolicy,
     );
-    const payloadRecordKeysToRemove = new Set<string>([
-      ...legacyMetadataRecordKeys,
-      ...rawKeysToRemove,
-    ]);
+    const payloadRecordKeysToRemove = new Set<string>(rawKeysToRemove);
     const candidateEntries: Array<{
       itemKey: string;
       lastAccessAt: number;
@@ -2120,7 +2113,6 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
     const indexChanged =
       nextEntries.size !== indexState.entries.size ||
       rawKeysToRemove.length > 0 ||
-      legacyMetadataRecordKeys.length > 0 ||
       !deepEqual(currentPersistedStaticPolicy, nextPersistedStaticPolicy);
 
     const deleteKeys = [...payloadRecordKeysToRemove];

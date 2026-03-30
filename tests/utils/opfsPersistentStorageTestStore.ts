@@ -9,7 +9,6 @@ import {
   encodePathSegment,
   getPayloadRecordKey,
   joinPath,
-  METADATA_RECORD_PREFIX,
   OPFS_ROOT_DIR,
   parseFileNameInfo,
   PAYLOAD_RECORD_PREFIX,
@@ -688,7 +687,7 @@ function parseTrackedDirPath(
   return { path, scope: null };
 }
 
-type RecordKind = 'payload' | 'metadata' | 'internal';
+type RecordKind = 'payload' | 'internal';
 
 type InstrumentedRecord = {
   key: string;
@@ -711,15 +710,6 @@ function getInstrumentedRecord(
       key,
       logicalKey: getLogicalStorageKey(scope, userKey),
       recordKind: 'payload',
-    };
-  }
-
-  if (key.startsWith(METADATA_RECORD_PREFIX)) {
-    const userKey = key.slice(METADATA_RECORD_PREFIX.length);
-    return {
-      key,
-      logicalKey: getLogicalStorageKey(scope, userKey),
-      recordKind: 'metadata',
     };
   }
 
@@ -770,15 +760,7 @@ function parseFileContext(
   if (key !== null) {
     resolvedRecordKeysByPath.set(path, key);
   }
-  return {
-    path,
-    scope,
-    record: getInstrumentedRecord(
-      scope,
-      key,
-      parsedRecord.isHashedPayload ? 'payload' : 'metadata',
-    ),
-  };
+  return { path, scope, record: getInstrumentedRecord(scope, key, 'payload') };
 }
 
 type MockOpfsBaseOperation = {

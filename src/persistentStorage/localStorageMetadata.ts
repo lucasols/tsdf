@@ -693,13 +693,6 @@ export function syncManagedLocalStorageSessionProtection(
       io,
     );
   }
-
-  const legacyProtectedKeysStorageKey = `tsdf.${sessionKey}._o_.p`;
-  io.removeItem(legacyProtectedKeysStorageKey);
-  removeMetadataJson(
-    getManagedLocalStorageManifestKeyForSingle(legacyProtectedKeysStorageKey),
-    io,
-  );
 }
 
 function upsertManifestEntry(

@@ -1120,10 +1120,6 @@ describe('storage tree helpers', () => {
     const mockAdapter = createOpfsPersistentStorageTestStore();
 
     mockAdapter.mockBrowserOpfs.writeFile(
-      'tsdf/sess1/docs/d.e.m.json',
-      'x'.repeat(20),
-    );
-    mockAdapter.mockBrowserOpfs.writeFile(
       'tsdf/sess1/docs/d.e.p.json',
       'x'.repeat(40),
     );
@@ -1133,10 +1129,9 @@ describe('storage tree helpers', () => {
     );
 
     expect(getOpfsDirTree(mockAdapter)).toMatchInlineSnapshot(`
-      "tsdf (0.35 kb)
-      └ sess1 (0.34 kb)
-        ├ docs (0.16 kb)
-        │ ├ d.e.m.json (0.06 kb)
+      "tsdf (0.29 kb)
+      └ sess1 (0.28 kb)
+        ├ docs (0.11 kb)
         │ └ d.e.p.json (0.10 kb)
         └ users (0.16 kb)
           └ ci.%22user-1.p.json (0.15 kb)"

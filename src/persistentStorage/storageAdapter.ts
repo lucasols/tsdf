@@ -1,5 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
-
 import { createAsyncStorageAdapter } from './asyncStorageAdapter';
 import {
   clearManagedLocalStorageManifest,
@@ -208,7 +206,6 @@ type LocalPersistentStorage = {
   kind: 'local-sync';
   runLocked<T>(callback: () => T | Promise<T>): Promise<T>;
   readRaw(key: string): string | null;
-  read<T>(key: string): T | null;
   write<T>(key: string, value: T): void;
   remove(key: string, options?: LocalStorageMetadataOptions): void;
   removeByPrefix(prefix: string): void;
@@ -258,21 +255,6 @@ export const localPersistentStorage: LocalPersistentStorage = {
   readRaw(key: string): string | null {
     return getManagedLocalStorageIoWithWarning().getItem(key);
   },
-  /**
-   * Reads a value from `localStorage` for this exact key.
-   * Returns `null` when the key does not exist or parsing fails.
-   */
-  read<T>(key: string): T | null {
-    try {
-      const raw = localPersistentStorage.readRaw(key);
-      if (raw === null) return null;
-      // WORKAROUND: This legacy sync storage API intentionally returns parsed JSON as the caller's requested type because it has no codec or schema boundary.
-      return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
-    } catch {
-      return null;
-    }
-  },
-
   /**
    * Stores a value in `localStorage` using `JSON.stringify` for persistence.
    */
