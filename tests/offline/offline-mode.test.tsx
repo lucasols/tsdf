@@ -18,13 +18,15 @@ import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
-import { userRowSchema } from './offlineReplayTestShared';
+import {
+  getOfflineQueueEntries,
+  userRowSchema,
+} from './offlineReplayTestShared';
 import {
   collectionSchema,
   docMutationInputSchema,
   docSchema,
   listQueryQueryPayloadSchema,
-  parsePersistedObject,
 } from './offlineTestShared';
 
 type DocState = { value: number };
@@ -44,27 +46,6 @@ type RenameCollectionItemOperations = {
     { name: string }
   >;
 };
-
-function getOfflineQueueEntries(
-  sessionKey: string,
-  storeName: string,
-): Array<Record<string, unknown>> {
-  const entries: Array<Record<string, unknown>> = [];
-
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith(`tsdf.${sessionKey}.${storeName}.oq.`)) continue;
-
-    const rawEntry = localStorage.getItem(key);
-    if (!rawEntry) {
-      throw new Error(`Missing persisted offline queue entry for "${key}"`);
-    }
-
-    entries.push(parsePersistedObject(rawEntry));
-  }
-
-  return entries;
-}
 
 describe('offline mode network and session', () => {
   let network = createOfflineNetworkMock();
@@ -615,6 +596,11 @@ describe('offline mode network and session', () => {
     });
 
     expect(mutationOk).toBe(true);
+    expect(globalHook.result.current).toMatchObject({
+      effectiveOffline: true,
+      effectiveMode: 'offline',
+      sessionKey,
+    });
     await advanceTime(1010);
     expect(
       readManagedLocalStorageSingleEntryByPayload(
@@ -655,6 +641,7 @@ describe('offline mode network and session', () => {
       refetchOnMount: '❌'
       status: 'error'
     `);
+    expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
   });
 
   test('offline fetches without cached data return the normalized connectivity error', async () => {
@@ -685,6 +672,7 @@ describe('offline mode network and session', () => {
       refetchOnMount: '❌'
       status: 'error'
     `);
+    expect(env.serverMock.fetchHistory).toMatchInlineSnapshot(`[]`);
   });
 
   test('offline list-query refetches keep the last successful query snapshot visible', async () => {
@@ -719,9 +707,9 @@ describe('offline mode network and session', () => {
     await flushAllTimers();
     expect(pick(hook.result.current, ['items', 'status']))
       .toMatchInlineSnapshot(`
-      items: ['Ada']
-      status: 'success'
-    `);
+        items: ['Ada']
+        status: 'success'
+      `);
 
     // Once offline, a manual refetch should surface the connectivity error without blanking cached items.
     env.clearTimeline();
@@ -735,18 +723,18 @@ describe('offline mode network and session', () => {
 
     expect(pick(hook.result.current, ['error', 'items', 'status']))
       .toMatchInlineSnapshot(`
-      error: { code: 0, id: 'offline', message: 'Offline' }
-      items: ['Ada']
-      status: 'error'
-    `);
+        error: { code: 0, id: 'offline', message: 'Offline' }
+        items: ['Ada']
+        status: 'error'
+      `);
     expect(env.serverTable.getRequestHistory('list', { includeTime: false }))
       .toMatchInlineSnapshot(`
-      - _type: 'list'
-        payload:
-          fields: '*'
-          pos: { limit: 50, offset: 0 }
-        returned_items: 1
-    `);
+        - _type: 'list'
+          payload:
+            fields: '*'
+            pos: { limit: 50, offset: 0 }
+          returned_items: 1
+      `);
     expect(env.timelineString).toMatchInlineSnapshot(`
       "
       time  | query-items | query-status |
@@ -791,10 +779,10 @@ describe('offline mode network and session', () => {
 
     expect(pick(hook.result.current, ['error', 'items', 'status']))
       .toMatchInlineSnapshot(`
-      error: { code: 0, id: 'offline', message: 'Offline' }
-      items: []
-      status: 'error'
-    `);
+        error: { code: 0, id: 'offline', message: 'Offline' }
+        items: []
+        status: 'error'
+      `);
     expect(
       env.serverTable.getRequestHistory('list', { includeTime: false }),
     ).toMatchInlineSnapshot(`[]`);

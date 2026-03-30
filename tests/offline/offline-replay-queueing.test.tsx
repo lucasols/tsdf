@@ -31,6 +31,25 @@ async function waitForMicrotaskCondition(
   }
 }
 
+function trackDocumentReplayState(env: {
+  apiStore: {
+    getOfflineEntities: () => Array<{
+      pendingMutations?: number;
+      syncState?: string;
+    }>;
+  };
+  store: { state: { data: { value: number } | null } };
+  trackUIChanges: (value: string) => void;
+}) {
+  const offlineEntity = env.apiStore.getOfflineEntities()[0];
+
+  env.trackUIChanges(
+    `value:${env.store.state.data?.value ?? 'null'} sync:${
+      offlineEntity?.syncState ?? 'none'
+    } pending:${offlineEntity?.pendingMutations ?? 0}`,
+  );
+}
+
 describe('offline replay queueing and retry behavior', () => {
   let network = createOfflineNetworkMock();
 
@@ -412,6 +431,8 @@ describe('offline replay queueing and retry behavior', () => {
       },
     });
 
+    trackDocumentReplayState(env);
+
     const mutationResult = await env.apiStore.performMutation({
       optimisticUpdate: () => {
         env.apiStore.updateState((draft) => {
@@ -421,24 +442,48 @@ describe('offline replay queueing and retry behavior', () => {
       mutation: () => Promise.resolve(2),
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
+    trackDocumentReplayState(env);
 
     expect(mutationResult.ok).toBe(true);
 
+    // The first online replay should settle into syncing before the retry
+    // window has a chance to decide whether the queued mutation should continue.
+    env.addTimelineComments('beforeNextAction', [
+      'bring the session online and wait for the first replay attempt to settle into syncing',
+    ]);
     act(() => {
       network.goOnline();
     });
     await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+    trackDocumentReplayState(env);
 
     expect(execute).toHaveBeenCalledTimes(1);
     expect(shouldSkipSync).toHaveBeenCalledTimes(0);
 
+    // After the retry window opens, the same queued mutation should replay
+    // again instead of staying paused forever.
+    env.addTimelineComments('beforeNextAction', [
+      'advance the retry window so shouldSkipSync can allow the queued mutation to replay again',
+    ]);
     await advanceTime(300);
     await flushAllTimers();
+    trackDocumentReplayState(env);
 
     expect(shouldSkipSync).toHaveBeenCalledTimes(1);
     expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
     expect(execute).toHaveBeenCalledTimes(2);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time | ui                               |
+      0    | "value:1 sync:none pending:0"    | ui-initialized
+      .    | "value:2 sync:pending pending:1" | ui-changed
+      .    | "value:2 sync:pending pending:1" | -- bring the session online and wait for the first replay attempt to settle into syncing
+      .    | "value:2 sync:syncing pending:1" | ui-changed
+      1s   | "value:2 sync:syncing pending:1" | -- advance the retry window so shouldSkipSync can allow the queued mutation to replay again
+      .    | "value:2 sync:none pending:0"    | ui-changed
+      "
+    `);
   });
 
   test('needs-confirmation entries do not accept new accumulation before shouldSkipSync runs', async () => {

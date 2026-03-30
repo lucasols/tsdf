@@ -115,6 +115,7 @@ describe('offline replay conflict handling', () => {
       },
     });
 
+    // Queue the offline mutation while the browser is disconnected.
     await env.apiStore.performMutation({
       optimisticUpdate: () => {
         env.apiStore.updateState((draft) => {
@@ -125,6 +126,8 @@ describe('offline replay conflict handling', () => {
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
+    // Reconnect so the queued mutation can be replayed and rejected before it
+    // reaches the execute callback.
     await act(async () => {
       network.goOnline();
       await Promise.resolve();
@@ -186,6 +189,8 @@ describe('offline replay conflict handling', () => {
       throw new Error('Expected a persisted offline conflict');
     }
 
+    // Resolve the stored conflict and confirm the session clears its offline
+    // bookkeeping once the resolution is accepted.
     await act(async () => {
       await env.apiStore.resolveOfflineConflict(conflict.id, {
         resolution: 'accept-local',
@@ -268,6 +273,8 @@ describe('offline replay conflict handling', () => {
       },
     });
 
+    // Queue the replay candidate while offline so we can verify the conflict
+    // flow starts from a durable persisted mutation.
     await env.apiStore.performMutation({
       optimisticUpdate: () => {
         env.apiStore.updateState((draft) => {
@@ -278,6 +285,8 @@ describe('offline replay conflict handling', () => {
       offline: { operation: 'updateValue', input: { value: 2 } },
     });
 
+    // Bring the session back online so the queued mutation is replayed and
+    // converted into a persisted conflict instead of executing successfully.
     act(() => {
       network.goOnline();
     });
@@ -304,6 +313,8 @@ describe('offline replay conflict handling', () => {
       throw new Error('Expected a persisted offline conflict');
     }
 
+    // Resolve the conflict by requeueing a replacement mutation and let it run
+    // immediately while the original optimistic state stays visible.
     await act(async () => {
       await env.apiStore.resolveOfflineConflict(conflict.id, { value: 7 });
       await flushAllTimers();
@@ -426,25 +437,16 @@ describe('offline replay conflict handling', () => {
 
     // The replacement replay should still point at the original temp entity,
     // not create a second temp row derived from the adjusted input.
-    expect({
-      offlineEntities: env.apiStore
-        .getOfflineEntities()
-        .map((entity) => ({
-          entityKey: entity.entityKey,
-          tempId: entity.tempId,
-        })),
-      hasResolvedTempData:
-        env.store.state[getCompositeKey('temp:Ada resolved')]?.data !==
-        undefined,
-      tempAdaData: env.store.state[getCompositeKey('temp:Ada')]?.data,
-    }).toMatchInlineSnapshot(`
-      hasResolvedTempData: '❌'
-      offlineEntities:
-        - entityKey: '"temp:Ada'
-          tempId: 'temp:Ada'
-
-      tempAdaData:
-        value: { name: 'pending:Ada resolved' }
+    expect(env.apiStore.getOfflineEntities().map((entity) => entity.tempId))
+      .toMatchInlineSnapshot(`
+      ['temp:Ada']
+    `);
+    expect(
+      env.store.state[getCompositeKey('temp:Ada resolved')],
+    ).toBeUndefined();
+    expect(env.store.state[getCompositeKey('temp:Ada')]?.data)
+      .toMatchInlineSnapshot(`
+      value: { name: 'pending:Ada resolved' }
     `);
     expect(tempAdaHook.result.current.data).toMatchInlineSnapshot(`
       value: { name: 'pending:Ada resolved' }
@@ -476,6 +478,8 @@ describe('offline replay conflict handling', () => {
       "
     `);
 
-    tempAdaHook.unmount();
+    act(() => {
+      tempAdaHook.unmount();
+    });
   });
 });

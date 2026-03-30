@@ -63,6 +63,12 @@ class FakeBroadcastChannel {
 
 const originalBroadcastChannel = Reflect.get(globalThis, 'BroadcastChannel');
 
+async function flushMicrotasks(turns = 2): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) {
+    await Promise.resolve();
+  }
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TEST_INITIAL_TIME);
@@ -96,6 +102,7 @@ test('remote offline session snapshots do not echo back to the sender tab', asyn
 
   publishedMessages.length = 0;
 
+  // Publish a local store update and let the broadcast reach the other tab.
   firstCoordinator.syncStoreData('echo-doc-store', {
     entities: [
       {
@@ -116,11 +123,20 @@ test('remote offline session snapshots do not echo back to the sender tab', asyn
     protectedKeys: [],
   });
 
-  await Promise.resolve();
+  await flushMicrotasks();
 
-  expect(
-    publishedMessages.filter(isOfflineSessionSnapshotMessage),
-  ).toHaveLength(1);
+  const [broadcastMessage] = publishedMessages.filter(
+    isOfflineSessionSnapshotMessage,
+  );
+  expect(publishedMessages).toHaveLength(1);
+  expect(broadcastMessage).toBeDefined();
+  expect(broadcastMessage).toMatchObject({
+    kind: 'offline-session-snapshot',
+    protocolVersion: 1,
+    sessionKey,
+    sentAt: TEST_INITIAL_TIME,
+    storeType: 'offline',
+  });
   expect(secondCoordinator.getEntities()).toMatchObject([
     { entityKey: 'document', pendingMutations: 1, storeName: 'echo-doc-store' },
   ]);
@@ -129,7 +145,7 @@ test('remote offline session snapshots do not echo back to the sender tab', asyn
   secondCoordinator.dispose();
 });
 
-test('stale async network checks are ignored after a newer result settles first', async () => {
+test('the latest async network check wins when an earlier request settles later', async () => {
   const resolvers: Array<(result: boolean) => void> = [];
   const coordinator = new SessionOfflineCoordinator({
     sessionKey: 'offline-session-network-race',
@@ -147,28 +163,32 @@ test('stale async network checks are ignored after a newer result settles first'
     },
   });
 
-  const initialResolvers = resolvers.splice(0);
-  for (const resolve of initialResolvers) {
+  // Resolve the bootstrap probe so the test can isolate the explicit race below.
+  for (const resolve of resolvers.splice(0)) {
     resolve(false);
   }
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
 
   const firstRefresh = coordinator.refreshNetworkState();
   const secondRefresh = coordinator.refreshNetworkState();
   const [resolveFirst, resolveSecond] = resolvers.splice(0, 2);
+  if (!resolveFirst || !resolveSecond) {
+    throw new Error('Expected both refresh probes to be pending');
+  }
 
-  resolveSecond?.(false);
-  await Promise.resolve();
-  await Promise.resolve();
+  // The newer probe settles first and establishes the final state.
+  resolveSecond(false);
+  await flushMicrotasks();
 
   expect(coordinator.getStatus()).toMatchObject({
     effectiveOffline: false,
     network: { active: false, enabled: true },
   });
 
-  resolveFirst?.(true);
-  await Promise.all([firstRefresh, secondRefresh]);
+  // The stale probe resolves later, but it should not be able to overwrite the newer result.
+  resolveFirst(true);
+  await expect(secondRefresh).resolves.toBe(false);
+  await expect(firstRefresh).resolves.toBe(false);
 
   expect(coordinator.getStatus()).toMatchObject({
     effectiveOffline: false,
@@ -205,17 +225,16 @@ test('recovery probes continue after recoveryCheck rejects', async () => {
     storeName: 'offline-session-recovery-doc',
   });
 
+  // A failed probe should still mark the outage as active and keep retrying.
   coordinator.setOutageActive(true);
   await vi.advanceTimersByTimeAsync(60);
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(coordinator.getStatus().outage.active).toBe(true);
 
   await vi.advanceTimersByTimeAsync(60);
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
 
   expect(recoveryCheck).toHaveBeenCalledTimes(2);
   expect(coordinator.getStatus().outage.active).toBe(false);
@@ -253,8 +272,7 @@ test('recovery probes stop once the last store unregisters', async () => {
   // Start recovery probing while the store is registered.
   coordinator.setOutageActive(true);
   await vi.advanceTimersByTimeAsync(60);
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
 
   const firstRecoveryCheckAt = coordinator.getStatus().lastRecoveryCheckAt;
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
@@ -263,8 +281,7 @@ test('recovery probes stop once the last store unregisters', async () => {
   // Once the last store unregisters, the coordinator should stop scheduling retries.
   unregister();
   await vi.advanceTimersByTimeAsync(200);
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
 
   expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(coordinator.getStatus()).toMatchObject({

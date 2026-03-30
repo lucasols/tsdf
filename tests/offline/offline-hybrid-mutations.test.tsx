@@ -63,6 +63,22 @@ async function waitForMicrotaskCondition(
   }
 }
 
+function getSingleQueuedMutationData(
+  sessionKey: string,
+  storeName: string,
+): { input: unknown; operation: unknown } {
+  const entries = getOfflineQueueEntries(sessionKey, storeName);
+  if (entries.length !== 1) {
+    throw new Error(
+      `Expected exactly one queued mutation for "${sessionKey}/${storeName}" but found ${entries.length}`,
+    );
+  }
+
+  const data = getOfflineQueueEntryData(entries[0]!);
+
+  return { input: data.input, operation: data.operation };
+}
+
 type RenameCollectionItemOperations = {
   renameItem: CollectionOfflineOperationDefinition<
     { value: { name: string } },
@@ -132,7 +148,11 @@ describe('hybrid offline mutation execution', () => {
 
       expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
       expect(directMutation).not.toHaveBeenCalled();
-      expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+      expect(getSingleQueuedMutationData(sessionKey, storeName))
+        .toMatchInlineSnapshot(`
+        input: { value: 2 }
+        operation: 'updateValue'
+      `);
     });
 
     test('call the direct mutation while online and skip queueing on success', async () => {
@@ -216,7 +236,11 @@ describe('hybrid offline mutation execution', () => {
 
       expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
       expect(directMutation).toHaveBeenCalledTimes(1);
-      expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+      expect(getSingleQueuedMutationData(sessionKey, storeName))
+        .toMatchInlineSnapshot(`
+        input: { value: 2 }
+        operation: 'updateValue'
+      `);
       expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
         effectiveOffline: true,
         outage: { active: true, enabled: true },
@@ -362,7 +386,11 @@ describe('hybrid offline mutation execution', () => {
 
       expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
       expect(directMutation).not.toHaveBeenCalled();
-      expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+      expect(getSingleQueuedMutationData(sessionKey, storeName))
+        .toMatchInlineSnapshot(`
+        input: { id: 'users||1', name: 'Grace' }
+        operation: 'renameItem'
+      `);
     });
 
     test('queue multiple offline operations in array order and replay them in that same order', async () => {
@@ -631,7 +659,11 @@ describe('hybrid offline mutation execution', () => {
 
       expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
       expect(directMutation).toHaveBeenCalledTimes(1);
-      expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+      expect(getSingleQueuedMutationData(sessionKey, storeName))
+        .toMatchInlineSnapshot(`
+        input: { id: 'users||1', name: 'Grace' }
+        operation: 'renameItem'
+      `);
       expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
         effectiveOffline: true,
       });
@@ -741,7 +773,11 @@ describe('hybrid offline mutation execution', () => {
 
       expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
       expect(directMutation).not.toHaveBeenCalled();
-      expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+      expect(getSingleQueuedMutationData(sessionKey, storeName))
+        .toMatchInlineSnapshot(`
+        input: { itemId: 'users||1', name: 'Grace' }
+        operation: 'patchUserName'
+      `);
     });
 
     test('call the direct mutation while online and skip queueing on success', async () => {
@@ -899,7 +935,11 @@ describe('hybrid offline mutation execution', () => {
 
       expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
       expect(directMutation).toHaveBeenCalledTimes(1);
-      expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+      expect(getSingleQueuedMutationData(sessionKey, storeName))
+        .toMatchInlineSnapshot(`
+        input: { itemId: 'users||1', name: 'Grace' }
+        operation: 'patchUserName'
+      `);
       expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
         effectiveOffline: true,
       });
