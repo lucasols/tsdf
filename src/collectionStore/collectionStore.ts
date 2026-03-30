@@ -7,12 +7,14 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
-import { rc_literals, rc_object, rc_string } from 'runcheck';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
-import { createIdleThrottledScheduler } from '../cacheLimits/scheduleIdleThrottled';
+import {
+  CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
+  createIdleThrottledScheduler,
+} from '../cacheLimits/scheduleIdleThrottled';
 import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
@@ -28,10 +30,11 @@ import {
   initializeOfflineStoreController,
   offlineSessionUnavailableError,
 } from '../persistentStorage/offline/storeController';
-import type {
-  AnyOfflineOperationDefinition,
-  CollectionOfflineEntityRef,
-  OfflineMutationInput,
+import {
+  offlineItemEntityRefSchema,
+  type AnyOfflineOperationDefinition,
+  type CollectionOfflineEntityRef,
+  type OfflineMutationInput,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -215,11 +218,6 @@ type CollectionOfflineOperationsConfig<
   ItemPayload extends ValidPayload,
 > = InternalCollectionOfflineOperations<ItemState, ItemPayload> | null;
 
-const offlineItemEntityRefSchema = rc_object({
-  entityKey: rc_string,
-  entityKind: rc_literals('item'),
-});
-
 export type CollectionStoreOptions<
   ItemState extends ValidStoreState,
   ItemPayload extends ValidPayload,
@@ -318,11 +316,9 @@ export type CollectionStore<
   typeof createCollectionStore<ItemState, ItemPayload, TOfflineOperations>
 >;
 
-type CollectionStoreEvents = {
+export type CollectionStoreEvents = {
   invalidateData: { priority: FetchType; itemKey: string };
 };
-
-const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
 
 export function createCollectionStore<
   ItemState extends ValidStoreState,

@@ -1,4 +1,5 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
+import { rc_literals, rc_object, rc_string } from 'runcheck';
 
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type { PersistentStorageSchema } from '../types';
@@ -11,6 +12,12 @@ export type OfflineFailurePhase = 'fetch' | 'mutation' | 'sync';
 export type OfflineFailureClassification = 'outage' | 'ignore';
 /** Kinds of entities participating in offline conflict/sync tracking. */
 export type OfflineEntityKind = 'document' | 'item' | 'query';
+
+/** Runtime schema for validating serialized offline item entity references. */
+export const offlineItemEntityRefSchema = rc_object({
+  entityKey: rc_string,
+  entityKind: rc_literals('item'),
+});
 
 /** Error shape emitted when runtime is operating in offline mode. */
 export type OfflineConnectivityError = {

@@ -125,7 +125,6 @@ export type CreateFetchApiOptions<
     ): TSFDListQuery<QueryPayload> | undefined;
   } | null;
   testInitialLastFetchStartTime?: number;
-  noFetchItemFnError: string;
   onQueryFetchStart?: (
     requests: BatchRequest<QueryFetchPayload<QueryPayload>>[],
     startedAt: number,
@@ -178,7 +177,6 @@ export function createFetchApi<
   preloadItems: preloadItems_,
   persistence,
   testInitialLastFetchStartTime,
-  noFetchItemFnError,
   onQueryFetchStart,
   onQueryFetchSettled,
   onItemFetchStart,
@@ -186,6 +184,8 @@ export function createFetchApi<
   offlineController,
 }: CreateFetchApiOptions<ItemState, QueryPayload, ItemPayload>) {
   type Query = TSFDListQuery<QueryPayload>;
+
+  const noFetchItemFnError = 'No fetchItemFn was provided';
 
   const querySchedulers = new Map<
     string,

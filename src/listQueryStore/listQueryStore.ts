@@ -6,11 +6,13 @@ import { notNullish } from '@ls-stack/utils/assertions';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
-import { rc_literals, rc_object, rc_string } from 'runcheck';
 import { Store } from 't-state';
 
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
-import { createIdleThrottledScheduler } from '../cacheLimits/scheduleIdleThrottled';
+import {
+  CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS,
+  createIdleThrottledScheduler,
+} from '../cacheLimits/scheduleIdleThrottled';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import {
   useGetPendingSync,
@@ -22,7 +24,10 @@ import {
   initializeOfflineStoreController,
   type OfflineStoreController,
 } from '../persistentStorage/offline/storeController';
-import type { OfflineMutationInput } from '../persistentStorage/offline/types';
+import {
+  offlineItemEntityRefSchema,
+  type OfflineMutationInput,
+} from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
   ListQueryOfflineOperationsConfig,
@@ -104,10 +109,6 @@ export type ListQueryStoreEvents = {
     invalidateFields?: string[];
   };
 };
-const offlineItemEntityRefSchema = rc_object({
-  entityKey: rc_string,
-  entityKind: rc_literals('item'),
-});
 
 export type ListQueryStore<
   ItemState extends ValidStoreState,
@@ -142,9 +143,6 @@ export type ListQueryStateCleanup<
   queryPayloads: QueryPayload[];
 };
 
-const CACHE_LIMIT_ENFORCEMENT_THROTTLE_MS = 60 * 60 * 1000;
-
-const noFetchItemFnError = 'No fetchItemFn was provided';
 const noPartialResourcesFieldsOptionError =
   'fields option is required when partialResources is enabled';
 
@@ -894,11 +892,10 @@ export function createListQueryStore<
       }));
     }
 
-    const results = await persistence.preloadQueries(
-      payloads.map((queryPayload) => getQueryKey(queryPayload)),
-    );
-    const preloadedQueryKeys = payloads.flatMap((queryPayload, index) =>
-      results[index] ? [getQueryKey(queryPayload)] : [],
+    const queryKeys = payloads.map((queryPayload) => getQueryKey(queryPayload));
+    const results = await persistence.preloadQueries(queryKeys);
+    const preloadedQueryKeys = queryKeys.filter(
+      (_key, index) => results[index],
     );
     if (preloadedQueryKeys.length > 0) {
       touchQueries(preloadedQueryKeys);
@@ -936,12 +933,9 @@ export function createListQueryStore<
       }));
     }
 
-    const results = await persistence.preloadItems(
-      payloads.map((itemPayload) => getItemKey(itemPayload)),
-    );
-    const preloadedItemKeys = payloads.flatMap((itemPayload, index) =>
-      results[index] ? [getItemKey(itemPayload)] : [],
-    );
+    const itemKeys = payloads.map((itemPayload) => getItemKey(itemPayload));
+    const results = await persistence.preloadItems(itemKeys);
+    const preloadedItemKeys = itemKeys.filter((_key, index) => results[index]);
     if (preloadedItemKeys.length > 0) {
       touchItems(preloadedItemKeys);
       if (shouldScheduleCacheLimitEnforcement()) {
@@ -1002,7 +996,6 @@ export function createListQueryStore<
       : undefined,
     persistence,
     testInitialLastFetchStartTime: testOptions?.initialLastFetchStartTime,
-    noFetchItemFnError,
     offlineController: offlineFetchController,
     onQueryFetchStart: (requests, startedAt) => {
       const queryKey = requests[0]?.requestId;

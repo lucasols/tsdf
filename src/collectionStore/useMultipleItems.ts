@@ -22,15 +22,12 @@ import {
 } from '../utils/storeShared';
 import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 import type {
+  CollectionStoreEvents,
   CollectionUseMultipleItemsQuery,
   TSFDCollectionItem,
   TSFDCollectionState,
   TSFDUseCollectionItemReturn,
 } from './collectionStore';
-
-type CollectionStoreEvents = {
-  invalidateData: { priority: FetchType; itemKey: string };
-};
 
 export type UseMultipleItemsOptions<
   ItemState extends ValidStoreState,

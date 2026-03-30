@@ -733,30 +733,35 @@ export function setupCollectionPersistence<
     if (metadataEntries.length === 0) return;
     const protectedItemKeys = getProtectedKeysFromMetadata(metadataEntries);
 
-    const invalidEntries = filterAndMap(metadataEntries, (entry) => {
+    const invalidEntries: { itemKey: string }[] = [];
+    const validEntries: {
+      itemKey: string;
+      lastAccessAt: number;
+      payload: ItemPayload;
+    }[] = [];
+
+    for (const entry of metadataEntries) {
       const payload = validateWithSchema(
         config.payloadSchema,
         readManifestPayloadMeta(entry.customMetadata),
       );
 
-      return payload === null ? { itemKey: entry.key } : false;
-    });
+      if (payload === null) {
+        invalidEntries.push({ itemKey: entry.key });
+      } else {
+        validEntries.push({
+          itemKey: entry.key,
+          lastAccessAt: entry.lastAccessAt,
+          payload,
+        });
+      }
+    }
 
     if (invalidEntries.length > 0) {
       await Promise.all(
         invalidEntries.map(({ itemKey }) => namespace.remove(itemKey)),
       );
     }
-
-    const validEntries = filterAndMap(metadataEntries, (entry) => {
-      const payload = validateWithSchema(
-        config.payloadSchema,
-        readManifestPayloadMeta(entry.customMetadata),
-      );
-      if (payload === null) return false;
-
-      return { itemKey: entry.key, lastAccessAt: entry.lastAccessAt, payload };
-    });
 
     const ignoredEntries = validEntries.filter(({ payload }) =>
       shouldIgnoreItem(payload),
