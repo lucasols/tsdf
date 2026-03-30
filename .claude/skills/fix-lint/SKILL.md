@@ -43,12 +43,15 @@ Anti-patterns to **never** do:
 
 When an error is hard to fix: **read the surrounding code to understand intent**, trace the types back to their source, and fix the root cause — even if it means changes across multiple files.
 
+Use `__LEGIT_CAST__` only as a last resort. First prefer fixing upstream types, narrowing properly, validating `unknown` data with schemas, or changing unsafe boundaries to return `unknown` and validate in callers. Never use it to skip validation for persisted data, transport messages, network payloads, or other untrusted input. If it is truly unavoidable, keep it at the narrowest boundary and add the required `WORKAROUND:` explanation.
+
 ## Fix Rules
 
 These are **strict project rules** — never work around them:
 
 - **No `any`** — find the proper type
 - **No `as Type` casts** — except `as const`
+- **Avoid `__LEGIT_CAST__`** — use it only at genuine type-system boundaries after exhausting type-safe and schema-based alternatives
 - **No non-null assertions (`!`)** — handle null/undefined properly (exception: allowed in test files)
 - **No `@ts-expect-error` / `@ts-ignore`** — fix the actual type issue
 - **No `eslint-disable` comments** — always fix the root cause
