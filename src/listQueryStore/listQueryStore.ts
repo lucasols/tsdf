@@ -28,7 +28,7 @@ import {
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
-  OperationInput,
+  OfflineMutationInput,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -680,20 +680,18 @@ export function createListQueryStore<
   const offlineMutationController = {
     canQueueMutation: () => offlineController?.canQueueMutation() ?? false,
     prepareForMutation: <
-      TName extends keyof Exclude<TOfflineOperations, null>,
-    >(args: {
-      operationName: TName;
-      input: OperationInput<Exclude<TOfflineOperations, null>, TName>;
-    }) =>
+      TName extends keyof Exclude<TOfflineOperations, null> & string,
+    >(
+      args: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>,
+    ) =>
       offlineController
         ? offlineController.prepareForMutation(args)
         : Promise.reject(new Error('Offline mutation controller unavailable')),
     queueMutation: <
-      TName extends keyof Exclude<TOfflineOperations, null>,
-    >(args: {
-      operationName: TName;
-      input: OperationInput<Exclude<TOfflineOperations, null>, TName>;
-    }) =>
+      TName extends keyof Exclude<TOfflineOperations, null> & string,
+    >(
+      args: OfflineMutationInput<Exclude<TOfflineOperations, null>, TName>,
+    ) =>
       offlineController
         ? offlineController.queueMutation(args)
         : Promise.resolve(),
@@ -1175,7 +1173,9 @@ export function createListQueryStore<
   });
 
   if (persistentStorageConfig?.offlineMode) {
-    offlineController = createOfflineStoreController({
+    offlineController = createOfflineStoreController<
+      Exclude<TOfflineOperations, null>
+    >({
       storeName: persistentStorageConfig.storeName,
       storeType: 'listQuery',
       getSessionKey,
@@ -1216,12 +1216,15 @@ export function createListQueryStore<
         applyPendingEntity: ({ tempId, pendingEntity }) => {
           if (!pendingEntity || typeof pendingEntity !== 'object') return;
           addItemToState(
-            __LEGIT_CAST__<ItemPayload, string>(tempId),
+            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
             __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
           );
         },
+        rollbackPendingEntity: ({ tempId }) => {
+          deleteItemState(__LEGIT_CAST__<ItemPayload, ValidPayload>(tempId));
+        },
         reconcileTempEntity: ({ tempId, reconciliation }) => {
-          const tempPayload = __LEGIT_CAST__<ItemPayload, string>(tempId);
+          const tempPayload = __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
           const tempItemKey = getItemKey(tempPayload);
           const currentItem = getItemState(tempPayload);
           const finalData =

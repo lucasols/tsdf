@@ -53,6 +53,22 @@ afterEach(() => {
   localStorage.clear();
 });
 
+const invalidDocumentTempEntityOperation: DirectDocumentOfflineOperations['setValue'] =
+  {
+    inputSchema: setValueInputSchema,
+    execute: ({ input }) => input,
+    // @ts-expect-error - document offline operations do not support tempEntity
+    tempEntity: {
+      buildPendingEntity: () => ({ value: 1, label: 'pending' }),
+      reconcileServerEntity: () => ({
+        finalPayload: 'document',
+        finalData: { value: 1, label: 'done' },
+      }),
+    },
+  };
+
+void invalidDocumentTempEntityOperation;
+
 type DirectDocumentOfflineOperations = DefineDocumentOfflineOperations<
   DocState,
   {
@@ -73,6 +89,7 @@ type DirectDocumentOfflineOperations = DefineDocumentOfflineOperations<
   }
 >;
 
+// tests using the document store directly without test envs to verify the public API usage
 test('direct document store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-session';
@@ -240,33 +257,27 @@ test('direct document store offline public api', async () => {
   assert(setValueResult.ok);
   expect(setValueResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
-  await act(async () => {
-    await documentStore.performMutation({
+  const multiOperationResult = await act(async () => {
+    return documentStore.performMutation({
       optimisticUpdate: () => {
         documentStore.updateState((draft) => {
           draft.value = 3;
-          draft.label = 'doc:3';
-        });
-      },
-      mutation: () => Promise.resolve({ value: 3 }),
-      offline: { operation: 'setValue', input: { value: 3 } },
-    });
-  });
-
-  await act(async () => {
-    await documentStore.performMutation({
-      optimisticUpdate: () => {
-        documentStore.updateState((draft) => {
           draft.label = 'offline label';
         });
       },
-      mutation: () => Promise.resolve({ label: 'offline label' }),
-      offline: {
-        operation: 'patchDoc',
-        input: { value: undefined, label: 'offline label' },
-      },
+      mutation: () => Promise.resolve({ value: 3, label: 'offline label' }),
+      offline: [
+        { operation: 'setValue', input: { value: 3 } },
+        {
+          operation: 'patchDoc',
+          input: { value: undefined, label: 'offline label' },
+        },
+      ],
     });
   });
+
+  assert(multiOperationResult.ok);
+  expect(multiOperationResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
   const invalidAccumulationResult = await act(async () => {
     return documentStore.performMutation({

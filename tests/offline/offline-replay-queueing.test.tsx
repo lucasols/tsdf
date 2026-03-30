@@ -1,3 +1,4 @@
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -75,7 +76,6 @@ describe('offline replay queueing and retry behavior', () => {
                   mergeInput: ({ incomingInput }) => incomingInput,
                 },
                 tempEntity: {
-                  createTempId: (input) => `temp:${input.name}`,
                   buildPendingEntity: (input) => ({
                     value: { name: input.name },
                   }),
@@ -112,7 +112,11 @@ describe('offline replay queueing and retry behavior', () => {
 
     expect(queued.ok).toBe(true);
     expect(env.apiStore.getOfflineEntities()).toMatchObject([
-      { entityKey: 'temp:Ada', pendingMutations: 2, tempId: 'temp:Ada' },
+      {
+        entityKey: getCompositeKey('temp:Ada'),
+        pendingMutations: 2,
+        tempId: 'temp:Ada',
+      },
     ]);
 
     act(() => {

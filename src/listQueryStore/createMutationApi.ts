@@ -14,7 +14,7 @@ import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import type {
   AnyOfflineOperationDefinition,
   ListQueryOfflineEntityRef,
-  OfflineMutationDescriptor,
+  OfflineMutationInput,
 } from '../persistentStorage/offline/types';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
 import {
@@ -742,10 +742,12 @@ export function createMutationApi<
      * online, but degrades into durable offline queueing when the session is
      * already offline or the failure is classified as offline/outage. Callers
      * must not assume a successful result always includes the server payload.
+     * Pass one descriptor or an ordered non-empty list to queue multiple
+     * offline operations from the same mutation fallback.
      */
     offline: TOfflineOperations extends null
       ? never
-      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
+      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
   };
 
   async function performMutation<T>(

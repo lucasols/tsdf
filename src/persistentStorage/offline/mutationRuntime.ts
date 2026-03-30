@@ -1,4 +1,7 @@
-import type { OperationInput, OfflineOperationSchemaShape } from './types';
+import type {
+  OfflineMutationInput,
+  OfflineOperationSchemaShape,
+} from './types';
 
 /**
  * Successful result of an offline-enabled mutation attempt.
@@ -20,35 +23,29 @@ export type OfflineAwareMutationController<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {
   canQueueMutation: () => boolean;
-  prepareForMutation: <TName extends keyof TOperations>(args: {
-    operationName: TName;
-    input: OperationInput<TOperations, TName>;
-  }) => Promise<PreparedOfflineMutation>;
+  prepareForMutation: <TName extends keyof TOperations & string>(
+    args: OfflineMutationInput<TOperations, TName>,
+  ) => Promise<PreparedOfflineMutation>;
 };
 
 export async function runHybridOfflineMutation<
   T,
   TOperations extends Record<string, OfflineOperationSchemaShape>,
-  TName extends keyof TOperations,
+  TName extends keyof TOperations & string,
 >({
   controller,
   offline,
   directMutation,
 }: {
   controller?: OfflineAwareMutationController<TOperations> | null;
-  offline?:
-    | { operation: TName; input: OperationInput<TOperations, TName> }
-    | undefined;
+  offline?: OfflineMutationInput<TOperations, TName> | undefined;
   directMutation: () => Promise<T>;
 }): Promise<OfflineMutationResult<T>> {
   if (!offline || !controller) {
     return { kind: 'online', data: await directMutation() };
   }
 
-  const prepared = await controller.prepareForMutation({
-    operationName: offline.operation,
-    input: offline.input,
-  });
+  const prepared = await controller.prepareForMutation(offline);
 
   if (prepared.effectiveOffline) {
     await prepared.queueMutation();

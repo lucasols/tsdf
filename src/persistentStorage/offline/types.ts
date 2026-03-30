@@ -129,7 +129,7 @@ export type GlobalOfflineEntity = {
   /** Last mutation/update timestamp. */
   updatedAt: number;
   /** Optional temporary ID for optimistic create flows. */
-  tempId?: string;
+  tempId?: ValidPayload;
 };
 
 /**
@@ -167,7 +167,7 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   /** Conflict update timestamp. */
   updatedAt: number;
   /** Optional temporary ID associated with optimistic entity flow. */
-  tempId?: string;
+  tempId?: ValidPayload;
 };
 
 /**
@@ -189,6 +189,8 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   operation: string;
   /** Operation input payload persisted with the entry. */
   input: TInput;
+  /** Stable ordering key used to replay queued operations deterministically. */
+  queueOrder: number;
   /** Entity references tied to this mutation, each shaped as `{ entityKey, entityKind }`. */
   entityRefs: {
     entityKey: string;
@@ -205,7 +207,7 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   /** Synchronization state for this entry. */
   syncState: OfflineSyncState;
   /** Optional temporary ID for optimistic create operations. */
-  tempId?: string;
+  tempId?: ValidPayload;
   /** Last recorded sync error if replay failed. */
   lastError?: { message: string };
   /** Pending conflict payload when confirmation or resolution is required. */
@@ -246,15 +248,48 @@ export type OfflineMutationDescriptor<
     string,
     { inputSchema: PersistentStorageSchema<__LEGIT_ANY__> }
   >,
-  TName extends keyof TOperations = keyof TOperations,
-> = TName extends keyof TOperations
-  ? {
-      /** Operation key from the offline operations registry. */
-      operation: TName;
-      /** Input resolved from the registered operation schema. */
-      input: OperationInput<TOperations, TName>;
-    }
-  : never;
+  TName extends keyof TOperations & string = keyof TOperations & string,
+> = {
+  [K in TName]: {
+    /** Operation key from the offline operations registry. */
+    operation: K;
+    /** Input resolved from the registered operation schema. */
+    input: OperationInput<TOperations, K>;
+  };
+}[TName];
+
+/**
+ * Non-empty list form accepted by offline-aware mutation APIs.
+ *
+ * The descriptors are queued in the exact order provided whenever the direct
+ * mutation falls back to offline persistence.
+ */
+export type OfflineMutationDescriptorList<
+  TOperations extends Record<
+    string,
+    { inputSchema: PersistentStorageSchema<__LEGIT_ANY__> }
+  >,
+  TName extends keyof TOperations & string = keyof TOperations & string,
+> = readonly [
+  OfflineMutationDescriptor<TOperations, TName>,
+  ...OfflineMutationDescriptor<TOperations, TName>[],
+];
+
+/**
+ * Public offline mutation input accepted by store mutation APIs.
+ *
+ * Callers can queue either one descriptor or an ordered non-empty list of
+ * descriptors.
+ */
+export type OfflineMutationInput<
+  TOperations extends Record<
+    string,
+    { inputSchema: PersistentStorageSchema<__LEGIT_ANY__> }
+  >,
+  TName extends keyof TOperations & string = keyof TOperations & string,
+> =
+  | OfflineMutationDescriptor<TOperations, TName>
+  | OfflineMutationDescriptorList<TOperations, TName>;
 
 /**
  * Result returned from conflict handlers to requeue a replacement operation input.
@@ -402,43 +437,99 @@ type ServerSnapshotField<TInput, TServerSnapshot> =
       };
 
 /**
+ * Replacement data returned by `tempEntity.reconcileServerEntity(...)`.
+ *
+ * @typeParam TFinalPayload - Final payload that should replace the temporary one.
+ * @typeParam TFinalData - Optional replacement entity data for the final payload.
+ */
+export type OfflineTempEntityReconciliation<
+  TFinalPayload extends ValidPayload = ValidPayload,
+  TFinalData = unknown,
+> = {
+  /** Final payload that should replace the temporary optimistic one. */
+  finalPayload: TFinalPayload;
+  /**
+   * Optional replacement data for the final payload.
+   * Omit this to keep the current optimistic entity data and only swap the
+   * payload/identity.
+   */
+  finalData?: TFinalData;
+};
+
+/**
  * Optional temp-id lifecycle for optimistic offline create flows.
  *
  * @typeParam TInput - Input type used to derive the temporary entity and identifier.
  * @typeParam TTempResult - Result returned by `execute`, used only by `tempEntity.reconcileServerEntity(...)`.
+ * @typeParam TTempId - Temporary payload used to track optimistic entities before reconciliation.
  */
-export type OfflineTempEntityConfig<TInput, TTempResult> = {
+export type OfflineTempEntityConfig<
+  TInput,
+  TTempResult,
+  TTempId extends ValidPayload = string,
+  TPendingEntity = unknown,
+  TFinalPayload extends ValidPayload = ValidPayload,
+  TFinalData = unknown,
+> = {
   /**
-   * Creates a temporary identifier to reference optimistic local entities.
+   * Builds the optimistic entity inserted into local state while the mutation
+   * is queued offline.
+   *
+   * `tempId` is the temporary payload used to identify the optimistic entity
+   * until replay succeeds and the final server entity can replace it.
    */
-  createTempId: (input: TInput) => string;
+  buildPendingEntity: (input: TInput, tempId: TTempId) => TPendingEntity;
   /**
-   * Builds a temporary optimistic entity inserted into local state.
-   */
-  buildPendingEntity: (input: TInput, tempId: string) => unknown;
-  /**
-   * Reconciles temp entities with the successful server response.
+   * Reconciles the optimistic temp entity with the successful replay result.
    */
   reconcileServerEntity: (
     result: TTempResult,
-    tempId: string,
-  ) => { finalPayload: ValidPayload; finalData?: unknown };
+    tempId: TTempId,
+  ) => OfflineTempEntityReconciliation<TFinalPayload, TFinalData>;
 };
 
-type TempEntityField<TInput, TTempResult> =
+type TempEntityField<
+  TInput,
+  TTempResult,
+  TTempId extends ValidPayload,
+  TPendingEntity = unknown,
+  TFinalPayload extends ValidPayload = ValidPayload,
+  TFinalData = unknown,
+> =
   IsUnknown<TTempResult> extends true
     ? {
         /** Optional temporary-entity lifecycle for optimistic create/update operations. */
-        tempEntity?: OfflineTempEntityConfig<TInput, TTempResult>;
+        tempEntity?: OfflineTempEntityConfig<
+          TInput,
+          TTempResult,
+          TTempId,
+          TPendingEntity,
+          TFinalPayload,
+          TFinalData
+        >;
       }
     : [TTempResult] extends [void]
       ? {
           /** Optional temporary-entity lifecycle for optimistic create/update operations. */
-          tempEntity?: OfflineTempEntityConfig<TInput, TTempResult>;
+          tempEntity?: OfflineTempEntityConfig<
+            TInput,
+            TTempResult,
+            TTempId,
+            TPendingEntity,
+            TFinalPayload,
+            TFinalData
+          >;
         }
       : {
           /** Required when the operation declares a concrete temp-entity replay result. */
-          tempEntity: OfflineTempEntityConfig<TInput, TTempResult>;
+          tempEntity: OfflineTempEntityConfig<
+            TInput,
+            TTempResult,
+            TTempId,
+            TPendingEntity,
+            TFinalPayload,
+            TFinalData
+          >;
         };
 
 /**
@@ -453,6 +544,10 @@ export type OfflineOperationDefinition<
   TConflict,
   TTempResult = void,
   TServerSnapshot = unknown,
+  TTempId extends ValidPayload = string,
+  TPendingEntity = unknown,
+  TFinalPayload extends ValidPayload = ValidPayload,
+  TFinalData = unknown,
 > = {
   /** Schema used to validate incoming operation input. */
   inputSchema: PersistentStorageSchema<TInput>;
@@ -477,7 +572,22 @@ export type OfflineOperationDefinition<
   ) => Promise<boolean> | boolean;
 } & ConflictHandlingField<TInput, TConflict, TServerSnapshot> &
   ServerSnapshotField<TInput, TServerSnapshot> &
-  TempEntityField<TInput, TTempResult>;
+  TempEntityField<
+    TInput,
+    TTempResult,
+    TTempId,
+    TPendingEntity,
+    TFinalPayload,
+    TFinalData
+  >;
+
+type WithoutTempEntity<T extends { tempEntity?: unknown }> = Omit<
+  T,
+  'tempEntity'
+> & {
+  /** Document stores do not support optimistic temp entities. */
+  tempEntity?: never;
+};
 
 /** Context used to resolve which entities a queued mutation affects. */
 type OperationEntityRefsContext<TInput> = {
@@ -494,7 +604,11 @@ export type AnyOfflineOperationDefinition = {
     __LEGIT_ANY__
   >;
   accumulation?: OfflineAccumulationConfig<__LEGIT_ANY__>;
-  tempEntity?: OfflineTempEntityConfig<__LEGIT_ANY__, __LEGIT_ANY__>;
+  tempEntity?: OfflineTempEntityConfig<
+    __LEGIT_ANY__,
+    __LEGIT_ANY__,
+    __LEGIT_ANY__
+  >;
   getServerSnapshot?: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
   execute: (ctx: OperationBaseContext<__LEGIT_ANY__>) => unknown;
   shouldSkipSync?: (
@@ -563,7 +677,7 @@ type DocumentOperationServerSnapshot<TOptions extends DefineOfflineOperation> =
  *
  * `TOptions` is usually provided with {@link DefineOfflineOperation}, which lets
  * callers specify the queued `input`, replay `result`, and optional `conflict`
- * payload concisely.
+ * payload concisely. Document stores do not support `tempEntity`.
  *
  * Omitted properties default to `unknown`.
  *
@@ -585,11 +699,13 @@ type DocumentOperationServerSnapshot<TOptions extends DefineOfflineOperation> =
 export type DocumentOfflineOperationDefinition<
   State extends ValidStoreState,
   TOptions extends DefineOfflineOperation = DefineOfflineOperation,
-> = OfflineOperationDefinition<
-  DocumentOperationInput<TOptions>,
-  DocumentOperationConflict<TOptions>,
-  DocumentOperationResult<TOptions>,
-  DocumentOperationServerSnapshot<TOptions>
+> = WithoutTempEntity<
+  OfflineOperationDefinition<
+    DocumentOperationInput<TOptions>,
+    DocumentOperationConflict<TOptions>,
+    DocumentOperationResult<TOptions>,
+    DocumentOperationServerSnapshot<TOptions>
+  >
 > &
   ([State] extends [never] ? never : unknown);
 
@@ -670,6 +786,9 @@ export type CollectionOfflineEntityRef<ItemPayload extends ValidPayload> =
  * @typeParam TInput - Input type accepted by the offline operation.
  * @typeParam TConflict - Conflict payload type produced by the optional conflict handler.
  * @typeParam TTempResult - Result returned by `execute`.
+ * When `tempEntity` is provided, `buildPendingEntity(...)` must return
+ * `ItemState`, and `reconcileServerEntity(...)` must return an `ItemPayload`
+ * plus optional `ItemState` replacement data.
  */
 export type CollectionOfflineOperationDefinition<
   ItemState extends ValidStoreState,
@@ -682,7 +801,11 @@ export type CollectionOfflineOperationDefinition<
   TInput,
   TConflict,
   TTempResult,
-  TServerSnapshot
+  TServerSnapshot,
+  ItemPayloadUnused,
+  ItemState,
+  ItemPayloadUnused,
+  ItemState
 > & {
   /**
    * Declares which collection items are affected by this queued mutation.
@@ -763,6 +886,9 @@ export type ListQueryOfflineEntityRef<ItemPayload extends ValidPayload> =
  * @typeParam TInput - Input type accepted by the offline operation.
  * @typeParam TConflict - Conflict payload type produced by the optional conflict handler.
  * @typeParam TTempResult - Result returned by `execute`.
+ * When `tempEntity` is provided, `buildPendingEntity(...)` must return
+ * `ItemState`, and `reconcileServerEntity(...)` must return an `ItemPayload`
+ * plus optional `ItemState` replacement data.
  */
 export type ListQueryOfflineOperationDefinition<
   ItemState extends ValidStoreState,
@@ -776,7 +902,11 @@ export type ListQueryOfflineOperationDefinition<
   TInput,
   TConflict,
   TTempResult,
-  TServerSnapshot
+  TServerSnapshot,
+  ItemPayloadUnused,
+  ItemState,
+  ItemPayloadUnused,
+  ItemState
 > & {
   /**
    * Declares which list-query entities are affected by this queued mutation.

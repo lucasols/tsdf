@@ -33,7 +33,7 @@ import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoo
 import type {
   AnyOfflineOperationDefinition,
   CollectionOfflineEntityRef,
-  OfflineMutationDescriptor,
+  OfflineMutationInput,
 } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
@@ -482,20 +482,23 @@ export function createCollectionStore<
           applyPendingEntity: ({ tempId, pendingEntity }) => {
             if (!pendingEntity || typeof pendingEntity !== 'object') return;
             addItemToState(
-              __LEGIT_CAST__<ItemPayload, string>(tempId),
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
               __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
             );
           },
+          rollbackPendingEntity: ({ tempId }) => {
+            deleteItemState(__LEGIT_CAST__<ItemPayload, ValidPayload>(tempId));
+          },
           reconcileTempEntity: ({ tempId, reconciliation }) => {
             const currentItem = getItemState(
-              __LEGIT_CAST__<ItemPayload, string>(tempId),
+              __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
             );
             const finalData =
               reconciliation.finalData !== undefined
                 ? __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
                 : (currentItem?.data ?? undefined);
             if (finalData === undefined) return;
-            deleteItemState(__LEGIT_CAST__<ItemPayload, string>(tempId));
+            deleteItemState(__LEGIT_CAST__<ItemPayload, ValidPayload>(tempId));
             addItemToState(
               __LEGIT_CAST__<ItemPayload, ValidPayload>(
                 reconciliation.finalPayload,
@@ -1540,10 +1543,12 @@ export function createCollectionStore<
      * online, but degrades into durable offline queueing when the session is
      * already offline or the failure is classified as offline/outage. Callers
      * must not assume a successful result always includes the server payload.
+     * Pass one descriptor or an ordered non-empty list to queue multiple
+     * offline operations from the same mutation fallback.
      */
     offline: TOfflineOperations extends null
       ? never
-      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
+      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
   };
 
   async function performMutation<

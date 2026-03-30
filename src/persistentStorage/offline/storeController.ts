@@ -15,12 +15,12 @@ import type {
   AnyOfflineOperationDefinition,
   GlobalOfflineEntity,
   OfflineConflictRecord,
+  OfflineMutationInput,
   OfflineModeConfig,
   OfflineOperationSchemaShape,
   OfflineQueueEntry,
   OfflineResolveConflictResult,
   OfflineStoreType,
-  OperationInput,
 } from './types';
 
 const NEEDS_CONFIRMATION_RETRY_MS = 250;
@@ -40,13 +40,19 @@ type OfflineStoreAdapter = {
   applyPendingEntity?: (args: {
     operationName: string;
     input: unknown;
-    tempId: string;
+    tempId: ValidPayload;
+    pendingEntity: unknown;
+  }) => void;
+  rollbackPendingEntity?: (args: {
+    operationName: string;
+    input: unknown;
+    tempId: ValidPayload;
     pendingEntity: unknown;
   }) => void;
   reconcileTempEntity?: (args: {
     operationName: string;
     input: unknown;
-    tempId: string;
+    tempId: ValidPayload;
     result: unknown;
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
   }) => void;
@@ -98,6 +104,15 @@ function toMessage(error: unknown): string {
   return 'Unknown error';
 }
 
+function getQueueOrder(entry: {
+  queueOrder?: number;
+  createdAt: number;
+}): number {
+  return typeof entry.queueOrder === 'number'
+    ? entry.queueOrder
+    : entry.createdAt;
+}
+
 export const offlineSessionUnavailableError = Object.assign(
   new Error('Offline session unavailable'),
   { code: 460, id: 'offline-session-unavailable' as const },
@@ -115,6 +130,12 @@ function compareQueueEntries(
   left: OfflineQueueEntry,
   right: OfflineQueueEntry,
 ): number {
+  const leftQueueOrder = getQueueOrder(left);
+  const rightQueueOrder = getQueueOrder(right);
+
+  if (leftQueueOrder !== rightQueueOrder) {
+    return leftQueueOrder - rightQueueOrder;
+  }
   if (left.createdAt !== right.createdAt) {
     return left.createdAt - right.createdAt;
   }
@@ -126,14 +147,12 @@ export type OfflineStoreController<
 > = {
   hydrateIfNeeded: () => Promise<void>;
   canQueueMutation: () => boolean;
-  prepareForMutation: <TName extends keyof TOperations>(args: {
-    operationName: TName;
-    input: OperationInput<TOperations, TName>;
-  }) => Promise<PreparedOfflineMutation>;
-  queueMutation: <TName extends keyof TOperations>(args: {
-    operationName: TName;
-    input: OperationInput<TOperations, TName>;
-  }) => Promise<void>;
+  prepareForMutation: <TName extends keyof TOperations & string>(
+    args: OfflineMutationInput<TOperations, TName>,
+  ) => Promise<PreparedOfflineMutation>;
+  queueMutation: <TName extends keyof TOperations & string>(
+    args: OfflineMutationInput<TOperations, TName>,
+  ) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
   getOfflineConflicts: () => OfflineConflictRecord[];
   resolveOfflineConflict: (
@@ -179,10 +198,40 @@ export function createOfflineStoreController<
   let replayRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let hydratedSessionKey: string | null = null;
   let hydratedPromise: Promise<void> | null = null;
+  let nextQueueOrder = 0;
   const queueEntries = new Map<string, OfflineQueueEntry>();
   const conflicts = new Map<string, OfflineConflictRecord>();
   const confirmationRetriesConsumed = new Set<string>();
-  const resolvedAdapter = adapter;
+
+  type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
+    operation: TName;
+    input: unknown;
+    tempId?: ValidPayload;
+    entityRefs?: OfflineEntityRef[];
+  };
+
+  type PreparedQueuedMutation = {
+    currentSessionKey: string;
+    operationName: string;
+    operation: AnyOfflineOperationDefinition;
+    validatedInput: unknown;
+    tempId?: ValidPayload;
+    entityRefs?: OfflineEntityRef[];
+  };
+
+  type PreparedMutationBatch = {
+    currentSessionKey: string;
+    mutations: PreparedQueuedMutation[];
+  };
+
+  type PlannedQueuedMutation = {
+    operationName: string;
+    validatedInput: unknown;
+    tempId?: ValidPayload;
+    pendingEntity?: unknown;
+    nextEntry: OfflineQueueEntry;
+    previousEntry?: OfflineQueueEntry;
+  };
 
   async function loadNamespaceRecords<T extends { id: string }>(
     namespace: NamespacePersistenceHandle<T>,
@@ -228,30 +277,29 @@ export function createOfflineStoreController<
     return activeSession?.sessionKey === current.sessionKey;
   }
 
+  function teardownActiveSession(): void {
+    activeSession?.unregister?.();
+    activeSession = null;
+    resetConfirmationRetries();
+    queueEntries.clear();
+    conflicts.clear();
+    nextQueueOrder = 0;
+    hydratedSessionKey = null;
+    hydratedPromise = null;
+  }
+
   function ensureActiveSession(): ActiveSessionState | null {
     const sessionKey = getSessionKey();
     if (sessionKey === false) {
       if (activeSession) {
-        activeSession.unregister?.();
-        activeSession = null;
-        resetConfirmationRetries();
-        queueEntries.clear();
-        conflicts.clear();
-        hydratedSessionKey = null;
-        hydratedPromise = null;
+        teardownActiveSession();
       }
       return null;
     }
 
     if (activeSession?.sessionKey === sessionKey) return activeSession;
 
-    activeSession?.unregister?.();
-    activeSession = null;
-    resetConfirmationRetries();
-    queueEntries.clear();
-    conflicts.clear();
-    hydratedSessionKey = null;
-    hydratedPromise = null;
+    teardownActiveSession();
 
     const session = getOrCreateSessionOfflineCoordinator(sessionKey, {
       adapter,
@@ -265,7 +313,7 @@ export function createOfflineStoreController<
     const queueNamespace =
       createPersistentStorageNamespaceHandle<OfflineQueueEntry>({
         storeName,
-        adapter: resolvedAdapter,
+        adapter,
         getSessionKey: () => sessionKey,
         onPersistentStorageError,
         entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
@@ -273,7 +321,7 @@ export function createOfflineStoreController<
     const conflictNamespace =
       createPersistentStorageNamespaceHandle<OfflineConflictRecord>({
         storeName,
-        adapter: resolvedAdapter,
+        adapter,
         getSessionKey: () => sessionKey,
         onPersistentStorageError,
         entryPrefix: OFFLINE_CONFLICT_STORAGE_ENTRY_PREFIX,
@@ -281,7 +329,7 @@ export function createOfflineStoreController<
     const entityNamespace =
       createPersistentStorageNamespaceHandle<GlobalOfflineEntity>({
         storeName,
-        adapter: resolvedAdapter,
+        adapter,
         getSessionKey: () => sessionKey,
         onPersistentStorageError,
         entryPrefix: OFFLINE_ENTITY_STORAGE_ENTRY_PREFIX,
@@ -329,6 +377,7 @@ export function createOfflineStoreController<
       for (const conflict of loadedConflictEntries.values()) {
         conflicts.set(conflict.id, conflict);
       }
+      nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
       refreshDerivedState(current);
     })().finally(() => {
@@ -405,7 +454,7 @@ export function createOfflineStoreController<
       left.id.localeCompare(right.id),
     );
     const protectedKeys = storeAdapter.getProtectedCacheKeys(
-      entities.flatMap((entity) => ({
+      entities.map((entity) => ({
         entityKey: entity.entityKey,
         entityKind: entity.entityKind,
       })),
@@ -441,18 +490,44 @@ export function createOfflineStoreController<
     return [...queueEntries.values()].sort(compareQueueEntries);
   }
 
+  function getNextQueueOrder(entries: Iterable<OfflineQueueEntry>): number {
+    let highestQueueOrder = -1;
+
+    for (const entry of entries) {
+      const entryQueueOrder = getQueueOrder(entry);
+      if (entryQueueOrder > highestQueueOrder) {
+        highestQueueOrder = entryQueueOrder;
+      }
+    }
+
+    return highestQueueOrder + 1;
+  }
+
+  function previewQueueOrders(count: number): {
+    queueOrders: number[];
+    nextQueueOrderValue: number;
+  } {
+    const baseQueueOrder = Math.max(nextQueueOrder, Date.now());
+    const queueOrders = Array.from({ length: count }, (_, index) => {
+      return baseQueueOrder + index;
+    });
+
+    return { queueOrders, nextQueueOrderValue: baseQueueOrder + count };
+  }
+
   function findAccumulationCandidate(args: {
     operationName: string;
     entityRefs: OfflineEntityRef[];
+    entries?: Iterable<OfflineQueueEntry>;
   }): OfflineQueueEntry | null {
     const normalizedEntityRefs = normalizeEntityRefs(args.entityRefs);
     let candidate: OfflineQueueEntry | null = null;
 
-    for (const entry of queueEntries.values()) {
+    for (const entry of args.entries ?? queueEntries.values()) {
       if (entry.operation !== args.operationName) continue;
       if (entry.syncState !== 'pending') continue;
       if (entry.attempts > 0) continue;
-      if (entry.tempId) continue;
+      if (entry.tempId !== undefined) continue;
       if (normalizeEntityRefs(entry.entityRefs) !== normalizedEntityRefs) {
         continue;
       }
@@ -492,6 +567,7 @@ export function createOfflineStoreController<
   async function persistEntry(
     entry: OfflineQueueEntry,
     current?: ActiveSessionState,
+    skipRefresh?: boolean,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
@@ -499,7 +575,7 @@ export function createOfflineStoreController<
       queueEntries.set(entry.id, entry);
     }
     await session.queueNamespace.save(entry.id, entry);
-    if (isActiveSessionState(session)) {
+    if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
   }
@@ -507,6 +583,7 @@ export function createOfflineStoreController<
   async function removeEntry(
     entryId: string,
     current?: ActiveSessionState,
+    skipRefresh?: boolean,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
@@ -518,7 +595,7 @@ export function createOfflineStoreController<
       }
     }
     await session.queueNamespace.remove(entryId);
-    if (isActiveSessionState(session)) {
+    if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
   }
@@ -577,24 +654,11 @@ export function createOfflineStoreController<
     await removeEntry(args.entry.id, args.current);
   }
 
-  async function queueMutationWithSession<TName extends keyof TOperations>(
+  function prepareMutationWithSession<TName extends keyof TOperations & string>(
     current: ActiveSessionState,
-    args: { operationName: TName; input: unknown },
-  ): Promise<void> {
-    const prepared = prepareMutationWithSession(current, args);
-    await queuePreparedMutation(prepared);
-  }
-
-  function prepareMutationWithSession<TName extends keyof TOperations>(
-    current: ActiveSessionState,
-    args: { operationName: TName; input: unknown },
-  ): {
-    currentSessionKey: string;
-    operationName: string;
-    operation: AnyOfflineOperationDefinition;
-    validatedInput: unknown;
-  } {
-    const operationName = String(args.operationName);
+    args: InternalQueuedMutationArgs<TName>,
+  ): PreparedQueuedMutation {
+    const operationName = String(args.operation);
     const operation = offlineMode.operations[operationName];
     if (!operation) {
       throw new Error(
@@ -615,54 +679,121 @@ export function createOfflineStoreController<
       operationName,
       operation,
       validatedInput,
+      tempId: args.tempId,
+      entityRefs: args.entityRefs,
     };
   }
 
-  async function queuePreparedMutation(args: {
-    currentSessionKey: string;
-    operationName: string;
-    operation: AnyOfflineOperationDefinition;
-    validatedInput: unknown;
-  }): Promise<void> {
-    const current = ensureActiveSession();
-    if (!current || current.sessionKey !== args.currentSessionKey) {
-      throw offlineSessionUnavailableError;
+  function normalizeMutationArgs<TName extends keyof TOperations & string>(
+    args: OfflineMutationInput<TOperations, TName>,
+  ): InternalQueuedMutationArgs<TName>[] {
+    if ('operation' in args) {
+      return [{ operation: args.operation, input: args.input }];
     }
-    const { operation, operationName, validatedInput } = args;
+
+    if (args.length === 0) {
+      throw new Error('Offline mutation list must contain at least one entry');
+    }
+
+    return args.map((entry: { operation: TName; input: unknown }) => ({
+      operation: entry.operation,
+      input: entry.input,
+    }));
+  }
+
+  function prepareMutationBatchWithSession<
+    TName extends keyof TOperations & string,
+  >(
+    current: ActiveSessionState,
+    args: OfflineMutationInput<TOperations, TName>,
+  ): PreparedMutationBatch {
+    const mutations = normalizeMutationArgs(args).map((entry) =>
+      prepareMutationWithSession(current, entry),
+    );
+
+    return { currentSessionKey: current.sessionKey, mutations };
+  }
+
+  async function planPreparedMutation(args: {
+    current: ActiveSessionState;
+    preparedMutation: PreparedQueuedMutation;
+    queueOrder: number;
+    workingQueue: Map<string, OfflineQueueEntry>;
+  }): Promise<PlannedQueuedMutation> {
+    const {
+      current,
+      preparedMutation: {
+        operation,
+        operationName,
+        validatedInput,
+        tempId: preparedTempId,
+        entityRefs: preparedEntityRefs,
+      },
+      queueOrder,
+      workingQueue,
+    } = args;
 
     const tempEntity = operation.tempEntity;
-    const tempId = tempEntity?.createTempId(validatedInput);
-    if (tempId && tempEntity && storeAdapter.applyPendingEntity) {
-      const pendingEntity = tempEntity.buildPendingEntity(
-        validatedInput,
-        tempId,
+    if (storeType === 'document' && tempEntity) {
+      throw new Error(
+        `Document offline operation "${operationName}" does not support tempEntity`,
       );
-      storeAdapter.applyPendingEntity({
-        operationName,
-        input: validatedInput,
-        tempId,
-        pendingEntity,
-      });
     }
 
     const rawEntityRefs =
-      tempId !== undefined
-        ? [{ entityKey: tempId, entityKind: 'item' as const }]
-        : typeof operation.getEntityRefs === 'function'
-          ? operation.getEntityRefs({ input: validatedInput })
-          : (storeAdapter.getEntityRefs?.({
-              operationName,
-              input: validatedInput,
-            }) ?? []);
-    const entityRefs = storeAdapter.normalizeEntityRefs
+      typeof operation.getEntityRefs === 'function'
+        ? operation.getEntityRefs({ input: validatedInput })
+        : (storeAdapter.getEntityRefs?.({
+            operationName,
+            input: validatedInput,
+          }) ?? []);
+    const resolvedEntityRefs = storeAdapter.normalizeEntityRefs
       ? storeAdapter.normalizeEntityRefs(rawEntityRefs)
       : __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
-    const now = Date.now();
+    const entityRefs =
+      tempEntity !== undefined &&
+      preparedTempId !== undefined &&
+      preparedEntityRefs !== undefined
+        ? preparedEntityRefs
+        : resolvedEntityRefs;
+    const tempId =
+      tempEntity !== undefined
+        ? (preparedTempId ??
+          __LEGIT_CAST__<ValidPayload | undefined, unknown>(rawEntityRefs[0]))
+        : preparedTempId;
 
-    if (operation.accumulation && !tempId) {
+    if (tempEntity) {
+      if (rawEntityRefs.length !== 1) {
+        throw new Error(
+          `Temp entity operation "${operationName}" must resolve exactly one entity ref`,
+        );
+      }
+      if (
+        resolvedEntityRefs.length !== 1 ||
+        resolvedEntityRefs[0]?.entityKind !== 'item'
+      ) {
+        throw new Error(
+          `Temp entity operation "${operationName}" must resolve exactly one item ref`,
+        );
+      }
+      if (entityRefs.length !== 1 || entityRefs[0]?.entityKind !== 'item') {
+        throw new Error(
+          `Temp entity operation "${operationName}" must preserve exactly one item ref`,
+        );
+      }
+    }
+
+    const now = Date.now();
+    const pendingEntity =
+      tempId !== undefined && tempEntity && storeAdapter.applyPendingEntity
+        ? tempEntity.buildPendingEntity(validatedInput, tempId)
+        : undefined;
+
+    if (operation.accumulation && tempId === undefined) {
       const existingEntry = findAccumulationCandidate({
         operationName,
         entityRefs,
+        entries: workingQueue.values(),
       });
 
       if (existingEntry) {
@@ -682,34 +813,138 @@ export function createOfflineStoreController<
           );
         }
 
-        await persistEntry(
-          { ...existingEntry, input: validatedMergedInput, updatedAt: now },
-          current,
-        );
-        await ensureReplayScheduled();
-        return;
+        const nextEntry = {
+          ...existingEntry,
+          input: validatedMergedInput,
+          updatedAt: now,
+        };
+        workingQueue.set(nextEntry.id, nextEntry);
+
+        return {
+          operationName,
+          validatedInput,
+          tempId,
+          pendingEntity,
+          nextEntry,
+          previousEntry: existingEntry,
+        };
       }
     }
 
-    await persistEntry(
-      {
-        id: `${storeName}:${now}:${Math.random().toString(36).slice(2, 10)}`,
-        sessionKey: current.sessionKey,
-        storeName,
-        storeType,
-        operation: operationName,
-        input: validatedInput,
-        entityRefs,
-        attempts: 0,
-        createdAt: now,
-        updatedAt: now,
-        lastAttemptAt: null,
-        syncState: 'pending',
-        tempId,
-      },
-      current,
-    );
+    const nextEntry = {
+      id: `${storeName}:${now}:${Math.random().toString(36).slice(2, 10)}`,
+      sessionKey: current.sessionKey,
+      storeName,
+      storeType,
+      operation: operationName,
+      input: validatedInput,
+      queueOrder,
+      entityRefs,
+      attempts: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastAttemptAt: null,
+      syncState: 'pending' as const,
+      tempId,
+    };
+    workingQueue.set(nextEntry.id, nextEntry);
 
+    return { operationName, validatedInput, tempId, pendingEntity, nextEntry };
+  }
+
+  async function queuePreparedMutations(
+    args: PreparedMutationBatch,
+  ): Promise<void> {
+    const current = ensureActiveSession();
+    if (!current || current.sessionKey !== args.currentSessionKey) {
+      throw offlineSessionUnavailableError;
+    }
+
+    const { queueOrders, nextQueueOrderValue } = previewQueueOrders(
+      args.mutations.length,
+    );
+    const workingQueue = new Map(queueEntries);
+    const plannedMutations: PlannedQueuedMutation[] = [];
+
+    for (const [index, mutation] of args.mutations.entries()) {
+      const queueOrder = queueOrders[index];
+      if (queueOrder === undefined) {
+        throw new Error('Missing queue order for prepared offline mutation');
+      }
+
+      plannedMutations.push(
+        await planPreparedMutation({
+          current,
+          preparedMutation: mutation,
+          queueOrder,
+          workingQueue,
+        }),
+      );
+    }
+
+    const persistedMutations: PlannedQueuedMutation[] = [];
+    const appliedPendingMutations: PlannedQueuedMutation[] = [];
+    const previousNextQueueOrder = nextQueueOrder;
+
+    try {
+      for (const mutation of plannedMutations) {
+        await persistEntry(mutation.nextEntry, current, true);
+        persistedMutations.push(mutation);
+      }
+
+      nextQueueOrder = nextQueueOrderValue;
+
+      if (storeAdapter.applyPendingEntity) {
+        for (const mutation of plannedMutations) {
+          if (
+            mutation.tempId === undefined ||
+            mutation.pendingEntity === undefined
+          ) {
+            continue;
+          }
+
+          storeAdapter.applyPendingEntity({
+            operationName: mutation.operationName,
+            input: mutation.validatedInput,
+            tempId: mutation.tempId,
+            pendingEntity: mutation.pendingEntity,
+          });
+          appliedPendingMutations.push(mutation);
+        }
+      }
+    } catch (error) {
+      for (const mutation of appliedPendingMutations.reverse()) {
+        if (
+          mutation.tempId === undefined ||
+          mutation.pendingEntity === undefined
+        ) {
+          continue;
+        }
+
+        storeAdapter.rollbackPendingEntity?.({
+          operationName: mutation.operationName,
+          input: mutation.validatedInput,
+          tempId: mutation.tempId,
+          pendingEntity: mutation.pendingEntity,
+        });
+      }
+
+      for (const mutation of persistedMutations.reverse()) {
+        if (mutation.previousEntry) {
+          await persistEntry(mutation.previousEntry, current, true);
+          continue;
+        }
+
+        await removeEntry(mutation.nextEntry.id, current, true);
+      }
+
+      nextQueueOrder = previousNextQueueOrder;
+      refreshDerivedState(current);
+
+      throw error;
+    }
+
+    refreshDerivedState(current);
     await ensureReplayScheduled();
   }
 
@@ -839,7 +1074,7 @@ export function createOfflineStoreController<
         });
 
         if (
-          entryToUse.tempId &&
+          entryToUse.tempId !== undefined &&
           tempEntity &&
           storeAdapter.reconcileTempEntity
         ) {
@@ -883,35 +1118,35 @@ export function createOfflineStoreController<
     }
   }
 
-  async function queueMutation<TName extends keyof TOperations>(args: {
-    operationName: TName;
-    input: unknown;
-  }): Promise<void> {
+  async function queueMutation<TName extends keyof TOperations & string>(
+    args: OfflineMutationInput<TOperations, TName>,
+  ): Promise<void> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
     if (!current) {
       throw offlineSessionUnavailableError;
     }
 
-    await queueMutationWithSession(current, args);
+    await queuePreparedMutations(
+      prepareMutationBatchWithSession(current, args),
+    );
   }
 
-  async function prepareForMutation<TName extends keyof TOperations>(args: {
-    operationName: TName;
-    input: OperationInput<TOperations, TName>;
-  }): Promise<PreparedOfflineMutation> {
+  async function prepareForMutation<TName extends keyof TOperations & string>(
+    args: OfflineMutationInput<TOperations, TName>,
+  ): Promise<PreparedOfflineMutation> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
     if (!current) {
       throw offlineSessionUnavailableError;
     }
 
-    const prepared = prepareMutationWithSession(current, args);
+    const prepared = prepareMutationBatchWithSession(current, args);
     await current.session.refreshNetworkState();
 
     return {
       effectiveOffline: current.session.getStatus().effectiveOffline,
-      queueMutation: () => queuePreparedMutation(prepared),
+      queueMutation: () => queuePreparedMutations(prepared),
       classifyError: async (error) => {
         const preparedCurrent = ensureActiveSession();
         if (
@@ -926,12 +1161,13 @@ export function createOfflineStoreController<
           return true;
         }
 
+        const firstMutation = prepared.mutations[0];
         const classification = await preparedCurrent.session.classifyFailure(
           error,
           {
             phase: 'mutation',
             storeType,
-            operationName: prepared.operationName,
+            operationName: firstMutation?.operationName,
             sessionKey: preparedCurrent.sessionKey,
           },
         );
@@ -995,11 +1231,18 @@ export function createOfflineStoreController<
     const requeue = typedResult.requeue;
 
     if (requeue) {
-      await queueMutationWithSession(current, {
-        operationName: __LEGIT_CAST__<keyof TOperations, string>(
-          conflict.operation,
-        ),
-        input: requeue.input,
+      await queuePreparedMutations({
+        currentSessionKey: current.sessionKey,
+        mutations: [
+          prepareMutationWithSession(current, {
+            operation: __LEGIT_CAST__<keyof TOperations & string, string>(
+              conflict.operation,
+            ),
+            input: requeue.input,
+            tempId: conflict.tempId,
+            entityRefs: conflict.entityRefs,
+          }),
+        ],
       });
     }
   }

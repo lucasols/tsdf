@@ -62,6 +62,61 @@ afterEach(() => {
   localStorage.clear();
 });
 
+const validListQueryTempEntity: NonNullable<
+  DirectListQueryOfflineOperations['createUser']['tempEntity']
+> = {
+  buildPendingEntity: (input, tempId) => ({
+    id: typeof tempId === 'string' ? -1 : tempId.id,
+    name: input.name,
+  }),
+  reconcileServerEntity: (result, tempId) => ({
+    finalPayload:
+      typeof tempId === 'string' ? getUserItemPayload(result.id) : tempId,
+    finalData: { ...result },
+  }),
+};
+
+void validListQueryTempEntity;
+
+const invalidListQueryPendingTempEntity: NonNullable<
+  DirectListQueryOfflineOperations['createUser']['tempEntity']
+> = {
+  // @ts-expect-error - buildPendingEntity must return User
+  buildPendingEntity: (input) => ({ name: input.name }),
+  reconcileServerEntity: (result) => ({
+    finalPayload: getUserItemPayload(result.id),
+    finalData: { ...result },
+  }),
+};
+
+void invalidListQueryPendingTempEntity;
+
+const invalidListQueryFinalPayloadTempEntity: NonNullable<
+  DirectListQueryOfflineOperations['createUser']['tempEntity']
+> = {
+  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+  reconcileServerEntity: (result) => ({
+    // @ts-expect-error - finalPayload must match UserPayload
+    finalPayload: 123,
+    finalData: { ...result },
+  }),
+};
+
+void invalidListQueryFinalPayloadTempEntity;
+
+const invalidListQueryFinalDataTempEntity: NonNullable<
+  DirectListQueryOfflineOperations['createUser']['tempEntity']
+> = {
+  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+  reconcileServerEntity: (result) => ({
+    finalPayload: getUserItemPayload(result.id),
+    // @ts-expect-error - finalData must match User
+    finalData: { name: result.name },
+  }),
+};
+
+void invalidListQueryFinalDataTempEntity;
+
 type DirectListQueryOfflineOperations = DefineListQueryOfflineOperations<
   User,
   UsersQueryPayload,
@@ -74,6 +129,7 @@ type DirectListQueryOfflineOperations = DefineListQueryOfflineOperations<
   }
 >;
 
+// tests using the list-query store directly without test envs to verify the public API usage
 test('direct list-query store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-list-query-offline-session';
@@ -200,9 +256,8 @@ test('direct list-query store offline public api', async () => {
           },
           createUser: {
             inputSchema: createUserInputSchema,
-            getEntityRefs: () => [],
+            getEntityRefs: ({ input }) => [`temp:${input.name}`],
             tempEntity: {
-              createTempId: (input) => `temp:${input.name}`,
               buildPendingEntity: (input) => ({ id: -1, name: input.name }),
               reconcileServerEntity: (result) => ({
                 finalPayload: getUserItemPayload(result.id),
@@ -271,38 +326,29 @@ test('direct list-query store offline public api', async () => {
     });
   });
 
-  await act(async () => {
-    await listQueryStore.performMutation(userOnePayload, {
-      optimisticUpdate: (payload) => {
-        if (Array.isArray(payload) || typeof payload === 'function') return;
-        listQueryStore.updateItemState(payload, (item) => ({
+  const multiRenameResult = await act(async () => {
+    return listQueryStore.performMutation(userOnePayload, {
+      optimisticUpdate: () => {
+        listQueryStore.updateItemState(userOnePayload, (item) => ({
           ...item,
           name: 'Ada second',
         }));
-      },
-      mutation: () => Promise.resolve({ id: 1, name: 'Ada second' }),
-      offline: {
-        operation: 'renameUser',
-        input: { id: 1, name: 'Ada second' },
-      },
-    });
-  });
-
-  await act(async () => {
-    await listQueryStore.performMutation(userTwoPayload, {
-      optimisticUpdate: (payload) => {
-        if (Array.isArray(payload) || typeof payload === 'function') return;
-        listQueryStore.updateItemState(payload, (item) => ({
+        listQueryStore.updateItemState(userTwoPayload, (item) => ({
           ...item,
           name: 'Grace offline',
         }));
       },
-      mutation: () => Promise.resolve({ id: 2, name: 'Grace offline' }),
-      offline: {
-        operation: 'renameUser',
-        input: { id: 2, name: 'Grace offline' },
-      },
+      mutation: () => Promise.resolve({ ok: true }),
+      offline: [
+        { operation: 'renameUser', input: { id: 1, name: 'Ada second' } },
+        { operation: 'renameUser', input: { id: 2, name: 'Grace offline' } },
+      ],
     });
+  });
+
+  expect(multiRenameResult).toMatchObject({
+    ok: true,
+    value: { kind: 'queued' },
   });
 
   await act(async () => {
@@ -353,10 +399,10 @@ test('direct list-query store offline public api', async () => {
   });
   expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
-    items: ['Ada conflict', 'Grace offline']
-    pendingSync: '✅'
-    status: 'success'
-  `);
+      items: ['Ada conflict', 'Grace offline']
+      pendingSync: '✅'
+      status: 'success'
+    `);
   const firstQuery = multiHook.result.current[0];
   expect(firstQuery).toMatchObject({
     pendingSync: true,
@@ -375,7 +421,7 @@ test('direct list-query store offline public api', async () => {
       storeType: 'listQuery',
     },
     {
-      entityKey: 'temp:Linus offline',
+      entityKey: getCompositeKey('temp:Linus offline'),
       pendingMutations: 1,
       storeType: 'listQuery',
       tempId: 'temp:Linus offline',
@@ -441,10 +487,10 @@ test('direct list-query store offline public api', async () => {
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
   expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
-    items: ['Ada resolved', 'Grace offline']
-    pendingSync: '❌'
-    status: 'success'
-  `);
+      items: ['Ada resolved', 'Grace offline']
+      pendingSync: '❌'
+      status: 'success'
+    `);
   expect(multiHook.result.current[0]).toMatchObject({
     pendingSync: false,
     items: ['Ada resolved', 'Grace offline'],

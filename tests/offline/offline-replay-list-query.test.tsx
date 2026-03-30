@@ -121,12 +121,41 @@ describe('offline replay list-query behavior', () => {
         },
       });
 
+      void plainEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ name: 'Ada offline' }),
+        // @ts-expect-error - offline mutations should not be available by default
+        offline: [
+          {
+            operation: 'patchUserName',
+            input: { itemId: 'users||1', name: 'Ada offline' },
+          },
+          {
+            operation: 'patchUserName',
+            input: { itemId: 'users||1', name: 'Ada queued again' },
+          },
+        ],
+      });
+
       void typedEnv.apiStore.performMutation('users||1', {
         mutation: () => Promise.resolve({ name: 'Ada offline' }),
         offline: {
           operation: 'patchUserName',
           input: { itemId: 'users||1', name: 'Ada offline' },
         },
+      });
+
+      void typedEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ name: 'Ada offline' }),
+        offline: [
+          {
+            operation: 'patchUserName',
+            input: { itemId: 'users||1', name: 'Ada offline' },
+          },
+          {
+            operation: 'patchUserName',
+            input: { itemId: 'users||1', name: 'Ada queued again' },
+          },
+        ],
       });
 
       async function queuedOfflineResultType_() {
@@ -204,9 +233,8 @@ describe('offline replay list-query behavior', () => {
             operations: {
               createUser: {
                 inputSchema: collectionCreateInputSchema,
-                getEntityRefs: () => [],
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
-                  createTempId: (input) => `temp:${input.name}`,
                   buildPendingEntity: (input) => ({ id: -1, name: input.name }),
                   reconcileServerEntity: (result) => ({
                     finalPayload: `users||${result.id}`,

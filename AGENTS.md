@@ -167,7 +167,7 @@ When applying an optimization:
 
 When fixing a bug:
 
-1. add a test that asserts the correct behavior and reproduces the issue, if possible. Only create a test if the test simulates a realistic scenario that could happen in real usage.
+1. add a test that asserts the correct behavior and reproduces the issue, if possible. The test must exercise real user-visible behavior through the highest practical public surface (the test envs and their public API), not low-level mechanics or internal implementation steps. Only create a test if it simulates a realistic scenario that could happen in real usage — if the bug cannot be reproduced realistically and only appears through synthetic scaffolding that weakens confidence, skip the test. Prefer adding the case to an existing higher-level suite over creating a new low-level test when both cover the same behavior.
 2. confirm that the test fails before applying the fix, to ensure the test is valid
 3. check the root cause of the issue and apply the fix, don't apply a superficial fix that only makes the test pass without addressing the underlying problem.
 4. be proactive about expanding the fix to the full affected surface area when the same root cause or pattern is clearly present elsewhere. In this repo, do not stop at a single store or code path if the same bug obviously also affects `DocumentStore`, `CollectionStore`, `ListQueryStore`, sync/async variants, or closely related persistence flows.

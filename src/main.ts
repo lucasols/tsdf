@@ -95,6 +95,7 @@ export type {
   DocumentOfflineOperationDefinition,
   GlobalOfflineEntity,
   GlobalOfflineStatus,
+  OfflineMutationInput,
   ListQueryOfflineEntityRef,
   ListQueryOfflineOperationDefinition,
   OfflineConflictRecord,

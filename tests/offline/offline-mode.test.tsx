@@ -140,9 +140,26 @@ describe('offline mode network and session', () => {
         offline: { operation: 'updateValue', input: { value: 2 } },
       });
 
+      void plainEnv.apiStore.performMutation({
+        mutation: () => Promise.resolve(2),
+        // @ts-expect-error - offline mutations should not be available by default
+        offline: [
+          { operation: 'updateValue', input: { value: 2 } },
+          { operation: 'updateValue', input: { value: 3 } },
+        ],
+      });
+
       void typedEnv.apiStore.performMutation({
         mutation: () => Promise.resolve(2),
         offline: { operation: 'updateValue', input: { value: 2 } },
+      });
+
+      void typedEnv.apiStore.performMutation({
+        mutation: () => Promise.resolve(2),
+        offline: [
+          { operation: 'updateValue', input: { value: 2 } },
+          { operation: 'updateValue', input: { value: 3 } },
+        ],
       });
 
       async function queuedOfflineResultType_() {
@@ -202,9 +219,26 @@ describe('offline mode network and session', () => {
         offline: { operation: 'renameItem', input: { name: 'Grace' } },
       });
 
+      void plainEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
+        // @ts-expect-error - offline mutations should not be available by default
+        offline: [
+          { operation: 'renameItem', input: { name: 'Grace' } },
+          { operation: 'renameItem', input: { name: 'Linus' } },
+        ],
+      });
+
       void typedEnv.apiStore.performMutation('users||1', {
         mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
         offline: { operation: 'renameItem', input: { name: 'Grace' } },
+      });
+
+      void typedEnv.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ value: { name: 'Grace' } }),
+        offline: [
+          { operation: 'renameItem', input: { name: 'Grace' } },
+          { operation: 'renameItem', input: { name: 'Linus' } },
+        ],
       });
 
       async function queuedOfflineResultType_() {

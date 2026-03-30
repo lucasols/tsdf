@@ -1,15 +1,41 @@
+import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
+import { rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { CollectionOfflineOperationDefinition } from '../../src/main';
+import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
+  collectionCreateInputSchema,
+  collectionSchema,
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
 } from './offlineTestShared';
 import { type UpdateValueConflictOperations } from './offlineReplayTestShared';
+
+async function waitForMicrotaskCondition(
+  condition: () => boolean,
+  maxTurns = 20,
+): Promise<void> {
+  for (let turn = 0; turn < maxTurns && !condition(); turn += 1) {
+    await Promise.resolve();
+  }
+}
+
+type CreateUserConflictOperations = {
+  createUser: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { name: string },
+    { reason: string },
+    { id: string; name: string }
+  >;
+};
 
 describe('offline replay conflict handling', () => {
   let network = createOfflineNetworkMock();
@@ -289,5 +315,167 @@ describe('offline replay conflict handling', () => {
     `);
     expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
     expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  });
+
+  test('resolving a temp-entity conflict keeps the original temp id when requeueing adjusted input', async () => {
+    network.setOffline();
+    const executeResolvers: Array<
+      (result: { id: string; name: string }) => void
+    > = [];
+    const env = createCollectionStoreTestEnv<
+      { name: string },
+      CreateUserConflictOperations
+    >(
+      { 'users||1': { name: 'User 1' } },
+      {
+        getSessionKey: () => 'offline-conflict-temp-requeue-session',
+        testScenario: 'loaded',
+        persistentStorage: {
+          storeName: 'offline-conflict-temp-requeue-collection',
+          adapter: 'local-sync',
+          schema: collectionSchema,
+          payloadSchema: rc_string,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                execute: () =>
+                  new Promise<{ id: string; name: string }>((resolve) => {
+                    executeResolvers.push(resolve);
+                  }),
+                conflictHandling: {
+                  schema: docConflictSchema,
+                  detectConflict: ({ input }) =>
+                    input.name === 'Ada' ? { reason: 'server-changed' } : false,
+                  resolveConflict: ({ conflict, resolution }) => {
+                    expect(conflict).toMatchObject({
+                      reason: 'server-changed',
+                    });
+                    expect(resolution).toMatchObject({ name: 'Ada resolved' });
+
+                    return { requeue: { input: { name: 'Ada resolved' } } };
+                  },
+                },
+                tempEntity: {
+                  buildPendingEntity: (input) => ({
+                    value: { name: `pending:${input.name}` },
+                  }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: result.id,
+                    finalData: { value: { name: result.name } },
+                  }),
+                },
+              },
+            },
+          },
+        },
+      },
+    );
+
+    await env.apiStore.performMutation('__create__', {
+      mutation: () => Promise.resolve({ value: { name: 'Ada' } }),
+      offline: { operation: 'createUser', input: { name: 'Ada' } },
+    });
+
+    // Start observing the optimistic item through the public hook API once the
+    // offline create has materialized it locally.
+    const tempAdaHook = renderHook(() => {
+      const item = env.apiStore.useItem('temp:Ada');
+      env.trackItemUI('temp:Ada', item.data?.value.name ?? null);
+      return item;
+    });
+    await flushAllTimers();
+
+    expect(env.apiStore.getOfflineEntities()).toMatchObject([
+      { entityKey: getCompositeKey('temp:Ada'), tempId: 'temp:Ada' },
+    ]);
+    expect(env.store.state[getCompositeKey('temp:Ada')]?.data).toMatchObject({
+      value: { name: 'pending:Ada' },
+    });
+
+    // Replay the queued create. The first online attempt should stop at the
+    // conflict instead of executing the mutation.
+    env.addTimelineComments('beforeNextAction', [
+      'replay the queued temp create and persist the conflict',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await flushAllTimers();
+
+    const [conflict] = env.apiStore.getOfflineConflicts();
+    expect(conflict).toBeDefined();
+    if (!conflict) {
+      throw new Error('Expected a persisted offline conflict');
+    }
+
+    // Resolve the conflict with adjusted input, but keep the original
+    // optimistic temp row alive while the replacement replay is in flight.
+    env.addTimelineComments('beforeNextAction', [
+      'resolve the conflict with a new name while keeping the same temp row',
+    ]);
+    await act(async () => {
+      await env.apiStore.resolveOfflineConflict(conflict.id, {
+        name: 'Ada resolved',
+      });
+      await Promise.resolve();
+    });
+    await waitForMicrotaskCondition(() => executeResolvers.length === 1);
+
+    // The replacement replay should still point at the original temp entity,
+    // not create a second temp row derived from the adjusted input.
+    expect({
+      offlineEntities: env.apiStore
+        .getOfflineEntities()
+        .map((entity) => ({
+          entityKey: entity.entityKey,
+          tempId: entity.tempId,
+        })),
+      hasResolvedTempData:
+        env.store.state[getCompositeKey('temp:Ada resolved')]?.data !==
+        undefined,
+      tempAdaData: env.store.state[getCompositeKey('temp:Ada')]?.data,
+    }).toMatchInlineSnapshot(`
+      hasResolvedTempData: '❌'
+      offlineEntities:
+        - entityKey: '"temp:Ada'
+          tempId: 'temp:Ada'
+
+      tempAdaData:
+        value: { name: 'pending:Ada resolved' }
+    `);
+    expect(tempAdaHook.result.current.data).toMatchInlineSnapshot(`
+      value: { name: 'pending:Ada resolved' }
+    `);
+
+    // Once the server accepts the replacement replay, the original temp row
+    // should reconcile into the final server-backed item and disappear cleanly.
+    env.addTimelineComments('beforeNextAction', [
+      'server accepts the replacement replay and reconciles the temp row',
+    ]);
+    executeResolvers[0]?.({ id: 'users||ada-resolved', name: 'Ada resolved' });
+    await flushAllTimers();
+
+    expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
+    expect(
+      env.store.state[getCompositeKey('users||ada-resolved')]?.data,
+    ).toMatchObject({ value: { name: 'Ada resolved' } });
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | temp:Ada             |
+      0     | pending:Ada          | ui-initialized
+      1.01s | pending:Ada          | -- replay the queued temp create and persist the conflict
+      .     | pending:Ada          | -- resolve the conflict with a new name while keeping the same temp row
+      .     | pending:Ada resolved | ui-changed
+      .     | pending:Ada resolved | -- server accepts the replacement replay and reconciles the temp row
+      .     | ···                  | ui-changed
+      "
+    `);
+
+    tempAdaHook.unmount();
   });
 });

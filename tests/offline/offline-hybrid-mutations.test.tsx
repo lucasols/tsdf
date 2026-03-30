@@ -1,7 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_object, rc_string } from 'runcheck';
+import { rc_boolean, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { getGlobalOfflineStatus } from '../../src/persistentStorage/offline/sessionCoordinator';
@@ -33,6 +33,10 @@ const renameCollectionInputSchema = rc_object({
   id: rc_string,
   name: rc_string,
 });
+const tempCollectionCreateInputSchema = rc_object({
+  name: rc_string,
+  shouldCreateTempRef: rc_boolean,
+});
 
 const quickRecoveryProbe = {
   intervalMs: 1,
@@ -62,6 +66,16 @@ type RenameCollectionItemOperations = {
   renameItem: CollectionOfflineOperationDefinition<
     { value: { name: string } },
     string,
+    { id: string; name: string }
+  >;
+};
+
+type AtomicCollectionBatchOperations = RenameCollectionItemOperations & {
+  createItem: CollectionOfflineOperationDefinition<
+    { value: { name: string } },
+    string,
+    { name: string; shouldCreateTempRef: boolean },
+    unknown,
     { id: string; name: string }
   >;
 };
@@ -349,6 +363,169 @@ describe('hybrid offline mutation execution', () => {
       expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
       expect(directMutation).not.toHaveBeenCalled();
       expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+    });
+
+    test('queue multiple offline operations in array order and replay them in that same order', async () => {
+      network.setOffline();
+      const sessionKey = 'hybrid-collection-array-session';
+      const storeName = 'hybrid-collection-array-store';
+      const directMutation = vi.fn(() =>
+        Promise.resolve({ value: { name: 'unused' } }),
+      );
+      const execute = vi.fn(
+        ({ input }: { input: { id: string; name: string } }) =>
+          Promise.resolve({ value: { name: input.name } }),
+      );
+      const env = createCollectionStoreTestEnv<
+        { name: string },
+        RenameCollectionItemOperations
+      >(
+        { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
+        {
+          getSessionKey: () => sessionKey,
+          testScenario: 'loaded',
+          persistentStorage: {
+            storeName,
+            adapter: 'local-sync',
+            schema: collectionSchema,
+            payloadSchema: rc_string,
+            offlineMode: {
+              network: network.config,
+              operations: {
+                renameItem: {
+                  inputSchema: renameCollectionInputSchema,
+                  getEntityRefs: ({ input }) => [input.id],
+                  execute,
+                },
+              },
+            },
+          },
+        },
+      );
+
+      const result = await env.apiStore.performMutation('users||1', {
+        mutation: directMutation,
+        offline: [
+          {
+            operation: 'renameItem',
+            input: { id: 'users||1', name: 'Ada queued' },
+          },
+          {
+            operation: 'renameItem',
+            input: { id: 'users||2', name: 'Grace queued' },
+          },
+        ],
+      });
+
+      expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
+      expect(directMutation).not.toHaveBeenCalled();
+      expect(
+        getOfflineQueueEntries(sessionKey, storeName)
+          .map((entry) => {
+            const data = getOfflineQueueEntryData(entry);
+
+            return {
+              input: data.input,
+              operation: data.operation,
+              queueOrder: data.queueOrder,
+            };
+          })
+          .sort((left, right) => {
+            return Number(left.queueOrder) - Number(right.queueOrder);
+          })
+          .map(({ queueOrder: _queueOrder, ...entry }) => entry),
+      ).toMatchInlineSnapshot(`
+        - input: { id: 'users||1', name: 'Ada queued' }
+          operation: 'renameItem'
+        - input: { id: 'users||2', name: 'Grace queued' }
+          operation: 'renameItem'
+      `);
+
+      act(() => {
+        network.goOnline();
+      });
+      await advanceTime(250);
+      await waitForMicrotaskCondition(() => execute.mock.calls.length === 2);
+
+      expect(execute.mock.calls.map((call) => call[0].input))
+        .toMatchInlineSnapshot(`
+        - { id: 'users||1', name: 'Ada queued' }
+        - { id: 'users||2', name: 'Grace queued' }
+      `);
+      expect(
+        getOfflineQueueEntries(sessionKey, storeName),
+      ).toMatchInlineSnapshot(`[]`);
+    });
+
+    test('do not partially queue a batch when a later offline descriptor is invalid', async () => {
+      network.setOffline();
+      const sessionKey = 'hybrid-collection-atomic-session';
+      const storeName = 'hybrid-collection-atomic-store';
+      const env = createCollectionStoreTestEnv<
+        { name: string },
+        AtomicCollectionBatchOperations
+      >(
+        { 'users||1': { name: 'Ada' } },
+        {
+          getSessionKey: () => sessionKey,
+          testScenario: 'loaded',
+          persistentStorage: {
+            storeName,
+            adapter: 'local-sync',
+            schema: collectionSchema,
+            payloadSchema: rc_string,
+            offlineMode: {
+              network: network.config,
+              operations: {
+                renameItem: {
+                  inputSchema: renameCollectionInputSchema,
+                  getEntityRefs: ({ input }) => [input.id],
+                  execute: ({ input }) => ({ value: { name: input.name } }),
+                },
+                createItem: {
+                  inputSchema: tempCollectionCreateInputSchema,
+                  getEntityRefs: ({ input }) =>
+                    input.shouldCreateTempRef ? [`temp:${input.name}`] : [],
+                  tempEntity: {
+                    buildPendingEntity: (input) => ({
+                      value: { name: `pending:${input.name}` },
+                    }),
+                    reconcileServerEntity: (result) => ({
+                      finalPayload: result.id,
+                      finalData: { value: { name: result.name } },
+                    }),
+                  },
+                  execute: ({ input }) => ({
+                    id: `users||${input.name.toLowerCase()}`,
+                    name: input.name,
+                  }),
+                },
+              },
+            },
+          },
+        },
+      );
+
+      const result = await env.apiStore.performMutation('users||1', {
+        mutation: () => Promise.resolve({ value: { name: 'unused' } }),
+        offline: [
+          {
+            operation: 'renameItem',
+            input: { id: 'users||1', name: 'Ada queued' },
+          },
+          {
+            operation: 'createItem',
+            input: { name: 'Temp', shouldCreateTempRef: false },
+          },
+        ],
+      });
+
+      expect(result.ok).toBe(false);
+      expect(
+        getOfflineQueueEntries(sessionKey, storeName),
+      ).toMatchInlineSnapshot(`[]`);
+      expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+      expect(env.store.state[getCompositeKey('temp:Temp')]).toBeUndefined();
     });
 
     test('call the direct mutation while online and skip queueing on success', async () => {
@@ -872,7 +1049,6 @@ describe('hybrid offline mutation execution', () => {
                 inputSchema: collectionCreateInputSchema,
                 getEntityRefs: ({ input }) => [`temp:${input.name}`],
                 tempEntity: {
-                  createTempId: (input) => `temp:${input.name}`,
                   buildPendingEntity: (input) => ({
                     value: { name: `pending:${input.name}` },
                   }),
@@ -898,7 +1074,7 @@ describe('hybrid offline mutation execution', () => {
 
     expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
     expect(env.apiStore.getOfflineEntities()).toMatchObject([
-      { entityKey: 'temp:Ada', tempId: 'temp:Ada' },
+      { entityKey: getCompositeKey('temp:Ada'), tempId: 'temp:Ada' },
     ]);
     expect(env.store.state[getCompositeKey('temp:Ada')]?.data).toMatchObject({
       value: { name: 'pending:Ada' },

@@ -20,7 +20,7 @@ import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
 import type {
   AnyOfflineOperationDefinition,
-  OfflineMutationDescriptor,
+  OfflineMutationInput,
 } from './persistentStorage/offline/types';
 import type { DocumentPersistentStorageConfig } from './persistentStorage/types';
 import {
@@ -141,6 +141,20 @@ type InternalDocumentOfflineOperations<State extends ValidStoreState> = Record<
 
 type DocumentOfflineOperationsConfig<State extends ValidStoreState> =
   InternalDocumentOfflineOperations<State> | null;
+
+function assertDocumentOfflineOperations(
+  operations: DocumentOfflineOperationsConfig<ValidStoreState>,
+): void {
+  if (!operations) return;
+
+  for (const [operationName, operation] of Object.entries(operations)) {
+    if (operation.tempEntity !== undefined) {
+      throw new Error(
+        `Document offline operation "${operationName}" does not support tempEntity`,
+      );
+    }
+  }
+}
 
 export type DocumentStoreOptions<
   State extends ValidStoreState,
@@ -267,6 +281,12 @@ export function createDocumentStore<
   const persistence = persistentStorageConfig
     ? setupDocumentPersistence({ ...persistentStorageConfig, getSessionKey })
     : null;
+
+  assertDocumentOfflineOperations(
+    __LEGIT_CAST__<DocumentOfflineOperationsConfig<ValidStoreState>, unknown>(
+      persistentStorageConfig?.offlineMode?.operations ?? null,
+    ),
+  );
 
   const offlineController = persistentStorageConfig?.offlineMode
     ? createOfflineStoreController({
@@ -807,10 +827,12 @@ export function createDocumentStore<
      * online, but degrades into durable offline queueing when the session is
      * already offline or the failure is classified as offline/outage. Callers
      * must not assume a successful result always includes the server payload.
+     * Pass one descriptor or an ordered non-empty list to queue multiple
+     * offline operations from the same mutation fallback.
      */
     offline: TOfflineOperations extends null
       ? never
-      : OfflineMutationDescriptor<Exclude<TOfflineOperations, null>>;
+      : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
   };
 
   async function performMutation<T>(

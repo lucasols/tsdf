@@ -28,6 +28,7 @@ type TodoItem = { title: string; completed: boolean };
 type RenameTodoInput = { id: string; title: string };
 type CreateTodoInput = { title: string };
 type TodoConflict = { reason: string };
+type CreateTodoResult = { id: string; title: string; completed: boolean };
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => {
@@ -47,6 +48,60 @@ afterEach(() => {
   localStorage.clear();
 });
 
+const validCollectionTempEntity: NonNullable<
+  DirectCollectionOfflineOperations['createTodo']['tempEntity']
+> = {
+  buildPendingEntity: (input, tempId) => ({
+    title: input.title,
+    completed: tempId.length > 0,
+  }),
+  reconcileServerEntity: (result, tempId) => ({
+    finalPayload: tempId === '__temp__' ? tempId : result.id,
+    finalData: { title: result.title, completed: result.completed },
+  }),
+};
+
+void validCollectionTempEntity;
+
+const invalidCollectionPendingTempEntity: NonNullable<
+  DirectCollectionOfflineOperations['createTodo']['tempEntity']
+> = {
+  // @ts-expect-error - buildPendingEntity must return TodoItem
+  buildPendingEntity: (input) => ({ title: input.title }),
+  reconcileServerEntity: (result) => ({
+    finalPayload: result.id,
+    finalData: { title: result.title, completed: result.completed },
+  }),
+};
+
+void invalidCollectionPendingTempEntity;
+
+const invalidCollectionFinalPayloadTempEntity: NonNullable<
+  DirectCollectionOfflineOperations['createTodo']['tempEntity']
+> = {
+  buildPendingEntity: (input) => ({ title: input.title, completed: false }),
+  reconcileServerEntity: (result) => ({
+    // @ts-expect-error - finalPayload must match TodoPayload
+    finalPayload: 123,
+    finalData: { title: result.title, completed: result.completed },
+  }),
+};
+
+void invalidCollectionFinalPayloadTempEntity;
+
+const invalidCollectionFinalDataTempEntity: NonNullable<
+  DirectCollectionOfflineOperations['createTodo']['tempEntity']
+> = {
+  buildPendingEntity: (input) => ({ title: input.title, completed: false }),
+  reconcileServerEntity: (result) => ({
+    finalPayload: result.id,
+    // @ts-expect-error - finalData must match TodoItem
+    finalData: { title: result.title },
+  }),
+};
+
+void invalidCollectionFinalDataTempEntity;
+
 type DirectCollectionOfflineOperations = DefineCollectionOfflineOperations<
   TodoItem,
   TodoPayload,
@@ -57,11 +112,12 @@ type DirectCollectionOfflineOperations = DefineCollectionOfflineOperations<
     createTodo: DefineOfflineOperation<
       CreateTodoInput,
       unknown,
-      { id: string; title: string; completed: boolean }
+      CreateTodoResult
     >;
   }
 >;
 
+// tests using the collection store directly without test envs to verify the public API usage
 test('direct collection store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-collection-offline-session';
@@ -165,9 +221,8 @@ test('direct collection store offline public api', async () => {
           },
           createTodo: {
             inputSchema: createTodoInputSchema,
-            getEntityRefs: () => [],
+            getEntityRefs: ({ input }) => [`temp:${input.title}`],
             tempEntity: {
-              createTempId: (input) => `temp:${input.title}`,
               buildPendingEntity: (input) => ({
                 title: input.title,
                 completed: false,
@@ -241,39 +296,31 @@ test('direct collection store offline public api', async () => {
   assert(todoUpdateResult.ok);
   expect(todoUpdateResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
-  await act(async () => {
-    await collectionStore.performMutation(todoOnePayload, {
-      optimisticUpdate: (payload) => {
-        collectionStore.updateItemState(payload, (item) => ({
+  const multiRenameResult = await act(async () => {
+    return collectionStore.performMutation(todoOnePayload, {
+      optimisticUpdate: () => {
+        collectionStore.updateItemState(todoOnePayload, (item) => ({
           ...item,
           title: 'Todo 1 second',
         }));
-      },
-      mutation: () =>
-        Promise.resolve({ title: 'Todo 1 second', completed: false }),
-      offline: {
-        operation: 'renameTodo',
-        input: { id: '1', title: 'Todo 1 second' },
-      },
-    });
-  });
-
-  await act(async () => {
-    await collectionStore.performMutation(todoTwoPayload, {
-      optimisticUpdate: (payload) => {
-        collectionStore.updateItemState(payload, (item) => ({
+        collectionStore.updateItemState(todoTwoPayload, (item) => ({
           ...item,
           title: 'Todo 2 offline',
         }));
       },
-      mutation: () =>
-        Promise.resolve({ title: 'Todo 2 offline', completed: false }),
-      offline: {
-        operation: 'renameTodo',
-        input: { id: '2', title: 'Todo 2 offline' },
-      },
+      mutation: () => Promise.resolve({ ok: true }),
+      offline: [
+        { operation: 'renameTodo', input: { id: '1', title: 'Todo 1 second' } },
+        {
+          operation: 'renameTodo',
+          input: { id: '2', title: 'Todo 2 offline' },
+        },
+      ],
     });
   });
+
+  assert(multiRenameResult.ok);
+  expect(multiRenameResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
   await act(async () => {
     await collectionStore.performMutation(todoOnePayload, {
@@ -340,7 +387,7 @@ test('direct collection store offline public api', async () => {
       storeType: 'collection',
     },
     {
-      entityKey: 'temp:Todo 3 offline',
+      entityKey: getCompositeKey('temp:Todo 3 offline'),
       pendingMutations: 1,
       storeType: 'collection',
       tempId: 'temp:Todo 3 offline',
