@@ -19,8 +19,8 @@ import {
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
 import type {
-  DocumentPersistentStorageConfig,
   PersistedDocumentData,
+  ResolvedDocumentPersistentStorageConfig,
 } from './types';
 
 type DocumentPersistenceOfflineOperations<State extends ValidStoreState> =
@@ -65,11 +65,11 @@ export function setupDocumentPersistence<
   TOfflineOperations extends DocumentPersistenceOfflineOperations<State> = null,
   StorageState = unknown,
 >(
-  config: DocumentPersistentStorageConfig<
+  config: ResolvedDocumentPersistentStorageConfig<
     State,
     StorageState,
     TOfflineOperations
-  > & { getSessionKey: () => string | false },
+  >,
 ): DocumentPersistenceSetup<State> {
   assertValidPersistentStoreName(config.storeName);
 

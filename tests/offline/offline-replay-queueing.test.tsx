@@ -63,7 +63,6 @@ describe('offline replay queueing and retry behavior', () => {
         getSessionKey: () => 'offline-temp-id-session',
         testScenario: 'loaded',
         persistentStorage: {
-          storeName: 'offline-temp-id-collection',
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
@@ -159,10 +158,10 @@ describe('offline replay queueing and retry behavior', () => {
       });
 
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
       persistentStorage: {
-        storeName,
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -310,7 +309,6 @@ describe('offline replay queueing and retry behavior', () => {
       getSessionKey: () => 'needs-confirmation-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'needs-confirmation-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -399,7 +397,6 @@ describe('offline replay queueing and retry behavior', () => {
       getSessionKey: () => 'needs-confirmation-no-outage-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'needs-confirmation-no-outage-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -457,7 +454,6 @@ describe('offline replay queueing and retry behavior', () => {
       getSessionKey: () => 'offline-needs-confirmation-accumulation-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'offline-needs-confirmation-accumulation-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -548,7 +544,6 @@ describe('offline replay queueing and retry behavior', () => {
       getSessionKey: () => 'online-needs-confirmation-retry-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'online-needs-confirmation-retry-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -607,10 +602,10 @@ describe('offline replay queueing and retry behavior', () => {
     let resolveReplay: ((result: { value: number }) => void) | undefined;
 
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: 'replay-session-switch-doc',
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'replay-session-switch-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {

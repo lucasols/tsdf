@@ -131,10 +131,10 @@ export function createDocumentEnv(options: {
   return createDocumentStoreTestEnv(
     options.serverData ?? { name: 'test', value: 42 },
     {
+      id: options.storeName,
       getSessionKey: () => options.sessionKey ?? 'session1',
       testScenario: options.testScenario,
       persistentStorage: {
-        storeName: options.storeName,
         adapter: opfsPersistentStorage,
         schema: wrappedDocumentSchema,
       },
@@ -152,9 +152,9 @@ export function createCollectionEnv(options: {
   storeName: string;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
-      storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: wrappedCollectionItemSchema,
       payloadSchema: rc_string,
@@ -190,7 +190,6 @@ export function createListQueryEnv(options: {
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
     persistentStorage: {
-      storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: rowSchema,
       itemPayloadSchema: rc_string,

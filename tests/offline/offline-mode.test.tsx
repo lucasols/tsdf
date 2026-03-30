@@ -87,11 +87,7 @@ describe('offline mode network and session', () => {
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
       getSessionKey: () => sessionKey,
       testScenario: 'idle',
-      persistentStorage: {
-        storeName: 'plain-persistence-doc',
-        adapter: 'local-sync',
-        schema: docSchema,
-      },
+      persistentStorage: { adapter: 'local-sync', schema: docSchema },
     });
 
     env.scheduleFetch('highPriority');
@@ -289,10 +285,10 @@ describe('offline mode network and session', () => {
 
     let currentSessionKey: string | false = 'offline-session-cleanup';
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: 'offline-session-cleanup-doc',
       getSessionKey: () => currentSessionKey,
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'offline-session-cleanup-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -338,10 +334,10 @@ describe('offline mode network and session', () => {
     const sessionKey = 'offline-doc-session';
     const storeName = 'offline-doc-store';
     const env = createDocumentStoreTestEnv(1, {
+      id: storeName,
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
       persistentStorage: {
-        storeName,
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -457,7 +453,6 @@ describe('offline mode network and session', () => {
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'offline-owned-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -523,7 +518,6 @@ describe('offline mode network and session', () => {
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'offline-missing-session-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -579,10 +573,10 @@ describe('offline mode network and session', () => {
     let mutationOk = false;
     await act(async () => {
       const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+        id: 'offline-global-hook-doc',
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
-          storeName: 'offline-global-hook-doc',
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
@@ -637,7 +631,6 @@ describe('offline mode network and session', () => {
       getSessionKey: () => 'offline-read-cache-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'offline-read-cache-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: { network: network.config, operations: {} },
@@ -668,7 +661,6 @@ describe('offline mode network and session', () => {
       getSessionKey: () => 'offline-read-empty-session',
       testScenario: 'idle',
       persistentStorage: {
-        storeName: 'offline-read-empty-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: { network: network.config, operations: {} },
@@ -699,7 +691,6 @@ describe('offline mode network and session', () => {
     createDocumentStoreTestEnv(1, {
       getSessionKey: () => sessionKey,
       persistentStorage: {
-        storeName: 'shared-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: { network: { enabled: true }, operations: {} },
@@ -711,7 +702,6 @@ describe('offline mode network and session', () => {
       {
         getSessionKey: () => sessionKey,
         persistentStorage: {
-          storeName: 'shared-collection',
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
@@ -746,10 +736,10 @@ describe('offline mode network and session', () => {
 
     function createEnv(storeName: string) {
       const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+        id: storeName,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
-          storeName,
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {

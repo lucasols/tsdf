@@ -47,7 +47,6 @@ function createConvertedSchemaConfig(
   } = {},
 ): CollectionPersistentStorageConfig<ItemState, string, StoredItemState> {
   return {
-    storeName: 'unused',
     adapter: opfsPersistentStorage,
     schema: {
       storeSchema: itemSchema,
@@ -77,10 +76,10 @@ function createEnv(options: {
   const schemaConfig = options.schemaConfig ?? createConvertedSchemaConfig();
 
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       ...schemaConfig,
-      storeName: options.storeName,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -186,7 +185,6 @@ describe('opfs: converted collection store persistence', () => {
             throw new Error('boom');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -240,7 +238,6 @@ describe('opfs: converted collection store persistence', () => {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidItemState,
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -274,7 +271,6 @@ describe('opfs: converted collection store persistence', () => {
             throw new Error('cannot-save');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 

@@ -105,10 +105,10 @@ describe('hybrid offline mutation execution', () => {
       const storeName = 'hybrid-doc-offline-store';
       const directMutation = vi.fn(() => Promise.resolve(2));
       const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+        id: storeName,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
-          storeName,
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
@@ -140,10 +140,10 @@ describe('hybrid offline mutation execution', () => {
       const storeName = 'hybrid-doc-online-store';
       const directMutation = vi.fn(() => Promise.resolve(2));
       const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+        id: storeName,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
-          storeName,
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
@@ -182,10 +182,10 @@ describe('hybrid offline mutation execution', () => {
         Promise.reject(new Error('offline-fallback')),
       );
       const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+        id: storeName,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
-          storeName,
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
@@ -230,10 +230,10 @@ describe('hybrid offline mutation execution', () => {
         Promise.reject(new Error('validation-error')),
       );
       const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+        id: storeName,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
-          storeName,
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
@@ -272,7 +272,6 @@ describe('hybrid offline mutation execution', () => {
         getSessionKey: () => 'hybrid-doc-void-online-session',
         testScenario: 'loaded',
         persistentStorage: {
-          storeName: 'hybrid-doc-void-online-store',
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {
@@ -332,10 +331,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { 'users||1': { name: 'Ada' } },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: 'loaded',
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: collectionSchema,
             payloadSchema: rc_string,
@@ -383,10 +382,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { 'users||1': { name: 'Ada' }, 'users||2': { name: 'Grace' } },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: 'loaded',
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: collectionSchema,
             payloadSchema: rc_string,
@@ -468,10 +467,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { 'users||1': { name: 'Ada' } },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: 'loaded',
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: collectionSchema,
             payloadSchema: rc_string,
@@ -541,10 +540,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { 'users||1': { name: 'Ada' } },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: 'loaded',
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: collectionSchema,
             payloadSchema: rc_string,
@@ -592,10 +591,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { 'users||1': { name: 'Ada' } },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: 'loaded',
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: collectionSchema,
             payloadSchema: rc_string,
@@ -650,10 +649,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { 'users||1': { name: 'Ada' } },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: 'loaded',
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: collectionSchema,
             payloadSchema: rc_string,
@@ -710,10 +709,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { users: [{ id: 1, name: 'Ada' }] },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: userRowSchema,
             itemPayloadSchema: rc_string,
@@ -757,10 +756,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { users: [{ id: 1, name: 'Ada' }] },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: userRowSchema,
             itemPayloadSchema: rc_string,
@@ -810,7 +809,6 @@ describe('hybrid offline mutation execution', () => {
           getSessionKey: () => 'hybrid-list-void-online-session',
           testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
           persistentStorage: {
-            storeName: 'hybrid-list-void-online-store',
             adapter: 'local-sync',
             schema: userRowSchema,
             itemPayloadSchema: rc_string,
@@ -860,10 +858,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { users: [{ id: 1, name: 'Ada' }] },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: userRowSchema,
             itemPayloadSchema: rc_string,
@@ -921,10 +919,10 @@ describe('hybrid offline mutation execution', () => {
       >(
         { users: [{ id: 1, name: 'Ada' }] },
         {
+          id: storeName,
           getSessionKey: () => sessionKey,
           testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
           persistentStorage: {
-            storeName,
             adapter: 'local-sync',
             schema: userRowSchema,
             itemPayloadSchema: rc_string,
@@ -973,7 +971,6 @@ describe('hybrid offline mutation execution', () => {
       getSessionKey: () => 'hybrid-doc-optimistic-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'hybrid-doc-optimistic-store',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -1029,10 +1026,10 @@ describe('hybrid offline mutation execution', () => {
     >(
       { 'users||1': { name: 'User 1' } },
       {
+        id: storeName,
         getSessionKey: () => sessionKey,
         testScenario: 'loaded',
         persistentStorage: {
-          storeName,
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
@@ -1101,10 +1098,10 @@ describe('hybrid offline mutation execution', () => {
       Promise.reject(new Error('offline-fallback')),
     );
     const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
       getSessionKey: () => sessionKey,
       testScenario: 'loaded',
       persistentStorage: {
-        storeName,
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -1171,7 +1168,6 @@ describe('hybrid offline mutation execution', () => {
       getSessionKey: () => 'hybrid-conflict-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'hybrid-conflict-store',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {

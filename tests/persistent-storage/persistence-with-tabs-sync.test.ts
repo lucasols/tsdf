@@ -318,7 +318,6 @@ describe('persistence + browser tabs sync integration', () => {
       usesRealTimeUpdates: true,
       dynamicRealtimeThrottleMs: () => 300,
       persistentStorage: {
-        storeName,
         adapter: 'local-sync',
         schema: rowSchema,
         itemPayloadSchema: rc_string,

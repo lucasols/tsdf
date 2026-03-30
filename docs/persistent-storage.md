@@ -38,9 +38,8 @@ Common options (applies to all store configs):
 
 | Option                            | Required | Description                                             |
 | --------------------------------- | -------- | ------------------------------------------------------- |
-| `storeName`                       | Yes      | Unique name of the persisted store namespace.           |
 | `schema`                          | Yes      | Schema used to validate restored data.                  |
-| `backend`                         | No       | `'opfs'` by default.                                    |
+| `adapter`                         | Yes      | `'local-sync'` or a custom async adapter.               |
 | `version`                         | No       | Cache version; bump to invalidate old entries.          |
 | `onPersistentStorageError(error)` | No       | Callback for write/read failures (quota, decode, etc.). |
 
@@ -51,7 +50,7 @@ Store-specific options:
 | Collection Store | `maxItems`, `pinnedItems`, `ignoreItems`                                                |
 | List Query Store | `maxItems`, `maxQueries`, `maxQuerySize`, `pinnedItems`, `pinnedQueries`, `ignoreItems` |
 
-> `PersistentStorageConfig` uses the store's existing `getSessionKey` automatically. When `getSessionKey` returns `false`, no persistence operations run.
+> `persistentStorage` automatically reuses the store's existing `id` for its storage namespace and the store's existing `getSessionKey` for session scoping. When `getSessionKey` returns `false`, no persistence operations run.
 
 ## Backend behavior
 
@@ -86,8 +85,7 @@ const settingsStore = createDocumentStore<Settings>({
   backgroundCoalescingWindowMultiplier: 2,
   blockWindowClose: null,
   persistentStorage: {
-    storeName: 'settings',
-    backend: 'opfs',
+    adapter: 'local-sync',
     version: 2,
     schema: rc_object({
       data: rc_object({ id: rc_string(), theme: rc_string() }),

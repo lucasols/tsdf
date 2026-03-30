@@ -151,7 +151,6 @@ test('direct collection store offline public api', async () => {
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
     persistentStorage: {
-      storeName: 'direct-collection-offline',
       adapter: 'local-sync',
       schema: todoSchema,
       payloadSchema: todoPayloadSchema,

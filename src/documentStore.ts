@@ -198,7 +198,8 @@ export type DocumentStoreOptions<
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached data is loaded
    * from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`. */
+   * Session scoping always reuses this store's `getSessionKey`, and the
+   * persisted namespace always reuses this store's `id`. */
   persistentStorage?: DocumentPersistentStorageConfig<
     State,
     StorageState,
@@ -263,6 +264,9 @@ export function createDocumentStore<
   let initialStatus: DocumentStatus = 'idle';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
+  const resolvedPersistentStorageConfig = persistentStorageConfig
+    ? { ...persistentStorageConfig, getSessionKey, storeName: id }
+    : null;
 
   if (import.meta.env.TEST && testOptions) {
     if (testOptions.initialData) {
@@ -283,8 +287,8 @@ export function createDocumentStore<
   }
 
   // Persistent storage setup
-  const persistence = persistentStorageConfig
-    ? setupDocumentPersistence({ ...persistentStorageConfig, getSessionKey })
+  const persistence = resolvedPersistentStorageConfig
+    ? setupDocumentPersistence(resolvedPersistentStorageConfig)
     : null;
 
   assertDocumentOfflineOperations(
@@ -294,15 +298,15 @@ export function createDocumentStore<
     ),
   );
 
-  const offlineController = persistentStorageConfig?.offlineMode
+  const offlineController = resolvedPersistentStorageConfig?.offlineMode
     ? createOfflineStoreController({
-        storeName: persistentStorageConfig.storeName,
+        storeName: id,
         storeType: 'document',
         getSessionKey,
         onPersistentStorageError:
-          persistentStorageConfig.onPersistentStorageError,
-        adapter: persistentStorageConfig.adapter,
-        offlineMode: persistentStorageConfig.offlineMode,
+          resolvedPersistentStorageConfig.onPersistentStorageError,
+        adapter: resolvedPersistentStorageConfig.adapter,
+        offlineMode: resolvedPersistentStorageConfig.offlineMode,
         storeAdapter: {
           getEntityRefs: () => [
             { entityKey: DOC_TARGET_KEY, entityKind: 'document' },
@@ -316,11 +320,11 @@ export function createDocumentStore<
             return [
               createProtectedStorageKey({
                 backend:
-                  persistentStorageConfig.adapter !== 'local-sync'
+                  resolvedPersistentStorageConfig.adapter !== 'local-sync'
                     ? 'opfs'
                     : 'localStorage',
                 sessionKey,
-                storeName: persistentStorageConfig.storeName,
+                storeName: id,
                 kind: 'document',
                 key: 'document',
               }),
@@ -941,7 +945,7 @@ export function createDocumentStore<
     const offlineEntities = useOfflineStoreEntities({
       sessionKey: getSessionKey(),
       inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
+      storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
     const isOffScreenFromContext = useContext(IsOffScreenContext);
     const disabled = disabledProp ?? isOffScreenProp ?? isOffScreenFromContext;
@@ -1195,7 +1199,7 @@ export function createDocumentStore<
       return useOfflineStoreEntities({
         sessionKey: getSessionKey(),
         inactiveScope: id,
-        storeName: persistentStorageConfig?.storeName,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
     },
     getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],

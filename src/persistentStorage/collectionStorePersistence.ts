@@ -59,8 +59,8 @@ import { COLLECTION_STORAGE_ENTRY_PREFIX } from './storageEntryPrefixes';
 import type {
   AsyncStorageDriver,
   AsyncStorageNamespaceScope,
-  CollectionPersistentStorageConfig,
   PersistedCollectionItemData,
+  ResolvedCollectionPersistentStorageConfig,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
@@ -135,12 +135,12 @@ export function setupCollectionPersistence<
   > = null,
   StorageState = unknown,
 >(
-  config: CollectionPersistentStorageConfig<
+  config: ResolvedCollectionPersistentStorageConfig<
     ItemState,
     ItemPayload,
     StorageState,
     TOfflineOperations
-  > & { getSessionKey: () => string | false },
+  >,
   options: { getItemKey?: (payload: ItemPayload) => string } = {},
 ): CollectionPersistenceSetup<ItemState, ItemPayload> {
   assertValidPersistentStoreName(config.storeName);

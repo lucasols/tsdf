@@ -66,7 +66,6 @@ describe('offline replay list-query behavior', () => {
         getSessionKey: () => 'offline-replay-mutation-payload-session',
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
-          storeName: 'offline-replay-mutation-payload',
           adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
@@ -224,7 +223,6 @@ describe('offline replay list-query behavior', () => {
         getSessionKey: () => 'offline-replay-temp-list-query-session',
         testScenario: { loaded: { queries: [{ tableId: 'users' }] } },
         persistentStorage: {
-          storeName: 'offline-replay-temp-list-query',
           adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,

@@ -407,11 +407,11 @@ describe('sync storage efficiency: maintenance', () => {
     >(
       { name: 'protected', value: 1 },
       {
+        id: 'protected-doc',
         getSessionKey: () => dottedSessionKey,
         testScenario: 'loaded',
         __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         persistentStorage: {
-          storeName: 'protected-doc',
           adapter: 'local-sync',
           schema: wrappedDocumentSchema,
           offlineMode: {
@@ -449,10 +449,10 @@ describe('sync storage efficiency: maintenance', () => {
     const triggerDocEnv = createDocumentStoreTestEnv(
       { name: 'trigger', value: 3 },
       {
+        id: 'trigger-doc',
         getSessionKey: () => 'sess-trigger',
         __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: true,
         persistentStorage: {
-          storeName: 'trigger-doc',
           adapter: 'local-sync',
           schema: wrappedDocumentSchema,
         },

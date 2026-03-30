@@ -417,7 +417,6 @@ describe('collection hook memoization', () => {
         getSessionKey: () => 'collection-pending-sync-memoization',
         testScenario: 'loaded',
         persistentStorage: {
-          storeName: 'collection-pending-sync-memoization',
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,
@@ -999,7 +998,6 @@ describe('list-query hook memoization', () => {
         getSessionKey: () => 'list-query-item-pending-sync-memoization',
         testScenario: { loaded: { tables: ['users'] } },
         persistentStorage: {
-          storeName: 'list-query-item-pending-sync-memoization',
           adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,
@@ -1080,7 +1078,6 @@ describe('list-query hook memoization', () => {
         getSessionKey: () => 'list-query-query-pending-sync-memoization',
         testScenario: { loaded: { tables: ['users', 'products'] } },
         persistentStorage: {
-          storeName: 'list-query-query-pending-sync-memoization',
           adapter: 'local-sync',
           schema: userRowSchema,
           itemPayloadSchema: rc_string,

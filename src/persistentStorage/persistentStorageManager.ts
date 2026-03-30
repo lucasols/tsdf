@@ -65,7 +65,7 @@ export function assertValidPersistentStoreName(storeName: string): void {
   if (!storeName.includes('.')) return;
 
   throw new Error(
-    `[tsdf] persistentStorage.storeName "${storeName}" must not contain ".".`,
+    `[tsdf] store id "${storeName}" must not contain "." when persistentStorage is enabled.`,
   );
 }
 

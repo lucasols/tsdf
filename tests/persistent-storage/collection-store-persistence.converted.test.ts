@@ -41,7 +41,6 @@ function createConvertedSchemaConfig(
   } = {},
 ): CollectionPersistentStorageConfig<ItemState, string, StoredItemState> {
   return {
-    storeName: 'unused',
     adapter: 'local-sync',
     schema: {
       storeSchema: itemSchema,
@@ -71,10 +70,10 @@ function createEnv(options: {
   const schemaConfig = options.schemaConfig ?? createConvertedSchemaConfig();
 
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       ...schemaConfig,
-      storeName: options.storeName,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -210,7 +209,6 @@ describe('localStorage: converted collection store persistence', () => {
             throw new Error('boom');
           },
         }),
-        storeName: 'placeholder',
       },
     });
     const invalidFinalEnv = createEnv({
@@ -220,7 +218,6 @@ describe('localStorage: converted collection store persistence', () => {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidItemState,
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -259,7 +256,6 @@ describe('localStorage: converted collection store persistence', () => {
             throw new Error('cannot-save');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 

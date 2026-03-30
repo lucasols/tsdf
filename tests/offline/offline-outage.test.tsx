@@ -26,7 +26,6 @@ describe('offline mode outage and recovery', () => {
     const env = createDocumentStoreTestEnv(1, {
       getSessionKey: () => sessionKey,
       persistentStorage: {
-        storeName: 'outage-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -71,7 +70,6 @@ describe('offline mode outage and recovery', () => {
     const env = createDocumentStoreTestEnv(1, {
       getSessionKey: () => sessionKey,
       persistentStorage: {
-        storeName: 'recovery-probe-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -142,9 +140,9 @@ describe('offline mode outage and recovery', () => {
 
     const createOfflineEnv = (storeName: string) =>
       createDocumentStoreTestEnv(1, {
+        id: storeName,
         getSessionKey: () => sessionKey,
         persistentStorage: {
-          storeName,
           adapter: 'local-sync',
           schema: docSchema,
           offlineMode: {

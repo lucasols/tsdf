@@ -122,9 +122,9 @@ function createEnv(options: {
   onPersistentStorageError?: (error: unknown) => void;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
-      storeName: options.storeName,
       adapter: 'local-sync',
       schema: wrappedItemSchema,
       payloadSchema: rc_string,
@@ -155,7 +155,7 @@ describe('localStorage: collection store persistence', () => {
     expect(() =>
       createEnv({ storeName: 'collection.with-dot', sessionKey: 'sess1' }),
     ).toThrowError(
-      '[tsdf] persistentStorage.storeName "collection.with-dot" must not contain ".".',
+      '[tsdf] store id "collection.with-dot" must not contain "." when persistentStorage is enabled.',
     );
   });
 

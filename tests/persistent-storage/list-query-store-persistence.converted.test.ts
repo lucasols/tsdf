@@ -48,7 +48,6 @@ function createConvertedSchemaConfig(
   } = {},
 ): ListQueryPersistentStorageConfig<Row, ListQueryParams, string, StoredRow> {
   return {
-    storeName: 'unused',
     adapter: 'local-sync',
     schema: {
       storeSchema: rowSchema,
@@ -84,7 +83,6 @@ function createEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       ...schemaConfig,
-      storeName: options.storeName,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -277,7 +275,6 @@ describe('localStorage: converted list query store persistence', () => {
             throw new Error('boom');
           },
         }),
-        storeName: 'placeholder',
       },
     });
     const invalidFinalEnv = createEnv({
@@ -287,7 +284,6 @@ describe('localStorage: converted list query store persistence', () => {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidRow,
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -338,7 +334,6 @@ describe('localStorage: converted list query store persistence', () => {
             throw new Error('cannot-save');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 

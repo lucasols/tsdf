@@ -49,9 +49,9 @@ function createDocumentEnv(options: {
   return createDocumentStoreTestEnv(
     options.serverData ?? { name: 'fresh', value: 42 },
     {
+      id: options.storeName,
       getSessionKey: () => options.sessionKey,
       persistentStorage: {
-        storeName: options.storeName,
         adapter: 'local-sync',
         schema: wrappedDocumentSchema,
       },
@@ -65,9 +65,9 @@ function createCollectionEnv(options: {
   serverData?: Record<string, { id: string; name: string }>;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey,
     persistentStorage: {
-      storeName: options.storeName,
       adapter: 'local-sync',
       schema: wrappedCollectionItemSchema,
       payloadSchema: rc_string,
@@ -84,7 +84,6 @@ function createListQueryEnv(options: {
     id: options.storeName,
     getSessionKey: () => options.sessionKey,
     persistentStorage: {
-      storeName: options.storeName,
       adapter: 'local-sync',
       schema: rowSchema,
       itemPayloadSchema: rc_string,

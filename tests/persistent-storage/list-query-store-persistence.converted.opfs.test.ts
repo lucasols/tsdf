@@ -54,7 +54,6 @@ function createConvertedSchemaConfig(
   } = {},
 ): ListQueryPersistentStorageConfig<Row, ListQueryParams, string, StoredRow> {
   return {
-    storeName: 'unused',
     adapter: opfsPersistentStorage,
     schema: {
       storeSchema: rowSchema,
@@ -98,7 +97,6 @@ function createEnv(options: {
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
       ...schemaConfig,
-      storeName: options.storeName,
       onPersistentStorageError: options.onPersistentStorageError,
     },
   });
@@ -227,7 +225,6 @@ describe('opfs: converted list query store persistence', () => {
             throw new Error('boom');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -279,7 +276,6 @@ describe('opfs: converted list query store persistence', () => {
         ...createConvertedSchemaConfig({
           convertFromStorage: createInvalidRow,
         }),
-        storeName: 'placeholder',
       },
     });
 
@@ -326,7 +322,6 @@ describe('opfs: converted list query store persistence', () => {
             throw new Error('cannot-save');
           },
         }),
-        storeName: 'placeholder',
       },
     });
 

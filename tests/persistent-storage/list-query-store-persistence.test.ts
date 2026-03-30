@@ -202,7 +202,6 @@ function createEnv(options: {
     dynamicRealtimeThrottleMs: options.dynamicRealtimeThrottleMs,
     bindFocusController: options.bindFocusController,
     persistentStorage: {
-      storeName: options.storeName,
       adapter: 'local-sync',
       schema: rowSchema,
       itemPayloadSchema: rc_string,
@@ -237,7 +236,7 @@ describe('localStorage: list query store persistence', () => {
     expect(() =>
       createEnv({ storeName: 'users.with-dot', sessionKey: 'sess1' }),
     ).toThrowError(
-      '[tsdf] persistentStorage.storeName "users.with-dot" must not contain ".".',
+      '[tsdf] store id "users.with-dot" must not contain "." when persistentStorage is enabled.',
     );
   });
 

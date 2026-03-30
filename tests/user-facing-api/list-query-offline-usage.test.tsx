@@ -185,7 +185,6 @@ test('direct list-query store offline public api', async () => {
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
     persistentStorage: {
-      storeName: 'direct-list-query-offline',
       adapter: 'local-sync',
       schema: userSchema,
       itemPayloadSchema: userPayloadSchema,

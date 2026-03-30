@@ -75,10 +75,10 @@ describe('offline replay conflict handling', () => {
       number,
       UpdateValueConflictOperations
     >(1, {
+      id: 'offline-conflict-doc',
       getSessionKey: () => 'offline-conflict-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'offline-conflict-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -238,10 +238,10 @@ describe('offline replay conflict handling', () => {
       number,
       UpdateValueConflictOperations
     >(1, {
+      id: 'offline-conflict-requeue-doc',
       getSessionKey: () => 'offline-conflict-requeue-session',
       testScenario: 'loaded',
       persistentStorage: {
-        storeName: 'offline-conflict-requeue-doc',
         adapter: 'local-sync',
         schema: docSchema,
         offlineMode: {
@@ -332,7 +332,6 @@ describe('offline replay conflict handling', () => {
         getSessionKey: () => 'offline-conflict-temp-requeue-session',
         testScenario: 'loaded',
         persistentStorage: {
-          storeName: 'offline-conflict-temp-requeue-collection',
           adapter: 'local-sync',
           schema: collectionSchema,
           payloadSchema: rc_string,

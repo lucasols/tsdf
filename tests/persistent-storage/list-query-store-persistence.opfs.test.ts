@@ -92,7 +92,6 @@ function createEnv(options: {
     offsetPagination: options.offsetPagination,
     defaultQuerySize: options.defaultQuerySize,
     persistentStorage: {
-      storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: rowSchema,
       itemPayloadSchema: rc_string,

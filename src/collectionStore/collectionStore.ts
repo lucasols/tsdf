@@ -276,7 +276,8 @@ export type CollectionStoreOptions<
   usesRealTimeUpdates?: boolean;
   /** Opt-in persistent storage configuration. When provided, cached items are loaded
    * from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`. */
+   * Session scoping always reuses this store's `getSessionKey`, and the
+   * persisted namespace always reuses this store's `id`. */
   persistentStorage?: CollectionPersistentStorageConfig<
     ItemState,
     ItemPayload,
@@ -373,6 +374,9 @@ export function createCollectionStore<
   let initialStatus: CollectionItemStatus = 'success';
   let initialError: StoreError | null = null;
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
+  const resolvedPersistentStorageConfig = persistentStorageConfig
+    ? { ...persistentStorageConfig, getSessionKey, storeName: id }
+    : null;
 
   if (import.meta.env.TEST && testOptions) {
     if (testOptions.initialData) {
@@ -393,11 +397,10 @@ export function createCollectionStore<
   }
 
   // Persistent storage setup
-  const persistence = persistentStorageConfig
-    ? setupCollectionPersistence(
-        { ...persistentStorageConfig, getSessionKey },
-        { getItemKey },
-      )
+  const persistence = resolvedPersistentStorageConfig
+    ? setupCollectionPersistence(resolvedPersistentStorageConfig, {
+        getItemKey,
+      })
     : null;
 
   const store = new Store<CollectionState>({
@@ -430,15 +433,15 @@ export function createCollectionStore<
     );
   }
 
-  const offlineController = persistentStorageConfig?.offlineMode
+  const offlineController = resolvedPersistentStorageConfig?.offlineMode
     ? createOfflineStoreController({
-        storeName: persistentStorageConfig.storeName,
+        storeName: id,
         storeType: 'collection',
         getSessionKey,
         onPersistentStorageError:
-          persistentStorageConfig.onPersistentStorageError,
-        adapter: persistentStorageConfig.adapter,
-        offlineMode: persistentStorageConfig.offlineMode,
+          resolvedPersistentStorageConfig.onPersistentStorageError,
+        adapter: resolvedPersistentStorageConfig.adapter,
+        offlineMode: resolvedPersistentStorageConfig.offlineMode,
         storeAdapter: {
           normalizeEntityRefs: (entityRefs) =>
             entityRefs.map((ref) => {
@@ -462,11 +465,11 @@ export function createCollectionStore<
             return entityRefs.map((ref) =>
               createProtectedStorageKey({
                 backend:
-                  persistentStorageConfig.adapter !== 'local-sync'
+                  resolvedPersistentStorageConfig.adapter !== 'local-sync'
                     ? 'opfs'
                     : 'localStorage',
                 sessionKey,
-                storeName: persistentStorageConfig.storeName,
+                storeName: id,
                 kind: 'collection.item',
                 key: ref.entityKey,
               }),
@@ -1323,7 +1326,7 @@ export function createCollectionStore<
     const getPendingSync = useGetPendingSync({
       sessionKey: getSessionKey(),
       inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
+      storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
 
     return useMultipleItemsBase<
@@ -1870,7 +1873,7 @@ export function createCollectionStore<
       return useOfflineStoreEntities({
         sessionKey: getSessionKey(),
         inactiveScope: id,
-        storeName: persistentStorageConfig?.storeName,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
     },
     getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],

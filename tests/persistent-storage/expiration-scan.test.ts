@@ -45,12 +45,9 @@ function createTriggerEnv(
     { name: 'trigger', value: 1 },
     {
       __DANGEROUS_IGNORE_INITIAL_TIME_CHECK__: ignoreInitialTimeCheck,
+      id: storeName,
       getSessionKey: () => sessionKey,
-      persistentStorage: {
-        storeName,
-        adapter: 'local-sync',
-        schema: wrappedSchema,
-      },
+      persistentStorage: { adapter: 'local-sync', schema: wrappedSchema },
     },
   );
 }
@@ -331,12 +328,9 @@ describe('expiration scan', () => {
     const env = createDocumentStoreTestEnv(
       { name: 'server', value: 2 },
       {
+        id: 'bad-doc',
         getSessionKey: () => 'sess1',
-        persistentStorage: {
-          storeName: 'bad-doc',
-          adapter: 'local-sync',
-          schema: wrappedSchema,
-        },
+        persistentStorage: { adapter: 'local-sync', schema: wrappedSchema },
       },
     );
     expect(env.store.state.status).toBe('idle');

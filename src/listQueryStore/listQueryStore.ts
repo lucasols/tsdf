@@ -338,7 +338,8 @@ type ListQueryStoreOptionsBase<
   getItemKey?: (params: ItemPayload) => ValidPayload | unknown[];
   /** Opt-in persistent storage configuration. When provided, cached items and queries
    * are loaded from storage on first read and saved back on successful fetches.
-   * Session scoping always reuses this store's `getSessionKey`. */
+   * Session scoping always reuses this store's `getSessionKey`, and the
+   * persisted namespace always reuses this store's `id`. */
   persistentStorage?: ListQueryPersistentStorageConfig<
     ItemState,
     QueryPayload,
@@ -598,13 +599,16 @@ export function createListQueryStore<
   };
 
   const globalDisableRefetchOnMount = usesRealTimeUpdates;
+  const resolvedPersistentStorageConfig = persistentStorageConfig
+    ? { ...persistentStorageConfig, getSessionKey, storeName: id }
+    : null;
 
   // Persistent storage setup
-  const persistence = persistentStorageConfig
-    ? setupListQueryPersistence(
-        { ...persistentStorageConfig, getSessionKey },
-        { getItemKey, getQueryKey },
-      )
+  const persistence = resolvedPersistentStorageConfig
+    ? setupListQueryPersistence(resolvedPersistentStorageConfig, {
+        getItemKey,
+        getQueryKey,
+      })
     : null;
 
   const store = new Store<State>({
@@ -1168,7 +1172,7 @@ export function createListQueryStore<
       events.emit('invalidateItem', event);
     },
     blockWindowClose,
-    offlineController: persistentStorageConfig?.offlineMode
+    offlineController: resolvedPersistentStorageConfig?.offlineMode
       ? offlineMutationController
       : null,
     runWithBroadcastConsistency,
@@ -1176,17 +1180,17 @@ export function createListQueryStore<
     publishItemSnapshot,
   });
 
-  if (persistentStorageConfig?.offlineMode) {
+  if (resolvedPersistentStorageConfig?.offlineMode) {
     offlineController = createOfflineStoreController<
       Exclude<TOfflineOperations, null>
     >({
-      storeName: persistentStorageConfig.storeName,
+      storeName: id,
       storeType: 'listQuery',
       getSessionKey,
       onPersistentStorageError:
-        persistentStorageConfig.onPersistentStorageError,
-      adapter: persistentStorageConfig.adapter,
-      offlineMode: persistentStorageConfig.offlineMode,
+        resolvedPersistentStorageConfig.onPersistentStorageError,
+      adapter: resolvedPersistentStorageConfig.adapter,
+      offlineMode: resolvedPersistentStorageConfig.offlineMode,
       storeAdapter: {
         normalizeEntityRefs: (entityRefs) =>
           entityRefs.map((ref) => {
@@ -1210,11 +1214,11 @@ export function createListQueryStore<
           return entityRefs.map((ref) =>
             createProtectedStorageKey({
               backend:
-                persistentStorageConfig.adapter !== 'local-sync'
+                resolvedPersistentStorageConfig.adapter !== 'local-sync'
                   ? 'opfs'
                   : 'localStorage',
               sessionKey,
-              storeName: persistentStorageConfig.storeName,
+              storeName: id,
               kind: 'listQuery.item',
               key: ref.entityKey,
             }),
@@ -1697,7 +1701,7 @@ export function createListQueryStore<
       const getPendingSyncForItemKeys = useGetPendingSyncForItemKeys({
         sessionKey: getSessionKey(),
         inactiveScope: id,
-        storeName: persistentStorageConfig?.storeName,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
 
       return useMultipleListQueriesHook<
@@ -1771,7 +1775,7 @@ export function createListQueryStore<
     const getPendingSync = useGetPendingSync({
       sessionKey: getSessionKey(),
       inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
+      storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
 
     return useMultipleItemsHook<
@@ -2165,7 +2169,7 @@ export function createListQueryStore<
       return useOfflineStoreEntities({
         sessionKey: getSessionKey(),
         inactiveScope: id,
-        storeName: persistentStorageConfig?.storeName,
+        storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
     },
     getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],

@@ -80,9 +80,9 @@ function createEnv(options: {
   serverData?: Record<string, ItemState>;
 }) {
   return createCollectionStoreTestEnv(options.serverData ?? {}, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
-      storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: wrappedItemSchema,
       payloadSchema: rc_string,

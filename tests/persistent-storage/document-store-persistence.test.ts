@@ -86,9 +86,9 @@ function createDocPersistenceEnv(options: {
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
 
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
+    id: options.storeName,
     getSessionKey,
     persistentStorage: {
-      storeName: options.storeName,
       adapter: 'local-sync',
       schema: wrappedSchema,
       version: options.version,
@@ -118,7 +118,7 @@ describe('localStorage: document store persistence', () => {
         sessionKey: 'sess1',
       }),
     ).toThrowError(
-      '[tsdf] persistentStorage.storeName "doc.with-dot" must not contain ".".',
+      '[tsdf] store id "doc.with-dot" must not contain "." when persistentStorage is enabled.',
     );
   });
 
@@ -780,11 +780,7 @@ describe('standard schema support', () => {
       lowPriorityThrottleMs: 200,
       baseCoalescingWindowMs: 10,
       blockWindowClose: null,
-      persistentStorage: {
-        storeName: 'std-doc',
-        adapter: 'local-sync',
-        schema: standardSchema,
-      },
+      persistentStorage: { adapter: 'local-sync', schema: standardSchema },
     });
 
     expect(store.store.state.data).toMatchInlineSnapshot(`

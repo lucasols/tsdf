@@ -41,9 +41,9 @@ function createDocPersistenceEnv(options: {
     options.getSessionKey ?? (() => options.sessionKey ?? 'session1');
 
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
+    id: options.storeName,
     getSessionKey,
     persistentStorage: {
-      storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: wrappedSchema,
       version: options.version,

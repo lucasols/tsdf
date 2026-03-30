@@ -70,9 +70,9 @@ function createEnv(options: {
   onPersistentStorageError?: (error: unknown) => void;
 }) {
   return createDocumentStoreTestEnv(options.serverData ?? defaultServerData, {
+    id: options.storeName,
     getSessionKey: () => options.sessionKey ?? 'session1',
     persistentStorage: {
-      storeName: options.storeName,
       adapter: opfsPersistentStorage,
       schema: options.schema ?? createConvertedSchema(),
       onPersistentStorageError: options.onPersistentStorageError,

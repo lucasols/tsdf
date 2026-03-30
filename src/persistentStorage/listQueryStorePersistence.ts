@@ -72,9 +72,9 @@ import {
 import type {
   AsyncStorageDriver,
   AsyncStorageNamespaceScope,
-  ListQueryPersistentStorageConfig,
   PersistedListQueryData,
   PersistedListQueryItemData,
+  ResolvedListQueryPersistentStorageConfig,
 } from './types';
 import { validateWithSchema } from './validateWithSchema';
 
@@ -208,13 +208,13 @@ export function setupListQueryPersistence<
   > = null,
   StorageState = unknown,
 >(
-  config: ListQueryPersistentStorageConfig<
+  config: ResolvedListQueryPersistentStorageConfig<
     ItemState,
     QueryPayload,
     ItemPayload,
     StorageState,
     TOfflineOperations
-  > & { getSessionKey: () => string | false },
+  >,
   options: {
     getItemKey?: (payload: ItemPayload) => string;
     getQueryKey?: (payload: QueryPayload) => string;

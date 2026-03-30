@@ -115,7 +115,6 @@ test('direct document store offline public api', async () => {
     baseCoalescingWindowMs: 10,
     blockWindowClose: null,
     persistentStorage: {
-      storeName: 'direct-document-offline',
       adapter: 'local-sync',
       schema: docSchema,
       offlineMode: {
