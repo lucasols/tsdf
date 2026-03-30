@@ -4,6 +4,7 @@
   "trailingComma": "all",
   "singleAttributePerLine": true,
   "printWidth": 80,
+  "experimentalSortImports": {},
   "experimentalSortPackageJson": false,
   "ignorePatterns": ["node_modules", "dist", "build", "*.lock", ".git"],
   "objectWrap": "collapse"
