@@ -22,6 +22,7 @@ Use this checklist to evaluate test quality quickly and consistently.
 - Do multi-phase `createLoggerStore` timelines use `.addMark('label')` to separate logical steps?
 - Are related assertions grouped into readable snapshots instead of scattered across many `expect` calls?
 - Is the test still readable if you ignore implementation details like raw store shape, fetch history, or transport internals?
+- Is there a top-level `describe` block that merely repeats the file name? If so, remove it (or rename the file if the `describe` label carries extra meaning).
 - If the answer to any of these is no, treat it as a real review finding rather than optional polish.
 
 ## Coverage

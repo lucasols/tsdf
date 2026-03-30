@@ -138,6 +138,7 @@ Default mode is to improve tests, not just critique them. Read the relevant test
 - Default stance: unreadable tests are review findings, not polish opportunities.
 - A strong test should let a human reviewer answer three questions in seconds: what is the setup, what changed, and what should happen next.
 - Flag test names that are wrong, vague, or misleading relative to the actual assertions.
+- **Flag top-level `describe` blocks that merely repeat the file name.** A file-level `describe` wrapper that adds no information beyond what the file name already communicates is pure noise — remove it and let the inner `describe`/`test` blocks stand on their own. If the top-level `describe` label carries meaning that the file name does not, rename the file to be self-explanatory instead of keeping the redundant wrapper.
 - Flag brittle fixtures, duplicated setup, and opaque data builders.
 - Prefer human-readable snapshots over dense object comparisons.
 - When a timeline snapshot can express the behavior clearly, prefer it as the primary readable artifact and keep additional assertions limited to key invariants or end-state checks.
