@@ -32,7 +32,7 @@ export default lsStackEslintCfg({
                 fn: '__LEGIT_CAST__',
                 commentPrefix: 'WORKAROUND:',
                 message:
-                  'Only use __LEGIT_CAST__ as a last resort workaround! A proper typesafe solution should be implemented instead when possible.',
+                  'Only use __LEGIT_CAST__ as a last resort workaround! Double check if using a proper typesafe solution can be implemented instead.',
               },
             ],
           },
