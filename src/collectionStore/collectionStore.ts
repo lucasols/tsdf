@@ -26,6 +26,7 @@ import {
   FetchType,
   getAutoIncrementId,
   RequestScheduler,
+  RequestSchedulerEventData,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
   ScheduleFetchResults,
@@ -216,7 +217,10 @@ export type CollectionStoreOptions<
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
-  onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
+  onSchedulerEvent?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   onMutationError?: (
     error: unknown,
     options: { silentErrors?: boolean },

@@ -447,10 +447,18 @@ export function logScheduleFetchResult(
 export function logSchedulerEvent(
   event: string,
   addAction: (action: string) => void,
+  data?: { delayMs?: number },
 ) {
   switch (event) {
     case 'scheduled-rt-fetch-started':
       addAction('scheduled-rt-fetch-started');
+      break;
+    case 'medium-priority-scheduled':
+      addAction(
+        data?.delayMs !== undefined
+          ? `medium-fetch-scheduled (delay: ${data.delayMs}ms)`
+          : 'medium-fetch-scheduled',
+      );
       break;
     case 'medium-priority-fetch-started':
       addAction('medium-priority-fetch-started');

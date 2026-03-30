@@ -108,6 +108,7 @@ export function createDocumentStoreTestEnv<D, StorageState = unknown>(
     addTimelineComments,
     getTimelineString,
     getRelativeTime,
+    clearTimeline: clearActionTimeline,
   } = createActionTracker();
 
   const { getMutationEmoji } = createEmojiCyclers();
@@ -172,8 +173,8 @@ export function createDocumentStoreTestEnv<D, StorageState = unknown>(
         }
       },
     },
-    onSchedulerEvent: (event) => {
-      logSchedulerEvent(event, addAction);
+    onSchedulerEvent: (event, data) => {
+      logSchedulerEvent(event, addAction, data);
     },
   });
 
@@ -274,6 +275,9 @@ export function createDocumentStoreTestEnv<D, StorageState = unknown>(
     },
     get timelineString() {
       return getTimelineString();
+    },
+    clearTimeline() {
+      clearActionTimeline();
     },
     serverMock,
     errorInNextFetch(error: FetchErrorConfig | string = 'Fetch error') {

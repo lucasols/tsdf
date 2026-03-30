@@ -35,6 +35,7 @@ test('medium priority fetch runs after delay when no other fetch occurs', async 
     "
     time  | ui |
     0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled (delay: 300ms)
     .     | 0  | medium-fetch-scheduled
     300ms | 0  | medium-priority-fetch-started
     310ms | 0  | 🔴 >fetch-started
@@ -69,6 +70,7 @@ test('medium priority fetch is cancelled when high priority fetch starts', async
     "
     time  | ui |
     0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled (delay: 300ms)
     .     | 0  | medium-fetch-scheduled
     100ms | 0  | scheduled-fetch-triggered
     110ms | 0  | medium-priority-cancelled
@@ -104,6 +106,7 @@ test('medium priority fetch is cancelled when low priority fetch starts', async 
     "
     time  | ui |
     0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled (delay: 300ms)
     .     | 0  | medium-fetch-scheduled
     100ms | 0  | scheduled-fetch-triggered
     110ms | 0  | medium-priority-cancelled
@@ -145,6 +148,7 @@ test('medium priority is NOT cancelled by mutation - schedules when delay expire
     "
     time  | ui |
     0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled (delay: 300ms)
     .     | 0  | medium-fetch-scheduled
     100ms | 1  | ⬜ optimistic-ui-commit
     .     | 1  | ⬜ >mutation-started (value: 1)
@@ -185,8 +189,10 @@ test('multiple medium priority calls reset the timer', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled (delay: 300ms)
     .     | 0  | medium-fetch-scheduled
-    200ms | 0  | medium-fetch-scheduled
+    200ms | 0  | medium-fetch-scheduled (delay: 300ms)
+    .     | 0  | medium-fetch-scheduled
     500ms | 0  | medium-priority-fetch-started
     510ms | 0  | 🔴 >fetch-started
     1.31s | 0  | 🔴 <fetch-finished (value: 0)
@@ -230,7 +236,8 @@ test('medium priority during in-progress fetch schedules when delay expires', as
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
     10ms  | 0  | 🔴 >fetch-started
-    15ms  | 0  | medium-fetch-scheduled
+    15ms  | 0  | medium-fetch-scheduled (delay: 300ms)
+    .     | 0  | medium-fetch-scheduled
     315ms | 0  | medium-priority-fetch-started
     810ms | 0  | 🔴 <fetch-finished (value: 0)
     820ms | 0  | 🟠 >fetch-started
@@ -277,7 +284,8 @@ test('medium priority with long delay runs normally after in-progress fetch comp
     0      | 0  | ui-initialized
     .      | 0  | scheduled-fetch-triggered
     10ms   | 0  | 🔴 >fetch-started
-    15ms   | 0  | medium-fetch-scheduled
+    15ms   | 0  | medium-fetch-scheduled (delay: 1000ms)
+    .      | 0  | medium-fetch-scheduled
     810ms  | 0  | 🔴 <fetch-finished (value: 0)
     1.015s | 0  | medium-priority-fetch-started
     1.025s | 0  | 🟠 >fetch-started
@@ -316,6 +324,7 @@ test('medium priority uses coalescing window after delay expires', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled (delay: 300ms)
     .     | 0  | medium-fetch-scheduled
     300ms | 0  | medium-priority-fetch-started
     320ms | 0  | scheduled-fetch-coalesced
@@ -350,6 +359,7 @@ test('custom delay per call overrides global delay', async () => {
     "
     time  | ui |
     0     | 0  | ui-initialized
+    .     | 0  | medium-fetch-scheduled (delay: 500ms)
     .     | 0  | medium-fetch-scheduled
     500ms | 0  | medium-priority-fetch-started
     510ms | 0  | 🔴 >fetch-started
@@ -391,7 +401,8 @@ test('medium priority during coalescing window is cancelled when fetch starts', 
     time  | ui |
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
-    10ms  | 0  | medium-fetch-scheduled
+    10ms  | 0  | medium-fetch-scheduled (delay: 300ms)
+    .     | 0  | medium-fetch-scheduled
     50ms  | 0  | medium-priority-cancelled
     .     | 0  | 🔴 >fetch-started
     850ms | 0  | 🔴 <fetch-finished (value: 0)

@@ -7,9 +7,15 @@ export type FetchContext = {
 export type RequestSchedulerEvents =
   | 'scheduled-fetch-started'
   | 'scheduled-rt-fetch-started'
+  | 'medium-priority-scheduled'
   | 'medium-priority-fetch-started'
   | 'medium-priority-cancelled'
   | 'batch-size-triggered';
+
+export type RequestSchedulerEventData = {
+  /** Delay in ms for medium-priority-scheduled events */
+  delayMs?: number;
+};
 
 export type ScheduleFetchResults =
   | 'skipped'
@@ -111,7 +117,10 @@ export type RequestSchedulerOptions<T> = {
     requests: BatchRequest<T>[],
     fetchContext: FetchContext,
   ) => Promise<Map<string, boolean>>;
-  on?: (event: RequestSchedulerEvents) => void;
+  on?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   lowPriorityThrottleMs: number;
   getCoalescingWindowMs: () => number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -140,7 +149,10 @@ export class RequestScheduler<T> {
     fetchContext: FetchContext,
   ) => Promise<Map<string, boolean>>;
   private readonly onEvent:
-    | ((event: RequestSchedulerEvents) => void)
+    | ((
+        event: RequestSchedulerEvents,
+        data?: RequestSchedulerEventData,
+      ) => void)
     | undefined;
   private readonly lowPriorityThrottleMs: number;
   private readonly getCoalescingWindowMs: () => number;
@@ -1055,6 +1067,8 @@ export class RequestScheduler<T> {
       payload,
       remoteStartCancelable,
     };
+
+    this.onEvent?.('medium-priority-scheduled', { delayMs });
 
     return 'medium-scheduled';
   }

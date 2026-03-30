@@ -5,6 +5,7 @@ import {
   FetchContext,
   FetchType,
   RequestScheduler,
+  RequestSchedulerEventData,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
   ScheduleFetchResults,
@@ -83,7 +84,10 @@ export type CreateFetchApiOptions<
   getCoalescingWindowMs: () => number;
   mediumPriorityDelayMs?: number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
-  onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
+  onSchedulerEvent?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   usesRealTimeUpdates: boolean;
   defaultQuerySize: number;
   maxItemBatchSize?: number;

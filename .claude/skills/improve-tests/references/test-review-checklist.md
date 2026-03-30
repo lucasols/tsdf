@@ -14,6 +14,7 @@ Use this checklist to evaluate test quality quickly and consistently.
 - Can a human reviewer understand the setup, action, and expected outcome at a glance?
 - Does the test tell a clear story top-to-bottom, or does it require reverse-engineering from low-level details?
 - If the test is time-based, cross-tab, or multi-store, does it use `timelineString` snapshots as the primary readable artifact?
+- Do `timelineString` tests use `addTimelineComments` to annotate key moments (e.g., actions during in-flight fetches, timer triggers, expected state transitions)?
 - When multiple environments are involved, are all relevant timelines shown side by side?
 - Are comments present where timing or sequencing is non-obvious, and do they explain why each step matters?
 - Do multi-phase `createLoggerStore` timelines use `.addMark('label')` to separate logical steps?

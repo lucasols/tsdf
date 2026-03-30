@@ -15,6 +15,7 @@ import type {
 } from '../persistentStorage/types';
 import {
   FetchType,
+  RequestSchedulerEventData,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
   ScheduleFetchResults,
@@ -264,7 +265,10 @@ type ListQueryStoreOptionsBase<
   >[];
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
-  onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
+  onSchedulerEvent?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   onMutationError?: (
     error: unknown,
     options: { silentErrors?: boolean },

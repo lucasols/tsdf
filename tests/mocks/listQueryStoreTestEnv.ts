@@ -14,7 +14,11 @@ import type {
   ListQueryPersistentStorageConfig,
   StorageAdapter,
 } from '../../src/persistentStorage/types';
-import type { FetchType } from '../../src/requestScheduler';
+import type {
+  FetchType,
+  RequestSchedulerEventData,
+  RequestSchedulerEvents,
+} from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
@@ -350,9 +354,10 @@ export function createListQueryStoreTestEnv<
       },
     },
     onSchedulerEvent: (
-      event: import('../../src/requestScheduler').RequestSchedulerEvents,
+      event: RequestSchedulerEvents,
+      data?: RequestSchedulerEventData,
     ) => {
-      logSchedulerEvent(event, addAction);
+      logSchedulerEvent(event, addAction, data);
     },
     fetchItemFn: disableFetchItemFn
       ? undefined

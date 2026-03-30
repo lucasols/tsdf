@@ -135,6 +135,7 @@ export function createCollectionStoreTestEnv<
     addTimelineComments,
     getTimelineString,
     getRelativeTime,
+    clearTimeline: clearActionTimeline,
   } = createActionTracker();
 
   const { getMutationEmoji } = createEmojiCyclers();
@@ -249,8 +250,8 @@ export function createCollectionStoreTestEnv<
         }
       },
     },
-    onSchedulerEvent: (event) => {
-      logSchedulerEvent(event, addAction);
+    onSchedulerEvent: (event, data) => {
+      logSchedulerEvent(event, addAction, data);
     },
   });
 
@@ -357,6 +358,9 @@ export function createCollectionStoreTestEnv<
     },
     get timelineString() {
       return getTimelineString();
+    },
+    clearTimeline() {
+      clearActionTimeline();
     },
   };
 
