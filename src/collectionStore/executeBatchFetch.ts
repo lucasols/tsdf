@@ -2,6 +2,9 @@ import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { klona } from 'klona/json';
 import { unknownToError } from 't-result';
 import { Store } from 't-state';
+
+import type { TSFDCollectionState } from './collectionStore';
+
 import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
@@ -9,7 +12,6 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import type { TSFDCollectionState } from './collectionStore';
 
 export async function executeBatchFetch<
   ItemState extends ValidStoreState,

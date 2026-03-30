@@ -11,7 +11,9 @@ import {
   test,
   vi,
 } from 'vitest';
+
 import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
+
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockOpfsStorageAdapter } from '../mocks/mockOpfsStorageAdapter';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';

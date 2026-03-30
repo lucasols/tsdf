@@ -1,12 +1,21 @@
+import type { Store } from 't-state';
+
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import type { Store } from 't-state';
+
 import type {
   TSDFItemQuery,
   TSFDListQuery,
   TSFDListQueryState,
 } from '../listQueryStore/types';
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
+import type {
+  ListQueryPersistentStorageConfig,
+  PersistedListQueryData,
+  PersistedListQueryItemData,
+  StorageAdapter,
+} from './types';
+
 import {
   convertStoreDataForPersistence,
   normalizePersistentStorageDataSchema,
@@ -24,12 +33,6 @@ import {
   refreshLocalStorageTimestamp,
 } from './persistentStorageManager';
 import { scheduleIdleCleanup } from './scheduleIdleCleanup';
-import type {
-  ListQueryPersistentStorageConfig,
-  PersistedListQueryData,
-  PersistedListQueryItemData,
-  StorageAdapter,
-} from './types';
 
 const DEFAULT_MAX_ITEMS = 500;
 const DEFAULT_MAX_QUERIES = 100;

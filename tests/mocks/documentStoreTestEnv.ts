@@ -1,8 +1,5 @@
 import { act } from 'react';
-import {
-  createDocumentStore,
-  type DocumentBrowserTabsMessage,
-} from '../../src/documentStore';
+
 import type {
   DocumentPersistentStorageConfig,
   StorageAdapter,
@@ -11,6 +8,11 @@ import type { FetchType } from '../../src/requestScheduler';
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+
+import {
+  createDocumentStore,
+  type DocumentBrowserTabsMessage,
+} from '../../src/documentStore';
 import { getNextStoreId } from './browserTabsTestUtils';
 import {
   createServerMock,

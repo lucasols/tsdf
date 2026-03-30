@@ -6,6 +6,9 @@ import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { type Emitter } from 'evtmitter';
 import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Store } from 't-state';
+
+import type { ListQueryStoreEvents } from './listQueryStore';
+
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
@@ -20,7 +23,6 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
   type ListQueryUseMultipleItemsQuery,

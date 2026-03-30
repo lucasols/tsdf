@@ -1,11 +1,7 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { act } from 'react';
-import {
-  createListQueryStore,
-  type ListQueryBrowserTabsMessage,
-  type ListQueryStoreOptions,
-} from '../../src/listQueryStore/listQueryStore';
+
 import type {
   OffsetPaginationConfig,
   PartialResourcesConfig,
@@ -22,6 +18,12 @@ import type {
 import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+
+import {
+  createListQueryStore,
+  type ListQueryBrowserTabsMessage,
+  type ListQueryStoreOptions,
+} from '../../src/listQueryStore/listQueryStore';
 import { getNextStoreId } from './browserTabsTestUtils';
 import {
   createServerTableMock,

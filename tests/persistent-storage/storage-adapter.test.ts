@@ -1,3 +1,4 @@
+import { murmur3 } from '@ls-stack/utils/hash';
 import {
   afterEach,
   beforeAll,
@@ -7,9 +8,10 @@ import {
   test,
   vi,
 } from 'vitest';
-import { murmur3 } from '@ls-stack/utils/hash';
-import { createStorageAdapter } from '../../src/persistentStorage/storageAdapter';
+
 import type { StorageAdapter } from '../../src/persistentStorage/types';
+
+import { createStorageAdapter } from '../../src/persistentStorage/storageAdapter';
 
 beforeAll(() => {
   vi.useFakeTimers();

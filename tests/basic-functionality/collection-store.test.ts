@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
+
 import { createCollectionStore } from '../../src/collectionStore/collectionStore';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { DEFAULT_FETCH_DURATION_MS } from '../mocks/serverTableMock';

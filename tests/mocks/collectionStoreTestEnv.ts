@@ -1,18 +1,20 @@
 import { act } from 'react';
+
+import type {
+  CollectionPersistentStorageConfig,
+  StorageAdapter,
+} from '../../src/persistentStorage/types';
+import type { FetchType } from '../../src/requestScheduler';
+import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
+import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
+
 import {
   createCollectionStore,
   type CollectionBrowserTabsMessage,
   type CollectionInitialStateItem,
   type CollectionStoreOptions,
 } from '../../src/collectionStore/collectionStore';
-import type { FetchType } from '../../src/requestScheduler';
-import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
-import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
-import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
-import type {
-  CollectionPersistentStorageConfig,
-  StorageAdapter,
-} from '../../src/persistentStorage/types';
 import { getNextStoreId } from './browserTabsTestUtils';
 import {
   createServerTableMock,

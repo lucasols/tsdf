@@ -7,6 +7,7 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
+
 import type { StorageAdapter, StorageBackend } from './types';
 
 function createLocalStorageAdapter(): StorageAdapter {

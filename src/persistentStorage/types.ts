@@ -1,4 +1,5 @@
 import { type RcType } from 'runcheck';
+
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 
 // --- Storage Adapter ---

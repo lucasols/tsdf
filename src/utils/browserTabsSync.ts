@@ -1,4 +1,5 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+
 import {
   createBrowserTabsPriority,
   type BrowserTabsTabStatusMessage,

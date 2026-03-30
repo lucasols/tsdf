@@ -6,12 +6,14 @@ import {
   rc_string,
   rc_unknown,
 } from 'runcheck';
+
 import type { ValidPayload } from '../utils/storeShared';
 import type {
   ConvertedPersistentStorageDataSchema,
   PersistentStorageDataSchema,
   PersistentStorageSchema,
 } from './types';
+
 import { validateWithSchema } from './validateWithSchema';
 
 const persistedDocumentDataSchema = rc_object({ data: rc_unknown });

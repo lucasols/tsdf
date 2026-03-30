@@ -1,5 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+
 import type {
   PersistedCollectionItemData,
   PersistedDocumentData,

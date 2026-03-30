@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { rc_object, rc_parse, rc_string } from 'runcheck';
 import { expect, test } from 'vitest';
+
 import {
   type BrowserTabsTransportAuditEntry,
   createInspectableInMemoryBrowserTabsTransportFactory,

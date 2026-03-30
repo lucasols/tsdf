@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { expect, test } from 'vitest';
+
 import {
   createInMemoryBrowserTabsTransportFactory,
   getNextStoreId,

@@ -18,11 +18,13 @@ import {
   test,
   vi,
 } from 'vitest';
-import { createDocumentStore } from '../../src/documentStore';
+
 import type {
   PersistedDocumentData,
   StorageCacheEntry,
 } from '../../src/persistentStorage/types';
+
+import { createDocumentStore } from '../../src/documentStore';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { normalizeError, TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';

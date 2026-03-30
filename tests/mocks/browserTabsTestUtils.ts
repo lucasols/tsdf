@@ -1,4 +1,5 @@
 import { klona } from 'klona/json';
+
 import type {
   BrowserTabsTransport,
   BrowserTabsTransportFactory,

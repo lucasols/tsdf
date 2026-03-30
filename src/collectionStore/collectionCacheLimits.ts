@@ -1,11 +1,13 @@
 import { Store } from 't-state';
-import { LruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
+
 import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 import type {
   CollectionStateCleanup,
   TSFDCollectionItem,
   TSFDCollectionState,
 } from './collectionStore';
+
+import { LruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
 
 export function createCollectionCacheLimits<
   ItemState extends ValidStoreState,
