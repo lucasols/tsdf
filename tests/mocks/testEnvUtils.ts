@@ -451,6 +451,9 @@ export function logSchedulerEvent(
           : 'rt-fetch-scheduled',
       );
       break;
+    case 'rt-fetch-cancelled':
+      addAction('rt-fetch-cancelled');
+      break;
     case 'scheduled-rt-fetch-started':
       addAction('scheduled-rt-fetch-started');
       break;

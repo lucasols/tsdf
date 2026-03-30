@@ -7,6 +7,7 @@ export type FetchContext = {
 export type RequestSchedulerEvents =
   | 'scheduled-fetch-started'
   | 'rt-fetch-scheduled'
+  | 'rt-fetch-cancelled'
   | 'scheduled-rt-fetch-started'
   | 'medium-priority-scheduled'
   | 'medium-priority-fetch-started'
@@ -931,6 +932,7 @@ export class RequestScheduler<T> {
     if (rtu) {
       clearTimeout(rtu.timeoutId);
       this.state.pending.rtuDelayed = null;
+      this.onEvent?.('rt-fetch-cancelled');
     }
   }
 
