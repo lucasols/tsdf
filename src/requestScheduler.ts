@@ -6,6 +6,7 @@ export type FetchContext = {
 
 export type RequestSchedulerEvents =
   | 'scheduled-fetch-started'
+  | 'rt-fetch-scheduled'
   | 'scheduled-rt-fetch-started'
   | 'medium-priority-scheduled'
   | 'medium-priority-fetch-started'
@@ -13,7 +14,7 @@ export type RequestSchedulerEvents =
   | 'batch-size-triggered';
 
 export type RequestSchedulerEventData = {
-  /** Delay in ms for medium-priority-scheduled events */
+  /** Delay in ms for scheduled events (medium-priority-scheduled, rt-fetch-scheduled) */
   delayMs?: number;
 };
 
@@ -1027,6 +1028,8 @@ export class RequestScheduler<T> {
       payload,
       remoteStartCancelable,
     };
+
+    this.onEvent?.('rt-fetch-scheduled', { delayMs: delay });
 
     return true;
   }

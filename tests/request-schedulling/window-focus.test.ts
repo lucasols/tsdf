@@ -482,15 +482,17 @@ test('document store: focused reconnect burst runs immediately once and schedule
 
   expect(env.timelineString).toMatchInlineSnapshot(`
     "
-    time  |
-    110ms | 🔴 >fetch-started
-    910ms | 🔴 <fetch-finished (value: 0)
-    1.21s | scheduled-rt-fetch-started
-    1.22s | 🟠 >fetch-started
-    2.02s | 🟠 <fetch-finished (value: 0)
-    2.32s | scheduled-rt-fetch-started
-    2.33s | 🟡 >fetch-started
-    3.13s | 🟡 <fetch-finished (value: 0)
+    time   |
+    110ms  | 🔴 >fetch-started
+    910ms  | 🔴 <fetch-finished (value: 0)
+    .      | rt-fetch-scheduled (delay: 300ms)
+    1.21s  | scheduled-rt-fetch-started
+    1.22s  | 🟠 >fetch-started
+    2.02s  | 🟠 <fetch-finished (value: 0)
+    2.221s | rt-fetch-scheduled (delay: 99ms)
+    2.32s  | scheduled-rt-fetch-started
+    2.33s  | 🟡 >fetch-started
+    3.13s  | 🟡 <fetch-finished (value: 0)
     "
   `);
 });

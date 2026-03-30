@@ -426,17 +426,11 @@ export function logScheduleFetchResult(
     case 'scheduled':
       addAction('scheduled-fetch-scheduled');
       break;
-    case 'rt-scheduled':
-      addAction('rt-fetch-scheduled');
-      break;
     case 'triggered':
       addAction('scheduled-fetch-triggered');
       break;
     case 'coalesced':
       addAction('scheduled-fetch-coalesced');
-      break;
-    case 'medium-scheduled':
-      addAction('medium-fetch-scheduled');
       break;
   }
 }
@@ -450,6 +444,13 @@ export function logSchedulerEvent(
   data?: { delayMs?: number },
 ) {
   switch (event) {
+    case 'rt-fetch-scheduled':
+      addAction(
+        data?.delayMs !== undefined
+          ? `rt-fetch-scheduled (delay: ${data.delayMs}ms)`
+          : 'rt-fetch-scheduled',
+      );
+      break;
     case 'scheduled-rt-fetch-started':
       addAction('scheduled-rt-fetch-started');
       break;
