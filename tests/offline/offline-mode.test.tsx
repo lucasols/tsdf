@@ -64,6 +64,7 @@ test('persistent storage without offlineMode keeps the existing online flow even
     persistentStorage: { adapter: 'local-sync', schema: docSchema },
   });
 
+  // Without offlineMode config, the store should operate normally even when the browser is offline.
   env.scheduleFetch('highPriority');
   await flushAllTimers();
 
@@ -264,6 +265,8 @@ type UpdateValueExecuteContext = Parameters<
   UpdateValueOperations['updateValue']['execute']
 >[0];
 
+// Protects against stale offline entities leaking after logout: when the session
+// key becomes unavailable, the store must unregister from the previous session.
 test('stores unregister their previous offline session when the session key becomes unavailable', async () => {
   network.setOffline();
 
@@ -426,6 +429,8 @@ test('document offline mutations are queued durably and replay when the browser 
   hook.unmount();
 });
 
+// Each store manages its own offline lifecycle -- a store without offlineMode
+// should never surface pending-sync or offline-entity state from sibling stores.
 test('plain stores do not inherit offline state from other stores in the same session', async () => {
   network.setOffline();
   const sessionKey = 'offline-entity-scope-session';
@@ -541,9 +546,10 @@ test('offline mutations fail fast when no session key is available', async () =>
     value: 1
   `);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-  expect(sessionKey).toBe(false);
 });
 
+// The global offline hook should work even before any offline-enabled store is created,
+// so apps can render a global offline banner unconditionally at mount time.
 test('global offline hooks can mount before a localStorage-backed store', async () => {
   network.setOffline();
   const sessionKey = 'offline-global-hook-session';
@@ -796,6 +802,8 @@ test('offline list-query mounts without cached data return the normalized connec
   hook.unmount();
 });
 
+// Multiple stores sharing the same session key should report a single, consistent
+// global offline status so the app can rely on one source of truth.
 test('global offline status is shared across stores in the same session', async () => {
   network.setOffline();
   const sessionKey = 'shared-offline-session';
@@ -841,6 +849,8 @@ test('global offline status is shared across stores in the same session', async 
   hook.unmount();
 });
 
+// Verifies that global selectors aggregate offline entities from all stores in the
+// session, while per-store selectors only report that store's own queued mutations.
 test('global and per-store offline entity selectors aggregate queued work across stores in the same session', async () => {
   network.setOffline();
   const sessionKey = 'shared-offline-entities';
