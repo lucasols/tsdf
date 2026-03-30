@@ -324,10 +324,10 @@ test('direct collection store offline public api', async () => {
   });
   expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 1 conflict' }
-    pendingSync: '✅'
-    status: 'success'
-  `);
+      data: { completed: '❌', title: 'Todo 1 conflict' }
+      pendingSync: '✅'
+      status: 'success'
+    `);
   expect(collectionStore.getOfflineEntities()).toMatchObject([
     {
       entityKey: getCompositeKey('1'),
@@ -407,22 +407,22 @@ test('direct collection store offline public api', async () => {
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
   expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 1 resolved' }
-    pendingSync: '❌'
-    status: 'success'
-  `);
+      data: { completed: '❌', title: 'Todo 1 resolved' }
+      pendingSync: '❌'
+      status: 'success'
+    `);
   expect(pick(todoTwoHook.result.current, ['data', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 2 offline' }
-    pendingSync: '❌'
-    status: 'success'
-  `);
+      data: { completed: '❌', title: 'Todo 2 offline' }
+      pendingSync: '❌'
+      status: 'success'
+    `);
   expect(pick(todoThreeHook.result.current, ['data', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
-    data: { completed: '❌', title: 'Todo 3 offline' }
-    pendingSync: '❌'
-    status: 'success'
-  `);
+      data: { completed: '❌', title: 'Todo 3 offline' }
+      pendingSync: '❌'
+      status: 'success'
+    `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
     effectiveOffline: false,
