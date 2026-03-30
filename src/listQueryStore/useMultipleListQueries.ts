@@ -318,7 +318,7 @@ export function useMultipleListQueries<
                 : {}),
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -436,7 +436,7 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
               QueryMetadata | undefined
@@ -530,7 +530,7 @@ export function useMultipleListQueries<
               fields: queryConfig.fields,
               isLoading: false,
               isLoadingMore: false,
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: result.queryMetadata,
             };
           }

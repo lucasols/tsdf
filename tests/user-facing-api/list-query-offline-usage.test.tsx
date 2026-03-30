@@ -1,5 +1,5 @@
-import { renderHook } from '@testing-library/react';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_literals, rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -74,7 +74,7 @@ type DirectListQueryOfflineOperations = DefineListQueryOfflineOperations<
   }
 >;
 
-test('direct list-query store offline public api supports the main operation hooks in one flow', async () => {
+test('direct list-query store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-list-query-offline-session';
   network.install();
@@ -351,16 +351,15 @@ test('direct list-query store offline public api supports the main operation hoo
   await listQueryStore.resolveOfflineConflict('missing', {
     resolution: 'noop',
   });
-  expect(
-    pick(listHook.result.current, ['items', 'status', 'isPendingOfflineSync']),
-  ).toMatchInlineSnapshot(`
-    isPendingOfflineSync: '✅'
+  expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
     items: ['Ada conflict', 'Grace offline']
+    pendingSync: '✅'
     status: 'success'
   `);
   const firstQuery = multiHook.result.current[0];
   expect(firstQuery).toMatchObject({
-    isPendingOfflineSync: true,
+    pendingSync: true,
     items: ['Ada conflict', 'Grace offline'],
     status: 'success',
   });
@@ -423,14 +422,10 @@ test('direct list-query store offline public api supports the main operation hoo
   );
   await flushAllTimers();
   expect(
-    pick(createdUserHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
+    pick(createdUserHook.result.current, ['data', 'status', 'pendingSync']),
   ).toMatchInlineSnapshot(`
     data: { id: 3, name: 'Linus offline' }
-    isPendingOfflineSync: '❌'
+    pendingSync: '❌'
     status: 'success'
   `);
 
@@ -444,15 +439,14 @@ test('direct list-query store offline public api supports the main operation hoo
   expect(listQueryStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   expect(listQueryStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
-  expect(
-    pick(listHook.result.current, ['items', 'status', 'isPendingOfflineSync']),
-  ).toMatchInlineSnapshot(`
-    isPendingOfflineSync: '❌'
+  expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
     items: ['Ada resolved', 'Grace offline']
+    pendingSync: '❌'
     status: 'success'
   `);
   expect(multiHook.result.current[0]).toMatchObject({
-    isPendingOfflineSync: false,
+    pendingSync: false,
     items: ['Ada resolved', 'Grace offline'],
     status: 'success',
   });

@@ -1726,10 +1726,7 @@ export function createListQueryStore<
           queryItemKeys[index] ?? [],
         );
 
-        return {
-          ...queryResult,
-          isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
-        };
+        return { ...queryResult, pendingSync: offlineMetadata.pendingSync };
       });
     };
 
@@ -1778,10 +1775,7 @@ export function createListQueryStore<
       itemKeys,
     );
 
-    return {
-      ...result,
-      isPendingOfflineSync: offlineMetadata.isPendingOfflineSync,
-    };
+    return { ...result, pendingSync: offlineMetadata.pendingSync };
   };
 
   const useMultipleItems: UseMultipleItemsApi = function useMultipleItems<
@@ -1832,7 +1826,7 @@ export function createListQueryStore<
     return result.map((itemResult) => {
       return {
         ...itemResult,
-        isPendingOfflineSync: getIsPendingOfflineSync(
+        pendingSync: getIsPendingOfflineSync(
           offlineEntitiesByKey.get(itemResult.itemStateKey),
         ),
       };
@@ -1869,7 +1863,7 @@ export function createListQueryStore<
     });
     return {
       ...result,
-      isPendingOfflineSync: getIsPendingOfflineSync(
+      pendingSync: getIsPendingOfflineSync(
         offlineEntities.find(
           (entity) => entity.entityKey === result.itemStateKey,
         ),

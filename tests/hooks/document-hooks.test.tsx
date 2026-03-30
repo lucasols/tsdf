@@ -131,7 +131,7 @@ describe('disable', () => {
       data: null
       error: null
       isLoading: '❌'
-      isPendingOfflineSync: '❌'
+      pendingSync: '❌'
       status: 'idle'
     `);
   });

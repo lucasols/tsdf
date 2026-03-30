@@ -108,7 +108,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:User 1}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
 
     >>> first update (✅)
@@ -120,7 +120,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:User 1}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -129,7 +129,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:User 1}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -138,7 +138,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
 
     >>> set disabled
@@ -150,7 +150,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
 
     >>> ignored update (❌)
@@ -162,7 +162,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
 
     >>> enabled again
@@ -174,7 +174,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -183,7 +183,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:✅}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     ┌─
     ⋅ itemStateKey: "users||1
@@ -192,7 +192,7 @@ test('useItem: isOffScreen should keep the selected data and not be affected by 
     ⋅ isLoading: ❌
     ⋅ data: {id:1, name:❌}
     ⋅ payload: users||1
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     "
   `);
@@ -268,7 +268,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ payload: {tableId:users}
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
 
     >>> first update (✅)
@@ -283,7 +283,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ payload: {tableId:users}
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     ┌─
     ⋅ queryKey: {tableId:"users"}
@@ -295,7 +295,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ payload: {tableId:users}
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
 
     >>> set disabled
@@ -310,7 +310,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ payload: {tableId:users}
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
 
     >>> ignored update (❌)
@@ -327,7 +327,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ payload: {tableId:users}
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     ┌─
     ⋅ queryKey: {tableId:"users"}
@@ -339,7 +339,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ payload: {tableId:users}
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     ┌─
     ⋅ queryKey: {tableId:"users"}
@@ -351,7 +351,7 @@ test('useListQuery: isOffScreen should keep the selected data and not be affecte
     ⋅ payload: {tableId:users}
     ⋅ fields: undefined
     ⋅ isLoadingMore: ❌
-    ⋅ isPendingOfflineSync: ❌
+    ⋅ pendingSync: ❌
     └─
     "
   `);

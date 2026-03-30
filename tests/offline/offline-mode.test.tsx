@@ -329,7 +329,7 @@ describe('offline mode network and session', () => {
     const hook = renderHook(() => {
       const doc = env.apiStore.useDocument();
       env.trackUIChanges(
-        `value:${doc.data?.value ?? 'null'} pending:${doc.isPendingOfflineSync ? 'yes' : 'no'}`,
+        `value:${doc.data?.value ?? 'null'} pending:${doc.pendingSync ? 'yes' : 'no'}`,
       );
       return doc;
     });
@@ -374,7 +374,7 @@ describe('offline mode network and session', () => {
       data: { value: 2 }
       error: null
       isLoading: '❌'
-      isPendingOfflineSync: '✅'
+      pendingSync: '✅'
       status: 'success'
     `);
 
@@ -393,7 +393,7 @@ describe('offline mode network and session', () => {
       data: { value: 1 }
       error: null
       isLoading: '❌'
-      isPendingOfflineSync: '❌'
+      pendingSync: '❌'
       status: 'success'
     `);
     expect(env.timelineString).toMatchInlineSnapshot(`
@@ -458,7 +458,7 @@ describe('offline mode network and session', () => {
     });
 
     const documentHook = renderHook(() => plainEnv.apiStore.useDocument());
-    expect(documentHook.result.current.isPendingOfflineSync).toBe(false);
+    expect(documentHook.result.current.pendingSync).toBe(false);
     expect(
       Object.prototype.hasOwnProperty.call(
         documentHook.result.current,

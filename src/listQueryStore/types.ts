@@ -59,7 +59,8 @@ export type TSFDUseListQueryReturn<
   hasMore: boolean;
   isLoading: boolean;
   isLoadingMore: boolean;
-  isPendingOfflineSync: boolean;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
   queryMetadata: QueryMetadata;
 };
 
@@ -76,7 +77,8 @@ export type TSFDUseListItemReturn<
   error: StoreError | null;
   isLoading: boolean;
   itemStateKey: string;
-  isPendingOfflineSync: boolean;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
   queryMetadata: QueryMetadata;
 };
 

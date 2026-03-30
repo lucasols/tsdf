@@ -19,7 +19,7 @@ export function getIsPendingOfflineSync(
 }
 
 export type OfflineEntitiesMetadata = {
-  isPendingOfflineSync: boolean;
+  pendingSync: boolean;
   pendingOfflineMutations: number;
   hasOfflineConflict: boolean;
   pendingItemKeys: string[];
@@ -48,7 +48,7 @@ export function getOfflineEntitiesMetadata(
   }
 
   return {
-    isPendingOfflineSync: pendingItemKeys.length > 0,
+    pendingSync: pendingItemKeys.length > 0,
     pendingOfflineMutations,
     hasOfflineConflict: conflictedItemKeys.length > 0,
     pendingItemKeys,

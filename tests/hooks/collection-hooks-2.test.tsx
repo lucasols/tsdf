@@ -58,9 +58,9 @@ test('isOffScreen should keep the selected data and not be affected by invalidat
 
     error: null
     isLoading: '❌'
-    isPendingOfflineSync: '❌'
     itemStateKey: '"1'
     payload: '1'
+    pendingSync: '❌'
     status: 'success'
   `);
 

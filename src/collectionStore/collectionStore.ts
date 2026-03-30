@@ -115,7 +115,8 @@ export type TSFDUseCollectionItemReturn<
   error: StoreError | null;
   itemStateKey: string;
   isLoading: boolean;
-  isPendingOfflineSync: boolean;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
   queryMetadata: QueryMetadata;
 };
 
@@ -1348,7 +1349,7 @@ export function createCollectionStore<
 
     return result.map((itemResult) => ({
       ...itemResult,
-      isPendingOfflineSync: getIsPendingOfflineSync(
+      pendingSync: getIsPendingOfflineSync(
         offlineEntitiesByKey.get(itemResult.itemStateKey),
       ),
     }));
@@ -1374,7 +1375,7 @@ export function createCollectionStore<
 
     return {
       ...result,
-      isPendingOfflineSync: getIsPendingOfflineSync(
+      pendingSync: getIsPendingOfflineSync(
         offlineEntities.find(
           (entity) => entity.entityKey === result.itemStateKey,
         ),

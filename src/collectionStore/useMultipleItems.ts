@@ -189,7 +189,7 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: false,
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -205,7 +205,7 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: !returnIdleStatus,
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -225,7 +225,7 @@ export function useMultipleItems<
             data,
             error: item.error,
             isLoading: status === 'loading',
-            isPendingOfflineSync: false,
+            pendingSync: false,
             payload: omitPayload ? undefined : item.payload,
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
@@ -265,7 +265,7 @@ export function useMultipleItems<
               error: null,
               payload: query.omitPayload ? undefined : query.payload,
               isLoading: false,
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: result.queryMetadata,
             };
           }
@@ -288,7 +288,7 @@ export function useMultipleItems<
               error: fallbackItem.error,
               payload: query.omitPayload ? undefined : fallbackItem.payload,
               isLoading: status === 'loading',
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: result.queryMetadata,
             };
           }

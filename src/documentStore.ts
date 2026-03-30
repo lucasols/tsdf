@@ -85,7 +85,8 @@ export type TSDFUseDocumentReturn<Selected> = {
   data: Selected;
   error: StoreError | null;
   isLoading: boolean;
-  isPendingOfflineSync: boolean;
+  /** Whether this result has local offline changes that still need to sync to the server. */
+  pendingSync: boolean;
 };
 
 export type DocumentStoreState<State extends ValidStoreState> = {
@@ -939,7 +940,7 @@ export function createDocumentStore<
           error,
           status,
           isLoading: status === 'loading',
-          isPendingOfflineSync: getIsPendingOfflineSync(
+          pendingSync: getIsPendingOfflineSync(
             offlineEntities.find(
               (entity) => entity.entityKey === DOC_TARGET_KEY,
             ),

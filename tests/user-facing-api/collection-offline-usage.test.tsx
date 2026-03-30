@@ -62,7 +62,7 @@ type DirectCollectionOfflineOperations = DefineCollectionOfflineOperations<
   }
 >;
 
-test('direct collection store offline public api supports the main operation hooks in one flow', async () => {
+test('direct collection store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-collection-offline-session';
   network.install();
@@ -221,22 +221,25 @@ test('direct collection store offline public api supports the main operation hoo
   });
   await Promise.resolve();
 
-  await act(async () => {
-    await collectionStore.performMutation(todoOnePayload, {
+  function renameTodo(id: string, title: string) {
+    return collectionStore.performMutation(todoOnePayload, {
       optimisticUpdate: (payload) => {
         collectionStore.updateItemState(payload, (item) => ({
           ...item,
-          title: 'Todo 1 first',
+          title,
         }));
       },
-      mutation: () =>
-        Promise.resolve({ title: 'Todo 1 first', completed: false }),
-      offline: {
-        operation: 'renameTodo',
-        input: { id: '1', title: 'Todo 1 first' },
-      },
+      mutation: () => Promise.resolve({ title, completed: false }),
+      offline: { operation: 'renameTodo', input: { id, title } },
     });
+  }
+
+  const todoUpdateResult = await act(async () => {
+    return await renameTodo('1', 'Todo 1 first');
   });
+
+  assert(todoUpdateResult.ok);
+  expect(todoUpdateResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
   await act(async () => {
     await collectionStore.performMutation(todoOnePayload, {
@@ -319,15 +322,10 @@ test('direct collection store offline public api supports the main operation hoo
   await collectionStore.resolveOfflineConflict('missing', {
     resolution: 'noop',
   });
-  expect(
-    pick(todoOneHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
+  expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
     data: { completed: '❌', title: 'Todo 1 conflict' }
-    isPendingOfflineSync: '✅'
+    pendingSync: '✅'
     status: 'success'
   `);
   expect(collectionStore.getOfflineEntities()).toMatchObject([
@@ -407,37 +405,22 @@ test('direct collection store offline public api supports the main operation hoo
   expect(collectionStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   expect(collectionStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
-  expect(
-    pick(todoOneHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
+  expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
     data: { completed: '❌', title: 'Todo 1 resolved' }
-    isPendingOfflineSync: '❌'
+    pendingSync: '❌'
     status: 'success'
   `);
-  expect(
-    pick(todoTwoHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
+  expect(pick(todoTwoHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
     data: { completed: '❌', title: 'Todo 2 offline' }
-    isPendingOfflineSync: '❌'
+    pendingSync: '❌'
     status: 'success'
   `);
-  expect(
-    pick(todoThreeHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
+  expect(pick(todoThreeHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
     data: { completed: '❌', title: 'Todo 3 offline' }
-    isPendingOfflineSync: '❌'
+    pendingSync: '❌'
     status: 'success'
   `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
@@ -445,6 +428,16 @@ test('direct collection store offline public api supports the main operation hoo
     effectiveOffline: false,
     network: { active: false, enabled: true },
   });
+
+  const onlineRenameResult = await act(async () => {
+    return await renameTodo('1', 'Todo 1 online');
+  });
+
+  assert(onlineRenameResult.ok);
+  expect(onlineRenameResult.value).toMatchInlineSnapshot(`
+    data: { completed: '❌', title: 'Todo 1 online' }
+    kind: 'online'
+  `);
 
   todoOneHook.unmount();
   todoTwoHook.unmount();

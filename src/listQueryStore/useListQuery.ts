@@ -134,7 +134,7 @@ export function useListQuery<
             queryKey: '',
             items: [],
             isLoadingMore: false,
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }
         : {
@@ -147,7 +147,7 @@ export function useListQuery<
             queryKey: '',
             items: [],
             isLoadingMore: false,
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }),
     [fields, isInvalidPayload, queryResult],

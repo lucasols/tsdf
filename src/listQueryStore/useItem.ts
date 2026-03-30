@@ -127,7 +127,7 @@ export function useItem<
               : __LEGIT_CAST__<Selected, null>(null),
             payload: itemPayload || null,
             itemStateKey: '',
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }
         : {
@@ -139,7 +139,7 @@ export function useItem<
               : __LEGIT_CAST__<Selected, null>(null),
             payload: itemPayload || null,
             itemStateKey: '',
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }),
     [isInvalidPayload, itemPayload, queryResult, selector],

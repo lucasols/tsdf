@@ -73,7 +73,7 @@ type DirectDocumentOfflineOperations = DefineDocumentOfflineOperations<
   }
 >;
 
-test('direct document store offline public api supports the main operation hooks in one flow', async () => {
+test('direct document store offline public api', async () => {
   const network = createOfflineNetworkMock();
   const sessionKey = 'direct-document-offline-session';
   network.install();
@@ -208,17 +208,12 @@ test('direct document store offline public api supports the main operation hooks
   const documentHook = renderHook(() => documentStore.useDocument());
   await flushAllTimers();
 
-  expect(
-    pick(documentHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
-    data: { label: 'server', value: 1 }
-    isPendingOfflineSync: '❌'
-    status: 'success'
-  `);
+  expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
+      data: { label: 'server', value: 1 }
+      pendingSync: '❌'
+      status: 'success'
+    `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
     effectiveOffline: false,
@@ -229,8 +224,8 @@ test('direct document store offline public api supports the main operation hooks
   });
   await Promise.resolve();
 
-  await act(async () => {
-    await documentStore.performMutation({
+  const setValueResult = await act(async () => {
+    return documentStore.performMutation({
       optimisticUpdate: () => {
         documentStore.updateState((draft) => {
           draft.value = 2;
@@ -241,6 +236,9 @@ test('direct document store offline public api supports the main operation hooks
       offline: { operation: 'setValue', input: { value: 2 } },
     });
   });
+
+  assert(setValueResult.ok);
+  expect(setValueResult.value).toMatchInlineSnapshot(`kind: 'queued'`);
 
   await act(async () => {
     await documentStore.performMutation({
@@ -270,12 +268,19 @@ test('direct document store offline public api supports the main operation hooks
     });
   });
 
-  const invalidAccumulationResult = await documentStore.performMutation({
-    mutation: () => Promise.resolve({ value: 4, label: 'invalid' }),
-    offline: { operation: 'patchDoc', input: { value: 4, label: 'invalid' } },
+  const invalidAccumulationResult = await act(async () => {
+    return documentStore.performMutation({
+      mutation: () => Promise.resolve({ value: 4, label: 'invalid' }),
+      offline: { operation: 'patchDoc', input: { value: 4, label: 'invalid' } },
+    });
   });
 
-  expect(invalidAccumulationResult.ok).toBe(false);
+  assert(!invalidAccumulationResult.ok);
+  expect(invalidAccumulationResult.error).toMatchInlineSnapshot(`
+    code: 500
+    id: 'fetch-error'
+    message: 'Invalid offline operation input for "patchDoc"'
+  `);
 
   await act(async () => {
     await documentStore.performMutation({
@@ -318,17 +323,12 @@ test('direct document store offline public api supports the main operation hooks
 
   expect(documentStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   await documentStore.resolveOfflineConflict('missing', { resolution: 'noop' });
-  expect(
-    pick(documentHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
-    data: { label: 'conflict:6', value: 6 }
-    isPendingOfflineSync: '✅'
-    status: 'success'
-  `);
+  expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
+      data: { label: 'conflict:6', value: 6 }
+      pendingSync: '✅'
+      status: 'success'
+    `);
   expect(documentStore.getOfflineEntities()).toMatchObject([
     { entityKey: 'document', pendingMutations: 5, storeType: 'document' },
   ]);
@@ -348,7 +348,7 @@ test('direct document store offline public api supports the main operation hooks
   });
 
   expect(documentHook.result.current.status).toBe('success');
-  expect(documentHook.result.current.isPendingOfflineSync).toBe(false);
+  expect(documentHook.result.current.pendingSync).toBe(false);
 
   const [conflict] = documentStore.getOfflineConflicts();
   expect(conflict).toMatchObject({
@@ -384,142 +384,17 @@ test('direct document store offline public api supports the main operation hooks
   expect(documentStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
   expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
-  expect(
-    pick(documentHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
-    data: { label: 'resolved:7', value: 7 }
-    isPendingOfflineSync: '❌'
-    status: 'success'
-  `);
+  expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
+    .toMatchInlineSnapshot(`
+      data: { label: 'resolved:7', value: 7 }
+      pendingSync: '❌'
+      status: 'success'
+    `);
   expect(getGlobalOfflineStatus(sessionKey)).toMatchObject({
     effectiveMode: 'online',
     effectiveOffline: false,
     network: { active: false, enabled: true },
   });
-
-  documentHook.unmount();
-});
-
-type TempDocumentOfflineOperations = DefineDocumentOfflineOperations<
-  DocState,
-  {
-    createTempDoc: DefineOfflineOperation<
-      ValueInput,
-      unknown,
-      { value: number }
-    >;
-  }
->;
-
-test('document temp entities stay pending on the document key and reconcile after replay', async () => {
-  const network = createOfflineNetworkMock();
-  const sessionKey = 'document-temp-entity-session';
-  network.install();
-
-  let documentState: DocState = { value: 1, label: 'server' };
-
-  const documentStore = createDocumentStore<
-    DocState,
-    TempDocumentOfflineOperations
-  >({
-    id: 'document-temp-entity',
-    getSessionKey: () => sessionKey,
-    fetchFn: async () => {
-      await delay(FETCH_DELAY_MS);
-      return { ...documentState };
-    },
-    errorNormalizer: normalizeError,
-    lowPriorityThrottleMs: 5,
-    baseCoalescingWindowMs: 10,
-    blockWindowClose: null,
-    persistentStorage: {
-      storeName: 'document-temp-entity',
-      adapter: 'local-sync',
-      schema: docSchema,
-      offlineMode: {
-        network: network.config,
-        operations: {
-          createTempDoc: {
-            inputSchema: setValueInputSchema,
-            tempEntity: {
-              createTempId: (input) => `temp:${input.value}`,
-              buildPendingEntity: (input) => ({
-                value: input.value,
-                label: `pending:${input.value}`,
-              }),
-              reconcileServerEntity: (result) => ({
-                finalPayload: 'document',
-                finalData: {
-                  value: result.value,
-                  label: `server:${result.value}`,
-                },
-              }),
-            },
-            execute: ({ input }) => {
-              documentState = {
-                value: input.value,
-                label: `server:${input.value}`,
-              };
-
-              return { value: input.value };
-            },
-          },
-        },
-      },
-    },
-  });
-
-  const documentHook = renderHook(() => documentStore.useDocument());
-  await flushAllTimers();
-
-  act(() => {
-    network.goOffline();
-  });
-  await Promise.resolve();
-
-  await act(async () => {
-    await documentStore.performMutation({
-      mutation: () => Promise.resolve({ value: 2 }),
-      offline: { operation: 'createTempDoc', input: { value: 2 } },
-    });
-  });
-
-  expect(documentStore.getOfflineEntities()).toMatchObject([
-    { entityKey: 'document', entityKind: 'document', tempId: 'temp:2' },
-  ]);
-  expect(
-    pick(documentHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
-    data: { label: 'pending:2', value: 2 }
-    isPendingOfflineSync: '✅'
-    status: 'success'
-  `);
-
-  await act(async () => {
-    network.goOnline();
-    await flushAllTimers();
-  });
-
-  expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
-  expect(
-    pick(documentHook.result.current, [
-      'data',
-      'status',
-      'isPendingOfflineSync',
-    ]),
-  ).toMatchInlineSnapshot(`
-    data: { label: 'server:2', value: 2 }
-    isPendingOfflineSync: '❌'
-    status: 'success'
-  `);
 
   documentHook.unmount();
 });

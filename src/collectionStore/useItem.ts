@@ -107,7 +107,7 @@ export function useItem<
             status: 'error',
             itemStateKey: '',
             isLoading: false,
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }
         : {
@@ -119,7 +119,7 @@ export function useItem<
             status: 'idle',
             itemStateKey: '',
             isLoading: false,
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: undefined,
           }),
     [isInvalidPayload, item, selector],

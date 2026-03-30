@@ -224,7 +224,7 @@ export function useMultipleItems<
               isLoading: false,
               payload,
               data,
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -241,7 +241,7 @@ export function useMultipleItems<
                 isLoading: false,
                 payload,
                 data,
-                isPendingOfflineSync: false,
+                pendingSync: false,
                 queryMetadata: __LEGIT_CAST__<
                   QueryMetadata,
                   QueryMetadata | undefined
@@ -268,7 +268,7 @@ export function useMultipleItems<
                 : {}),
               payload,
               data,
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -362,7 +362,7 @@ export function useMultipleItems<
                 : __LEGIT_CAST__<Selected, null>(null)
               : data,
             payload,
-            isPendingOfflineSync: false,
+            pendingSync: false,
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
               QueryMetadata | undefined
@@ -435,7 +435,7 @@ export function useMultipleItems<
               data: selector
                 ? selector(null, null)
                 : __LEGIT_CAST__<Selected, null>(null),
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: result.queryMetadata,
             };
           }
@@ -467,7 +467,7 @@ export function useMultipleItems<
               data: selector
                 ? selector(itemState, fallbackItemState.itemQuery.payload)
                 : __LEGIT_CAST__<Selected, ItemState>(itemState),
-              isPendingOfflineSync: false,
+              pendingSync: false,
               queryMetadata: result.queryMetadata,
             };
           }
