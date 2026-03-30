@@ -48,7 +48,7 @@ export default lsStackEslintCfg({
       },
     },
     {
-      files: ['tests/**/*.test.{ts,tsx}'],
+      files: ['tests/**/*.{ts,tsx}'],
       rules: {
         '@typescript-eslint/no-non-null-assertion': 'off',
         '@ls-stack/require-usage-explanation': 'off',
