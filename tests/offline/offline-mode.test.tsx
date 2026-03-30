@@ -315,6 +315,128 @@ test('stores unregister their previous offline session when the session key beco
   ).toMatchInlineSnapshot(`[]`);
 });
 
+test('logging back into the same session replays durable offline mutations queued before logout', async () => {
+  network.setOffline();
+
+  const sessionKey = 'offline-session-resume';
+  const storeName = 'offline-session-resume-doc';
+  let currentSessionKey: string | false = sessionKey;
+  const replayedInputs: { value: number }[] = [];
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    id: storeName,
+    getSessionKey: () => currentSessionKey,
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        network: network.config,
+        operations: {
+          updateValue: {
+            inputSchema: docMutationInputSchema,
+            execute: ({ input }: UpdateValueExecuteContext) => {
+              replayedInputs.push(input);
+              env.apiStore.updateState((draft) => {
+                draft.value = input.value;
+              });
+              return input;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const hook = renderHook(() => {
+    const doc = env.apiStore.useDocument();
+    env.trackUIChanges(
+      `value:${doc.data?.value ?? 'null'} pending:${doc.pendingSync ? 'yes' : 'no'}`,
+    );
+    return doc;
+  });
+
+  await Promise.resolve();
+
+  // Queue an optimistic mutation while the app is offline.
+  await act(async () => {
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: () => Promise.resolve(2),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+  });
+
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+  expect(replayedInputs).toMatchInlineSnapshot(`[]`);
+
+  // Logging out should detach the current store view without deleting the
+  // durable offline queue that belongs to the previous session.
+  currentSessionKey = false;
+  hook.rerender();
+
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+  // Connectivity can recover while logged out, but the old session must remain
+  // dormant until that same session becomes active again.
+  env.addTimelineComments('beforeNextAction', [
+    'the browser goes back online while the app is logged out',
+  ]);
+  act(() => {
+    network.goOnline();
+  });
+  await flushAllTimers();
+
+  expect(replayedInputs).toMatchInlineSnapshot(`[]`);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+  // Once the same session logs back in, a normal online fetch cycle should
+  // reattach the session, replay the stored mutation, and clear the queue.
+  env.addTimelineComments('beforeNextAction', [
+    'the same session logs back in and triggers a normal online fetch',
+  ]);
+  currentSessionKey = sessionKey;
+  hook.rerender();
+  env.scheduleFetch('highPriority');
+  await advanceTime(250);
+  await flushAllTimers();
+
+  expect(replayedInputs).toMatchInlineSnapshot(`
+    - value: 2
+  `);
+  expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+    `[]`,
+  );
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+  expect(env.timelineString).toMatchInlineSnapshot(`
+    "
+    time  | ui                    |
+    0     | "value:1 pending:no"  | ui-initialized
+    .     | "value:2 pending:no"  | ui-changed
+    .     | "value:2 pending:yes" | ui-changed
+    .     | "value:2 pending:no"  | ui-changed
+    10ms  | "value:2 pending:no"  | -- the browser goes back online while the app is logged out
+    .     | "value:2 pending:no"  | 🔴 >fetch-started
+    810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
+    .     | "value:1 pending:no"  | ui-changed
+    1.81s | "value:1 pending:no"  | -- the same session logs back in and triggers a normal online fetch
+    .     | "value:1 pending:no"  | scheduled-fetch-triggered
+    1.82s | "value:1 pending:yes" | ui-changed
+    .     | "value:1 pending:yes" | 🟠 >fetch-started
+    .     | "value:2 pending:yes" | ui-changed
+    .     | "value:2 pending:no"  | ui-changed
+    2.62s | "value:2 pending:no"  | 🟠 <fetch-finished (value: 1)
+    .     | "value:1 pending:no"  | ui-changed
+    "
+  `);
+  hook.unmount();
+});
+
 test('document offline mutations are queued durably and replay when the browser comes back online', async () => {
   network.setOffline();
 
