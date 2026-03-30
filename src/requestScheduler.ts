@@ -1,3 +1,5 @@
+import { fetchTypePriority } from './utils/storeShared';
+
 export type FetchContext = {
   shouldAbort: () => boolean;
   getStartTime: () => number;
@@ -143,6 +145,15 @@ export type ScheduleFetchOptions = { mediumPriorityDelayMs?: number };
 let autoIncrementId = 0;
 export function getAutoIncrementId(): number {
   return ++autoIncrementId;
+}
+
+function getHigherPriorityFetchType(
+  current: FetchType,
+  incoming: FetchType,
+): FetchType {
+  return fetchTypePriority[current] >= fetchTypePriority[incoming]
+    ? current
+    : incoming;
 }
 
 export class RequestScheduler<T> {
@@ -568,7 +579,10 @@ export class RequestScheduler<T> {
       existing.payload = this.coalescePayload
         ? this.coalescePayload(existing.payload, payload)
         : payload;
-      existing.priority = priority;
+      existing.priority = getHigherPriorityFetchType(
+        existing.priority,
+        priority,
+      );
       existing.remoteStartCancelable =
         existing.remoteStartCancelable && remoteStartCancelable;
       return 'coalesced';
@@ -604,7 +618,10 @@ export class RequestScheduler<T> {
       existing.payload = this.coalescePayload
         ? this.coalescePayload(existing.payload, payload)
         : payload;
-      existing.priority = priority;
+      existing.priority = getHigherPriorityFetchType(
+        existing.priority,
+        priority,
+      );
       existing.remoteStartCancelable =
         existing.remoteStartCancelable && remoteStartCancelable;
       return;
@@ -850,7 +867,10 @@ export class RequestScheduler<T> {
           existing.payload = this.coalescePayload
             ? this.coalescePayload(existing.payload, request.payload)
             : request.payload;
-          existing.priority = request.priority;
+          existing.priority = getHigherPriorityFetchType(
+            existing.priority,
+            request.priority,
+          );
           existing.remoteStartCancelable =
             existing.remoteStartCancelable && request.remoteStartCancelable;
           existing.awaitCallbacks.push(...request.awaitCallbacks);

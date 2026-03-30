@@ -136,6 +136,40 @@ describe('medium priority vs realtime scheduling', () => {
         "
       `);
     });
+
+    test('mounting after medium invalidation keeps medium priority over later realtime invalidation', async () => {
+      const env = createDocumentStoreTestEnv(0, {
+        testScenario: 'loaded',
+        usesRealTimeUpdates: true,
+        mediumPriorityDelayMs: 300,
+        dynamicRealtimeThrottleMs: () => 1000,
+      });
+
+      // No hook is mounted yet, so invalidations only update refetchOnMount.
+      env.apiStore.invalidateData('mediumPriority');
+
+      await advanceTime(100);
+
+      env.apiStore.invalidateData('realtimeUpdate');
+
+      // Mounting should use the strongest pending invalidation priority.
+      renderHook(() => {
+        env.trackUIChanges(env.apiStore.useDocument().data?.value);
+      });
+
+      await flushAllTimers();
+
+      expect(env.timelineString).toMatchInlineSnapshot(`
+        "
+        time  | ui |
+        100ms | 0  | ui-initialized
+        .     | 0  | medium-fetch-scheduled (delay: 300ms)
+        400ms | 0  | medium-priority-fetch-started
+        410ms | 0  | 🔴 >fetch-started
+        1.21s | 0  | 🔴 <fetch-finished (value: 0)
+        "
+      `);
+    });
   });
 
   // Collection store: same scheduler behavior verified through per-item invalidation API.
