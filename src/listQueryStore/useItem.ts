@@ -149,13 +149,12 @@ export function useItem<
   );
 
   const fetchQuery = hasPayload ? query[0] : undefined;
-  const isPayloadReadyForFetch = hasPayload;
 
   const [useModifyResult, emitIsLoadedEvt] = useEnsureIsLoaded(
     ensureIsLoaded,
-    hasPayload && isPayloadReadyForFetch,
+    hasPayload,
     () => {
-      if (fetchQuery && isPayloadReadyForFetch) {
+      if (fetchQuery) {
         scheduleItemFetch('highPriority', fetchQuery.payload, {
           fields: fetchQuery.fields,
         });
@@ -164,12 +163,7 @@ export function useItem<
   );
 
   useSubscribeToStore(store, ({ observe }) => {
-    if (
-      !ensureIsLoaded ||
-      !hasPayload ||
-      !isPayloadReadyForFetch ||
-      !result.itemStateKey
-    ) {
+    if (!ensureIsLoaded || !hasPayload || !result.itemStateKey) {
       return;
     }
 

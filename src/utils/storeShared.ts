@@ -28,6 +28,8 @@ export type PayloadDebounce = {
   leading?: boolean;
 };
 
+export const DEFAULT_BATCH_KEY = '__default__';
+
 export const invalidPayloadError = {
   code: 461,
   id: 'invalid-payload',
@@ -64,5 +66,26 @@ export class StoreFetchError extends Error {
     this.type = type;
     this.path = error.path;
     this.method = error.method;
+  }
+}
+
+export class TimeoutStoreError extends StoreFetchError {
+  constructor() {
+    super({ code: 408, id: 'timeout', message: 'Timeout' }, 'timeout');
+    this.name = 'TimeoutStoreError';
+  }
+}
+
+export class AbortedStoreError extends StoreFetchError {
+  constructor() {
+    super({ code: 408, id: 'aborted', message: 'Aborted' }, 'aborted');
+    this.name = 'AbortedStoreError';
+  }
+}
+
+export class NotFoundStoreError extends StoreFetchError {
+  constructor() {
+    super({ code: 404, id: 'not-found', message: 'Not found' }, 'fetch');
+    this.name = 'NotFoundStoreError';
   }
 }

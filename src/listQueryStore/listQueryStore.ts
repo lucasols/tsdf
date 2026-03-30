@@ -4,10 +4,7 @@ import {
 } from '@ls-stack/browser-utils/window';
 import { notNullish } from '@ls-stack/utils/assertions';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import {
-  __LEGIT_CAST__,
-  type __LEGIT_ANY__,
-} from '@ls-stack/utils/saferTyping';
+import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { rc_literals, rc_object, rc_string } from 'runcheck';
 import { Store } from 't-state';
@@ -25,13 +22,10 @@ import {
   initializeOfflineStoreController,
   type OfflineStoreController,
 } from '../persistentStorage/offline/storeController';
-import type {
-  AnyOfflineOperationDefinition,
-  ListQueryOfflineEntityRef,
-  OfflineMutationInput,
-} from '../persistentStorage/offline/types';
+import type { OfflineMutationInput } from '../persistentStorage/offline/types';
 import { createProtectedStorageKey } from '../persistentStorage/persistentStorageManager';
 import type {
+  ListQueryOfflineOperationsConfig,
   ListQueryPersistentStorageConfig,
   PersistentStoragePreloadResult,
 } from '../persistentStorage/types';
@@ -60,6 +54,7 @@ import {
 import { type BlockWindowCloseHandler } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
+  DEFAULT_BATCH_KEY,
   StoreError,
   StoreFetchError,
   ValidPayload,
@@ -113,30 +108,6 @@ const offlineItemEntityRefSchema = rc_object({
   entityKey: rc_string,
   entityKind: rc_literals('item'),
 });
-
-type InternalListQueryOfflineOperations<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = Record<
-  string,
-  AnyOfflineOperationDefinition & {
-    getEntityRefs: (ctx: {
-      input: __LEGIT_ANY__;
-    }) => ListQueryOfflineEntityRef<ItemPayload>[];
-  }
-> &
-  ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
-
-type ListQueryOfflineOperationsConfig<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = InternalListQueryOfflineOperations<
-  ItemState,
-  QueryPayload,
-  ItemPayload
-> | null;
 
 export type ListQueryStore<
   ItemState extends ValidStoreState,
@@ -823,7 +794,7 @@ export function createListQueryStore<
 
   function getItemBatchKey(payload: ItemPayload): string | false {
     if (!fetchItemFn || !batchFetchItemFn) return false;
-    if (!getItemsBatchKey) return '__default__';
+    if (!getItemsBatchKey) return DEFAULT_BATCH_KEY;
     return getItemsBatchKey(payload);
   }
 

@@ -13,8 +13,12 @@ import {
   ScheduleFetchResults,
 } from '../requestScheduler';
 import {
+  AbortedStoreError,
+  DEFAULT_BATCH_KEY,
+  NotFoundStoreError,
   StoreError,
   StoreFetchError,
+  TimeoutStoreError,
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
@@ -241,7 +245,9 @@ export function createFetchApi<
     )) {
       const payload = itemQuery?.payload;
       const currentBatchKey =
-        payload && getItemsBatchKey ? getItemsBatchKey(payload) : '__default__';
+        payload && getItemsBatchKey
+          ? getItemsBatchKey(payload)
+          : DEFAULT_BATCH_KEY;
 
       if (currentBatchKey !== batchKey) continue;
 
@@ -257,7 +263,9 @@ export function createFetchApi<
         itemKeyToPayload.get(itemKey) ??
         store.state.itemQueries[itemKey]?.payload;
       const batchKey =
-        payload && getItemsBatchKey ? getItemsBatchKey(payload) : '__default__';
+        payload && getItemsBatchKey
+          ? getItemsBatchKey(payload)
+          : DEFAULT_BATCH_KEY;
 
       if (batchKey !== false) {
         const scheduler = batchKeySchedulers.get(batchKey);
@@ -473,7 +481,7 @@ export function createFetchApi<
         }
         // batchKey === false → fall through to per-item scheduler
       } else {
-        return getOrCreateBatchKeyScheduler('__default__');
+        return getOrCreateBatchKeyScheduler(DEFAULT_BATCH_KEY);
       }
     }
 
@@ -533,7 +541,7 @@ export function createFetchApi<
 
   function getBatchKeyForPayload(payload: ItemPayload): string | false {
     if (!useBatchSchedulers) return false;
-    if (!getItemsBatchKey) return '__default__';
+    if (!getItemsBatchKey) return DEFAULT_BATCH_KEY;
     return getItemsBatchKey(payload);
   }
 
@@ -975,25 +983,11 @@ export function createFetchApi<
     );
 
     if (result === 'timeout') {
-      return {
-        items: [],
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-        hasMore: false,
-      };
+      return { items: [], error: new TimeoutStoreError(), hasMore: false };
     }
 
     if (result === true) {
-      return {
-        items: [],
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-        hasMore: false,
-      };
+      return { items: [], error: new AbortedStoreError(), hasMore: false };
     }
 
     const query = store.state.queries[queryKey];
@@ -1007,14 +1001,7 @@ export function createFetchApi<
     }
 
     if (!query) {
-      return {
-        items: [],
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-        hasMore: false,
-      };
+      return { items: [], error: new NotFoundStoreError(), hasMore: false };
     }
 
     return {
@@ -1092,23 +1079,11 @@ export function createFetchApi<
     );
 
     if (result === 'timeout') {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-      };
+      return { data: null, error: new TimeoutStoreError() };
     }
 
     if (result === true) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-      };
+      return { data: null, error: new AbortedStoreError() };
     }
 
     const item = store.state.items[itemKey];
@@ -1122,13 +1097,7 @@ export function createFetchApi<
     }
 
     if (!itemQuery || !item) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-      };
+      return { data: null, error: new NotFoundStoreError() };
     }
 
     return { data: item, error: null };

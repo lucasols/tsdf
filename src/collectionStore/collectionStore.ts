@@ -68,8 +68,12 @@ import {
 } from '../utils/performMutation';
 import { createStoreFocusLifecycle } from '../utils/storeFocusLifecycle';
 import {
+  AbortedStoreError,
+  DEFAULT_BATCH_KEY,
   fetchTypePriority,
+  NotFoundStoreError,
   StoreFetchError,
+  TimeoutStoreError,
   TSDFStatus,
   ValidPayload,
   ValidStoreState,
@@ -523,6 +527,13 @@ export function createCollectionStore<
     });
   }
 
+  function touchItemsAndMaybeEnforceLimits(itemKeys: string[]): void {
+    touchItems(itemKeys);
+    if (shouldScheduleCacheLimitEnforcement()) {
+      scheduleCacheLimitEnforcement();
+    }
+  }
+
   function registerActiveItems(itemKeys: string[]): () => void {
     if (itemKeys.length === 0) return () => {};
 
@@ -597,7 +608,7 @@ export function createCollectionStore<
 
   function getBatchKey(payload: ItemPayload): string | false {
     if (!useBatchSchedulers) return false;
-    if (!getItemsBatchKey) return '__default__';
+    if (!getItemsBatchKey) return DEFAULT_BATCH_KEY;
     return getItemsBatchKey(payload);
   }
 
@@ -769,7 +780,7 @@ export function createCollectionStore<
         }
         // batchKey === false → fall through to per-item scheduler
       } else {
-        return getOrCreateBatchKeyScheduler('__default__');
+        return getOrCreateBatchKeyScheduler(DEFAULT_BATCH_KEY);
       }
     }
     return getOrCreateItemScheduler(itemKey);
@@ -860,10 +871,7 @@ export function createCollectionStore<
 
       lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
       if (snapshotItem !== null) {
-        touchItems([message.itemKey]);
-        if (shouldScheduleCacheLimitEnforcement()) {
-          scheduleCacheLimitEnforcement();
-        }
+        touchItemsAndMaybeEnforceLimits([message.itemKey]);
       }
       return;
     }
@@ -892,10 +900,7 @@ export function createCollectionStore<
     if (message.item === null && schedulerPayload) {
       cleanupItemResources(message.itemKey, schedulerPayload);
     } else if (message.item !== null) {
-      touchItems([message.itemKey]);
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits([message.itemKey]);
     }
 
     lastCollectionSyncVersions.set(message.itemKey, candidateVersion);
@@ -999,10 +1004,9 @@ export function createCollectionStore<
       ({ requestId }) => results.get(requestId) === true,
     );
     if (successfulRequests.length > 0) {
-      touchItems(successfulRequests.map(({ requestId }) => requestId));
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits(
+        successfulRequests.map(({ requestId }) => requestId),
+      );
       for (const { requestId } of successfulRequests) {
         publishItemSnapshot(requestId, 'confirmed');
       }
@@ -1118,23 +1122,11 @@ export function createCollectionStore<
     const result = await scheduler.awaitFetch(itemId, params, options);
 
     if (result === 'timeout') {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-      };
+      return { data: null, error: new TimeoutStoreError() };
     }
 
     if (result === true) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-      };
+      return { data: null, error: new AbortedStoreError() };
     }
 
     const item = store.state[itemId];
@@ -1144,13 +1136,7 @@ export function createCollectionStore<
     }
 
     if (!item?.data) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-      };
+      return { data: null, error: new NotFoundStoreError() };
     }
 
     return { data: item.data, error: null };
@@ -1305,10 +1291,7 @@ export function createCollectionStore<
       results[index] ? [getItemKey(payload)] : [],
     );
     if (preloadedItemKeys.length > 0) {
-      touchItems(preloadedItemKeys);
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits(preloadedItemKeys);
     }
     return payloads.map((payload, index) => ({
       payload,
@@ -1413,10 +1396,7 @@ export function createCollectionStore<
       itemKey,
       0,
     );
-    touchItems([itemKey]);
-    if (shouldScheduleCacheLimitEnforcement()) {
-      scheduleCacheLimitEnforcement();
-    }
+    touchItemsAndMaybeEnforceLimits([itemKey]);
     publishItemSnapshot(itemKey);
   }
 
@@ -1483,10 +1463,7 @@ export function createCollectionStore<
     });
 
     if (updatedItemKeys.size > 0) {
-      touchItems([...updatedItemKeys]);
-      if (shouldScheduleCacheLimitEnforcement()) {
-        scheduleCacheLimitEnforcement();
-      }
+      touchItemsAndMaybeEnforceLimits([...updatedItemKeys]);
       for (const itemKey of updatedItemKeys) {
         const payload = store.state[itemKey]?.payload;
         if (payload) {
@@ -1679,10 +1656,7 @@ export function createCollectionStore<
   persistence?.attach(store);
   initializeOfflineStoreController(offlineController);
   if (store.isInitialized) {
-    touchItems(Object.keys(store.state));
-    if (shouldScheduleCacheLimitEnforcement()) {
-      scheduleCacheLimitEnforcement();
-    }
+    touchItemsAndMaybeEnforceLimits(Object.keys(store.state));
   }
 
   /**
@@ -1853,7 +1827,6 @@ export function createCollectionStore<
     store,
     events,
     storeEvents,
-    scheduler: null,
     get invalidationWasTriggered() {
       return invalidationWasTriggered;
     },

@@ -27,7 +27,7 @@ import type {
   RequestSchedulerEventData,
   RequestSchedulerEvents,
 } from '../../src/requestScheduler';
-import type { BrowserTabsLeadershipTimings } from '../../src/utils/browserTabsLeadership';
+import type { BrowserTabsPriorityTimings } from '../../src/utils/browserTabsPriority';
 import type { BrowserTabsTransportFactory } from '../../src/utils/browserTabsSync';
 import type { BlockWindowCloseHandler } from '../../src/utils/performMutation';
 import {
@@ -166,7 +166,7 @@ export function createListQueryStoreTestEnv<
     sharedServerTableState?: ServerTableSharedState<TRow>;
     browserTabsTransportFactory?: BrowserTabsTransportFactory;
     testBrowserTabId?: string;
-    browserTabsLeadershipTimings?: BrowserTabsLeadershipTimings;
+    browserTabsLeadershipTimings?: BrowserTabsPriorityTimings;
     /** Binds this env to a focus coordinator. Provides per-tab `getWindowIsFocused` and `onWindowFocus`/`onWindowBlur` for scoped focus events. */
     bindFocusController?: {
       getWindowIsFocused: () => boolean;

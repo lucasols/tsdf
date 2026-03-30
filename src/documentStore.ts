@@ -72,8 +72,11 @@ import {
 import { reusePrevIfEqual } from './utils/reusePrevIfEqual';
 import { createStoreFocusLifecycle } from './utils/storeFocusLifecycle';
 import {
+  AbortedStoreError,
   fetchTypePriority,
+  NotFoundStoreError,
   StoreFetchError,
+  TimeoutStoreError,
   TSDFStatus,
   ValidStoreState,
   type StoreError,
@@ -690,23 +693,11 @@ export function createDocumentStore<
     const result = await scheduler.awaitFetch(DOC_REQUEST_ID, null, options);
 
     if (result === 'timeout') {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'timeout', message: 'Timeout' },
-          'timeout',
-        ),
-      };
+      return { data: null, error: new TimeoutStoreError() };
     }
 
     if (result === true) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 408, id: 'aborted', message: 'Aborted' },
-          'aborted',
-        ),
-      };
+      return { data: null, error: new AbortedStoreError() };
     }
 
     if (store.state.error) {
@@ -717,13 +708,7 @@ export function createDocumentStore<
     }
 
     if (!store.state.data) {
-      return {
-        data: null,
-        error: new StoreFetchError(
-          { code: 404, id: 'not-found', message: 'Not found' },
-          'fetch',
-        ),
-      };
+      return { data: null, error: new NotFoundStoreError() };
     }
 
     return { data: store.state.data, error: null };

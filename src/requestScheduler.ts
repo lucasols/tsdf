@@ -932,7 +932,6 @@ export class RequestScheduler<T> {
     if (rtu) {
       clearTimeout(rtu.timeoutId);
       this.#state.pending.rtuDelayed = null;
-      this.#state.pending.rtuDelayed = null;
       this.#onEvent?.('rt-fetch-cancelled');
     }
   }

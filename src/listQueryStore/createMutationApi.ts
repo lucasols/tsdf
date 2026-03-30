@@ -11,11 +11,8 @@ import {
   type OfflineAwareMutationController,
 } from '../persistentStorage/offline/mutationRuntime';
 import { offlineSessionUnavailableError } from '../persistentStorage/offline/storeController';
-import type {
-  AnyOfflineOperationDefinition,
-  ListQueryOfflineEntityRef,
-  OfflineMutationInput,
-} from '../persistentStorage/offline/types';
+import type { OfflineMutationInput } from '../persistentStorage/offline/types';
+import type { ListQueryOfflineOperationsConfig } from '../persistentStorage/types';
 import { FetchType, getAutoIncrementId } from '../requestScheduler';
 import { type SnapshotConsistency } from '../utils/browserTabsSync';
 import {
@@ -52,30 +49,6 @@ type InvalidateItemEvent = {
 };
 
 type SchedulerWithMutation = { startMutation: (key: string) => () => boolean };
-
-type InternalListQueryOfflineOperations<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = Record<
-  string,
-  AnyOfflineOperationDefinition & {
-    getEntityRefs: (ctx: {
-      input: __LEGIT_ANY__;
-    }) => ListQueryOfflineEntityRef<ItemPayload>[];
-  }
-> &
-  ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
-
-type ListQueryOfflineOperationsConfig<
-  ItemState extends ValidStoreState,
-  QueryPayload extends ValidPayload,
-  ItemPayload extends ValidPayload,
-> = InternalListQueryOfflineOperations<
-  ItemState,
-  QueryPayload,
-  ItemPayload
-> | null;
 
 export type CreateMutationApiOptions<
   ItemState extends ValidStoreState,

@@ -397,7 +397,7 @@ export type ResolvedCollectionPersistentStorageConfig<
   ignoreItems?: ItemPayload[] | ((payload: ItemPayload) => boolean);
 };
 
-type InternalListQueryOfflineOperations<
+export type InternalListQueryOfflineOperations<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,
@@ -411,7 +411,7 @@ type InternalListQueryOfflineOperations<
 > &
   ([ItemState | QueryPayload | ItemPayload] extends [never] ? never : unknown);
 
-type ListQueryOfflineOperationsConfig<
+export type ListQueryOfflineOperationsConfig<
   ItemState extends ValidStoreState,
   QueryPayload extends ValidPayload,
   ItemPayload extends ValidPayload,

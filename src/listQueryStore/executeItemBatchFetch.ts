@@ -11,6 +11,7 @@ import {
 import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
+  DEFAULT_BATCH_KEY,
   StoreError,
   ValidPayload,
   ValidStoreState,
@@ -143,7 +144,7 @@ export async function executeItemBatchFetch<
         fetcher: () =>
           batchFetchItemFn(batchRequests, {
             signal: fetchCtx.signal,
-            batchKey: batchKey ?? '__default__',
+            batchKey: batchKey ?? DEFAULT_BATCH_KEY,
           }),
       });
       if (!fetchResult.ok) {

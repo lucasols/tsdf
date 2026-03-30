@@ -11,6 +11,7 @@ import {
 import { BatchRequest, FetchContext } from '../requestScheduler';
 import { reusePrevIfEqual } from '../utils/reusePrevIfEqual';
 import {
+  DEFAULT_BATCH_KEY,
   StoreError,
   ValidPayload,
   ValidStoreState,
@@ -79,7 +80,11 @@ export async function executeBatchFetch<
       const fetchResult = await runOfflineAwareFetch({
         controller: offlineController,
         fetcher: () =>
-          batchFetchFn(payloads, fetchCtx.signal, batchKey ?? '__default__'),
+          batchFetchFn(
+            payloads,
+            fetchCtx.signal,
+            batchKey ?? DEFAULT_BATCH_KEY,
+          ),
       });
 
       if (!fetchResult.ok) {
