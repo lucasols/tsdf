@@ -7,9 +7,7 @@ export default lsStackEslintCfg({
   ignore: ['src-old/**/*', 'test-old/**/*'],
   extraRuleGroups: [
     {
-      plugins: {
-        'react-hooks': reactHooks,
-      },
+      plugins: { 'react-hooks': reactHooks },
       rules: {
         'react-hooks/rules-of-hooks': 'error',
         'react-hooks/exhaustive-deps': 'warn',
@@ -26,6 +24,19 @@ export default lsStackEslintCfg({
             ],
           },
         ],
+        '@ls-stack/require-usage-explanation': [
+          'error',
+          {
+            matches: [
+              {
+                fn: '__LEGIT_CAST__',
+                commentPrefix: 'WORKAROUND:',
+                message:
+                  'Only use __LEGIT_CAST__ as a last resort workaround! A proper typesafe solution should be implemented instead when possible.',
+              },
+            ],
+          },
+        ],
         '@ls-stack/no-call-with-inferred-generics': [
           'error',
           {
@@ -38,9 +49,7 @@ export default lsStackEslintCfg({
     },
     {
       files: ['tests/**/*.test.{ts,tsx}'],
-      rules: {
-        '@typescript-eslint/no-non-null-assertion': 'off',
-      },
+      rules: { '@typescript-eslint/no-non-null-assertion': 'off' },
     },
   ],
 });
