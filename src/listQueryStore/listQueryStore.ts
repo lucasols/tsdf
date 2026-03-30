@@ -15,9 +15,8 @@ import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
 import { createIdleThrottledScheduler } from '../cacheLimits/scheduleIdleThrottled';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
 import {
-  createOfflineEntityLookup,
-  getIsPendingOfflineSync,
-  getOfflineEntitiesMetadata,
+  useGetPendingSync,
+  useGetPendingSyncForItemKeys,
 } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import {
@@ -65,7 +64,6 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
-import { useDeepStableValue } from '../utils/useDeepStableValue';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import { createListQueryCacheLimits } from './listQueryCacheLimits';
@@ -1682,7 +1680,13 @@ export function createListQueryStore<
       QueryPayload,
       QueryMetadata
     >[] {
-      const result = useMultipleListQueriesHook<
+      const getPendingSyncForItemKeys = useGetPendingSyncForItemKeys({
+        sessionKey: getSessionKey(),
+        inactiveScope: id,
+        storeName: persistentStorageConfig?.storeName,
+      });
+
+      return useMultipleListQueriesHook<
         ItemState,
         QueryPayload,
         ItemPayload,
@@ -1712,31 +1716,7 @@ export function createListQueryStore<
         itemPendingInvalidationFields,
         globalDisableRefetchOnMount,
         partialResources,
-      );
-
-      const queryItemKeys = store.useSelectorRC((state) =>
-        result.map((queryResult) =>
-          queryResult.queryKey
-            ? (state.queries[queryResult.queryKey]?.items ?? [])
-            : [],
-        ),
-      );
-      const offlineEntities = useOfflineStoreEntities({
-        sessionKey: getSessionKey(),
-        inactiveScope: id,
-        storeName: persistentStorageConfig?.storeName,
-      });
-      const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
-
-      return useDeepStableValue(
-        result.map((queryResult, index) => {
-          const offlineMetadata = getOfflineEntitiesMetadata(
-            offlineEntitiesByKey,
-            queryItemKeys[index] ?? [],
-          );
-
-          return { ...queryResult, pendingSync: offlineMetadata.pendingSync };
-        }),
+        getPendingSyncForItemKeys,
       );
     };
 
@@ -1757,12 +1737,7 @@ export function createListQueryStore<
     payload: QueryPayload | false | null | undefined,
     options: UseListQueryOptions<ItemState, ItemPayload, SelectedItem> = {},
   ): TSFDUseListQueryReturn<SelectedItem, QueryPayload, undefined> {
-    const result = useListQueryHook<
-      ItemState,
-      QueryPayload,
-      ItemPayload,
-      SelectedItem
-    >(
+    return useListQueryHook<ItemState, QueryPayload, ItemPayload, SelectedItem>(
       payload,
       options,
       store,
@@ -1770,22 +1745,6 @@ export function createListQueryStore<
       scheduleListQueryFetch,
       useMultipleListQueries,
     );
-
-    const itemKeys = store.useSelectorRC((state) =>
-      result.queryKey ? (state.queries[result.queryKey]?.items ?? []) : [],
-    );
-    const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
-      inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
-    });
-    const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
-    const offlineMetadata = getOfflineEntitiesMetadata(
-      offlineEntitiesByKey,
-      itemKeys,
-    );
-
-    return { ...result, pendingSync: offlineMetadata.pendingSync };
   };
 
   const useMultipleItems: UseMultipleItemsApi = function useMultipleItems<
@@ -1795,7 +1754,13 @@ export function createListQueryStore<
     items: ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
-    const result = useMultipleItemsHook<
+    const getPendingSync = useGetPendingSync({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
+
+    return useMultipleItemsHook<
       ItemState,
       QueryPayload,
       ItemPayload,
@@ -1823,25 +1788,8 @@ export function createListQueryStore<
       itemPendingInvalidationFields,
       globalDisableRefetchOnMount,
       fetchItemFn,
+      getPendingSync,
       partialResources,
-    );
-
-    const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
-      inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
-    });
-    const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
-
-    return useDeepStableValue(
-      result.map((itemResult) => {
-        return {
-          ...itemResult,
-          pendingSync: getIsPendingOfflineSync(
-            offlineEntitiesByKey.get(itemResult.itemStateKey),
-          ),
-        };
-      }),
     );
   };
 
@@ -1860,27 +1808,13 @@ export function createListQueryStore<
     itemPayload: ItemPayload | false | null | undefined,
     options: UseItemOptions<ItemState, Selected> = {},
   ): TSFDUseListItemReturn<Selected, ItemPayload> {
-    const result = useItemHook<ItemState, QueryPayload, ItemPayload, Selected>(
+    return useItemHook<ItemState, QueryPayload, ItemPayload, Selected>(
       itemPayload,
       options,
       store,
       scheduleItemFetch,
       useMultipleItems,
     );
-
-    const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
-      inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
-    });
-    return {
-      ...result,
-      pendingSync: getIsPendingOfflineSync(
-        offlineEntities.find(
-          (entity) => entity.entityKey === result.itemStateKey,
-        ),
-      ),
-    };
   };
 
   function useFindItem<SelectedItem = ItemState | null>(

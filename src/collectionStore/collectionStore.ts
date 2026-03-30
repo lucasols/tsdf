@@ -25,10 +25,7 @@ import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
 } from '../persistentStorage/offline/mutationRuntime';
-import {
-  createOfflineEntityLookup,
-  getIsPendingOfflineSync,
-} from '../persistentStorage/offline/entityMetadata';
+import { useGetPendingSync } from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import type {
   AnyOfflineOperationDefinition,
@@ -78,7 +75,6 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
-import { useDeepStableValue } from '../utils/useDeepStableValue';
 import { createCollectionCacheLimits } from './collectionCacheLimits';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
@@ -1312,7 +1308,13 @@ export function createCollectionStore<
     items: CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ) {
-    const result = useMultipleItemsBase<
+    const getPendingSync = useGetPendingSync({
+      sessionKey: getSessionKey(),
+      inactiveScope: id,
+      storeName: persistentStorageConfig?.storeName,
+    });
+
+    return useMultipleItemsBase<
       ItemState,
       ItemPayload,
       Selected,
@@ -1337,22 +1339,7 @@ export function createCollectionStore<
       scheduleAutomaticFetch,
       invalidationWasTriggered,
       globalDisableRefetchOnMount,
-    );
-
-    const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
-      inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
-    });
-    const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
-
-    return useDeepStableValue(
-      result.map((itemResult) => ({
-        ...itemResult,
-        pendingSync: getIsPendingOfflineSync(
-          offlineEntitiesByKey.get(itemResult.itemStateKey),
-        ),
-      })),
+      getPendingSync,
     );
   }
 
@@ -1360,28 +1347,13 @@ export function createCollectionStore<
     payload: ItemPayload | undefined | false | null,
     options: UseItemOptions<ItemState, Selected> = {},
   ) {
-    const result = useItemBase<ItemState, ItemPayload, Selected>(
+    return useItemBase<ItemState, ItemPayload, Selected>(
       payload,
       options,
       store,
       scheduleFetch,
       useMultipleItems,
     );
-
-    const offlineEntities = useOfflineStoreEntities({
-      sessionKey: getSessionKey(),
-      inactiveScope: id,
-      storeName: persistentStorageConfig?.storeName,
-    });
-
-    return {
-      ...result,
-      pendingSync: getIsPendingOfflineSync(
-        offlineEntities.find(
-          (entity) => entity.entityKey === result.itemStateKey,
-        ),
-      ),
-    };
   }
 
   type EndMutation = () => void;

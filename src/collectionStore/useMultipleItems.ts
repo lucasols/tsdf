@@ -86,6 +86,7 @@ export function useMultipleItems<
   scheduleAutomaticFetch: (fetchType: FetchType, payload: ItemPayload) => void,
   invalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
+  getPendingSync: (itemStateKey: string) => boolean,
 ): readonly TSFDUseCollectionItemReturn<
   Selected,
   ItemPayload,
@@ -108,7 +109,7 @@ export function useMultipleItems<
   };
 
   const queriesWithId = useMemo((): QueryWithId[] => {
-    const newQueries = items.map((queryProps) => ({
+    return items.map((queryProps) => ({
       itemKey: getItemKey(queryProps.payload),
       payload: queryProps.payload,
       disableRefetches:
@@ -129,8 +130,6 @@ export function useMultipleItems<
         queryProps.isOffScreen ?? allItemsIsOffScreen ?? isOffScreenFromContext,
       queryMetadata: queryProps.queryMetadata,
     }));
-
-    return newQueries;
   }, [
     items,
     allItemsDisableRefetches,
@@ -189,7 +188,7 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: false,
-              pendingSync: false,
+              pendingSync: getPendingSync(itemKey),
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -205,7 +204,7 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: !returnIdleStatus,
-              pendingSync: false,
+              pendingSync: getPendingSync(itemKey),
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -225,7 +224,7 @@ export function useMultipleItems<
             data,
             error: item.error,
             isLoading: status === 'loading',
-            pendingSync: false,
+            pendingSync: getPendingSync(itemKey),
             payload: omitPayload ? undefined : item.payload,
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
@@ -235,7 +234,7 @@ export function useMultipleItems<
         },
       );
     },
-    [queriesWithId, selector],
+    [getPendingSync, queriesWithId, selector],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -265,7 +264,7 @@ export function useMultipleItems<
               error: null,
               payload: query.omitPayload ? undefined : query.payload,
               isLoading: false,
-              pendingSync: false,
+              pendingSync: getPendingSync(result.itemStateKey),
               queryMetadata: result.queryMetadata,
             };
           }
@@ -288,7 +287,7 @@ export function useMultipleItems<
               error: fallbackItem.error,
               payload: query.omitPayload ? undefined : fallbackItem.payload,
               isLoading: status === 'loading',
-              pendingSync: false,
+              pendingSync: getPendingSync(result.itemStateKey),
               queryMetadata: result.queryMetadata,
             };
           }
@@ -297,7 +296,13 @@ export function useMultipleItems<
         return result;
       },
     );
-  }, [queriesWithId, readFallbackItemState, selector, storeState]);
+  }, [
+    getPendingSync,
+    queriesWithId,
+    readFallbackItemState,
+    selector,
+    storeState,
+  ]);
   useOnEvtmitterEvent(events, 'invalidateData', ({ payload: event }) => {
     for (const {
       itemKey,

@@ -1,4 +1,55 @@
+import { useCallback, useMemo } from 'react';
 import type { GlobalOfflineEntity } from './types';
+import { useOfflineStoreEntities } from './sessionCoordinator';
+
+/**
+ * React hook that returns a memoized `getPendingSync` callback for checking
+ * whether a single item has a pending offline sync.
+ *
+ * Used by collection and list-query `useMultipleItems` wrappers.
+ */
+export function useGetPendingSync(args: {
+  sessionKey: string | false;
+  inactiveScope: string;
+  storeName?: string;
+}): (itemStateKey: string) => boolean {
+  const offlineEntities = useOfflineStoreEntities(args);
+  const offlineEntitiesByKey = useMemo(
+    () => createOfflineEntityLookup(offlineEntities),
+    [offlineEntities],
+  );
+  return useCallback(
+    (itemStateKey: string) => {
+      return getIsPendingOfflineSync(offlineEntitiesByKey.get(itemStateKey));
+    },
+    [offlineEntitiesByKey],
+  );
+}
+
+/**
+ * React hook that returns a memoized callback for checking whether any items
+ * in a set of keys have pending offline sync.
+ *
+ * Used by the list-query `useMultipleListQueries` wrapper.
+ */
+export function useGetPendingSyncForItemKeys(args: {
+  sessionKey: string | false;
+  inactiveScope: string;
+  storeName?: string;
+}): (itemKeys: string[]) => boolean {
+  const offlineEntities = useOfflineStoreEntities(args);
+  const offlineEntitiesByKey = useMemo(
+    () => createOfflineEntityLookup(offlineEntities),
+    [offlineEntities],
+  );
+  return useCallback(
+    (itemKeys: string[]) => {
+      return getOfflineEntitiesMetadata(offlineEntitiesByKey, itemKeys)
+        .pendingSync;
+    },
+    [offlineEntitiesByKey],
+  );
+}
 
 export function createOfflineEntityLookup(
   entities: GlobalOfflineEntity[],

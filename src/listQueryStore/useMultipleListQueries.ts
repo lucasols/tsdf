@@ -121,6 +121,7 @@ export function useMultipleListQueries<
   itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
+  getPendingSyncForItemKeys: (itemKeys: string[]) => boolean,
 ): readonly TSFDUseListQueryReturn<
   SelectedItem,
   QueryPayload,
@@ -436,7 +437,7 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
-            pendingSync: false,
+            pendingSync: getPendingSyncForItemKeys(query.items),
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
               QueryMetadata | undefined
@@ -445,7 +446,7 @@ export function useMultipleListQueries<
         },
       );
     },
-    [queriesWithId, getQueryItems, partialResources],
+    [getPendingSyncForItemKeys, getQueryItems, partialResources, queriesWithId],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -530,7 +531,7 @@ export function useMultipleListQueries<
               fields: queryConfig.fields,
               isLoading: false,
               isLoadingMore: false,
-              pendingSync: false,
+              pendingSync: getPendingSyncForItemKeys(fallbackQuery.items),
               queryMetadata: result.queryMetadata,
             };
           }
@@ -546,6 +547,7 @@ export function useMultipleListQueries<
     readFallbackItemState,
     partialResources,
     itemSelector,
+    getPendingSyncForItemKeys,
   ]);
   const autoFetchSignals = store.useSelectorRC(
     useCallback(

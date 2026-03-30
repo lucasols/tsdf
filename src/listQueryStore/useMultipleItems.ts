@@ -109,6 +109,7 @@ export function useMultipleItems<
   itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   fetchItemFn: unknown,
+  getPendingSync: (itemStateKey: string) => boolean,
   partialResources?: PartialResourcesConfig<ItemState>,
 ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
   const isOffScreenFromContext = useContext(IsOffScreenContext);
@@ -224,7 +225,7 @@ export function useMultipleItems<
               isLoading: false,
               payload,
               data,
-              pendingSync: false,
+              pendingSync: getPendingSync(itemKey),
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -241,7 +242,7 @@ export function useMultipleItems<
                 isLoading: false,
                 payload,
                 data,
-                pendingSync: false,
+                pendingSync: getPendingSync(itemKey),
                 queryMetadata: __LEGIT_CAST__<
                   QueryMetadata,
                   QueryMetadata | undefined
@@ -268,7 +269,7 @@ export function useMultipleItems<
                 : {}),
               payload,
               data,
-              pendingSync: false,
+              pendingSync: getPendingSync(itemKey),
               queryMetadata: __LEGIT_CAST__<
                 QueryMetadata,
                 QueryMetadata | undefined
@@ -362,7 +363,7 @@ export function useMultipleItems<
                 : __LEGIT_CAST__<Selected, null>(null)
               : data,
             payload,
-            pendingSync: false,
+            pendingSync: getPendingSync(itemKey),
             queryMetadata: __LEGIT_CAST__<
               QueryMetadata,
               QueryMetadata | undefined
@@ -371,7 +372,13 @@ export function useMultipleItems<
         },
       );
     },
-    [loadFromStateOnly, partialResources, queriesWithId, selector],
+    [
+      getPendingSync,
+      loadFromStateOnly,
+      partialResources,
+      queriesWithId,
+      selector,
+    ],
   );
 
   const autoFetchSignalSelector = useCallback(
@@ -435,7 +442,7 @@ export function useMultipleItems<
               data: selector
                 ? selector(null, null)
                 : __LEGIT_CAST__<Selected, null>(null),
-              pendingSync: false,
+              pendingSync: getPendingSync(result.itemStateKey),
               queryMetadata: result.queryMetadata,
             };
           }
@@ -467,7 +474,7 @@ export function useMultipleItems<
               data: selector
                 ? selector(itemState, fallbackItemState.itemQuery.payload)
                 : __LEGIT_CAST__<Selected, ItemState>(itemState),
-              pendingSync: false,
+              pendingSync: getPendingSync(result.itemStateKey),
               queryMetadata: result.queryMetadata,
             };
           }
@@ -483,6 +490,7 @@ export function useMultipleItems<
     readFallbackItemState,
     selector,
     storeState,
+    getPendingSync,
   ]);
   const autoFetchSignals = store.useSelectorRC(autoFetchSignalSelector, {
     equalityFn: deepEqual,
