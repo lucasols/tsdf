@@ -47,7 +47,8 @@ export function useFindItem<
         itemKey: matchedItem.itemKey,
         value: selector
           ? selector(matchedItem.item, matchedItem.itemQuery.payload)
-          : __LEGIT_CAST__<SelectedItem, ItemState>(matchedItem.item),
+          : // WORKAROUND: Runtime selector presence does not narrow SelectedItem, so the default branch must forward the matched raw item through the generic.
+            __LEGIT_CAST__<SelectedItem, ItemState>(matchedItem.item),
       };
     },
     { equalityFn: deepEqual },

@@ -44,8 +44,8 @@ function getStorageKey(sessionKey: string, storeName: string): string {
 }
 
 export type PersistentStorageHandle<T> = {
-  /** Loads persisted data, validating version and schema. Returns null if not found or invalid. */
-  load(): Promise<T | null>;
+  /** Loads persisted data, validating the cache entry envelope. Returns raw entry data or null if not found or invalid. */
+  load(): Promise<unknown>;
   /** Schedules a debounced save. getData is called at save time to capture latest state. */
   scheduleSave(getData: () => T): void;
   /** Immediately saves data, canceling any pending debounce. */
@@ -100,13 +100,19 @@ export function createPersistentStorageHandle<T>(
     }
   }
 
-  async function load(): Promise<T | null> {
+  async function load(): Promise<unknown> {
     const key = getKey();
     if (key === false) return null;
 
-    const entry = await adapter.read<StorageCacheEntry<T>>(key);
+    const rawEntry = await adapter.read(key);
+    if (!rawEntry) return null;
 
-    if (!entry) return null;
+    const entryResult = rc_parse(rawEntry, cacheEntrySchema);
+    if (!entryResult.ok) {
+      scheduleIdleCleanup(() => void adapter.remove(key));
+      return null;
+    }
+    const entry = entryResult.value;
 
     if (entry.version !== version) {
       scheduleIdleCleanup(() => void adapter.remove(key));
@@ -173,8 +179,8 @@ export function createPersistentStorageHandle<T>(
 }
 
 export type PersistentStorageNamespaceHandle<T> = {
-  readEntry(entryKey: string): Promise<StorageCacheEntry<T> | null>;
-  load(entryKey: string): Promise<T | null>;
+  readEntry(entryKey: string): Promise<StorageCacheEntry<unknown> | null>;
+  load(entryKey: string): Promise<unknown>;
   save(entryKey: string, data: T): Promise<void>;
   remove(entryKey: string): Promise<void>;
   listKeys(): Promise<string[]>;
@@ -215,12 +221,19 @@ export function createPersistentStorageNamespaceHandle<T>(
 
   async function readEntry(
     entryKey: string,
-  ): Promise<StorageCacheEntry<T> | null> {
+  ): Promise<StorageCacheEntry<unknown> | null> {
     const key = getKey(entryKey);
     if (key === false) return null;
 
-    const entry = await adapter.read<StorageCacheEntry<T>>(key);
-    if (!entry) return null;
+    const rawEntry = await adapter.read(key);
+    if (!rawEntry) return null;
+
+    const entryResult = rc_parse(rawEntry, cacheEntrySchema);
+    if (!entryResult.ok) {
+      scheduleIdleCleanup(() => void adapter.remove(key));
+      return null;
+    }
+    const entry = entryResult.value;
 
     if (entry.version !== version) {
       scheduleIdleCleanup(() => void adapter.remove(key));
@@ -230,7 +243,7 @@ export function createPersistentStorageNamespaceHandle<T>(
     return entry;
   }
 
-  async function load(entryKey: string): Promise<T | null> {
+  async function load(entryKey: string): Promise<unknown> {
     const key = getKey(entryKey);
     const entry = await readEntry(entryKey);
     if (!key || !entry) return null;
@@ -433,7 +446,7 @@ async function runExpirationScan(
   const now = Date.now();
 
   for (const key of keys) {
-    const raw = await adapter.read<unknown>(key);
+    const raw = await adapter.read(key);
     if (!raw) {
       await adapter.remove(key);
       continue;

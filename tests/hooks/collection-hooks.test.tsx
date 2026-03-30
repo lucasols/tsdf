@@ -1,7 +1,7 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import { evtmitter } from 'evtmitter';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   afterEach,
   beforeAll,

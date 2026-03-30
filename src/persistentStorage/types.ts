@@ -6,8 +6,8 @@ import type { ValidPayload, ValidStoreState } from '../utils/storeShared';
 
 /** Uniform async interface for reading/writing persistent data. */
 export type StorageAdapter = {
-  read<T>(key: string): Promise<T | null>;
-  write<T>(key: string, value: T): Promise<void>;
+  read(key: string): Promise<unknown>;
+  write(key: string, value: unknown): Promise<void>;
   remove(key: string): Promise<void>;
   removeByPrefix(prefix: string): Promise<void>;
   listKeys(prefix: string): Promise<string[]>;

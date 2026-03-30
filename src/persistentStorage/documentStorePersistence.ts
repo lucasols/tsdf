@@ -156,7 +156,13 @@ export function setupDocumentPersistence<
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 
-        const validated = parsePersistedStoreData(cached.data, dataSchema);
+        const persisted = parsePersistedDocumentData(cached);
+        if (!persisted) {
+          scheduleIdleCleanup(() => void handle.clear());
+          return;
+        }
+
+        const validated = parsePersistedStoreData(persisted.data, dataSchema);
         if (validated === null) {
           scheduleIdleCleanup(() => void handle.clear());
           return;

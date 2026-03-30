@@ -206,7 +206,10 @@ export function useMultipleListQueries<
         if (itemSelector) {
           return itemSelector(item, itemPayload, itemKey);
         }
-        return __LEGIT_CAST__<SelectedItem, ItemState>(item);
+        return (
+          // WORKAROUND: Runtime itemSelector presence does not narrow SelectedItem, so the default branch must forward the raw item through the generic.
+          __LEGIT_CAST__<SelectedItem, ItemState>(item)
+        );
       });
     },
     [itemSelector, partialResources],
@@ -278,6 +281,11 @@ export function useMultipleListQueries<
         > => {
           const query = state.queries[queryKey];
           let loadingFields: string[] | undefined;
+          const resultQueryMetadata =
+            // WORKAROUND: queryMetadata stays optional on input queries, but the public hook result preserves the caller's QueryMetadata generic.
+            __LEGIT_CAST__<QueryMetadata, QueryMetadata | undefined>(
+              queryMetadata,
+            );
 
           if (!query) {
             const pendingLoadingFields =
@@ -302,10 +310,7 @@ export function useMultipleListQueries<
                 : {}),
               isLoading: !returnIdleStatus,
               isLoadingMore: false,
-              queryMetadata: __LEGIT_CAST__<
-                QueryMetadata,
-                QueryMetadata | undefined
-              >(queryMetadata),
+              queryMetadata: resultQueryMetadata,
             };
           }
 
@@ -329,10 +334,9 @@ export function useMultipleListQueries<
             const someItemMissingFieldsInState = query.items.some((itemKey) => {
               const item = state.items[itemKey];
               if (!item || typeof item !== 'object') return true;
-              const itemRecord = __LEGIT_CAST__<
-                Record<string, unknown>,
-                ItemState
-              >(item);
+              const itemRecord =
+                // WORKAROUND: Partial-resource checks need indexed property access, but ItemState is generic and does not expose a string index signature.
+                __LEGIT_CAST__<Record<string, unknown>, ItemState>(item);
               return fields.some(
                 (f) => !(f in itemRecord) || itemRecord[f] === undefined,
               );
@@ -435,10 +439,7 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
-            queryMetadata: __LEGIT_CAST__<
-              QueryMetadata,
-              QueryMetadata | undefined
-            >(queryMetadata),
+            queryMetadata: resultQueryMetadata,
           };
         },
       );

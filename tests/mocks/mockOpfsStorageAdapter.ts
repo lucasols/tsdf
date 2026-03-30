@@ -138,12 +138,12 @@ export function createMockOpfsStorageAdapter({
   }
 
   const adapter: StorageAdapter = {
-    async read<T>(key: string): Promise<T | null> {
+    async read(key: string): Promise<unknown> {
       try {
         readRequests.push(key);
         await waitForReadDelay();
 
-        return persistentStore.storage.readEntry<T>(key);
+        return persistentStore.storage.readEntry(key);
       } catch {
         return null;
       }

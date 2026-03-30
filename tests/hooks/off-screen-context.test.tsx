@@ -1,6 +1,6 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { type ReactNode } from 'react';
+import React, { type ReactNode } from 'react';
 import {
   afterEach,
   beforeAll,

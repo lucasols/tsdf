@@ -203,7 +203,13 @@ export function useMultipleItems<
 
           const data = selector
             ? selector(itemState ?? null, itemQuery?.payload ?? null)
-            : __LEGIT_CAST__<Selected, ItemState | null>(itemState ?? null);
+            : // WORKAROUND: Runtime selector presence does not narrow Selected, so the unselected path must forward the raw item state through the generic.
+              __LEGIT_CAST__<Selected, ItemState | null>(itemState ?? null);
+          const resultQueryMetadata =
+            // WORKAROUND: queryMetadata stays optional on input queries, but the public hook result preserves the caller's QueryMetadata generic.
+            __LEGIT_CAST__<QueryMetadata, QueryMetadata | undefined>(
+              queryMetadata,
+            );
 
           if (itemQuery === null) {
             return {
@@ -213,10 +219,7 @@ export function useMultipleItems<
               isLoading: false,
               payload,
               data,
-              queryMetadata: __LEGIT_CAST__<
-                QueryMetadata,
-                QueryMetadata | undefined
-              >(queryMetadata),
+              queryMetadata: resultQueryMetadata,
             };
           }
 
@@ -229,10 +232,7 @@ export function useMultipleItems<
                 isLoading: false,
                 payload,
                 data,
-                queryMetadata: __LEGIT_CAST__<
-                  QueryMetadata,
-                  QueryMetadata | undefined
-                >(queryMetadata),
+                queryMetadata: resultQueryMetadata,
               };
             }
 
@@ -255,10 +255,7 @@ export function useMultipleItems<
                 : {}),
               payload,
               data,
-              queryMetadata: __LEGIT_CAST__<
-                QueryMetadata,
-                QueryMetadata | undefined
-              >(queryMetadata),
+              queryMetadata: resultQueryMetadata,
             };
           }
 
@@ -277,19 +274,23 @@ export function useMultipleItems<
               (f) => !loadedFields.includes(f),
             );
             const hasMissingFields = missingFields.length > 0;
-            const missingFieldsAreAvailableInState =
+            let missingFieldsAreAvailableInState = false;
+
+            if (
               hasMissingFields &&
-              !!rawItemState &&
-              typeof rawItemState === 'object' &&
-              (() => {
-                const itemRecord = __LEGIT_CAST__<
-                  Record<string, unknown>,
-                  ItemState
-                >(rawItemState);
-                return missingFields.every(
-                  (f) => f in itemRecord && itemRecord[f] !== undefined,
+              rawItemState &&
+              typeof rawItemState === 'object'
+            ) {
+              const itemRecord =
+                // WORKAROUND: Partial-resource checks need indexed property access, but ItemState is generic and does not expose a string index signature.
+                __LEGIT_CAST__<Record<string, unknown>, ItemState>(
+                  rawItemState,
                 );
-              })();
+
+              missingFieldsAreAvailableInState = missingFields.every(
+                (f) => f in itemRecord && itemRecord[f] !== undefined,
+              );
+            }
 
             if (hasMissingFields && !missingFieldsAreAvailableInState) {
               status =
@@ -345,13 +346,11 @@ export function useMultipleItems<
             data: shouldHideDataWhileLoading
               ? selector
                 ? selector(null, itemQuery.payload)
-                : __LEGIT_CAST__<Selected, null>(null)
+                : // WORKAROUND: Runtime selector presence does not narrow Selected, so the loading fallback has to re-express the null result.
+                  __LEGIT_CAST__<Selected, null>(null)
               : data,
             payload,
-            queryMetadata: __LEGIT_CAST__<
-              QueryMetadata,
-              QueryMetadata | undefined
-            >(queryMetadata),
+            queryMetadata: resultQueryMetadata,
           };
         },
       );

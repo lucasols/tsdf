@@ -793,7 +793,13 @@ export function setupListQueryPersistence<
     for (const { entry } of queryEntries) {
       if (!entry) continue;
 
-      for (const itemKey of entry.data.items) {
+      const persistedQuery = parsePersistedListQueryData(
+        entry.data,
+        config.queryPayloadSchema,
+      );
+      if (!persistedQuery) continue;
+
+      for (const itemKey of persistedQuery.items) {
         referencedItems.add(itemKey);
       }
     }
@@ -891,24 +897,33 @@ export function setupListQueryPersistence<
         const entry = await queryNamespace.load(queryKey);
         if (!entry) return;
 
-        const filteredItems = entry.items.filter((itemKey) =>
+        const persistedQuery = parsePersistedListQueryData(
+          entry,
+          config.queryPayloadSchema,
+        );
+        if (!persistedQuery) {
+          await queryNamespace.remove(queryKey);
+          return;
+        }
+
+        const filteredItems = persistedQuery.items.filter((itemKey) =>
           keptItemKeys.has(itemKey),
         );
         const limitedQuery = limitPersistedQueryItems(
           filteredItems,
-          entry.hasMore,
+          persistedQuery.hasMore,
           maxQuerySize,
         );
 
         if (
-          limitedQuery.itemKeys.length === entry.items.length &&
-          limitedQuery.hasMore === entry.hasMore
+          limitedQuery.itemKeys.length === persistedQuery.items.length &&
+          limitedQuery.hasMore === persistedQuery.hasMore
         ) {
           return;
         }
 
         await queryNamespace.save(queryKey, {
-          ...entry,
+          ...persistedQuery,
           items: limitedQuery.itemKeys,
           hasMore: limitedQuery.hasMore,
         });

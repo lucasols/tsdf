@@ -771,7 +771,8 @@ export function createDocumentStore<
 
         const data = selector
           ? selector(state.data)
-          : __LEGIT_CAST__<Selected, State | null>(state.data);
+          : // WORKAROUND: Runtime selector presence does not narrow Selected, so the default branch must forward the raw document state through the generic.
+            __LEGIT_CAST__<Selected, State | null>(state.data);
 
         let status = state.status;
 

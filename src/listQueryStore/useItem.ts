@@ -126,7 +126,8 @@ export function useItem<
             status: 'error',
             data: selector
               ? selector(null, null)
-              : __LEGIT_CAST__<Selected, null>(null),
+              : // WORKAROUND: Runtime selector presence does not narrow the generic Selected type, but the fallback branch returns the raw null state.
+                __LEGIT_CAST__<Selected, null>(null),
             payload: itemPayload || null,
             itemStateKey: '',
             queryMetadata: undefined,
@@ -137,7 +138,8 @@ export function useItem<
             status: 'idle',
             data: selector
               ? selector(null, null)
-              : __LEGIT_CAST__<Selected, null>(null),
+              : // WORKAROUND: Runtime selector presence does not narrow the generic Selected type, but the fallback branch returns the raw null state.
+                __LEGIT_CAST__<Selected, null>(null),
             payload: itemPayload || null,
             itemStateKey: '',
             queryMetadata: undefined,

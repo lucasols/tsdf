@@ -1,4 +1,5 @@
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { rc_number, rc_object, rc_parse, rc_string } from 'runcheck';
 
 import {
   createBrowserTabsPriority,
@@ -41,8 +42,6 @@ export type BrowserTabsMessageMeta = {
   sentAt: number;
 };
 
-type RawBrowserTabsMessage = BrowserTabsMessageMeta & { kind: string };
-
 type MessageWithoutMeta<Message extends { kind: string }> =
   Message extends unknown ? Omit<Message, keyof BrowserTabsMessageMeta> : never;
 
@@ -58,6 +57,19 @@ export type BrowserTabsCoordinator<Message extends { kind: string }> = {
 
 const PROTOCOL_VERSION = 1 as const;
 const CHANNEL_PREFIX = 'tsdf-browser-tabs-v1';
+
+type RawBrowserTabsMessage = BrowserTabsMessageMeta & { kind: string };
+
+const rawBrowserTabsMessageSchema = rc_object({
+  protocolVersion: rc_number,
+  messageId: rc_string,
+  storeType: rc_string,
+  sessionKey: rc_string,
+  tabId: rc_string,
+  seq: rc_number,
+  sentAt: rc_number,
+  kind: rc_string,
+});
 
 function getDefaultTransportFactory(): BrowserTabsTransportFactory {
   return ({ channelName, onMessage }) => {
@@ -129,7 +141,10 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>({
       if (lastSeenSeq !== undefined && message.seq <= lastSeenSeq) return;
 
       lastSeenSeqByTab.set(message.tabId, message.seq);
-      onMessage(__LEGIT_CAST__<Message, RawBrowserTabsMessage>(message));
+      onMessage(
+        // WORKAROUND: parseSyncMessage validates the shared transport envelope before the generic message payload is forwarded to typed callbacks.
+        __LEGIT_CAST__<Message, RawBrowserTabsMessage>(message),
+      );
     },
   });
 
@@ -153,13 +168,12 @@ export function createBrowserTabsCoordinator<Message extends { kind: string }>({
         sentAt: Date.now(),
         messageId: `${tabId}:${seq}`,
       };
-      const fullMessage = { ...message, ...meta };
-      type PublishedMessage = Message & BrowserTabsMessageMeta;
-      type FullMessageShape = MessageWithoutMeta<Message> &
-        BrowserTabsMessageMeta;
-      const typedMessage = __LEGIT_CAST__<PublishedMessage, FullMessageShape>(
-        fullMessage,
-      );
+      const typedMessage =
+        // WORKAROUND: The generic message type is reconstructed only after we attach the runtime transport metadata required by every cross-tab message.
+        __LEGIT_CAST__<
+          Message & BrowserTabsMessageMeta,
+          MessageWithoutMeta<Message> & BrowserTabsMessageMeta
+        >({ ...message, ...meta });
 
       transport.postMessage(typedMessage);
 
@@ -219,6 +233,7 @@ export function createBrowserTabsCoordinatorWithPriority<
     onWindowFocusChange,
     publishStatus: (status) => {
       coordinator.publish(
+        // WORKAROUND: Priority status messages are only published by stores whose Message union includes this status shape.
         __LEGIT_CAST__<
           MessageWithoutMeta<Message>,
           BrowserTabsTabStatusMessage
@@ -276,26 +291,25 @@ function getConsistencyRank(consistency: SnapshotConsistency): number {
   return consistency === 'confirmed' ? 1 : 0;
 }
 
-type SyncMessageRecord = Record<string, unknown>;
-
 function parseSyncMessage(
   message: unknown,
   storeType: BrowserTabsStoreType,
 ): RawBrowserTabsMessage | null {
   if (!message || typeof message !== 'object') return null;
 
-  const value = __LEGIT_CAST__<SyncMessageRecord, unknown>(message);
-  const isValid =
-    value.protocolVersion === PROTOCOL_VERSION &&
-    value.storeType === storeType &&
-    typeof value.messageId === 'string' &&
-    typeof value.sessionKey === 'string' &&
-    typeof value.tabId === 'string' &&
-    typeof value.seq === 'number' &&
-    typeof value.sentAt === 'number' &&
-    typeof value.kind === 'string';
+  const result = rc_parse(message, rawBrowserTabsMessageSchema);
+  if (!result.ok) return null;
 
-  if (!isValid) return null;
+  const value = result.value;
+  if (
+    value.protocolVersion !== PROTOCOL_VERSION ||
+    value.storeType !== storeType
+  ) {
+    return null;
+  }
 
-  return __LEGIT_CAST__<RawBrowserTabsMessage, SyncMessageRecord>(value);
+  return Object.assign({}, message, value, {
+    protocolVersion: PROTOCOL_VERSION,
+    storeType,
+  });
 }

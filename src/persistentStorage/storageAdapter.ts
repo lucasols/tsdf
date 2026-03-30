@@ -1,5 +1,4 @@
 import { murmur3 } from '@ls-stack/utils/hash';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import {
   rc_array,
   rc_object,
@@ -12,17 +11,17 @@ import type { StorageAdapter, StorageBackend } from './types';
 
 function createLocalStorageAdapter(): StorageAdapter {
   return {
-    read<T>(key: string): Promise<T | null> {
+    read(key: string): Promise<unknown> {
       try {
         const raw = localStorage.getItem(key);
         if (raw === null) return Promise.resolve(null);
-        return Promise.resolve(__LEGIT_CAST__<T, unknown>(JSON.parse(raw)));
+        return Promise.resolve(JSON.parse(raw));
       } catch {
         return Promise.resolve(null);
       }
     },
 
-    write<T>(key: string, value: T): Promise<void> {
+    write(key: string, value: unknown): Promise<void> {
       localStorage.setItem(key, JSON.stringify(value));
       return Promise.resolve();
     },
@@ -118,14 +117,14 @@ function createOpfsAdapter(): StorageAdapter {
   }
 
   return {
-    async read<T>(key: string): Promise<T | null> {
+    async read(key: string): Promise<unknown> {
       try {
         const dir = await getCacheDir();
         const bucket = await readBucket(dir, key);
         const entry = bucket?.entries.find((item) => item.key === key);
 
         if (!entry) return null;
-        return __LEGIT_CAST__<T, unknown>(entry.value);
+        return entry.value;
       } catch {
         return null;
       }
