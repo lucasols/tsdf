@@ -1,4 +1,3 @@
-import type { StorageAdapter } from '../../src/persistentStorage/types';
 import {
   createInMemoryPersistentTestStore,
   type PersistentTestStoreScope,
@@ -67,7 +66,13 @@ type MockOpfsStorageAdapterOptions = {
 };
 
 type MockOpfsStorageAdapterBase = {
-  adapter: StorageAdapter;
+  adapter: {
+    read(key: string): Promise<unknown>;
+    write<T>(key: string, value: T): Promise<void>;
+    remove(key: string): Promise<void>;
+    removeByPrefix(prefix: string): Promise<void>;
+    listKeys(prefix: string): Promise<string[]>;
+  };
   storage: ReturnType<typeof createInMemoryPersistentTestStore>['storage'];
   scope: ReturnType<typeof createInMemoryPersistentTestStore>['scope'];
   readRequests: string[];
@@ -136,7 +141,7 @@ export function createMockOpfsStorageAdapter({
     });
   }
 
-  const adapter: StorageAdapter = {
+  const adapter = {
     async read(key: string): Promise<unknown> {
       try {
         readRequests.push(key);

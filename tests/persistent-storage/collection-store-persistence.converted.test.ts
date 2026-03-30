@@ -13,11 +13,7 @@ import {
 } from 'vitest';
 
 import { createCompactLocalStorageEntry } from '../../src/persistentStorage/compactLocalStorageEntry';
-import type {
-  CollectionPersistentStorageConfig,
-  PersistedCollectionItemData,
-  StorageCacheEntry,
-} from '../../src/persistentStorage/types';
+import type { CollectionPersistentStorageConfig } from '../../src/persistentStorage/types';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createMockLocalStorageStore } from '../mocks/mockLocalStorageStore';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
