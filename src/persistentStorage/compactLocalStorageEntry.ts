@@ -31,7 +31,7 @@ export function parseCompactLocalStorageEntry(
   const value = rc_parse_json(raw, rc_unknown).unwrapOrNull();
   if (value === null) return null;
 
-  if (!isObject(value) || Array.isArray(value) || !('d' in value)) {
+  if (!isObject(value) || !('d' in value)) {
     return null;
   }
 

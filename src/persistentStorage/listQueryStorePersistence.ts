@@ -1,9 +1,6 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import {
-  __LEGIT_CAST__,
-  type __LEGIT_ANY__,
-} from '@ls-stack/utils/saferTyping';
+import { type __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 
 import type {
@@ -282,29 +279,17 @@ export function setupListQueryPersistence<
       value !== null &&
       'd' in value &&
       'p' in value
-        ? (() => {
-            const parsed = parsePersistedListQueryItemData(
-              {
-                data: value.d,
-                payload: value.p,
-                ...('lf' in value && Array.isArray(value.lf)
-                  ? { loadedFields: value.lf }
-                  : {}),
-              },
-              config.itemPayloadSchema,
-            );
-            return parsed
-              ? {
-                  data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
-                    parsed.data,
-                  ),
-                  payload: parsed.payload,
-                  ...(parsed.loadedFields
-                    ? { loadedFields: parsed.loadedFields }
-                    : {}),
-                }
-              : null;
-          })()
+        ? parsePersistedListQueryItemData(
+            {
+              data: value.d,
+              payload: value.p,
+              ...('lf' in value && Array.isArray(value.lf)
+                ? { loadedFields: value.lf }
+                : {}),
+            },
+            config.itemPayloadSchema,
+            dataSchema,
+          )
         : null,
   };
   const queryStorageValueCodec = {
@@ -796,6 +781,7 @@ export function setupListQueryPersistence<
       const persisted = parsePersistedListQueryItemData(
         JSON.parse(snapshot),
         config.itemPayloadSchema,
+        dataSchema,
       );
       return persisted
         ? (toItemState(persisted, dataSchema, shouldIgnoreItem) ?? undefined)
@@ -857,14 +843,21 @@ export function setupListQueryPersistence<
       return undefined;
     }
 
-    const itemState = toItemState(
-      __LEGIT_CAST__<
-        ParsedPersistedListQueryItemData<ItemPayload>,
-        PersistedListQueryItemData<unknown>
-      >(cacheEntry.data),
+    const persisted = parsePersistedListQueryItemData(
+      cacheEntry.data,
+      config.itemPayloadSchema,
       dataSchema,
-      shouldIgnoreItem,
     );
+    if (!persisted) {
+      scheduleLocalStorageRemoval(storageKey, {
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      });
+      forgetPersistedItem(itemKey);
+      return undefined;
+    }
+
+    const itemState = toItemState(persisted, dataSchema, shouldIgnoreItem);
     if (!itemState) {
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',
@@ -1048,6 +1041,7 @@ export function setupListQueryPersistence<
     const persisted = parsePersistedListQueryItemData(
       cached,
       config.itemPayloadSchema,
+      dataSchema,
     );
     if (!persisted) {
       forgetPersistedItem(itemKey);

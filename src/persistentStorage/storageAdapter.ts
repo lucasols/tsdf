@@ -266,6 +266,7 @@ export const localPersistentStorage: LocalPersistentStorage = {
     try {
       const raw = localPersistentStorage.readRaw(key);
       if (raw === null) return null;
+      // WORKAROUND: This legacy sync storage API intentionally returns parsed JSON as the caller's requested type because it has no codec or schema boundary.
       return __LEGIT_CAST__<T, unknown>(JSON.parse(raw));
     } catch {
       return null;

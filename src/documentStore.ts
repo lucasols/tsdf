@@ -288,6 +288,7 @@ export function createDocumentStore<
     : null;
 
   assertDocumentOfflineOperations(
+    // WORKAROUND: Persistent config stores offline operations behind the generic persistence surface, and the assertion helper expects the already-narrowed ValidStoreState variant.
     __LEGIT_CAST__<DocumentOfflineOperationsConfig<ValidStoreState>, unknown>(
       persistentStorageConfig?.offlineMode?.operations ?? null,
     ),

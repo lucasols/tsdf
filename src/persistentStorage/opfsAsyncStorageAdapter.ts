@@ -1,5 +1,7 @@
 import { createCache, type Cache } from '@ls-stack/utils/cache';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { isObject } from '@ls-stack/utils/typeGuards';
+import { asPossiblyUndefined } from '@ls-stack/utils/typingFnUtils';
 
 import {
   ASYNC_NAMESPACE_INDEX_RECORD_KEY,
@@ -23,11 +25,7 @@ import type {
 const OPFS_DIR_HANDLE_CACHE_MAX_SIZE = 500;
 const OPFS_FILE_HANDLE_CACHE_MAX_SIZE = 10_000;
 async function getNavigatorStorageDirectory(): Promise<FileSystemDirectoryHandle> {
-  const storage = __LEGIT_CAST__<
-    | { getDirectory?: (() => Promise<FileSystemDirectoryHandle>) | undefined }
-    | undefined,
-    unknown
-  >(globalThis.navigator.storage);
+  const storage = asPossiblyUndefined(globalThis.navigator)?.storage;
   if (storage?.getDirectory === undefined) {
     throw new Error('[TSDF] OPFS is unavailable in this environment.');
   }
@@ -629,9 +627,9 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         continue;
       }
 
-      const fileHandle = __LEGIT_CAST__<FileSystemFileHandle, FileSystemHandle>(
-        entryHandle,
-      );
+      const fileHandle =
+        // WORKAROUND: This branch only keeps file handles, but the DOM iterator still exposes the broader FileSystemHandle union.
+        __LEGIT_CAST__<FileSystemFileHandle, FileSystemHandle>(entryHandle);
       const nextEntries = filesByKind.get(parsed.kind) ?? [];
       nextEntries.push({
         fileHandle,
@@ -725,11 +723,9 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
     if (indexHandle === null || filePath === null) return null;
 
     const value = await this.#readJsonFile(filePath, indexHandle, cacheContext);
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return null;
-    }
+    if (!isObject(value)) return null;
 
-    const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+    const record = value;
     const rawEntries = record.e;
     if (
       typeof rawEntries !== 'object' ||
@@ -931,9 +927,9 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
 
       allFileNames.push(fileName);
       const filePath = joinPath(storeDirPath, fileName);
-      const fileHandle = __LEGIT_CAST__<FileSystemFileHandle, FileSystemHandle>(
-        entryHandle,
-      );
+      const fileHandle =
+        // WORKAROUND: This branch only keeps file handles, but the DOM iterator still exposes the broader FileSystemHandle union.
+        __LEGIT_CAST__<FileSystemFileHandle, FileSystemHandle>(entryHandle);
 
       if (parsed.isHashedPayload) {
         hashedFiles.push({
@@ -1476,10 +1472,9 @@ export class OpfsAsyncStorageDriver implements AsyncStorageDriver {
         invalidEntryNames.push(entry.name);
         continue;
       }
-      const dirHandle = __LEGIT_CAST__<
-        FileSystemDirectoryHandle,
-        FileSystemHandle
-      >(entry);
+      const dirHandle =
+        // WORKAROUND: This branch only keeps directory handles, but the DOM iterator still exposes the broader FileSystemHandle union.
+        __LEGIT_CAST__<FileSystemDirectoryHandle, FileSystemHandle>(entry);
       const path = joinPath(parentPath, entry.name);
       cacheContext.dirCache.set(path, dirHandle);
       entries.push({ handle: dirHandle, name: entry.name, path });

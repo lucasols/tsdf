@@ -1,6 +1,6 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { murmur3 } from '@ls-stack/utils/hash';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { isObject } from '@ls-stack/utils/typeGuards';
 
 import type { AsyncStorageNamespaceScope } from './types';
 
@@ -224,11 +224,9 @@ export function resolveHashedPayloadRecordKeyFromValue(
 ): string | null {
   if (!shouldHashPayloadRecordForKind(scope.kind)) return null;
 
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return null;
-  }
+  if (!isObject(value)) return null;
 
-  const record = __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+  const record = value;
   if (!('p' in record)) return null;
 
   switch (scope.kind) {

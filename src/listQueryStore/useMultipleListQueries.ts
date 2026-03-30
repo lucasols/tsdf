@@ -517,6 +517,7 @@ export function useMultipleListQueries<
                   return itemSelector(selectedItem, itemPayload, itemKey);
                 }
 
+                // WORKAROUND: Runtime itemSelector presence does not narrow SelectedItem, so the default branch must forward the raw item through the caller's generic.
                 return __LEGIT_CAST__<SelectedItem, ItemState>(selectedItem);
               },
             );

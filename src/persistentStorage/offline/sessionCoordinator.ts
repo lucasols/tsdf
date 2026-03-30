@@ -1,5 +1,4 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { useMemo } from 'react';
 import { Store } from 't-state';
 
@@ -842,12 +841,10 @@ export function useGlobalOfflineStatus(
  */
 export function useGlobalOfflineEntities(
   sessionKey: string,
-): GlobalOfflineEntity[] {
+): readonly GlobalOfflineEntity[] {
   const coordinator = useSessionOfflineCoordinator(sessionKey);
 
-  return __LEGIT_CAST__<GlobalOfflineEntity[], readonly GlobalOfflineEntity[]>(
-    coordinator.store.useSelectorRC((state) => state.entities),
-  );
+  return coordinator.store.useSelectorRC((state) => state.entities);
 }
 
 /**
@@ -857,21 +854,19 @@ export function useOfflineStoreEntities(args: {
   sessionKey: string | false;
   inactiveScope: string;
   storeName?: string;
-}): GlobalOfflineEntity[] {
+}): readonly GlobalOfflineEntity[] {
   const coordinator = useSessionOfflineCoordinator(
     resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
   );
 
-  return __LEGIT_CAST__<GlobalOfflineEntity[], readonly GlobalOfflineEntity[]>(
-    coordinator.store.useSelectorRC(
-      (state) => {
-        if (!args.storeName) return [];
+  return coordinator.store.useSelectorRC(
+    (state) => {
+      if (!args.storeName) return [];
 
-        return state.entities.filter(
-          (entity) => entity.storeName === args.storeName,
-        );
-      },
-      { equalityFn: deepEqual },
-    ),
+      return state.entities.filter(
+        (entity) => entity.storeName === args.storeName,
+      );
+    },
+    { equalityFn: deepEqual },
   );
 }

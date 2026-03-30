@@ -266,6 +266,7 @@ function toLocalStorageValueCodec<T>(
   valueCodec: AsyncStorageValueCodec<T> | undefined,
 ): LocalStorageValueCodec<T> {
   if (valueCodec === undefined) {
+    // WORKAROUND: The default local-storage codec is generic over unknown and simply forwards JSON-compatible values, so callers rebind it to their T when no custom codec is supplied.
     return __LEGIT_CAST__<
       LocalStorageValueCodec<T>,
       LocalStorageValueCodec<unknown>
@@ -285,9 +286,11 @@ function toLocalStorageValueCodec<T>(
         );
       }
 
+      // WORKAROUND: The object/null/array guard above guarantees the compact local-storage entry shape, but the async codec surface still returns unknown.
       return __LEGIT_CAST__<CompactLocalStorageEntryValue, unknown>(serialized);
     },
     deserialize(data) {
+      // WORKAROUND: This adapter bridges async and local codec interfaces, and TypeScript cannot express that the compact stored object is the deserialize input for the provided codec.
       return valueCodec.deserialize(__LEGIT_CAST__<never, unknown>(data));
     },
   };
@@ -391,7 +394,8 @@ export function createPersistentStorageHandle<T>(
 
         const decoded = valueCodec
           ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
-          : __LEGIT_CAST__<T, unknown>(entry.value);
+          : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
+            __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [asyncEntryKey] });
           return null;
@@ -645,7 +649,8 @@ export function createPersistentStorageNamespaceHandle<
             key: upsert.key,
             value: valueCodec
               ? valueCodec.serialize(upsert.data)
-              : __LEGIT_CAST__<unknown, T>(upsert.data),
+              : // WORKAROUND: In the no-codec path, persistence stores opaque caller values as unknown and only erases the generic for transport through the adapter.
+                __LEGIT_CAST__<unknown, T>(upsert.data),
             version: asyncVersion,
             metadata:
               upsert.metadata ?? getManifestMeta?.(upsert.data, upsert.key),
@@ -737,7 +742,8 @@ export function createPersistentStorageNamespaceHandle<
 
         const decoded = valueCodec
           ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
-          : __LEGIT_CAST__<T, unknown>(entry.value);
+          : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
+            __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
           return null;
@@ -787,7 +793,8 @@ export function createPersistentStorageNamespaceHandle<
 
         const decoded = valueCodec
           ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
-          : __LEGIT_CAST__<T, unknown>(entry.value);
+          : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
+            __LEGIT_CAST__<T, unknown>(entry.value);
         if (decoded === null) {
           await namespace.commit({ removes: [entryKey] });
           return null;
@@ -844,7 +851,8 @@ export function createPersistentStorageNamespaceHandle<
           }
           const decoded = valueCodec
             ? valueCodec.deserialize(entry.value, entry.metadata.customMetadata)
-            : __LEGIT_CAST__<T, unknown>(entry.value);
+            : // WORKAROUND: Stored values cross the persistence boundary as unknown, and in the no-codec path this API intentionally exposes them as the caller's requested T.
+              __LEGIT_CAST__<T, unknown>(entry.value);
           if (decoded === null) {
             const key = entryKeys[index];
             if (key !== undefined) {
@@ -910,8 +918,10 @@ export function createPersistentStorageNamespaceHandle<
         })
         .map((entry) => ({
           customMetadata: entry.meta
-            ? __LEGIT_CAST__<TMetadata, unknown>(entry.meta)
-            : __LEGIT_CAST__<TMetadata, Record<string, never>>({}),
+            ? // WORKAROUND: Metadata is only guaranteed to be record-shaped at runtime, and this API rebinds that validated record to the caller's metadata generic.
+              __LEGIT_CAST__<TMetadata, unknown>(entry.meta)
+            : // WORKAROUND: Missing metadata is represented internally as an empty record, which this API rebinds to the caller's metadata generic.
+              __LEGIT_CAST__<TMetadata, Record<string, never>>({}),
           key: entry.entryKey,
           lastAccessAt: entry.lastAccessAt,
           writtenAt: entry.lastAccessAt,
@@ -980,6 +990,7 @@ export function readStorageEntryFromLocalStorageSync<T = unknown>(
   key: string,
   version: number | undefined,
   options: LocalStorageMetadataOptions,
+  // WORKAROUND: The default local-storage codec is generic over unknown and simply forwards JSON-compatible values, so callers rebind it to their T when no custom codec is supplied.
   valueCodec: LocalStorageValueCodec<T> = __LEGIT_CAST__<
     LocalStorageValueCodec<T>,
     LocalStorageValueCodec<unknown>

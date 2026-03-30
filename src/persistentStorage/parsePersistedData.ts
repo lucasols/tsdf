@@ -73,6 +73,21 @@ export function parsePersistedStoreData<TFinal, TStorage = unknown>(
   }
 }
 
+export type PersistedStoreDataValue<TFinal, TStorage = unknown> =
+  | TFinal
+  | TStorage;
+
+function validatePersistedStoreDataValue<TFinal, TStorage = unknown>(
+  value: unknown,
+  schema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): PersistedStoreDataValue<TFinal, TStorage> | null {
+  if (schema.mode === 'direct') {
+    return validateWithSchema(schema.storeSchema, value);
+  }
+
+  return validateWithSchema(schema.storageSchema, value);
+}
+
 export function convertStoreDataForPersistence<TFinal, TStorage = unknown>(
   value: TFinal,
   schema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
@@ -88,24 +103,65 @@ export function convertStoreDataForPersistence<TFinal, TStorage = unknown>(
   }
 }
 
-export type ParsedPersistedDocumentData = { data: unknown };
+export type ParsedPersistedDocumentData<TData = unknown> = { data: TData };
 
 export function parsePersistedDocumentData(
   value: unknown,
-): ParsedPersistedDocumentData | null {
+): ParsedPersistedDocumentData | null;
+export function parsePersistedDocumentData<TFinal, TStorage = unknown>(
+  value: unknown,
+  dataSchema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): ParsedPersistedDocumentData<
+  PersistedStoreDataValue<TFinal, TStorage>
+> | null;
+export function parsePersistedDocumentData<TFinal, TStorage = unknown>(
+  value: unknown,
+  dataSchema?: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): ParsedPersistedDocumentData<unknown> | null {
   const result = rc_parse(value, persistedDocumentDataSchema);
-  return result.ok ? result.value : null;
+  if (!result.ok) return null;
+
+  const data =
+    dataSchema === undefined
+      ? result.value.data
+      : validatePersistedStoreDataValue(result.value.data, dataSchema);
+  if (data === null) return null;
+
+  return { data };
 }
 
 export type ParsedPersistedCollectionItemData<
   ItemPayload extends ValidPayload,
-> = { data: unknown; payload: ItemPayload };
+  TData = unknown,
+> = { data: TData; payload: ItemPayload };
 
 export function parsePersistedCollectionItemData<
   ItemPayload extends ValidPayload,
 >(
   value: unknown,
   payloadSchema: PersistentStorageSchema<ItemPayload>,
+): ParsedPersistedCollectionItemData<ItemPayload> | null;
+
+export function parsePersistedCollectionItemData<
+  ItemPayload extends ValidPayload,
+  TFinal,
+  TStorage = unknown,
+>(
+  value: unknown,
+  payloadSchema: PersistentStorageSchema<ItemPayload>,
+  dataSchema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): ParsedPersistedCollectionItemData<
+  ItemPayload,
+  PersistedStoreDataValue<TFinal, TStorage>
+> | null;
+export function parsePersistedCollectionItemData<
+  ItemPayload extends ValidPayload,
+  TFinal,
+  TStorage = unknown,
+>(
+  value: unknown,
+  payloadSchema: PersistentStorageSchema<ItemPayload>,
+  dataSchema?: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
 ): ParsedPersistedCollectionItemData<ItemPayload> | null {
   const result = rc_parse(value, persistedCollectionItemDataSchema);
   if (!result.ok) return null;
@@ -113,17 +169,50 @@ export function parsePersistedCollectionItemData<
   const payload = validateWithSchema(payloadSchema, result.value.payload);
   if (payload === null) return null;
 
-  return { data: result.value.data, payload };
+  const data =
+    dataSchema === undefined
+      ? result.value.data
+      : validatePersistedStoreDataValue(result.value.data, dataSchema);
+  if (data === null) return null;
+
+  return { data, payload };
 }
 
+export type ParsedTypedPersistedListQueryItemData<
+  ItemPayload extends ValidPayload,
+  TData,
+> = { data: TData; payload: ItemPayload; loadedFields?: string[] };
+
 export type ParsedPersistedListQueryItemData<ItemPayload extends ValidPayload> =
-  { data: unknown; payload: ItemPayload; loadedFields?: string[] };
+  ParsedTypedPersistedListQueryItemData<ItemPayload, unknown>;
 
 export function parsePersistedListQueryItemData<
   ItemPayload extends ValidPayload,
 >(
   value: unknown,
   payloadSchema: PersistentStorageSchema<ItemPayload>,
+): ParsedPersistedListQueryItemData<ItemPayload> | null;
+
+export function parsePersistedListQueryItemData<
+  ItemPayload extends ValidPayload,
+  TFinal,
+  TStorage = unknown,
+>(
+  value: unknown,
+  payloadSchema: PersistentStorageSchema<ItemPayload>,
+  dataSchema: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
+): ParsedTypedPersistedListQueryItemData<
+  ItemPayload,
+  PersistedStoreDataValue<TFinal, TStorage>
+> | null;
+export function parsePersistedListQueryItemData<
+  ItemPayload extends ValidPayload,
+  TFinal,
+  TStorage = unknown,
+>(
+  value: unknown,
+  payloadSchema: PersistentStorageSchema<ItemPayload>,
+  dataSchema?: NormalizedPersistentStorageDataSchema<TFinal, TStorage>,
 ): ParsedPersistedListQueryItemData<ItemPayload> | null {
   const result = rc_parse(value, persistedListQueryItemDataSchema);
   if (!result.ok) return null;
@@ -131,11 +220,13 @@ export function parsePersistedListQueryItemData<
   const payload = validateWithSchema(payloadSchema, result.value.payload);
   if (payload === null) return null;
 
-  return {
-    data: result.value.data,
-    payload,
-    loadedFields: result.value.loadedFields,
-  };
+  const data =
+    dataSchema === undefined
+      ? result.value.data
+      : validatePersistedStoreDataValue(result.value.data, dataSchema);
+  if (data === null) return null;
+
+  return { data, payload, loadedFields: result.value.loadedFields };
 }
 
 export type ParsedPersistedListQueryData<QueryPayload extends ValidPayload> = {

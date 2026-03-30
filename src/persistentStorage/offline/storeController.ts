@@ -305,6 +305,7 @@ export function createOfflineStoreController<
     const session = getOrCreateSessionOfflineCoordinator(sessionKey, {
       adapter,
       onPersistentStorageError,
+      // WORKAROUND: Session coordinators keep offline operation schemas under a generic erased shape, and session creation restores the caller's concrete operations map.
       config: __LEGIT_CAST__<
         OfflineModeConfig<Record<string, OfflineOperationSchemaShape>>,
         OfflineModeConfig<TOperations>
@@ -750,7 +751,8 @@ export function createOfflineStoreController<
           }) ?? []);
     const resolvedEntityRefs = storeAdapter.normalizeEntityRefs
       ? storeAdapter.normalizeEntityRefs(rawEntityRefs)
-      : __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
+      : // WORKAROUND: When no normalizer is provided, entity refs already come from the operation definition, but the controller stores them as unknown[].
+        __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
     const entityRefs =
       tempEntity !== undefined &&
       preparedTempId !== undefined &&
@@ -760,6 +762,7 @@ export function createOfflineStoreController<
     const tempId =
       tempEntity !== undefined
         ? (preparedTempId ??
+          // WORKAROUND: Single-entity temp ids travel through rawEntityRefs as unknown values until the store adapter converts them back to payload ids.
           __LEGIT_CAST__<ValidPayload | undefined, unknown>(rawEntityRefs[0]))
         : preparedTempId;
 
@@ -1236,6 +1239,7 @@ export function createOfflineStoreController<
         currentSessionKey: current.sessionKey,
         mutations: [
           prepareMutationWithSession(current, {
+            // WORKAROUND: Conflict records persist operation names as plain strings, and requeueing needs to rebind the validated name to the operation-map key type.
             operation: __LEGIT_CAST__<keyof TOperations & string, string>(
               conflict.operation,
             ),

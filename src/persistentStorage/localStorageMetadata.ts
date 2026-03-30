@@ -321,7 +321,6 @@ function serializeStoredManifestEntry(
 
   if (
     isObject(entry.meta) &&
-    !Array.isArray(entry.meta) &&
     !('a' in entry.meta) &&
     !('k' in entry.meta) &&
     !('m' in entry.meta)
@@ -354,11 +353,7 @@ function readParsedManifest(
   const entries: StoredManagedLocalStorageManifestEntry[] = [];
 
   for (const rawEntry of parsedManifest.e) {
-    if (
-      !isObject(rawEntry) ||
-      Array.isArray(rawEntry) ||
-      typeof rawEntry.a !== 'number'
-    ) {
+    if (!isObject(rawEntry) || typeof rawEntry.a !== 'number') {
       return null;
     }
 

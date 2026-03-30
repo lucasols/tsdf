@@ -258,7 +258,8 @@ export function useMultipleItems<
               status: 'deleted',
               data: selector
                 ? selector(null)
-                : __LEGIT_CAST__<Selected, null>(null),
+                : // WORKAROUND: Runtime selector presence does not narrow Selected, so the deleted fallback still has to express null through the caller's generic.
+                  __LEGIT_CAST__<Selected, null>(null),
               error: null,
               payload: query.omitPayload ? undefined : query.payload,
               isLoading: false,
@@ -279,7 +280,8 @@ export function useMultipleItems<
               status,
               data: selector
                 ? selector(fallbackItem.data ?? null)
-                : __LEGIT_CAST__<Selected, ItemState | null>(
+                : // WORKAROUND: Runtime selector presence does not narrow Selected, so fallback item data still has to flow through the caller's generic unchanged.
+                  __LEGIT_CAST__<Selected, ItemState | null>(
                     fallbackItem.data ?? null,
                   ),
               error: fallbackItem.error,

@@ -68,7 +68,7 @@
   "dependencies": {
     "@evtmitter/react": "^0.1.0",
     "@ls-stack/browser-utils": "^0.3.0",
-    "@ls-stack/extended-lint": "^0.89.2",
+    "@ls-stack/extended-lint": "^0.89.3",
     "@ls-stack/react-utils": "^0.12.1",
     "@ls-stack/utils": "^3.75.0",
     "@standard-schema/spec": "^1.1.0",

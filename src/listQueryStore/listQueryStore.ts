@@ -1197,7 +1197,10 @@ export function createListQueryStore<
             if (normalizedRef !== null) return normalizedRef;
 
             return {
-              entityKey: getItemKey(__LEGIT_CAST__<ItemPayload, unknown>(ref)),
+              entityKey: getItemKey(
+                // WORKAROUND: normalizeEntityRefs accepts either normalized refs or raw payloads, and after the ref schema fails the remaining value is treated as the caller's ItemPayload.
+                __LEGIT_CAST__<ItemPayload, unknown>(ref),
+              ),
               entityKind: 'item' as const,
             };
           }),
@@ -1220,26 +1223,36 @@ export function createListQueryStore<
         applyPendingEntity: ({ tempId, pendingEntity }) => {
           if (!pendingEntity || typeof pendingEntity !== 'object') return;
           addItemToState(
+            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when applying queued entities.
             __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+            // WORKAROUND: Pending entity snapshots cross the offline queue as unknown and are rehydrated back to ItemState at this store-specific boundary.
             __LEGIT_CAST__<ItemState, unknown>(pendingEntity),
           );
         },
         rollbackPendingEntity: ({ tempId }) => {
-          deleteItemState(__LEGIT_CAST__<ItemPayload, ValidPayload>(tempId));
+          deleteItemState(
+            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when removing queued temp entities.
+            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId),
+          );
         },
         reconcileTempEntity: ({ tempId, reconciliation }) => {
-          const tempPayload = __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
+          const tempPayload =
+            // WORKAROUND: Offline temp ids are stored as generic ValidPayload values, so this list-query adapter has to narrow them back to ItemPayload when reconciling queued temp entities.
+            __LEGIT_CAST__<ItemPayload, ValidPayload>(tempId);
           const tempItemKey = getItemKey(tempPayload);
           const currentItem = getItemState(tempPayload);
           const finalData =
             reconciliation.finalData !== undefined
-              ? __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
+              ? // WORKAROUND: Reconciliation data is stored as unknown by the shared offline queue and is rehydrated to ItemState by the list-query store.
+                __LEGIT_CAST__<ItemState, unknown>(reconciliation.finalData)
               : (currentItem ?? undefined);
           if (finalData === undefined) return;
 
-          const finalPayload = __LEGIT_CAST__<ItemPayload, ValidPayload>(
-            reconciliation.finalPayload,
-          );
+          const finalPayload =
+            // WORKAROUND: Reconciliation payloads flow through the shared offline controller as ValidPayload and are narrowed back to the list-query store's ItemPayload here.
+            __LEGIT_CAST__<ItemPayload, ValidPayload>(
+              reconciliation.finalPayload,
+            );
           const finalItemKey = getItemKey(finalPayload);
           const queryMemberships = Object.entries(store.state.queries)
             .map(([queryKey, query]) => ({

@@ -441,7 +441,8 @@ export function useMultipleItems<
               payload: query.payload,
               data: selector
                 ? selector(null, null)
-                : __LEGIT_CAST__<Selected, null>(null),
+                : // WORKAROUND: Runtime selector presence does not narrow Selected, so the deleted fallback still has to express null through the caller's generic.
+                  __LEGIT_CAST__<Selected, null>(null),
               pendingSync: getPendingSync(result.itemStateKey),
               queryMetadata: result.queryMetadata,
             };
@@ -473,7 +474,8 @@ export function useMultipleItems<
               payload: query.payload,
               data: selector
                 ? selector(itemState, fallbackItemState.itemQuery.payload)
-                : __LEGIT_CAST__<Selected, ItemState>(itemState),
+                : // WORKAROUND: Runtime selector presence does not narrow Selected, so fallback item data still has to flow through the caller's generic unchanged.
+                  __LEGIT_CAST__<Selected, ItemState>(itemState),
               pendingSync: getPendingSync(result.itemStateKey),
               queryMetadata: result.queryMetadata,
             };

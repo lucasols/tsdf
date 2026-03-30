@@ -1,9 +1,6 @@
 import { filterAndMap } from '@ls-stack/utils/arrayUtils';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
-import {
-  __LEGIT_CAST__,
-  type __LEGIT_ANY__,
-} from '@ls-stack/utils/saferTyping';
+import { type __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 
 import type {
@@ -183,20 +180,11 @@ export function setupCollectionPersistence<
       value !== null &&
       'd' in value &&
       'p' in value
-        ? (() => {
-            const parsed = parsePersistedCollectionItemData(
-              { data: value.d, payload: value.p },
-              config.payloadSchema,
-            );
-            return parsed
-              ? {
-                  data: __LEGIT_CAST__<ItemState | StorageState, unknown>(
-                    parsed.data,
-                  ),
-                  payload: parsed.payload,
-                }
-              : null;
-          })()
+        ? parsePersistedCollectionItemData(
+            { data: value.d, payload: value.p },
+            config.payloadSchema,
+            dataSchema,
+          )
         : null,
   };
 
@@ -369,6 +357,7 @@ export function setupCollectionPersistence<
       const persisted = parsePersistedCollectionItemData(
         JSON.parse(snapshot),
         config.payloadSchema,
+        dataSchema,
       );
       return persisted
         ? (toCollectionItemState(persisted, dataSchema, shouldIgnoreItem) ??
@@ -419,14 +408,21 @@ export function setupCollectionPersistence<
       return undefined;
     }
 
-    const item = toCollectionItemState(
-      __LEGIT_CAST__<
-        ParsedPersistedCollectionItemData<ItemPayload>,
-        PersistedCollectionItemData<unknown>
-      >(cacheEntry.data),
+    const persisted = parsePersistedCollectionItemData(
+      cacheEntry.data,
+      config.payloadSchema,
       dataSchema,
-      shouldIgnoreItem,
     );
+    if (!persisted) {
+      scheduleLocalStorageRemoval(storageKey, {
+        metadata: 'namespace',
+        namespacePrefix: prefix,
+      });
+      forgetPersistedItem(itemKey);
+      return undefined;
+    }
+
+    const item = toCollectionItemState(persisted, dataSchema, shouldIgnoreItem);
     if (!item) {
       scheduleLocalStorageRemoval(storageKey, {
         metadata: 'namespace',
@@ -484,6 +480,7 @@ export function setupCollectionPersistence<
     const persisted = parsePersistedCollectionItemData(
       cached,
       config.payloadSchema,
+      dataSchema,
     );
     if (!persisted) {
       forgetPersistedItem(itemKey);

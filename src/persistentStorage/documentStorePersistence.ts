@@ -1,4 +1,3 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import type { Store } from 't-state';
 
 import type { DocumentStoreState } from '../documentStore';
@@ -85,16 +84,7 @@ export function setupDocumentPersistence<
       serialize: (data) => ({ d: data.data }),
       deserialize: (value) =>
         typeof value === 'object' && value !== null && 'd' in value
-          ? (() => {
-              const parsed = parsePersistedDocumentData({ data: value.d });
-              return parsed
-                ? {
-                    data: __LEGIT_CAST__<State | StorageState, unknown>(
-                      parsed.data,
-                    ),
-                  }
-                : null;
-            })()
+          ? parsePersistedDocumentData({ data: value.d }, dataSchema)
           : null,
     },
   });
@@ -211,7 +201,7 @@ export function setupDocumentPersistence<
       .then((cached) => {
         if (!cached || currentGeneration !== generation || !storeRef) return;
 
-        const persisted = parsePersistedDocumentData(cached);
+        const persisted = parsePersistedDocumentData(cached, dataSchema);
         if (!persisted) {
           scheduleIdleCleanup(() => void handle.clear());
           return;

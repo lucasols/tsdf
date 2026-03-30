@@ -1,6 +1,16 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { sleep } from '@ls-stack/utils/sleep';
+import { isObject } from '@ls-stack/utils/typeGuards';
+import {
+  rc_array,
+  rc_number,
+  rc_object,
+  rc_parse,
+  rc_parse_json,
+  rc_string,
+  rc_tuple,
+} from 'runcheck';
 
 import { runWithNavigatorLock } from './navigatorLocks';
 import { getSessionProtectedKeysSnapshot } from './offline/sessionProtectionRegistry';
@@ -46,11 +56,9 @@ function getBucketId(timestamp: number): string {
 }
 
 function getRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return null;
-  }
+  if (!isObject(value)) return null;
 
-  return __LEGIT_CAST__<Record<string, unknown>, unknown>(value);
+  return value;
 }
 
 export function isOfflineProtectedMetadata(
@@ -91,26 +99,13 @@ function setOfflineProtectionMetadata(
 function parseProtectedRef(
   value: string,
 ): AsyncStorageProtectedEntryRef | null {
-  let parsed: unknown;
+  const parsed = rc_parse_json(
+    value,
+    rc_tuple([rc_string, rc_string, rc_string, rc_string]),
+  ).unwrapOrNull();
+  if (parsed === null) return null;
 
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return null;
-  }
-
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length !== 4 ||
-    parsed.some((entry) => typeof entry !== 'string')
-  ) {
-    return null;
-  }
-
-  const [sessionKey, storeName, rawKind, key] = __LEGIT_CAST__<
-    [string, string, string, string],
-    unknown
-  >(parsed);
+  const [sessionKey, storeName, rawKind, key] = parsed;
   const kind = parseAsyncStorageNamespaceKind(rawKind);
   if (kind === null) return null;
 
@@ -119,6 +114,10 @@ function parseProtectedRef(
 
 const ASYNC_METADATA_LAST_ACCESS_AT_KEY = 'a';
 const ASYNC_METADATA_VERSION_KEY = 'v';
+const persistedStaticPolicySchema = rc_object({
+  k: rc_array(rc_string).optionalKey(),
+  m: rc_number.optionalKey(),
+});
 
 function getInlineCustomMetadata(
   record: Record<string, unknown>,
@@ -254,28 +253,15 @@ export function buildPersistedStaticPolicy(
 function parseStaticPolicy(
   value: unknown,
 ): AsyncStorageNamespaceStaticPolicy | null {
-  const record = getRecord(value);
-  if (record === null) return null;
-
-  if (
-    ('m' in record &&
-      record.m !== undefined &&
-      (typeof record.m !== 'number' ||
-        !Number.isInteger(record.m) ||
-        record.m < 0)) ||
-    ('k' in record &&
-      record.k !== undefined &&
-      (!Array.isArray(record.k) ||
-        record.k.some((entry) => typeof entry !== 'string')))
-  ) {
+  const parsed = rc_parse(value, persistedStaticPolicySchema).unwrapOrNull();
+  if (parsed === null) return null;
+  if (parsed.m !== undefined && (!Number.isInteger(parsed.m) || parsed.m < 0)) {
     return null;
   }
 
   return normalizeStaticPolicy({
-    ...(typeof record.m === 'number' ? { maxEntries: record.m } : {}),
-    ...(Array.isArray(record.k)
-      ? { pinnedKeys: __LEGIT_CAST__<string[], unknown>(record.k) }
-      : {}),
+    ...(parsed.m !== undefined ? { maxEntries: parsed.m } : {}),
+    ...(parsed.k !== undefined ? { pinnedKeys: parsed.k } : {}),
   });
 }
 
@@ -948,6 +934,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       pending.removes.delete(upsert.key);
       pending.upserts.set(
         upsert.key,
+        // WORKAROUND: Pending namespace commits erase value generics internally so one queue can hold mixed namespaces, and this cast restores the normalized internal upsert shape.
         __LEGIT_CAST__<
           AsyncStorageNamespaceCommitUpsert<unknown, Record<string, unknown>>,
           unknown
@@ -1157,7 +1144,9 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       }
 
       result.set(key, {
+        // WORKAROUND: Managed storage payloads cross the storage boundary as unknown, and version plus metadata validation above determine when they are safe to expose as TValue.
         value: __LEGIT_CAST__<TValue, unknown>(rawPayload),
+        // WORKAROUND: Internal metadata is always normalized to record-shaped custom metadata, and this public API only rebinds that validated record to the caller's generic.
         metadata: __LEGIT_CAST__<
           AsyncStorageEntryMetadata<TCustomMetadata>,
           AsyncStorageEntryMetadata<Record<string, unknown>>
@@ -1208,6 +1197,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
       compareMetadata(left, right, args.order ?? 'key'),
     );
 
+    // WORKAROUND: Internal metadata is always normalized to record-shaped custom metadata, and this public API only rebinds that validated array to the caller's generic.
     return __LEGIT_CAST__<
       AsyncStorageEntryMetadata<TCustomMetadata>[],
       AsyncStorageEntryMetadata<Record<string, unknown>>[]
@@ -1557,6 +1547,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   async #performStartupCleanupWithDriver(
     driver: AsyncStorageDriver,
   ): Promise<void> {
+    // WORKAROUND: Startup cleanup only runs through the cleanup-capable driver path, but this shared helper keeps the broader AsyncStorageDriver parameter.
     const cleanupActionDriver = __LEGIT_CAST__<
       AsyncStorageStartupCleanupActionCapableDriver,
       AsyncStorageDriver
@@ -2250,6 +2241,7 @@ class ManagedAsyncStorageAdapter implements AsyncStorageAdapter {
   async #withCleanupDriver<T>(
     callback: (driver: AsyncStorageDriver) => Promise<T>,
   ): Promise<T> {
+    // WORKAROUND: Capability probing happens on the optional cleanup method below, but TypeScript cannot access that method through the base driver interface.
     const maybeCleanupCapableDriver = __LEGIT_CAST__<
       AsyncStorageCleanupCapableDriver,
       AsyncStorageDriver

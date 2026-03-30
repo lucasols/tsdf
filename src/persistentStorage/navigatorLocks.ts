@@ -1,14 +1,8 @@
-import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { asPossiblyUndefined } from '@ls-stack/utils/typingFnUtils';
 
 export function getNavigatorLockManager(): LockManager | null {
-  const globalNavigator = __LEGIT_CAST__<Navigator | null | undefined, unknown>(
-    globalThis.navigator,
-  );
-  return (
-    __LEGIT_CAST__<LockManager | null | undefined, unknown>(
-      globalNavigator?.locks,
-    ) ?? null
-  );
+  const globalNavigator = asPossiblyUndefined(globalThis.navigator);
+  return globalNavigator?.locks ?? null;
 }
 
 const warnedLockUnavailable = new Set<string>();
