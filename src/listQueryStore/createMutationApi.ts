@@ -135,6 +135,7 @@ export function createMutationApi<
     | ItemPayload
     | ItemPayload[]
     | FilterItem
+    | false
     | undefined
     | null;
   type MutationPayloadToUse = ItemPayload | ItemPayload[] | FilterItem;
@@ -691,8 +692,8 @@ export function createMutationApi<
       debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
     },
   ): Promise<Result<Awaited<T>, StoreError | true>> {
-    const matchAllItems: FilterItem = () => true;
-    const payloadToUse: MutationPayloadToUse = payload ?? matchAllItems;
+    const payloadToUse: MutationPayloadToUse =
+      payload === false || payload == null ? [] : payload;
 
     const affectedItems = resolveAffectedItems(payloadToUse);
     const mutationId = getAutoIncrementId();
@@ -714,7 +715,9 @@ export function createMutationApi<
         if (revalidateOnSuccess) {
           invalidateQueryAndItems({
             itemPayload:
-              revalidateOnSuccess === 'queries' ? false : payloadToUse,
+              revalidateOnSuccess === 'queries' || affectedItems.length === 0
+                ? false
+                : payloadToUse,
             queryPayload: getRevalidateOnSuccessQueries,
           });
         }
@@ -732,7 +735,7 @@ export function createMutationApi<
 
         if (!dontRevalidateOnError) {
           invalidateQueryAndItems({
-            itemPayload: payloadToUse,
+            itemPayload: affectedItems.length === 0 ? false : payloadToUse,
             queryPayload: getRelatedQueries,
           });
         }
