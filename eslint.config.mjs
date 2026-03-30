@@ -25,6 +25,19 @@ export default lsStackEslintCfg({
             ],
           },
         ],
+        '@ls-stack/require-usage-explanation': [
+          'error',
+          {
+            matches: [
+              {
+                fn: '__LEGIT_CAST__',
+                commentPrefix: 'WORKAROUND:',
+                message:
+                  '__LEGIT_CAST__ should only be used as a last resort. Always verify that no typesafe alternative exists before resorting to it.',
+              },
+            ],
+          },
+        ],
         '@ls-stack/no-call-with-inferred-generics': [
           'error',
           {
@@ -44,8 +57,11 @@ export default lsStackEslintCfg({
       },
     },
     {
-      files: ['tests/**/*.test.{ts,tsx}'],
-      rules: { '@typescript-eslint/no-non-null-assertion': 'off' },
+      files: ['tests/**/*.{ts,tsx}'],
+      rules: {
+        '@typescript-eslint/no-non-null-assertion': 'off',
+        '@ls-stack/require-usage-explanation': 'off',
+      },
     },
   ],
 });

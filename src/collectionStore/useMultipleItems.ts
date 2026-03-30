@@ -179,7 +179,13 @@ export function useMultipleItems<
 
           const data = selector
             ? selector(item?.data ?? null)
-            : __LEGIT_CAST__<Selected, ItemState | null>(item?.data ?? null);
+            : // WORKAROUND: Runtime selector presence does not narrow Selected, so the unselected path must forward the raw item state through the generic.
+              __LEGIT_CAST__<Selected, ItemState | null>(item?.data ?? null);
+          const resultQueryMetadata =
+            // WORKAROUND: queryMetadata stays optional on input queries, but the public hook result preserves the caller's QueryMetadata generic.
+            __LEGIT_CAST__<QueryMetadata, QueryMetadata | undefined>(
+              queryMetadata,
+            );
 
           if (item === null) {
             return {
@@ -190,10 +196,7 @@ export function useMultipleItems<
               payload: omitPayload ? undefined : payload,
               isLoading: false,
               pendingSync: getPendingSync(itemKey),
-              queryMetadata: __LEGIT_CAST__<
-                QueryMetadata,
-                QueryMetadata | undefined
-              >(queryMetadata),
+              queryMetadata: resultQueryMetadata,
             };
           }
 
@@ -206,10 +209,7 @@ export function useMultipleItems<
               payload: omitPayload ? undefined : payload,
               isLoading: !returnIdleStatus,
               pendingSync: getPendingSync(itemKey),
-              queryMetadata: __LEGIT_CAST__<
-                QueryMetadata,
-                QueryMetadata | undefined
-              >(queryMetadata),
+              queryMetadata: resultQueryMetadata,
             };
           }
 
@@ -227,10 +227,7 @@ export function useMultipleItems<
             isLoading: status === 'loading',
             pendingSync: getPendingSync(itemKey),
             payload: omitPayload ? undefined : item.payload,
-            queryMetadata: __LEGIT_CAST__<
-              QueryMetadata,
-              QueryMetadata | undefined
-            >(queryMetadata),
+            queryMetadata: resultQueryMetadata,
           };
         },
       );

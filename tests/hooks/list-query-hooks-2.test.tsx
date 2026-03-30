@@ -1,6 +1,7 @@
 import { createLoggerStore } from '@ls-stack/utils/testUtils';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import '@testing-library/react/dont-cleanup-after-each';
+import React from 'react';
 import {
   afterAll,
   afterEach,
