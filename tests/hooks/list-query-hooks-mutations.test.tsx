@@ -677,6 +677,7 @@ test('RTU throttling', async () => {
     .     | 1        | ⬛ >mutation-started (value: {"id":5,"name":"2"})
     1.27s | 1        | ⬛ <mutation-data-persisted (value: {"id":5,"name":"2"})
     1.32s | 1        | received-ws-data-change-event
+    .     | 1        | rt-fetch-scheduled (delay: 610ms)
     1.93s | 1        | scheduled-rt-fetch-started
     1.94s | 1        | 🟠 >list-fetch-started
     2.74s | 1        | 🟠 <list-fetch-finished (value: {"count":5})
@@ -685,6 +686,7 @@ test('RTU throttling', async () => {
     .     | 2        | 🟫 >mutation-started (value: {"id":5,"name":"3"})
     3.27s | 2        | 🟫 <mutation-data-persisted (value: {"id":5,"name":"3"})
     3.32s | 2        | received-ws-data-change-event
+    .     | 2        | rt-fetch-scheduled (delay: 420ms)
     3.74s | 2        | scheduled-rt-fetch-started
     3.75s | 2        | 🟡 >list-fetch-started
     4.55s | 2        | 🟡 <list-fetch-finished (value: {"count":5})

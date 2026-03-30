@@ -260,7 +260,7 @@ test('delayed realtime update fetches also are coalesced', async () => {
     .      | 0  | scheduled-fetch-triggered
     20ms   | 0  | 🔴 >fetch-started
     820ms  | 0  | 🔴 <fetch-finished (value: 0)
-    2s     | 0  | rt-fetch-scheduled
+    2s     | 0  | rt-fetch-scheduled (delay: 820ms)
     2.819s | 0  | scheduled-fetch-triggered
     2.82s  | 0  | scheduled-rt-fetch-started
     2.839s | 0  | 🟠 >fetch-started
@@ -306,7 +306,7 @@ test('delayed realtime update request also starts coalescing window', async () =
     .      | 0  | scheduled-fetch-triggered
     20ms   | 0  | 🔴 >fetch-started
     820ms  | 0  | 🔴 <fetch-finished (value: 0)
-    2s     | 0  | rt-fetch-scheduled
+    2s     | 0  | rt-fetch-scheduled (delay: 820ms)
     2.82s  | 0  | scheduled-rt-fetch-started
     2.821s | 0  | scheduled-fetch-coalesced
     2.84s  | 0  | 🟠 >fetch-started
@@ -345,7 +345,7 @@ test('medium priority triggers coalescing window after delay expires', async () 
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | medium-fetch-scheduled
+    .     | 0  | medium-fetch-scheduled (delay: 100ms)
     100ms | 0  | medium-priority-fetch-started
     110ms | 0  | scheduled-fetch-coalesced
     120ms | 0  | 🔴 >fetch-started
@@ -388,7 +388,7 @@ test('medium priority is cancelled when fetch starts from active coalescing wind
     time  | ui |
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
-    10ms  | 0  | medium-fetch-scheduled
+    10ms  | 0  | medium-fetch-scheduled (delay: 100ms)
     50ms  | 0  | medium-priority-cancelled
     .     | 0  | 🔴 >fetch-started
     850ms | 0  | 🔴 <fetch-finished (value: 0)
@@ -430,7 +430,7 @@ test('mixed medium and high priority fetches within coalescing window', async ()
     "
     time  | ui |
     0     | 0  | ui-initialized
-    .     | 0  | medium-fetch-scheduled
+    .     | 0  | medium-fetch-scheduled (delay: 100ms)
     100ms | 0  | medium-priority-fetch-started
     120ms | 0  | scheduled-fetch-coalesced
     150ms | 0  | 🔴 >fetch-started
@@ -471,7 +471,7 @@ test('medium priority with short delay is cancelled by fetch from coalescing win
     time  | ui |
     0     | 0  | ui-initialized
     .     | 0  | scheduled-fetch-triggered
-    5ms   | 0  | medium-fetch-scheduled
+    5ms   | 0  | medium-fetch-scheduled (delay: 100ms)
     20ms  | 0  | medium-priority-cancelled
     .     | 0  | 🔴 >fetch-started
     820ms | 0  | 🔴 <fetch-finished (value: 0)

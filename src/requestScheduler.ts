@@ -1,3 +1,5 @@
+import { fetchTypePriority } from './utils/storeShared';
+
 export type FetchContext = {
   shouldAbort: () => boolean;
   getStartTime: () => number;
@@ -6,10 +8,18 @@ export type FetchContext = {
 
 export type RequestSchedulerEvents =
   | 'scheduled-fetch-started'
+  | 'rt-fetch-scheduled'
+  | 'rt-fetch-cancelled'
   | 'scheduled-rt-fetch-started'
+  | 'medium-priority-scheduled'
   | 'medium-priority-fetch-started'
   | 'medium-priority-cancelled'
   | 'batch-size-triggered';
+
+export type RequestSchedulerEventData = {
+  /** Delay in ms for scheduled events (medium-priority-scheduled, rt-fetch-scheduled) */
+  delayMs?: number;
+};
 
 export type ScheduleFetchResults =
   | 'skipped'
@@ -111,7 +121,10 @@ export type RequestSchedulerOptions<T> = {
     requests: BatchRequest<T>[],
     fetchContext: FetchContext,
   ) => Promise<Map<string, boolean>>;
-  on?: (event: RequestSchedulerEvents) => void;
+  on?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   lowPriorityThrottleMs: number;
   getCoalescingWindowMs: () => number;
   dynamicRealtimeThrottleMs?: (lastFetchDuration: number) => number;
@@ -134,12 +147,26 @@ export function getAutoIncrementId(): number {
   return ++autoIncrementId;
 }
 
+function getHigherPriorityFetchType(
+  current: FetchType,
+  incoming: FetchType,
+): FetchType {
+  return fetchTypePriority[current] >= fetchTypePriority[incoming]
+    ? current
+    : incoming;
+}
+
 export class RequestScheduler<T> {
   readonly #fetchFn: (
     requests: BatchRequest<T>[],
     fetchContext: FetchContext,
   ) => Promise<Map<string, boolean>>;
-  readonly #onEvent: ((event: RequestSchedulerEvents) => void) | undefined;
+  readonly #onEvent:
+    | ((
+        event: RequestSchedulerEvents,
+        data?: RequestSchedulerEventData,
+      ) => void)
+    | undefined;
   readonly #lowPriorityThrottleMs: number;
   readonly #getCoalescingWindowMs: () => number;
   readonly #dynamicRealtimeThrottleMs:
@@ -550,7 +577,10 @@ export class RequestScheduler<T> {
       existing.payload = this.#coalescePayload
         ? this.#coalescePayload(existing.payload, payload)
         : payload;
-      existing.priority = priority;
+      existing.priority = getHigherPriorityFetchType(
+        existing.priority,
+        priority,
+      );
       existing.remoteStartCancelable =
         existing.remoteStartCancelable && remoteStartCancelable;
       return 'coalesced';
@@ -589,7 +619,10 @@ export class RequestScheduler<T> {
       existing.payload = this.#coalescePayload
         ? this.#coalescePayload(existing.payload, payload)
         : payload;
-      existing.priority = priority;
+      existing.priority = getHigherPriorityFetchType(
+        existing.priority,
+        priority,
+      );
       existing.remoteStartCancelable =
         existing.remoteStartCancelable && remoteStartCancelable;
       return;
@@ -817,7 +850,10 @@ export class RequestScheduler<T> {
           existing.payload = this.#coalescePayload
             ? this.#coalescePayload(existing.payload, request.payload)
             : request.payload;
-          existing.priority = request.priority;
+          existing.priority = getHigherPriorityFetchType(
+            existing.priority,
+            request.priority,
+          );
           existing.remoteStartCancelable =
             existing.remoteStartCancelable && request.remoteStartCancelable;
           existing.awaitCallbacks.push(...request.awaitCallbacks);
@@ -896,6 +932,8 @@ export class RequestScheduler<T> {
     if (rtu) {
       clearTimeout(rtu.timeoutId);
       this.#state.pending.rtuDelayed = null;
+      this.#state.pending.rtuDelayed = null;
+      this.#onEvent?.('rt-fetch-cancelled');
     }
   }
 
@@ -994,6 +1032,8 @@ export class RequestScheduler<T> {
       remoteStartCancelable,
     };
 
+    this.#onEvent?.('rt-fetch-scheduled', { delayMs: delay });
+
     return true;
   }
 
@@ -1033,6 +1073,8 @@ export class RequestScheduler<T> {
       payload,
       remoteStartCancelable,
     };
+
+    this.#onEvent?.('medium-priority-scheduled', { delayMs });
 
     return 'medium-scheduled';
   }

@@ -449,9 +449,9 @@ describe('hybrid offline mutation execution', () => {
 
       expect(execute.mock.calls.map((call) => call[0].input))
         .toMatchInlineSnapshot(`
-        - { id: 'users||1', name: 'Ada queued' }
-        - { id: 'users||2', name: 'Grace queued' }
-      `);
+          - { id: 'users||1', name: 'Ada queued' }
+          - { id: 'users||2', name: 'Grace queued' }
+        `);
       expect(
         getOfflineQueueEntries(sessionKey, storeName),
       ).toMatchInlineSnapshot(`[]`);

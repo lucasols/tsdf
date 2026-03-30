@@ -37,6 +37,7 @@ import type {
 } from '../persistentStorage/types';
 import {
   FetchType,
+  RequestSchedulerEventData,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
   ScheduleFetchResults,
@@ -64,6 +65,7 @@ import {
   ValidPayload,
   ValidStoreState,
 } from '../utils/storeShared';
+import { useDeepStableValue } from '../utils/useDeepStableValue';
 import { createFetchApi } from './createFetchApi';
 import { createMutationApi } from './createMutationApi';
 import { createListQueryCacheLimits } from './listQueryCacheLimits';
@@ -324,7 +326,10 @@ type ListQueryStoreOptionsBase<
   >[];
   onInvalidateQuery?: OnListQueryInvalidate<QueryPayload>;
   onInvalidateItem?: OnListQueryItemInvalidate<ItemState, ItemPayload>;
-  onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
+  onSchedulerEvent?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   onMutationError?: (
     error: unknown,
     options: { silentErrors?: boolean },
@@ -1723,14 +1728,16 @@ export function createListQueryStore<
       });
       const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
-      return result.map((queryResult, index) => {
-        const offlineMetadata = getOfflineEntitiesMetadata(
-          offlineEntitiesByKey,
-          queryItemKeys[index] ?? [],
-        );
+      return useDeepStableValue(
+        result.map((queryResult, index) => {
+          const offlineMetadata = getOfflineEntitiesMetadata(
+            offlineEntitiesByKey,
+            queryItemKeys[index] ?? [],
+          );
 
-        return { ...queryResult, pendingSync: offlineMetadata.pendingSync };
-      });
+          return { ...queryResult, pendingSync: offlineMetadata.pendingSync };
+        }),
+      );
     };
 
   const useListQuery: {
@@ -1826,14 +1833,16 @@ export function createListQueryStore<
     });
     const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
-    return result.map((itemResult) => {
-      return {
-        ...itemResult,
-        pendingSync: getIsPendingOfflineSync(
-          offlineEntitiesByKey.get(itemResult.itemStateKey),
-        ),
-      };
-    });
+    return useDeepStableValue(
+      result.map((itemResult) => {
+        return {
+          ...itemResult,
+          pendingSync: getIsPendingOfflineSync(
+            offlineEntitiesByKey.get(itemResult.itemStateKey),
+          ),
+        };
+      }),
+    );
   };
 
   const useItem: {

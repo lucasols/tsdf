@@ -79,6 +79,7 @@ test('dynamically throttle realtime updates', async () => {
     .     | 1  | -- vvv throttle window (100ms) vvv
     320ms | 1  | server-data-changed (value: 2)
     .     | 1  | received-ws-data-change-event
+    .     | 1  | rt-fetch-scheduled (delay: 90ms)
     330ms | 1  | server-data-changed (value: 3)
     .     | 1  | received-ws-data-change-event
     410ms | 1  | -- ^^^ throttle window ^^^
@@ -88,6 +89,7 @@ test('dynamically throttle realtime updates', async () => {
     .     | 3  | ui-changed
     660ms | 3  | server-data-changed (value: 4)
     .     | 3  | received-ws-data-change-event
+    .     | 3  | rt-fetch-scheduled (delay: 60ms)
     720ms | 3  | scheduled-rt-fetch-started
     730ms | 3  | 🟡 >fetch-started
     930ms | 3  | 🟡 <fetch-finished (value: 4)
@@ -161,6 +163,7 @@ test('dynamically throttle multiple realtime updates at same time with delay inf
     .      | 1  | received-ws-data-change-event
     1.71s  | 1  | 🟠 <fetch-finished (value: 3)
     .      | 3  | ui-changed
+    .      | 3  | rt-fetch-scheduled (delay: 500ms)
     1.711s | 3  | -- vvv 500ms throttle (1000ms fetch >= 700ms) vvv
     2.21s  | 3  | scheduled-rt-fetch-started
     .      | 3  | -- ^^^ throttle ends, delayed fetch runs ^^^
@@ -296,6 +299,7 @@ test('slow mutation then external RTU while mutation RTU is running', async () =
     .      | 1  | -- external RTU coalesced, schedules follow-up fetch
     3.01s  | 1  | 🟠 <fetch-finished (value: 2)
     .      | 2  | ui-changed
+    .      | 2  | rt-fetch-scheduled (delay: 200ms)
     3.011s | 2  | -- vvv 200ms throttle (800ms fetch < 1000ms) vvv
     3.21s  | 2  | scheduled-rt-fetch-started
     .      | 2  | -- ^^^ throttle ends, follow-up fetch runs ^^^
@@ -603,6 +607,7 @@ test('schedule rtu updates then schedule a fetch right before the rtu starts', a
     810ms  | 0  | 🔴 <fetch-finished (value: 0)
     1s     | 0  | server-data-changed (value: 1)
     .      | 0  | received-ws-data-change-event
+    .      | 0  | rt-fetch-scheduled (delay: 310ms)
     .      | 0  | -- RTU received, fetch scheduled for 1.5s
     1.001s | 0  | -- vvv 500ms RTU throttle vvv
     .      | 0  | -- low priority fetch preempts RTU fetch
@@ -681,12 +686,6 @@ test('mutation that triggers multiple rtu updates', async () => {
     1.84s | 0  | server-data-changed (value: 1)
     .     | 0  | ⬜ <mutation-data-persisted (value: 1)
     .     | 0  | -- burst of 6 RTU requests after data change
-    1.9s  | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
-    .     | 0  | rt-fetch-scheduled
     2.2s  | 0  | scheduled-rt-fetch-started
     .     | 0  | -- mutation completes at 2.2s
     2.21s | 0  | 🟠 >fetch-started

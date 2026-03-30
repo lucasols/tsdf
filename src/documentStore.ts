@@ -29,6 +29,7 @@ import {
   FetchType,
   getAutoIncrementId,
   RequestScheduler,
+  RequestSchedulerEventData,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
   ScheduleFetchResults,
@@ -184,7 +185,10 @@ export type DocumentStoreOptions<
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   mediumPriorityDelayMs?: number;
-  onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
+  onSchedulerEvent?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   onMutationError?: (
     error: unknown,
     options: { dontShowToast?: boolean },

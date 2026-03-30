@@ -133,6 +133,7 @@ export function createDocumentStoreTestEnv<
     addTimelineComments,
     getTimelineString,
     getRelativeTime,
+    clearTimeline: clearActionTimeline,
   } = createActionTracker();
 
   const { getMutationEmoji } = createEmojiCyclers();
@@ -218,8 +219,8 @@ export function createDocumentStoreTestEnv<
           }
         },
       },
-      onSchedulerEvent: (event) => {
-        logSchedulerEvent(event, addAction);
+      onSchedulerEvent: (event, data) => {
+        logSchedulerEvent(event, addAction, data);
       },
     });
   } catch (error) {
@@ -324,6 +325,9 @@ export function createDocumentStoreTestEnv<
     },
     get timelineString() {
       return getTimelineString();
+    },
+    clearTimeline() {
+      clearActionTimeline();
     },
     serverMock,
     errorInNextFetch(error: FetchErrorConfig | string = 'Fetch error') {

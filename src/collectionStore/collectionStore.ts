@@ -46,6 +46,7 @@ import {
   FetchType,
   getAutoIncrementId,
   RequestScheduler,
+  RequestSchedulerEventData,
   RequestSchedulerEvents,
   ScheduleFetchOptions,
   ScheduleFetchResults,
@@ -77,6 +78,7 @@ import {
   ValidStoreState,
   type StoreError,
 } from '../utils/storeShared';
+import { useDeepStableValue } from '../utils/useDeepStableValue';
 import { createCollectionCacheLimits } from './collectionCacheLimits';
 import { executeBatchFetch as executeBatchFetchBase } from './executeBatchFetch';
 import { useItem as useItemBase, UseItemOptions } from './useItem';
@@ -149,20 +151,11 @@ export type CollectionInitialStateItem<
   ItemState extends ValidStoreState,
 > = { payload: ItemPayload; data: ItemState };
 
-type CollectionMutationTouchedItem<ItemPayload extends ValidPayload> =
-  | { payload: ItemPayload }
-  | { payload?: undefined };
-
 export type CollectionStoreStoreEvents<ItemPayload extends ValidPayload> = {
   /** Emitted when a mutation begins executing */
-  mutationStart: {
-    mutationId: number;
-  } & CollectionMutationTouchedItem<ItemPayload>;
+  mutationStart: { mutationId: number; items: ItemPayload[] };
   /** Emitted when a mutation completes or fails */
-  mutationEnd: {
-    mutationId: number;
-    success: boolean;
-  } & CollectionMutationTouchedItem<ItemPayload>;
+  mutationEnd: { mutationId: number; items: ItemPayload[]; success: boolean };
 };
 
 export type CollectionStateCleanup<ItemPayload extends ValidPayload> = {
@@ -275,7 +268,10 @@ export type CollectionStoreOptions<
    * revalidation. Set to `0` to disable this cooldown. */
   transportReconnectCooldownMs?: number;
   onInvalidate?: OnCollectionItemInvalidate<ItemState, ItemPayload>;
-  onSchedulerEvent?: (event: RequestSchedulerEvents) => void;
+  onSchedulerEvent?: (
+    event: RequestSchedulerEvents,
+    data?: RequestSchedulerEventData,
+  ) => void;
   onMutationError?: (
     error: unknown,
     options: { silentErrors?: boolean },
@@ -1350,12 +1346,14 @@ export function createCollectionStore<
     });
     const offlineEntitiesByKey = createOfflineEntityLookup(offlineEntities);
 
-    return result.map((itemResult) => ({
-      ...itemResult,
-      pendingSync: getIsPendingOfflineSync(
-        offlineEntitiesByKey.get(itemResult.itemStateKey),
-      ),
-    }));
+    return useDeepStableValue(
+      result.map((itemResult) => ({
+        ...itemResult,
+        pendingSync: getIsPendingOfflineSync(
+          offlineEntitiesByKey.get(itemResult.itemStateKey),
+        ),
+      })),
+    );
   }
 
   function useItem<Selected = ItemState | null>(
@@ -1517,27 +1515,33 @@ export function createCollectionStore<
     return someItemWasUpdated;
   }
 
-  type CollectionMutationArgs<
-    T,
-    TMutationPayload extends ItemPayload | undefined | null,
-  > = {
-    optimisticUpdate?: (payload: TMutationPayload) => void | boolean;
-    mutation: (payload: TMutationPayload) => Promise<T>;
-    onSuccess?: (response: Awaited<T>, payload: TMutationPayload) => void;
+  type CollectionMutationPayload =
+    | ItemPayload
+    | ItemPayload[]
+    | false
+    | undefined
+    | null;
+  type CollectionMutationPayloadToUse = ItemPayload | ItemPayload[];
+
+  type CollectionMutationArgs<T> = {
+    optimisticUpdate?: (
+      payload: CollectionMutationPayloadToUse,
+    ) => void | boolean;
+    mutation: (payload: CollectionMutationPayloadToUse) => Promise<T>;
+    onSuccess?: (
+      response: Awaited<T>,
+      payload: CollectionMutationPayloadToUse,
+    ) => void;
     revalidateOnSuccess?: boolean;
     silentErrors?: boolean;
     debounce?: { context: string; payload: __LEGIT_ANY__; ms: number };
   };
 
-  type CollectionOnlineMutationArgs<
-    T,
-    TMutationPayload extends ItemPayload | undefined | null,
-  > = CollectionMutationArgs<T, TMutationPayload> & { offline?: undefined };
+  type CollectionOnlineMutationArgs<T> = CollectionMutationArgs<T> & {
+    offline?: undefined;
+  };
 
-  type CollectionOfflineMutationArgs<
-    T,
-    TMutationPayload extends ItemPayload | undefined | null,
-  > = CollectionMutationArgs<T, TMutationPayload> & {
+  type CollectionOfflineMutationArgs<T> = CollectionMutationArgs<T> & {
     /**
      * When provided, the mutation tries the direct request while the session is
      * online, but degrades into durable offline queueing when the session is
@@ -1551,36 +1555,22 @@ export function createCollectionStore<
       : OfflineMutationInput<Exclude<TOfflineOperations, null>>;
   };
 
-  async function performMutation<
-    T,
-    TMutationPayload extends ItemPayload | undefined | null,
-  >(
-    payload: TMutationPayload,
-    args: CollectionOnlineMutationArgs<T, TMutationPayload>,
+  async function performMutation<T>(
+    payload: CollectionMutationPayload,
+    args: CollectionOnlineMutationArgs<T>,
   ): Promise<ResultType<Awaited<T>, StoreError | true>>;
-  async function performMutation<
-    T,
-    TMutationPayload extends ItemPayload | undefined | null,
-  >(
-    payload: TMutationPayload,
-    args: CollectionOfflineMutationArgs<T, TMutationPayload>,
+  async function performMutation<T>(
+    payload: CollectionMutationPayload,
+    args: CollectionOfflineMutationArgs<T>,
   ): Promise<ResultType<OfflineMutationResult<T>, StoreError | true>>;
-  async function performMutation<
-    T,
-    TMutationPayload extends ItemPayload | undefined | null,
-  >(
-    payload: TMutationPayload,
-    args:
-      | CollectionOnlineMutationArgs<T, TMutationPayload>
-      | CollectionOfflineMutationArgs<T, TMutationPayload>,
+  async function performMutation<T>(
+    payload: CollectionMutationPayload,
+    args: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
   ): Promise<
     ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
   >;
-  async function performMutation<
-    T,
-    TMutationPayload extends ItemPayload | undefined | null,
-  >(
-    payload: TMutationPayload,
+  async function performMutation<T>(
+    payload: CollectionMutationPayload,
     {
       optimisticUpdate,
       mutation,
@@ -1589,32 +1579,31 @@ export function createCollectionStore<
       onSuccess,
       debounce: _debounce,
       offline,
-    }:
-      | CollectionOnlineMutationArgs<T, TMutationPayload>
-      | CollectionOfflineMutationArgs<T, TMutationPayload>,
+    }: CollectionOnlineMutationArgs<T> | CollectionOfflineMutationArgs<T>,
   ): Promise<
     ResultType<Awaited<T> | OfflineMutationResult<T>, StoreError | true>
   > {
+    const payloadToUse: CollectionMutationPayloadToUse =
+      payload === false || payload == null ? [] : payload;
+    const affectedItems = Array.isArray(payloadToUse)
+      ? payloadToUse
+      : [payloadToUse];
+
     if (offline && offlineController && !offlineController.canQueueMutation()) {
       return Result.err(offlineSessionUnavailableError);
     }
 
-    const hasPayload = payload != null;
     const mutationId = getAutoIncrementId();
-    storeEvents.emit(
-      'mutationStart',
-      hasPayload ? { mutationId, payload } : { mutationId },
-    );
+    storeEvents.emit('mutationStart', { mutationId, items: affectedItems });
 
-    const directMutation = () => mutation(payload);
+    const directMutation = () => mutation(payloadToUse);
 
     const result = await performMutationWithLifecycle({
-      startMutation: () =>
-        hasPayload ? startMutation(payload) : () => undefined,
+      startMutation: () => startMutation(payloadToUse),
       optimisticUpdate: optimisticUpdate
         ? () =>
             runWithBroadcastConsistency('optimistic', () =>
-              optimisticUpdate(payload),
+              optimisticUpdate(payloadToUse),
             )
         : undefined,
       debounce: _debounce,
@@ -1631,12 +1620,12 @@ export function createCollectionStore<
             data: await directMutation(),
           }),
       onSuccess: (result) => {
-        if (hasPayload && revalidateOnSuccess && result.kind === 'online') {
-          invalidateItem(payload);
+        if (revalidateOnSuccess && affectedItems.length > 0) {
+          invalidateItem(payloadToUse);
         }
 
         if (onSuccess && result.kind === 'online') {
-          onSuccess(result.data, payload);
+          onSuccess(result.data, payloadToUse);
         }
       },
       onError: (exception) => {
@@ -1646,20 +1635,19 @@ export function createCollectionStore<
           onMutationError(exception, { silentErrors });
         }
 
-        if (hasPayload) {
-          invalidateItem(payload);
+        if (affectedItems.length > 0) {
+          invalidateItem(payloadToUse);
         }
 
         return error;
       },
     });
 
-    storeEvents.emit(
-      'mutationEnd',
-      hasPayload
-        ? { mutationId, payload, success: result.ok }
-        : { mutationId, success: result.ok },
-    );
+    storeEvents.emit('mutationEnd', {
+      mutationId,
+      items: affectedItems,
+      success: result.ok,
+    });
 
     if (!offline && result.ok && result.value.kind === 'online') {
       return Result.ok(result.value.data);

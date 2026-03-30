@@ -1,4 +1,4 @@
-import { FetchType } from '../requestScheduler';
+import type { FetchType } from '../requestScheduler';
 
 export type TSDFStatus = 'loading' | 'error' | 'refetching' | 'success';
 
@@ -36,8 +36,8 @@ export const invalidPayloadError = {
 
 export const fetchTypePriority: Record<FetchType, number> = {
   lowPriority: 0,
-  mediumPriority: 1,
-  realtimeUpdate: 2,
+  realtimeUpdate: 1,
+  mediumPriority: 2,
   highPriority: 3,
 };
 
