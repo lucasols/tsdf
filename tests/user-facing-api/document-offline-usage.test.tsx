@@ -343,7 +343,15 @@ test('direct document store offline public api', async () => {
       status: 'success'
     `);
   expect(documentStore.getOfflineEntities()).toMatchObject([
-    { entityKey: 'document', pendingMutations: 5, storeType: 'document' },
+    {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
+      entityKey: 'document',
+      pendingMutations: 5,
+      storeType: 'document',
+    },
   ]);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchObject([
     { storeName: 'direct-document-offline' },
@@ -365,6 +373,10 @@ test('direct document store offline public api', async () => {
 
   const [conflict] = documentStore.getOfflineResolutions();
   expect(conflict).toMatchObject({
+    blockedByResolutionIds: [],
+    blockedResolutionCount: 0,
+    childResolutionCount: 0,
+    childResolutionIds: [],
     conflict: { reason: 'stale-server-value' },
     entityRefs: [{ entityKey: 'document', entityKind: 'document' }],
     input: { value: 6 },
@@ -376,6 +388,10 @@ test('direct document store offline public api', async () => {
   expect(documentStore.getOfflineEntities()).toMatchObject([
     {
       entityKey: 'document',
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       requiresResolution: true,
       pendingMutations: 0,
       storeType: 'document',

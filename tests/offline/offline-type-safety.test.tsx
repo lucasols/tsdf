@@ -284,3 +284,48 @@ test('type safety: list-query test env requires explicit offline operation typin
   void typeCheck_;
   expect(true).toBe(true);
 });
+
+test('type safety: offline entity and resolution snapshots expose dependency metadata', () => {
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    PatchUserOperations
+  >({ users: [{ id: 1, name: 'Ada' }] });
+
+  function typeCheck_() {
+    const offlineEntity = env.apiStore.getOfflineEntities()[0];
+    if (offlineEntity) {
+      const blockedByResolutionIds: string[] =
+        offlineEntity.blockedByResolutionIds;
+      const childResolutionIds: string[] = offlineEntity.childResolutionIds;
+      const blockedResolutionCount: number =
+        offlineEntity.blockedResolutionCount;
+      const childResolutionCount: number = offlineEntity.childResolutionCount;
+
+      void blockedByResolutionIds;
+      void childResolutionIds;
+      void blockedResolutionCount;
+      void childResolutionCount;
+    }
+
+    const offlineResolution = env.apiStore.getOfflineResolutions()[0];
+    if (offlineResolution) {
+      const blockedByResolutionIds: string[] =
+        offlineResolution.blockedByResolutionIds;
+      const childResolutionIds: string[] = offlineResolution.childResolutionIds;
+      const blockedResolutionCount: number =
+        offlineResolution.blockedResolutionCount;
+      const childResolutionCount: number =
+        offlineResolution.childResolutionCount;
+
+      void blockedByResolutionIds;
+      void childResolutionIds;
+      void blockedResolutionCount;
+      void childResolutionCount;
+    }
+  }
+
+  void typeCheck_;
+  expect(true).toBe(true);
+});

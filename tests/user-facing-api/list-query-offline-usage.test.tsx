@@ -411,16 +411,28 @@ test('direct list-query store offline public api', async () => {
   });
   expect(listQueryStore.getOfflineEntities()).toMatchObject([
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey(getUserEntityKey(1)),
       pendingMutations: 3,
       storeType: 'listQuery',
     },
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey(getUserEntityKey(2)),
       pendingMutations: 1,
       storeType: 'listQuery',
     },
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey('temp:Linus offline'),
       pendingMutations: 1,
       storeType: 'listQuery',
@@ -446,6 +458,10 @@ test('direct list-query store offline public api', async () => {
 
   const [conflict] = listQueryStore.getOfflineResolutions();
   expect(conflict).toMatchObject({
+    blockedByResolutionIds: [],
+    blockedResolutionCount: 0,
+    childResolutionCount: 0,
+    childResolutionIds: [],
     conflict: { reason: 'server-changed' },
     input: { id: 1, name: 'Ada conflict' },
     operation: 'conflictUser',
@@ -455,6 +471,10 @@ test('direct list-query store offline public api', async () => {
   });
   expect(listQueryStore.getOfflineEntities()).toMatchObject([
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey(getUserEntityKey(1)),
       requiresResolution: true,
       pendingMutations: 0,

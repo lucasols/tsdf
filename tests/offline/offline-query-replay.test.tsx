@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
-import { rc_string } from 'runcheck';
+import { rc_number, rc_object, rc_string } from 'runcheck';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { ListQueryOfflineOperationDefinition } from '../../src/main';
@@ -9,7 +9,7 @@ import {
   type ListQueryParams,
 } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
   type CreateListQueryUserOperations,
@@ -23,6 +23,7 @@ import {
 import {
   collectionCreateInputSchema,
   listQueryQueryPayloadSchema,
+  waitForMicrotaskCondition,
 } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -214,6 +215,39 @@ describe('list-query replay', () => {
 
   type CreateAndPatchListQueryUserOperations = CreateListQueryUserOperations &
     PatchUserOperations;
+  type NestedListQueryUserRow = { id: number; name: string; parentId?: string };
+  type CreateChildListQueryUserOperations = {
+    createChildUser: ListQueryOfflineOperationDefinition<
+      NestedListQueryUserRow,
+      ListQueryParams,
+      string,
+      { name: string; parentId: string },
+      unknown,
+      NestedListQueryUserRow
+    >;
+  };
+  type PatchNestedListQueryUserOperations = {
+    patchUserName: ListQueryOfflineOperationDefinition<
+      NestedListQueryUserRow,
+      ListQueryParams,
+      string,
+      { itemId: string; name: string },
+      unknown
+    >;
+  };
+  type NestedTempCreateListQueryUserOperations = CreateListQueryUserOperations &
+    CreateChildListQueryUserOperations &
+    PatchNestedListQueryUserOperations;
+
+  const nestedUserRowSchema = rc_object({
+    id: rc_number,
+    name: rc_string,
+    parentId: rc_string.optionalKey(),
+  });
+  const nestedChildCreateInputSchema = rc_object({
+    name: rc_string,
+    parentId: rc_string,
+  });
 
   test('list-query replay runs temp create before the queued edit and remaps the edit to the final id', async () => {
     network.setOffline();
@@ -584,6 +618,702 @@ describe('list-query replay', () => {
     expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
       `[]`,
     );
+
+    hook.unmount();
+  });
+
+  test('list-query nested temp-create descendants cascade into manual resolutions and discard together', async () => {
+    network.setOffline();
+    const usersQuery = { tableId: 'users' } as const;
+    const createUserExecute = vi
+      .fn<
+        ({
+          input,
+        }: {
+          input: { name: string };
+        }) => Promise<{ id: number; name: string }>
+      >()
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'));
+    const createChildUserExecute = vi
+      .fn<
+        ({
+          input,
+        }: {
+          input: { name: string; parentId: string };
+        }) => Promise<NestedListQueryUserRow>
+      >()
+      .mockResolvedValue({
+        id: 4,
+        name: 'Child offline',
+        parentId: 'users||3',
+      });
+    const patchUserExecute = vi.fn(
+      ({ input }: { input: { itemId: string; name: string } }) => {
+        env.apiStore.updateItemState(input.itemId, (item) => ({
+          ...item,
+          name: input.name,
+        }));
+
+        return { name: input.name };
+      },
+    );
+
+    const env = createListQueryStoreTestEnv<
+      NestedListQueryUserRow,
+      false,
+      false,
+      NestedTempCreateListQueryUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: 'offline-replay-nested-temp-create-chain-store',
+        getSessionKey: () => 'offline-replay-nested-temp-create-chain-session',
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: nestedUserRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: createUserExecute,
+              },
+              createChildUser: {
+                inputSchema: nestedChildCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({
+                    id: -2,
+                    name: input.name,
+                    parentId: input.parentId,
+                  }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: createChildUserExecute,
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: patchUserExecute,
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      const query = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      });
+
+      env.trackItemUI('query-items', query.items.join(', '));
+      return query;
+    });
+    await flushAllTimers();
+
+    // Queue the root temp create and a nested temp-create child while offline.
+    await act(async () => {
+      await env.apiStore.performMutation(null, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Parent offline',
+            { id: -1, name: 'Parent offline' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () => Promise.resolve({ id: 3, name: 'Parent offline' }),
+        offline: { operation: 'createUser', input: { name: 'Parent offline' } },
+      });
+    });
+
+    await act(async () => {
+      await env.apiStore.performMutation(null, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Child offline',
+            { id: -2, name: 'Child offline', parentId: 'temp:Parent offline' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () =>
+          Promise.resolve({
+            id: 4,
+            name: 'Child offline',
+            parentId: 'users||3',
+          }),
+        offline: {
+          operation: 'createChildUser',
+          input: { name: 'Child offline', parentId: 'temp:Parent offline' },
+        },
+      });
+    });
+
+    // Queue a grandchild edit against the child temp item so the cascade has to
+    // recurse beyond the direct child resolution.
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Child offline', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('temp:Child offline', (item) => ({
+            ...item,
+            name: 'Child blocked edit',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Child blocked edit' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'temp:Child offline', name: 'Child blocked edit' },
+        },
+      });
+    });
+
+    // Exhaust the parent replay. The nested child temp-create and the edit that
+    // depends on that child should both become blocked manual resolutions.
+    await act(async () => {
+      network.goOnline();
+      await Promise.resolve();
+    });
+    await waitForMicrotaskCondition(
+      () => createUserExecute.mock.calls.length === 1,
+    );
+    for (const attempt of [2, 3, 4, 5]) {
+      await advanceTime(5_000);
+      await waitForMicrotaskCondition(
+        () => createUserExecute.mock.calls.length === attempt,
+      );
+    }
+    await flushAllTimers();
+
+    const parentResolution = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'createUser');
+    const childCreateResolution = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'createChildUser');
+    const grandchildResolution = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'patchUserName');
+
+    expect(parentResolution).toBeDefined();
+    expect(childCreateResolution).toBeDefined();
+    expect(grandchildResolution).toBeDefined();
+    if (!parentResolution || !childCreateResolution || !grandchildResolution) {
+      throw new Error('Expected the full nested temp-create resolution chain');
+    }
+
+    expect(createChildUserExecute).not.toHaveBeenCalled();
+    expect(patchUserExecute).not.toHaveBeenCalled();
+    expect(parentResolution).toMatchObject({
+      blockedByResolutionIds: [],
+      childResolutionIds: [childCreateResolution.id],
+      operation: 'createUser',
+    });
+    expect(childCreateResolution).toMatchObject({
+      blockedByResolutionIds: [parentResolution.id],
+      childResolutionIds: [grandchildResolution.id],
+      input: { name: 'Child offline', parentId: 'temp:Parent offline' },
+      operation: 'createChildUser',
+    });
+    expect(grandchildResolution).toMatchObject({
+      blockedByResolutionIds: [childCreateResolution.id],
+      childResolutionIds: [],
+      input: { itemId: 'temp:Child offline', name: 'Child blocked edit' },
+      operation: 'patchUserName',
+    });
+    const parentEntity = env.apiStore
+      .getOfflineEntities()
+      .find(
+        (entity) =>
+          entity.entityKey ===
+          env.getStoreItemKeyFromRaw('temp:Parent offline'),
+      );
+    const childEntity = env.apiStore
+      .getOfflineEntities()
+      .find(
+        (entity) =>
+          entity.entityKey === env.getStoreItemKeyFromRaw('temp:Child offline'),
+      );
+    expect(parentEntity).toMatchObject({
+      childResolutionIds: [childCreateResolution.id],
+      requiresResolution: true,
+    });
+    expect(childEntity?.requiresResolution).toBe(true);
+    expect(childEntity?.blockedByResolutionIds).toEqual(
+      expect.arrayContaining([parentResolution.id, childCreateResolution.id]),
+    );
+    expect(childEntity?.childResolutionIds).toEqual([grandchildResolution.id]);
+
+    // Discarding the parent should clear every nested descendant and roll back
+    // both optimistic temp items from the query and item state.
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(parentResolution.id, {
+        action: 'discard',
+      });
+      await Promise.resolve();
+    });
+    await flushAllTimers();
+
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getItemState('temp:Parent offline')).toBeNull();
+    expect(env.apiStore.getItemState('temp:Child offline')).toBeNull();
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      ['Ada', 'Grace']
+    `);
+
+    hook.unmount();
+  });
+
+  test('list-query temp-create retry exhaustion promotes dependent edits into blocked manual resolutions that unblock after the parent succeeds', async () => {
+    network.setOffline();
+    const usersQuery = { tableId: 'users' } as const;
+    const createUserExecute = vi
+      .fn<
+        ({
+          input,
+        }: {
+          input: { name: string };
+        }) => Promise<{ id: number; name: string }>
+      >()
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockResolvedValueOnce({ id: 3, name: 'Linus offline' });
+    const patchUserExecute = vi.fn(
+      ({ input }: { input: { itemId: string; name: string } }) => {
+        env.apiStore.updateItemState(input.itemId, (item) => ({
+          ...item,
+          name: input.name,
+        }));
+
+        return { name: input.name };
+      },
+    );
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateAndPatchListQueryUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: 'offline-replay-temp-create-resolution-chain-store',
+        getSessionKey: () =>
+          'offline-replay-temp-create-resolution-chain-session',
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: createUserExecute,
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: patchUserExecute,
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      const query = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      });
+
+      env.trackItemUI('query-items', query.items.join(', '));
+      env.trackItemUI('query-status', query.status);
+      return query;
+    });
+    await flushAllTimers();
+
+    // Queue the temp create while offline so replay has to reconcile it later.
+    env.addTimelineComments('beforeNextAction', [
+      'queue the temp create and a dependent edit while offline',
+    ]);
+    await act(async () => {
+      await env.apiStore.performMutation(null, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Linus offline',
+            { id: -1, name: 'Linus offline' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+      });
+    });
+
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus offline', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('temp:Linus offline', (item) => ({
+            ...item,
+            name: 'Linus blocked edit',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
+        },
+      });
+    });
+
+    // Replay the temp create until it reaches manual resolution; its dependent
+    // edit should be promoted into a blocked manual resolution at the same time.
+    env.addTimelineComments('beforeNextAction', [
+      'go online and let the temp create exhaust replay retries',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await waitForMicrotaskCondition(
+      () => createUserExecute.mock.calls.length === 1,
+    );
+    for (const attempt of [2, 3, 4, 5]) {
+      await advanceTime(5_000);
+      await waitForMicrotaskCondition(
+        () => createUserExecute.mock.calls.length === attempt,
+      );
+    }
+    await flushAllTimers();
+
+    const parentResolution = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'createUser');
+    const childResolution = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'patchUserName');
+
+    expect(parentResolution).toBeDefined();
+    expect(childResolution).toBeDefined();
+    if (!parentResolution || !childResolution) {
+      throw new Error('Expected temp-create parent and child resolutions');
+    }
+
+    expect(parentResolution).toMatchObject({
+      blockedByResolutionIds: [],
+      childResolutionCount: 1,
+      childResolutionIds: [childResolution.id],
+      input: { name: 'Linus offline' },
+      kind: 'retry-exhausted',
+      operation: 'createUser',
+    });
+    expect(childResolution).toMatchObject({
+      blockedByResolutionIds: [parentResolution.id],
+      blockedResolutionCount: 1,
+      childResolutionIds: [],
+      input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
+      kind: 'retry-exhausted',
+      operation: 'patchUserName',
+    });
+    expect(env.apiStore.getOfflineEntities()).toMatchObject([
+      {
+        blockedByResolutionIds: [parentResolution.id],
+        blockedResolutionCount: 1,
+        childResolutionCount: 1,
+        childResolutionIds: [childResolution.id],
+        entityKey: env.getStoreItemKeyFromRaw('temp:Linus offline'),
+        pendingMutations: 0,
+        requiresResolution: true,
+        syncState: 'resolution-required',
+      },
+    ]);
+    expect(patchUserExecute).not.toHaveBeenCalled();
+
+    // The blocked child must not become independently resolvable before the
+    // parent temp create has either succeeded or been discarded.
+    await expect(
+      env.apiStore.resolveOfflineResolution(childResolution.id, {
+        action: 'retry',
+      }),
+    ).rejects.toThrow(
+      'Cannot resolve a blocked offline resolution before its parent temp create is cleared',
+    );
+
+    // Retrying the parent should reconcile the temp payload to a real id and
+    // leave the child manual resolution unblocked and remapped.
+    env.addTimelineComments('beforeNextAction', [
+      'retry the parent resolution so the temp payload can reconcile',
+    ]);
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(parentResolution.id, {
+        action: 'retry',
+      });
+      await Promise.resolve();
+    });
+    await waitForMicrotaskCondition(
+      () => createUserExecute.mock.calls.length === 6,
+    );
+    await flushAllTimers();
+
+    const remappedChildResolution = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'patchUserName');
+    expect(env.apiStore.getOfflineResolutions()).toHaveLength(1);
+    expect(remappedChildResolution).toMatchObject({
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionIds: [],
+      input: { itemId: 'users||3', name: 'Linus blocked edit' },
+      kind: 'retry-exhausted',
+      operation: 'patchUserName',
+    });
+
+    // Once the child is remapped onto the final payload, it becomes eligible for
+    // retry and should apply cleanly against the server-backed item.
+    env.addTimelineComments('beforeNextAction', [
+      'retry the remapped child resolution',
+    ]);
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(remappedChildResolution!.id, {
+        action: 'retry',
+      });
+      await Promise.resolve();
+    });
+    await waitForMicrotaskCondition(
+      () => patchUserExecute.mock.calls.length === 1,
+    );
+    await flushAllTimers();
+
+    expect(patchUserExecute.mock.calls.map(([ctx]) => ctx.input))
+      .toMatchInlineSnapshot(`
+        - { itemId: 'users||3', name: 'Linus blocked edit' }
+      `);
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      ['Ada', 'Grace', 'Linus blocked edit']
+    `);
+    expect(env.apiStore.getItemState('users||3')).toMatchInlineSnapshot(`
+      id: 3
+      name: 'Linus blocked edit'
+    `);
+    expect(env.apiStore.getItemState('temp:Linus offline')).toBeNull();
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | query-items                    | query-status |
+      0      | Ada, Grace                     | success      | [query-items, query-status] ui-initialized
+      10ms   | Ada, Grace                     | error        | [query-status] ui-changed
+      1.01s  | Ada, Grace                     | error        | -- queue the temp create and a dependent edit while offline
+      .      | Ada, Grace, Linus blocked edit | error        | [query-items, query-items] ui-changed
+      21.01s | Ada, Grace, Linus blocked edit | error        | -- go online and let the temp create exhaust replay retries
+      .      | Ada, Grace, Linus blocked edit | error        | -- retry the parent resolution so the temp payload can reconcile
+      .      | Ada, Grace, Linus offline      | error        | [query-items] ui-changed
+      22.01s | Ada, Grace, Linus offline      | error        | -- retry the remapped child resolution
+      .      | Ada, Grace, Linus blocked edit | error        | [query-items] ui-changed
+      "
+    `);
+
+    hook.unmount();
+  });
+
+  test('list-query discarding a temp-create parent resolution removes dependent descendants and clears the temp chain', async () => {
+    network.setOffline();
+    const usersQuery = { tableId: 'users' } as const;
+    const createUserExecute = vi
+      .fn<
+        ({
+          input,
+        }: {
+          input: { name: string };
+        }) => Promise<{ id: number; name: string }>
+      >()
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'))
+      .mockRejectedValueOnce(new Error('create replay failed'));
+
+    const env = createListQueryStoreTestEnv<
+      { id: number; name: string },
+      false,
+      false,
+      CreateAndPatchListQueryUserOperations
+    >(
+      {
+        users: [
+          { id: 1, name: 'Ada' },
+          { id: 2, name: 'Grace' },
+        ],
+      },
+      {
+        id: 'offline-replay-temp-create-discard-store',
+        getSessionKey: () => 'offline-replay-temp-create-discard-session',
+        testScenario: { loaded: { queries: [usersQuery] } },
+        persistentStorage: {
+          adapter: 'local-sync',
+          schema: userRowSchema,
+          itemPayloadSchema: rc_string,
+          queryPayloadSchema: listQueryQueryPayloadSchema,
+          offlineMode: {
+            network: network.config,
+            operations: {
+              createUser: {
+                inputSchema: collectionCreateInputSchema,
+                getEntityRefs: ({ input }) => [`temp:${input.name}`],
+                tempEntity: {
+                  buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                  reconcileServerEntity: (result) => ({
+                    finalPayload: `users||${result.id}`,
+                    finalData: result,
+                  }),
+                },
+                execute: createUserExecute,
+              },
+              patchUserName: {
+                inputSchema: userPatchSchema,
+                getEntityRefs: ({ input }) => [input.itemId],
+                execute: ({ input }) => ({ name: input.name }),
+              },
+            },
+          },
+        },
+      },
+    );
+
+    const hook = renderHook(() => {
+      const query = env.apiStore.useListQuery(usersQuery, {
+        itemSelector: (item) => item.name,
+      });
+
+      env.trackItemUI('query-items', query.items.join(', '));
+      return query;
+    });
+    await flushAllTimers();
+
+    // Build the temp-create chain entirely through the public mutation API.
+    await act(async () => {
+      await env.apiStore.performMutation(null, {
+        optimisticUpdate: () => {
+          env.apiStore.addItemToState(
+            'temp:Linus offline',
+            { id: -1, name: 'Linus offline' },
+            { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+          );
+        },
+        mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+        offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+      });
+    });
+
+    await act(async () => {
+      await env.apiStore.performMutation('temp:Linus offline', {
+        optimisticUpdate: () => {
+          env.apiStore.updateItemState('temp:Linus offline', (item) => ({
+            ...item,
+            name: 'Linus discarded edit',
+          }));
+        },
+        mutation: () => Promise.resolve({ name: 'Linus discarded edit' }),
+        offline: {
+          operation: 'patchUserName',
+          input: { itemId: 'temp:Linus offline', name: 'Linus discarded edit' },
+        },
+      });
+    });
+
+    // Exhaust the parent replay so both parent and child become manual
+    // resolutions rooted at the same temp entity.
+    env.addTimelineComments('beforeNextAction', [
+      'go online and let the parent temp create exhaust replay',
+    ]);
+    act(() => {
+      network.goOnline();
+    });
+    await waitForMicrotaskCondition(
+      () => createUserExecute.mock.calls.length === 1,
+    );
+    for (const attempt of [2, 3, 4, 5]) {
+      await advanceTime(5_000);
+      await waitForMicrotaskCondition(
+        () => createUserExecute.mock.calls.length === attempt,
+      );
+    }
+    await flushAllTimers();
+
+    const parentResolution = env.apiStore
+      .getOfflineResolutions()
+      .find((resolution) => resolution.operation === 'createUser');
+    if (!parentResolution) {
+      throw new Error('Expected the temp-create parent resolution');
+    }
+
+    // Discarding the parent should remove the blocked child resolution and the
+    // optimistic temp row in one cascade.
+    await act(async () => {
+      await env.apiStore.resolveOfflineResolution(parentResolution.id, {
+        action: 'discard',
+      });
+      await Promise.resolve();
+    });
+    await flushAllTimers();
+
+    expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(env.apiStore.getItemState('temp:Linus offline')).toBeNull();
+    expect(hook.result.current.items).toMatchInlineSnapshot(`
+      ['Ada', 'Grace']
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time   | query-items                      |
+      0      | Ada, Grace                       | ui-initialized
+      1.01s  | Ada, Grace, Linus offline        | ui-changed
+      .      | Ada, Grace, Linus discarded edit | ui-changed
+      21.01s | Ada, Grace, Linus discarded edit | -- go online and let the parent temp create exhaust replay
+      .      | Ada, Grace                       | ui-changed
+      "
+    `);
 
     hook.unmount();
   });

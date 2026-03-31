@@ -218,7 +218,11 @@ test('document offline accumulation keeps a single persisted queue entry and rep
     value: 3
   `);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - createdAt: 1735689600000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
       entityKey: 'document'
       entityKind: 'document'
       id: 'offline-accumulation-session:offline-accumulation-doc:document'

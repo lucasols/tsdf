@@ -377,16 +377,28 @@ test('direct collection store offline public api', async () => {
     `);
   expect(collectionStore.getOfflineEntities()).toMatchObject([
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey('1'),
       pendingMutations: 3,
       storeType: 'collection',
     },
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey('2'),
       pendingMutations: 1,
       storeType: 'collection',
     },
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey('temp:Todo 3 offline'),
       pendingMutations: 1,
       storeType: 'collection',
@@ -412,6 +424,10 @@ test('direct collection store offline public api', async () => {
 
   const [conflict] = collectionStore.getOfflineResolutions();
   expect(conflict).toMatchObject({
+    blockedByResolutionIds: [],
+    blockedResolutionCount: 0,
+    childResolutionCount: 0,
+    childResolutionIds: [],
     conflict: { reason: 'server-changed' },
     input: { id: '1', title: 'Todo 1 conflict' },
     operation: 'conflictTodo',
@@ -421,6 +437,10 @@ test('direct collection store offline public api', async () => {
   });
   expect(collectionStore.getOfflineEntities()).toMatchObject([
     {
+      blockedByResolutionIds: [],
+      blockedResolutionCount: 0,
+      childResolutionCount: 0,
+      childResolutionIds: [],
       entityKey: getCompositeKey('1'),
       requiresResolution: true,
       pendingMutations: 0,

@@ -12,17 +12,25 @@ import {
 import { readManagedLocalStorageSingleEntryByPayload } from '../../src/persistentStorage/localStorageMetadata';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
+import { createListQueryStoreTestEnv } from '../mocks/listQueryStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
 import { advanceTime, flushAllTimers, pick } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import {
+  type CreateListQueryUserOperations,
   getOfflineQueueEntries,
+  type PatchUserOperations,
   type UpdateValueOperations,
+  userPatchSchema,
+  userRowSchema,
 } from './offlineReplayTestShared';
 import {
+  collectionCreateInputSchema,
   collectionSchema,
   docMutationInputSchema,
   docSchema,
+  listQueryQueryPayloadSchema,
+  waitForMicrotaskCondition,
 } from './offlineTestShared';
 
 let network = createOfflineNetworkMock();
@@ -259,6 +267,151 @@ test('logging back into the same session replays durable offline mutations queue
     "
   `);
   hook.unmount();
+});
+
+type CreateAndPatchListQueryUserOperations = CreateListQueryUserOperations &
+  PatchUserOperations;
+
+test('global and store offline entities expose temp-create dependency metadata once replay reaches manual resolution', async () => {
+  network.setOffline();
+
+  const sessionKey = 'offline-session-temp-create-dependencies';
+  const usersQuery = { tableId: 'users' } as const;
+  const createUserExecute = vi
+    .fn<
+      ({
+        input,
+      }: {
+        input: { name: string };
+      }) => Promise<{ id: number; name: string }>
+    >()
+    .mockRejectedValueOnce(new Error('create replay failed'))
+    .mockRejectedValueOnce(new Error('create replay failed'))
+    .mockRejectedValueOnce(new Error('create replay failed'))
+    .mockRejectedValueOnce(new Error('create replay failed'))
+    .mockRejectedValueOnce(new Error('create replay failed'));
+
+  const env = createListQueryStoreTestEnv<
+    { id: number; name: string },
+    false,
+    false,
+    CreateAndPatchListQueryUserOperations
+  >(
+    {
+      users: [
+        { id: 1, name: 'Ada' },
+        { id: 2, name: 'Grace' },
+      ],
+    },
+    {
+      id: 'offline-session-temp-create-dependencies-store',
+      getSessionKey: () => sessionKey,
+      testScenario: { loaded: { queries: [usersQuery] } },
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: userRowSchema,
+        itemPayloadSchema: rc_string,
+        queryPayloadSchema: listQueryQueryPayloadSchema,
+        offlineMode: {
+          network: network.config,
+          operations: {
+            createUser: {
+              inputSchema: collectionCreateInputSchema,
+              getEntityRefs: ({ input }) => [`temp:${input.name}`],
+              tempEntity: {
+                buildPendingEntity: (input) => ({ id: -1, name: input.name }),
+                reconcileServerEntity: (result) => ({
+                  finalPayload: `users||${result.id}`,
+                  finalData: result,
+                }),
+              },
+              execute: createUserExecute,
+            },
+            patchUserName: {
+              inputSchema: userPatchSchema,
+              getEntityRefs: ({ input }) => [input.itemId],
+              execute: ({ input }) => ({ name: input.name }),
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // Queue a temp create and a dependent edit while fully offline.
+  await act(async () => {
+    await env.apiStore.performMutation(null, {
+      optimisticUpdate: () => {
+        env.apiStore.addItemToState(
+          'temp:Linus offline',
+          { id: -1, name: 'Linus offline' },
+          { addItemToQueries: { queries: [usersQuery], appendTo: 'end' } },
+        );
+      },
+      mutation: () => Promise.resolve({ id: 3, name: 'Linus offline' }),
+      offline: { operation: 'createUser', input: { name: 'Linus offline' } },
+    });
+  });
+
+  await act(async () => {
+    await env.apiStore.performMutation('temp:Linus offline', {
+      optimisticUpdate: () => {
+        env.apiStore.updateItemState('temp:Linus offline', (item) => ({
+          ...item,
+          name: 'Linus blocked edit',
+        }));
+      },
+      mutation: () => Promise.resolve({ name: 'Linus blocked edit' }),
+      offline: {
+        operation: 'patchUserName',
+        input: { itemId: 'temp:Linus offline', name: 'Linus blocked edit' },
+      },
+    });
+  });
+
+  // Let the temp create exhaust replay so the parent and child dependency
+  // metadata becomes visible through both store-scoped and global entity APIs.
+  act(() => {
+    network.goOnline();
+  });
+  await waitForMicrotaskCondition(
+    () => createUserExecute.mock.calls.length === 1,
+  );
+  for (const attempt of [2, 3, 4, 5]) {
+    await advanceTime(5_000);
+    await waitForMicrotaskCondition(
+      () => createUserExecute.mock.calls.length === attempt,
+    );
+  }
+  await flushAllTimers();
+
+  const [storeEntity] = env.apiStore.getOfflineEntities();
+  const [globalEntity] = getGlobalOfflineEntities(sessionKey);
+  const parentResolution = env.apiStore
+    .getOfflineResolutions()
+    .find((resolution) => resolution.operation === 'createUser');
+  const childResolution = env.apiStore
+    .getOfflineResolutions()
+    .find((resolution) => resolution.operation === 'patchUserName');
+
+  expect(storeEntity).toMatchObject({
+    blockedByResolutionIds: [parentResolution?.id],
+    blockedResolutionCount: 1,
+    childResolutionCount: 1,
+    childResolutionIds: [childResolution?.id],
+    entityKey: env.getStoreItemKeyFromRaw('temp:Linus offline'),
+    requiresResolution: true,
+    syncState: 'resolution-required',
+  });
+  expect(globalEntity).toMatchObject({
+    blockedByResolutionIds: [parentResolution?.id],
+    blockedResolutionCount: 1,
+    childResolutionCount: 1,
+    childResolutionIds: [childResolution?.id],
+    entityKey: env.getStoreItemKeyFromRaw('temp:Linus offline'),
+    requiresResolution: true,
+    storeName: 'offline-session-temp-create-dependencies-store',
+  });
 });
 
 // Each store manages its own offline lifecycle -- a store without offlineMode

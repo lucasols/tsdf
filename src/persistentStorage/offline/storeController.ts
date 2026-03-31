@@ -26,10 +26,13 @@ import {
   type OfflineResolutionRecord,
   type OfflineResolveConflictResult,
   type OfflineStoreType,
+  type PersistedOfflineResolutionRecord,
 } from './types';
 
 const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 5;
 const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
+const BLOCKED_TEMP_CREATE_RESOLUTION_MESSAGE =
+  'Blocked by unresolved temp create dependency';
 
 type OfflineEntityRef = {
   entityKey: string;
@@ -92,7 +95,7 @@ type ActiveSessionState = {
     typeof createPersistentStorageNamespaceHandle<OfflineQueueEntry>
   >;
   resolutionNamespace: ReturnType<
-    typeof createPersistentStorageNamespaceHandle<OfflineResolutionRecord>
+    typeof createPersistentStorageNamespaceHandle<PersistedOfflineResolutionRecord>
   >;
   entityNamespace: ReturnType<
     typeof createPersistentStorageNamespaceHandle<GlobalOfflineEntity>
@@ -156,6 +159,26 @@ function compareQueueEntries(
   return left.id.localeCompare(right.id);
 }
 
+type TempCreateDependencySource = {
+  entityKey: string;
+  tempId?: ValidPayload;
+  resolutionId?: string;
+  sourceType: 'queue' | 'resolution';
+};
+
+type ResolutionDependencySnapshot = {
+  blockedByResolutionIdsByResolutionId: Map<string, string[]>;
+  childResolutionIdsByResolutionId: Map<string, string[]>;
+  blockedByResolutionIdsByEntityKey: Map<string, string[]>;
+  childResolutionIdsByEntityKey: Map<string, string[]>;
+  blockedResolutionIdsByResolutionId: Map<string, Set<string>>;
+};
+
+type TempCreateDescendantCollection = {
+  queueEntries: OfflineQueueEntry[];
+  resolutions: PersistedOfflineResolutionRecord[];
+};
+
 export type OfflineStoreController<
   TOperations extends Record<string, OfflineOperationSchemaShape>,
 > = {
@@ -218,7 +241,7 @@ export function createOfflineStoreController<
   const replayRetryIntervalMs =
     offlineMode.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
   const queueEntries = new Map<string, OfflineQueueEntry>();
-  const resolutions = new Map<string, OfflineResolutionRecord>();
+  const resolutions = new Map<string, PersistedOfflineResolutionRecord>();
   const countedReplayFailures = new Map<string, number>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
@@ -341,7 +364,7 @@ export function createOfflineStoreController<
         entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
       });
     const resolutionNamespace =
-      createPersistentStorageNamespaceHandle<OfflineResolutionRecord>({
+      createPersistentStorageNamespaceHandle<PersistedOfflineResolutionRecord>({
         storeName,
         adapter,
         getSessionKey: () => sessionKey,
@@ -416,11 +439,163 @@ export function createOfflineStoreController<
     return hydratedPromise;
   }
 
+  function getOrCreateSet(
+    map: Map<string, Set<string>>,
+    key: string,
+  ): Set<string> {
+    const existing = map.get(key);
+    if (existing) return existing;
+
+    const created = new Set<string>();
+    map.set(key, created);
+    return created;
+  }
+
+  function toSortedArrayMap(
+    source: Map<string, Set<string>>,
+  ): Map<string, string[]> {
+    return new Map(
+      [...source.entries()].map(([key, values]) => [
+        key,
+        [...values].sort((left, right) => left.localeCompare(right)),
+      ]),
+    );
+  }
+
+  function createResolutionDependencySnapshot(): ResolutionDependencySnapshot {
+    const tempDependencySourcesByEntityKey = new Map<
+      string,
+      TempCreateDependencySource
+    >();
+    const blockedByResolutionIdsByResolutionId = new Map<string, Set<string>>();
+    const childResolutionIdsByResolutionId = new Map<string, Set<string>>();
+    const blockedByResolutionIdsByEntityKey = new Map<string, Set<string>>();
+    const childResolutionIdsByEntityKey = new Map<string, Set<string>>();
+    const blockedResolutionIdsByResolutionId = new Map<string, Set<string>>();
+
+    for (const entry of queueEntries.values()) {
+      const entityKey = getTempCreateEntityKey(entry);
+      if (!entityKey) continue;
+
+      tempDependencySourcesByEntityKey.set(entityKey, {
+        entityKey,
+        tempId: entry.tempId,
+        sourceType: 'queue',
+      });
+    }
+
+    for (const resolution of resolutions.values()) {
+      const entityKey = getTempCreateEntityKey(resolution);
+      if (!entityKey) continue;
+
+      tempDependencySourcesByEntityKey.set(entityKey, {
+        entityKey,
+        tempId: resolution.tempId,
+        resolutionId: resolution.id,
+        sourceType: 'resolution',
+      });
+    }
+
+    for (const resolution of resolutions.values()) {
+      for (const dependencySource of tempDependencySourcesByEntityKey.values()) {
+        if (
+          !workItemDependsOnTempCreateSource({
+            workItem: resolution,
+            dependencySource,
+          })
+        ) {
+          continue;
+        }
+        getOrCreateSet(blockedResolutionIdsByResolutionId, resolution.id).add(
+          dependencySource.sourceType === 'resolution' &&
+            dependencySource.resolutionId
+            ? dependencySource.resolutionId
+            : `queue:${dependencySource.entityKey}`,
+        );
+        getOrCreateSet(
+          childResolutionIdsByEntityKey,
+          dependencySource.entityKey,
+        ).add(resolution.id);
+
+        if (
+          dependencySource.sourceType !== 'resolution' ||
+          !dependencySource.resolutionId
+        ) {
+          continue;
+        }
+
+        getOrCreateSet(blockedByResolutionIdsByResolutionId, resolution.id).add(
+          dependencySource.resolutionId,
+        );
+        getOrCreateSet(
+          childResolutionIdsByResolutionId,
+          dependencySource.resolutionId,
+        ).add(resolution.id);
+        for (const entityRef of resolution.entityRefs) {
+          getOrCreateSet(
+            blockedByResolutionIdsByEntityKey,
+            entityRef.entityKey,
+          ).add(dependencySource.resolutionId);
+        }
+      }
+    }
+
+    return {
+      blockedByResolutionIdsByResolutionId: toSortedArrayMap(
+        blockedByResolutionIdsByResolutionId,
+      ),
+      childResolutionIdsByResolutionId: toSortedArrayMap(
+        childResolutionIdsByResolutionId,
+      ),
+      blockedByResolutionIdsByEntityKey: toSortedArrayMap(
+        blockedByResolutionIdsByEntityKey,
+      ),
+      childResolutionIdsByEntityKey: toSortedArrayMap(
+        childResolutionIdsByEntityKey,
+      ),
+      blockedResolutionIdsByResolutionId,
+    };
+  }
+
+  function buildDerivedResolutionRecords(
+    dependencySnapshot?: ResolutionDependencySnapshot,
+  ): OfflineResolutionRecord[] {
+    const snapshot = dependencySnapshot ?? createResolutionDependencySnapshot();
+
+    return [...resolutions.values()]
+      .map((resolution) => {
+        const blockedByResolutionIds =
+          snapshot.blockedByResolutionIdsByResolutionId.get(resolution.id) ??
+          [];
+        const childResolutionIds =
+          snapshot.childResolutionIdsByResolutionId.get(resolution.id) ?? [];
+
+        return {
+          ...resolution,
+          blockedByResolutionIds,
+          childResolutionIds,
+          blockedResolutionCount:
+            snapshot.blockedResolutionIdsByResolutionId.get(resolution.id)
+              ?.size ?? 0,
+          childResolutionCount: childResolutionIds.length,
+        };
+      })
+      .sort((left, right) => {
+        if (left.createdAt !== right.createdAt) {
+          return left.createdAt - right.createdAt;
+        }
+        if (left.enqueuedAt !== right.enqueuedAt) {
+          return left.enqueuedAt - right.enqueuedAt;
+        }
+        return left.id.localeCompare(right.id);
+      });
+  }
+
   function refreshDerivedState(current?: ActiveSessionState): void {
     const session = current ?? ensureActiveSession();
     if (!session || !isActiveSessionState(session)) return;
     const sessionState = session;
-
+    const dependencySnapshot = createResolutionDependencySnapshot();
     const entitiesByKey = new Map<string, GlobalOfflineEntity>();
 
     function createEntityBase(
@@ -447,6 +622,13 @@ export function createOfflineStoreController<
     for (const entry of queueEntries.values()) {
       for (const ref of entry.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
+        const childResolutionIds =
+          dependencySnapshot.childResolutionIdsByEntityKey.get(ref.entityKey) ??
+          [];
+        const blockedByResolutionIds =
+          dependencySnapshot.blockedByResolutionIdsByEntityKey.get(
+            ref.entityKey,
+          ) ?? [];
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
@@ -456,6 +638,10 @@ export function createOfflineStoreController<
               ? existing.syncState
               : entry.syncState,
           requiresResolution: existing?.requiresResolution ?? false,
+          blockedByResolutionIds,
+          childResolutionIds,
+          blockedResolutionCount: blockedByResolutionIds.length,
+          childResolutionCount: childResolutionIds.length,
           createdAt: existing?.createdAt ?? entry.createdAt,
           updatedAt: entry.updatedAt,
           tempId: entry.tempId ?? existing?.tempId,
@@ -466,12 +652,23 @@ export function createOfflineStoreController<
     for (const resolution of resolutions.values()) {
       for (const ref of resolution.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
+        const childResolutionIds =
+          dependencySnapshot.childResolutionIdsByEntityKey.get(ref.entityKey) ??
+          [];
+        const blockedByResolutionIds =
+          dependencySnapshot.blockedByResolutionIdsByEntityKey.get(
+            ref.entityKey,
+          ) ?? [];
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
           pendingMutations: existing?.pendingMutations ?? 0,
           syncState: 'resolution-required',
           requiresResolution: true,
+          blockedByResolutionIds,
+          childResolutionIds,
+          blockedResolutionCount: blockedByResolutionIds.length,
+          childResolutionCount: childResolutionIds.length,
           createdAt: existing?.createdAt ?? resolution.createdAt,
           updatedAt: resolution.updatedAt,
           tempId: resolution.tempId ?? existing?.tempId,
@@ -482,6 +679,8 @@ export function createOfflineStoreController<
     const entities = [...entitiesByKey.values()].sort((left, right) =>
       left.id.localeCompare(right.id),
     );
+    const derivedResolutions =
+      buildDerivedResolutionRecords(dependencySnapshot);
     const protectedKeys = storeAdapter.getProtectedCacheKeys(
       entities.map((entity) => ({
         entityKey: entity.entityKey,
@@ -491,7 +690,7 @@ export function createOfflineStoreController<
 
     sessionState.session.syncStoreData(storeName, {
       entities,
-      resolutions: [...resolutions.values()],
+      resolutions: derivedResolutions,
       protectedKeys,
     });
     storeAdapter.syncEntityOverlays?.({
@@ -668,7 +867,7 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     entry: OfflineQueueEntry,
     conflict: unknown,
-  ): OfflineResolutionRecord {
+  ): PersistedOfflineResolutionRecord {
     return {
       ...buildResolutionRecordBase(current, entry),
       id: `conflict:${entry.id}`,
@@ -681,13 +880,76 @@ export function createOfflineStoreController<
     current: ActiveSessionState,
     entry: OfflineQueueEntry,
     lastReplayError: { message: string },
-  ): OfflineResolutionRecord {
+  ): PersistedOfflineResolutionRecord {
     return {
       ...buildResolutionRecordBase(current, entry),
       id: `retry-exhausted:${entry.id}`,
       kind: 'retry-exhausted',
       lastReplayError,
     };
+  }
+
+  function isTempCreateOperation(operationName: string): boolean {
+    return offlineMode.operations[operationName]?.tempEntity !== undefined;
+  }
+
+  function getTempCreateEntityKey(
+    workItem:
+      | Pick<OfflineQueueEntry, 'operation' | 'tempId' | 'entityRefs'>
+      | Pick<
+          PersistedOfflineResolutionRecord,
+          'operation' | 'tempId' | 'entityRefs'
+        >,
+  ): string | null {
+    if (workItem.tempId === undefined) return null;
+    if (!isTempCreateOperation(workItem.operation)) return null;
+
+    const tempEntityRef = workItem.entityRefs.find(
+      (entityRef) => entityRef.entityKind === 'item',
+    );
+    return tempEntityRef?.entityKey ?? null;
+  }
+
+  function hasPayloadReference(value: unknown, target: ValidPayload): boolean {
+    if (deepEqual(value, target)) return true;
+    if (!Array.isArray(value) && !isObject(value)) return false;
+
+    if (Array.isArray(value)) {
+      return value.some((entryValue) =>
+        hasPayloadReference(entryValue, target),
+      );
+    }
+
+    return Object.values(value).some((entryValue) =>
+      hasPayloadReference(entryValue, target),
+    );
+  }
+
+  function workItemDependsOnTempCreateSource(args: {
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'entityRefs' | 'input' | 'operation' | 'tempId'
+    >;
+    dependencySource: TempCreateDependencySource;
+  }): boolean {
+    if (
+      getTempCreateEntityKey(args.workItem) === args.dependencySource.entityKey
+    ) {
+      return false;
+    }
+
+    if (
+      args.workItem.entityRefs.some(
+        (entityRef) => entityRef.entityKey === args.dependencySource.entityKey,
+      )
+    ) {
+      return true;
+    }
+
+    return (
+      args.dependencySource.tempId !== undefined &&
+      hasPayloadReference(args.workItem.input, args.dependencySource.tempId)
+    );
   }
 
   function replacePayloadReferences(
@@ -876,8 +1138,9 @@ export function createOfflineStoreController<
   }
 
   async function persistResolution(
-    resolution: OfflineResolutionRecord,
+    resolution: PersistedOfflineResolutionRecord,
     current?: ActiveSessionState,
+    skipRefresh?: boolean,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
@@ -885,7 +1148,7 @@ export function createOfflineStoreController<
       resolutions.set(resolution.id, resolution);
     }
     await session.resolutionNamespace.save(resolution.id, resolution);
-    if (isActiveSessionState(session)) {
+    if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
   }
@@ -893,6 +1156,7 @@ export function createOfflineStoreController<
   async function removeResolution(
     resolutionId: string,
     current?: ActiveSessionState,
+    skipRefresh?: boolean,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
@@ -900,9 +1164,229 @@ export function createOfflineStoreController<
       resolutions.delete(resolutionId);
     }
     await session.resolutionNamespace.remove(resolutionId);
-    if (isActiveSessionState(session)) {
+    if (!skipRefresh && isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
+  }
+
+  function collectTempCreateDescendants(args: {
+    parentEntityKey: string;
+    parentTempId?: ValidPayload;
+    parentEntryId?: string;
+    parentResolutionId?: string;
+  }): TempCreateDescendantCollection {
+    const sourcesByEntityKey = new Map<string, TempCreateDependencySource>([
+      [
+        args.parentEntityKey,
+        {
+          entityKey: args.parentEntityKey,
+          tempId: args.parentTempId,
+          resolutionId: args.parentResolutionId,
+          sourceType: args.parentResolutionId ? 'resolution' : 'queue',
+        },
+      ],
+    ]);
+    const pendingEntityKeys = [args.parentEntityKey];
+    const seenEntityKeys = new Set(pendingEntityKeys);
+    const descendantQueueEntries = new Map<string, OfflineQueueEntry>();
+    const descendantResolutions = new Map<
+      string,
+      PersistedOfflineResolutionRecord
+    >();
+
+    while (pendingEntityKeys.length > 0) {
+      const entityKey = pendingEntityKeys.shift();
+      if (!entityKey) continue;
+      const dependencySource = sourcesByEntityKey.get(entityKey);
+      if (!dependencySource) continue;
+
+      for (const entry of getSortedEntries()) {
+        if (
+          entry.id === args.parentEntryId ||
+          descendantQueueEntries.has(entry.id)
+        ) {
+          continue;
+        }
+        if (
+          !workItemDependsOnTempCreateSource({
+            workItem: entry,
+            dependencySource,
+          })
+        ) {
+          continue;
+        }
+
+        descendantQueueEntries.set(entry.id, entry);
+        const descendantEntityKey = getTempCreateEntityKey(entry);
+        if (!descendantEntityKey || seenEntityKeys.has(descendantEntityKey)) {
+          continue;
+        }
+
+        seenEntityKeys.add(descendantEntityKey);
+        pendingEntityKeys.push(descendantEntityKey);
+        sourcesByEntityKey.set(descendantEntityKey, {
+          entityKey: descendantEntityKey,
+          tempId: entry.tempId,
+          sourceType: 'queue',
+        });
+      }
+
+      for (const resolution of resolutions.values()) {
+        if (
+          resolution.id === args.parentResolutionId ||
+          descendantResolutions.has(resolution.id)
+        ) {
+          continue;
+        }
+        if (
+          !workItemDependsOnTempCreateSource({
+            workItem: resolution,
+            dependencySource,
+          })
+        ) {
+          continue;
+        }
+
+        descendantResolutions.set(resolution.id, resolution);
+        const descendantEntityKey = getTempCreateEntityKey(resolution);
+        if (!descendantEntityKey || seenEntityKeys.has(descendantEntityKey)) {
+          continue;
+        }
+
+        seenEntityKeys.add(descendantEntityKey);
+        pendingEntityKeys.push(descendantEntityKey);
+        sourcesByEntityKey.set(descendantEntityKey, {
+          entityKey: descendantEntityKey,
+          tempId: resolution.tempId,
+          resolutionId: resolution.id,
+          sourceType: 'resolution',
+        });
+      }
+    }
+
+    return {
+      queueEntries: [...descendantQueueEntries.values()].sort(
+        compareQueueEntries,
+      ),
+      resolutions: [...descendantResolutions.values()].sort((left, right) => {
+        if (left.createdAt !== right.createdAt) {
+          return left.createdAt - right.createdAt;
+        }
+        if (left.enqueuedAt !== right.enqueuedAt) {
+          return left.enqueuedAt - right.enqueuedAt;
+        }
+        return left.id.localeCompare(right.id);
+      }),
+    };
+  }
+
+  function rollbackTempCreatePendingEntity(
+    workItem: Pick<
+      OfflineQueueEntry | PersistedOfflineResolutionRecord,
+      'operation' | 'input' | 'tempId'
+    >,
+  ): void {
+    if (
+      workItem.tempId === undefined ||
+      !isTempCreateOperation(workItem.operation)
+    ) {
+      return;
+    }
+
+    storeAdapter.rollbackPendingEntity?.({
+      operationName: workItem.operation,
+      input: workItem.input,
+      tempId: workItem.tempId,
+      pendingEntity: undefined,
+    });
+  }
+
+  async function promoteBlockedTempCreateDescendants(args: {
+    current: ActiveSessionState;
+    parentEntry: OfflineQueueEntry;
+    parentResolutionId: string;
+  }): Promise<void> {
+    const parentEntityKey = getTempCreateEntityKey(args.parentEntry);
+    if (!parentEntityKey) return;
+    const descendants = collectTempCreateDescendants({
+      parentEntityKey,
+      parentTempId: args.parentEntry.tempId,
+      parentResolutionId: args.parentResolutionId,
+    });
+
+    for (const dependentEntry of descendants.queueEntries) {
+      await removeEntry(dependentEntry.id, args.current, true);
+      await persistResolution(
+        buildRetryExhaustedResolutionRecord(args.current, dependentEntry, {
+          message: BLOCKED_TEMP_CREATE_RESOLUTION_MESSAGE,
+        }),
+        args.current,
+        true,
+      );
+    }
+  }
+
+  async function persistManualResolutionChain(args: {
+    current: ActiveSessionState;
+    parentEntry: OfflineQueueEntry;
+    parentResolution: PersistedOfflineResolutionRecord;
+  }): Promise<void> {
+    await removeEntry(args.parentEntry.id, args.current, true);
+    await persistResolution(args.parentResolution, args.current, true);
+    await promoteBlockedTempCreateDescendants({
+      current: args.current,
+      parentEntry: args.parentEntry,
+      parentResolutionId: args.parentResolution.id,
+    });
+    refreshDerivedState(args.current);
+  }
+
+  function isPersistedResolutionBlocked(
+    resolution: PersistedOfflineResolutionRecord,
+  ): boolean {
+    const snapshot = createResolutionDependencySnapshot();
+    return (
+      (snapshot.blockedResolutionIdsByResolutionId.get(resolution.id)?.size ??
+        0) > 0
+    );
+  }
+
+  async function discardTempCreateResolutionChain(args: {
+    current: ActiveSessionState;
+    resolution: PersistedOfflineResolutionRecord;
+  }): Promise<void> {
+    const parentEntityKey = getTempCreateEntityKey(args.resolution);
+
+    await removeResolution(args.resolution.id, args.current, true);
+
+    if (!parentEntityKey) {
+      refreshDerivedState(args.current);
+      return;
+    }
+
+    const descendants = collectTempCreateDescendants({
+      parentEntityKey,
+      parentTempId: args.resolution.tempId,
+      parentResolutionId: args.resolution.id,
+    });
+
+    for (const queueEntry of descendants.queueEntries) {
+      await removeEntry(queueEntry.id, args.current, true);
+    }
+
+    for (const resolution of descendants.resolutions) {
+      await removeResolution(resolution.id, args.current, true);
+    }
+
+    for (const queueEntry of descendants.queueEntries) {
+      rollbackTempCreatePendingEntity(queueEntry);
+    }
+    for (const resolution of descendants.resolutions) {
+      rollbackTempCreatePendingEntity(resolution);
+    }
+    rollbackTempCreatePendingEntity(args.resolution);
+
+    refreshDerivedState(args.current);
   }
 
   async function persistValidatedConflictResolution(args: {
@@ -922,11 +1406,15 @@ export function createOfflineStoreController<
       );
     }
 
-    await persistResolution(
-      buildConflictResolutionRecord(args.current, args.entry, args.conflict),
-      args.current,
-    );
-    await removeEntry(args.entry.id, args.current);
+    await persistManualResolutionChain({
+      current: args.current,
+      parentEntry: args.entry,
+      parentResolution: buildConflictResolutionRecord(
+        args.current,
+        args.entry,
+        args.conflict,
+      ),
+    });
   }
 
   function prepareMutationWithSession<TName extends keyof TOperations & string>(
@@ -1481,11 +1969,15 @@ export function createOfflineStoreController<
         };
 
         if (nextFailures >= replayRetryMaxFailures) {
-          await removeEntry(entryToUse.id, current, true);
-          await persistResolution(
-            buildRetryExhaustedResolutionRecord(current, entryToUse, lastError),
+          await persistManualResolutionChain({
             current,
-          );
+            parentEntry: entryToUse,
+            parentResolution: buildRetryExhaustedResolutionRecord(
+              current,
+              entryToUse,
+              lastError,
+            ),
+          });
           return;
         }
 
@@ -1566,9 +2058,7 @@ export function createOfflineStoreController<
   }
 
   function getOfflineResolutions(): OfflineResolutionRecord[] {
-    return [...resolutions.values()].sort((left, right) =>
-      left.id.localeCompare(right.id),
-    );
+    return buildDerivedResolutionRecords();
   }
 
   async function resolveOfflineResolution(
@@ -1588,6 +2078,12 @@ export function createOfflineStoreController<
       return;
     }
 
+    if (isPersistedResolutionBlocked(resolutionRecord)) {
+      throw new Error(
+        'Cannot resolve a blocked offline resolution before its parent temp create is cleared',
+      );
+    }
+
     if (resolutionRecord.kind === 'retry-exhausted') {
       const action = isObject(resolution) ? resolution.action : undefined;
 
@@ -1595,9 +2091,13 @@ export function createOfflineStoreController<
         throw new Error('Invalid offline resolution action');
       }
 
-      await removeResolution(resolutionId, current);
-
-      if (action === 'discard') return;
+      if (action === 'discard') {
+        await discardTempCreateResolutionChain({
+          current,
+          resolution: resolutionRecord,
+        });
+        return;
+      }
 
       const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
       const queueOrder = queueOrders[0];
@@ -1614,7 +2114,9 @@ export function createOfflineStoreController<
         queueOrder,
         tempId: resolutionRecord.tempId,
       });
-      await persistEntry(nextEntry, current);
+      await removeResolution(resolutionId, current, true);
+      await persistEntry(nextEntry, current, true);
+      refreshDerivedState(current);
       await ensureReplayScheduled();
       return;
     }
@@ -1632,14 +2134,19 @@ export function createOfflineStoreController<
       resolution,
     });
 
-    await removeResolution(resolutionId, current);
-
     const typedResult: OfflineResolveConflictResult<unknown> = result;
-    if (!typedResult) return;
+    if (!typedResult) {
+      await discardTempCreateResolutionChain({
+        current,
+        resolution: resolutionRecord,
+      });
+      return;
+    }
 
     const requeue = typedResult.requeue;
 
     if (requeue) {
+      await removeResolution(resolutionId, current, true);
       await queuePreparedMutations({
         currentSessionKey: current.sessionKey,
         mutations: [
@@ -1654,7 +2161,13 @@ export function createOfflineStoreController<
           }),
         ],
       });
+      return;
     }
+
+    await discardTempCreateResolutionChain({
+      current,
+      resolution: resolutionRecord,
+    });
   }
 
   async function evaluateOfflineFetchError(

@@ -181,6 +181,14 @@ export type GlobalOfflineEntity = {
   syncState: OfflineSyncState | 'resolution-required';
   /** Whether the entity currently requires manual resolution. */
   requiresResolution: boolean;
+  /** Resolution ids currently blocking this entity from being resolved/applied. */
+  blockedByResolutionIds: string[];
+  /** Child resolution ids currently derived from this entity's temp-create chain. */
+  childResolutionIds: string[];
+  /** Number of blocking parent resolutions currently affecting this entity. */
+  blockedResolutionCount: number;
+  /** Number of child resolutions currently derived from this entity's temp-create chain. */
+  childResolutionCount: number;
   /** Creation timestamp for lifecycle bookkeeping. */
   createdAt: number;
   /** Last mutation/update timestamp. */
@@ -195,7 +203,7 @@ export type GlobalOfflineEntity = {
  * @typeParam TConflict - Conflict payload stored for later resolution.
  * @typeParam TInput - Original mutation input associated with the conflict.
  */
-export type OfflineConflictResolutionRecord<
+type OfflineConflictResolutionRecordBase<
   TConflict = unknown,
   TInput = unknown,
 > = {
@@ -232,12 +240,36 @@ export type OfflineConflictResolutionRecord<
   tempId?: ValidPayload;
 };
 
+/** Derived dependency metadata exposed for offline manual resolutions. */
+export type OfflineResolutionDependencyMetadata = {
+  /** Parent resolution ids that must be cleared before this resolution can be retried or discarded. */
+  blockedByResolutionIds: string[];
+  /** Child manual resolutions currently derived from this resolution's temp-create dependency chain. */
+  childResolutionIds: string[];
+  /** Number of blocking parent resolutions affecting this resolution. */
+  blockedResolutionCount: number;
+  /** Number of child manual resolutions currently derived from this resolution. */
+  childResolutionCount: number;
+};
+
+/**
+ * Persisted offline conflict payload with derived dependency metadata.
+ *
+ * @typeParam TConflict - Conflict payload stored for later resolution.
+ * @typeParam TInput - Original mutation input associated with the conflict.
+ */
+export type OfflineConflictResolutionRecord<
+  TConflict = unknown,
+  TInput = unknown,
+> = OfflineConflictResolutionRecordBase<TConflict, TInput> &
+  OfflineResolutionDependencyMetadata;
+
 /**
  * Persisted resolution record created when replay retries are exhausted.
  *
  * @typeParam TInput - Original mutation input associated with the replay failure.
  */
-export type OfflineRetryExhaustedResolutionRecord<TInput = unknown> = {
+type OfflineRetryExhaustedResolutionRecordBase<TInput = unknown> = {
   /** Resolution record identifier. */
   id: string;
   /** Resolution kind. */
@@ -270,6 +302,31 @@ export type OfflineRetryExhaustedResolutionRecord<TInput = unknown> = {
   /** Optional temporary ID associated with optimistic entity flow. */
   tempId?: ValidPayload;
 };
+
+/**
+ * Persisted resolution record created when replay retries are exhausted, plus
+ * derived dependency metadata.
+ *
+ * @typeParam TInput - Original mutation input associated with the replay failure.
+ */
+export type OfflineRetryExhaustedResolutionRecord<TInput = unknown> =
+  OfflineRetryExhaustedResolutionRecordBase<TInput> &
+    OfflineResolutionDependencyMetadata;
+
+/**
+ * Persisted offline resolution payload without any derived dependency metadata.
+ *
+ * This shape is what gets serialized to storage and hydrated back into memory.
+ *
+ * @typeParam TConflict - Conflict payload stored for later resolution.
+ * @typeParam TInput - Original mutation input associated with the resolution.
+ */
+export type PersistedOfflineResolutionRecord<
+  TConflict = unknown,
+  TInput = unknown,
+> =
+  | OfflineConflictResolutionRecordBase<TConflict, TInput>
+  | OfflineRetryExhaustedResolutionRecordBase<TInput>;
 
 /**
  * Persisted offline resolution payload.

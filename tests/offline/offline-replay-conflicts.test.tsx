@@ -125,7 +125,11 @@ test('offline conflicts are detected before execute, surface through selectors, 
     status: 'success'
   `);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - createdAt: 1735689600000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
       entityKey: 'document'
       entityKind: 'document'
       id: 'offline-conflict-session:offline-conflict-doc:document'
@@ -285,7 +289,11 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
   expect(conflict).toBeDefined();
   expect(executedInputs).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
-    - createdAt: 1735689600000
+    - blockedByResolutionIds: []
+      blockedResolutionCount: 0
+      childResolutionCount: 0
+      childResolutionIds: []
+      createdAt: 1735689600000
       entityKey: 'document'
       entityKind: 'document'
       id: 'offline-conflict-requeue-session:offline-conflict-requeue-doc:document'
