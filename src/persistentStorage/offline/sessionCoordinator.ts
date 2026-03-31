@@ -835,6 +835,20 @@ export function getGlobalOfflineEntities(
   return registry.get(sessionKey)?.getEntities() ?? [];
 }
 
+export function __resetSessionOfflineCoordinatorRegistryForTests(): void {
+  if (!import.meta.env.TEST) {
+    throw new Error(
+      '[tsdf] __resetSessionOfflineCoordinatorRegistryForTests is test-only',
+    );
+  }
+
+  for (const coordinator of registry.values()) {
+    coordinator.dispose();
+  }
+  registry.clear();
+  defaultStatusBySession.clear();
+}
+
 function useSessionOfflineCoordinator(
   sessionKey: string,
 ): SessionOfflineCoordinator {

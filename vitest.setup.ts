@@ -1,6 +1,9 @@
-import { compactSnapshot } from '@ls-stack/utils/testUtils';
 import { format } from 'node:util';
+
+import { compactSnapshot } from '@ls-stack/utils/testUtils';
 import { afterEach, beforeEach, expect, vi } from 'vitest';
+
+import { __resetSessionOfflineCoordinatorRegistryForTests } from './src/persistentStorage/offline/sessionCoordinator';
 
 process.env.NODE_ENV = 'development';
 
@@ -57,6 +60,7 @@ const defaultNavigatorLocks = {
 };
 
 beforeEach(() => {
+  __resetSessionOfflineCoordinatorRegistryForTests();
   Object.defineProperty(globalThis.navigator, 'locks', {
     value: defaultNavigatorLocks,
     writable: true,
@@ -66,6 +70,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __resetSessionOfflineCoordinatorRegistryForTests();
   Object.defineProperty(globalThis.navigator, 'locks', {
     value: defaultNavigatorLocks,
     writable: true,

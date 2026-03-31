@@ -1,4 +1,5 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
+import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { isObject } from '@ls-stack/utils/typeGuards';
 import { rc_parse } from 'runcheck';
@@ -18,8 +19,8 @@ import {
   offlineResolutionRecordSchema,
   type AnyOfflineOperationDefinition,
   type GlobalOfflineEntity,
-  type OfflineMutationInput,
   type OfflineModeConfig,
+  type OfflineMutationInput,
   type OfflineOperationSchemaShape,
   type OfflineQueueEntry,
   type OfflineResolutionRecord,
@@ -60,6 +61,14 @@ type OfflineStoreAdapter = {
     tempId: ValidPayload;
     result: unknown;
     reconciliation: { finalPayload: ValidPayload; finalData?: unknown };
+  }) => void;
+  captureQueuedMutationOverlays?: (args: {
+    sessionKey: string;
+    entityRefs: OfflineEntityRef[];
+  }) => void;
+  syncEntityOverlays?: (args: {
+    sessionKey: string;
+    entities: GlobalOfflineEntity[];
   }) => void;
 };
 
@@ -480,6 +489,10 @@ export function createOfflineStoreController<
       resolutions: [...resolutions.values()],
       protectedKeys,
     });
+    storeAdapter.syncEntityOverlays?.({
+      sessionKey: sessionState.sessionKey,
+      entities,
+    });
 
     void syncEntityNamespace(sessionState, entities);
   }
@@ -628,6 +641,141 @@ export function createOfflineStoreController<
       kind: 'retry-exhausted',
       lastReplayError,
     };
+  }
+
+  function replacePayloadReferences(
+    value: unknown,
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ): unknown {
+    if (deepEqual(value, tempId)) return finalPayload;
+    if (Array.isArray(value)) {
+      return value.map((item) =>
+        replacePayloadReferences(item, tempId, finalPayload),
+      );
+    }
+    if (!isObject(value)) return value;
+
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [
+        key,
+        replacePayloadReferences(entryValue, tempId, finalPayload),
+      ]),
+    );
+  }
+
+  function resolveEntityRefsForInput(
+    operationName: string,
+    input: unknown,
+    fallbackEntityRefs: OfflineEntityRef[],
+  ): OfflineEntityRef[] {
+    const operation = offlineMode.operations[operationName];
+    if (!operation) return fallbackEntityRefs;
+
+    const rawEntityRefs =
+      typeof operation.getEntityRefs === 'function'
+        ? operation.getEntityRefs({ input })
+        : (storeAdapter.getEntityRefs?.({ operationName, input }) ?? []);
+
+    if (rawEntityRefs.length === 0) return fallbackEntityRefs;
+
+    if (storeAdapter.normalizeEntityRefs) {
+      return storeAdapter.normalizeEntityRefs(rawEntityRefs);
+    }
+
+    // WORKAROUND: Custom store adapters can return a concrete payload-key array
+    // shape that is structurally compatible with OfflineEntityRef[], but TypeScript
+    // cannot connect that erased generic to this controller-level union.
+    return __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
+  }
+
+  async function rebindQueuedEntriesAfterTempReconciliation(args: {
+    current: ActiveSessionState;
+    entryIdToSkip: string;
+    tempId: ValidPayload;
+    finalPayload: ValidPayload;
+  }): Promise<void> {
+    const changedQueueEntries: OfflineQueueEntry[] = [];
+
+    for (const entry of queueEntries.values()) {
+      if (entry.id === args.entryIdToSkip) continue;
+
+      const rewrittenInput = replacePayloadReferences(
+        entry.input,
+        args.tempId,
+        args.finalPayload,
+      );
+
+      if (deepEqual(rewrittenInput, entry.input)) continue;
+
+      const operation = offlineMode.operations[entry.operation];
+      if (!operation) continue;
+
+      const validatedInput = validateWithSchema(
+        operation.inputSchema,
+        rewrittenInput,
+      );
+      if (validatedInput === null) continue;
+
+      const rewrittenEntry = {
+        ...entry,
+        input: validatedInput,
+        entityRefs: resolveEntityRefsForInput(
+          entry.operation,
+          validatedInput,
+          entry.entityRefs,
+        ),
+      };
+
+      await persistEntry(rewrittenEntry, args.current, true);
+      changedQueueEntries.push(rewrittenEntry);
+    }
+
+    for (const resolution of resolutions.values()) {
+      const rewrittenInput = replacePayloadReferences(
+        resolution.input,
+        args.tempId,
+        args.finalPayload,
+      );
+
+      if (deepEqual(rewrittenInput, resolution.input)) {
+        continue;
+      }
+
+      const operation = offlineMode.operations[resolution.operation];
+      if (!operation) continue;
+
+      const validatedInput = validateWithSchema(
+        operation.inputSchema,
+        rewrittenInput,
+      );
+      if (validatedInput === null) continue;
+
+      const rewrittenResolution = {
+        ...resolution,
+        input: validatedInput,
+        entityRefs: resolveEntityRefsForInput(
+          resolution.operation,
+          validatedInput,
+          resolution.entityRefs,
+        ),
+      };
+
+      resolutions.set(rewrittenResolution.id, rewrittenResolution);
+      await args.current.resolutionNamespace.save(
+        rewrittenResolution.id,
+        rewrittenResolution,
+      );
+    }
+
+    for (const entry of changedQueueEntries) {
+      storeAdapter.captureQueuedMutationOverlays?.({
+        sessionKey: args.current.sessionKey,
+        entityRefs: entry.entityRefs,
+      });
+    }
+
+    refreshDerivedState(args.current);
   }
 
   async function persistEntry(
@@ -972,6 +1120,13 @@ export function createOfflineStoreController<
           appliedPendingMutations.push(mutation);
         }
       }
+
+      for (const mutation of plannedMutations) {
+        storeAdapter.captureQueuedMutationOverlays?.({
+          sessionKey: current.sessionKey,
+          entityRefs: mutation.nextEntry.entityRefs,
+        });
+      }
     } catch (error) {
       for (const mutation of appliedPendingMutations.reverse()) {
         if (
@@ -1148,6 +1303,12 @@ export function createOfflineStoreController<
             tempId: entryToUse.tempId,
             result,
             reconciliation,
+          });
+          await rebindQueuedEntriesAfterTempReconciliation({
+            current,
+            entryIdToSkip: entryToUse.id,
+            tempId: entryToUse.tempId,
+            finalPayload: reconciliation.finalPayload,
           });
         }
 

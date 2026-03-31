@@ -9,6 +9,11 @@ import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
+import {
+  createOfflineEntityLookup,
+  getIsPendingOfflineSync,
+} from '../persistentStorage/offline/entityMetadata';
+import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import {
@@ -84,7 +89,10 @@ export function useMultipleItems<
   scheduleAutomaticFetch: (fetchType: FetchType, payload: ItemPayload) => void,
   invalidationWasTriggered: Set<string>,
   globalDisableRefetchOnMount: boolean | undefined,
-  getPendingSync: (itemStateKey: string) => boolean,
+  offlineEntities: readonly GlobalOfflineEntity[],
+  offlineOverlays: Readonly<
+    Record<string, { data: ItemState | null; payload?: ItemPayload }>
+  >,
 ): readonly TSFDUseCollectionItemReturn<
   Selected,
   ItemPayload,
@@ -157,6 +165,26 @@ export function useMultipleItems<
     ? debouncedFetchQueriesWithId
     : queriesWithId;
 
+  const offlineEntitiesByKey = useMemo(
+    () => createOfflineEntityLookup(offlineEntities),
+    [offlineEntities],
+  );
+  const activeOfflineOverlays = useMemo(() => {
+    const nextOverlays: Record<
+      string,
+      { data: ItemState | null; payload?: ItemPayload }
+    > = {};
+
+    for (const [itemKey, overlay] of Object.entries(offlineOverlays)) {
+      const entity = offlineEntitiesByKey.get(itemKey);
+      if (!entity || entity.requiresResolution) continue;
+
+      nextOverlays[itemKey] = overlay;
+    }
+
+    return nextOverlays;
+  }, [offlineEntitiesByKey, offlineOverlays]);
+
   const resultSelector = useCallback(
     (state: CollectionState) => {
       return queriesWithId.map(
@@ -173,18 +201,22 @@ export function useMultipleItems<
           QueryMetadata
         > => {
           const item = state[itemKey];
+          const overlay = activeOfflineOverlays[itemKey];
+          const hasOverlay = overlay !== undefined;
+          const resolvedData = hasOverlay ? overlay.data : (item?.data ?? null);
+          const resolvedPayload = overlay?.payload ?? item?.payload ?? payload;
 
           const data = selector
-            ? selector(item?.data ?? null)
+            ? selector(resolvedData)
             : // WORKAROUND: Runtime selector presence does not narrow Selected, so the unselected path must forward the raw item state through the generic.
-              __LEGIT_CAST__<Selected, ItemState | null>(item?.data ?? null);
+              __LEGIT_CAST__<Selected, ItemState | null>(resolvedData);
           const resultQueryMetadata =
             // WORKAROUND: queryMetadata stays optional on input queries, but the public hook result preserves the caller's QueryMetadata generic.
             __LEGIT_CAST__<QueryMetadata, QueryMetadata | undefined>(
               queryMetadata,
             );
 
-          if (item === null) {
+          if (hasOverlay ? overlay.data === null : item === null) {
             return {
               itemStateKey: itemKey,
               status: 'deleted',
@@ -192,12 +224,14 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: false,
-              pendingSync: getPendingSync(itemKey),
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(itemKey),
+              ),
               queryMetadata: resultQueryMetadata,
             };
           }
 
-          if (!item) {
+          if (!item && !hasOverlay) {
             return {
               itemStateKey: itemKey,
               status: returnIdleStatus ? 'idle' : 'loading',
@@ -205,14 +239,16 @@ export function useMultipleItems<
               error: null,
               payload: omitPayload ? undefined : payload,
               isLoading: !returnIdleStatus,
-              pendingSync: getPendingSync(itemKey),
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(itemKey),
+              ),
               queryMetadata: resultQueryMetadata,
             };
           }
 
-          let status = item.status;
+          let status = item?.status ?? 'success';
 
-          if (!returnRefetchingStatus && item.status === 'refetching') {
+          if (!returnRefetchingStatus && item?.status === 'refetching') {
             status = 'success';
           }
 
@@ -220,16 +256,18 @@ export function useMultipleItems<
             itemStateKey: itemKey,
             status,
             data,
-            error: item.error,
+            error: item?.error ?? null,
             isLoading: status === 'loading',
-            pendingSync: getPendingSync(itemKey),
-            payload: omitPayload ? undefined : item.payload,
+            pendingSync: getIsPendingOfflineSync(
+              offlineEntitiesByKey.get(itemKey),
+            ),
+            payload: omitPayload ? undefined : resolvedPayload,
             queryMetadata: resultQueryMetadata,
           };
         },
       );
     },
-    [getPendingSync, queriesWithId, selector],
+    [activeOfflineOverlays, offlineEntitiesByKey, queriesWithId, selector],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -248,8 +286,15 @@ export function useMultipleItems<
 
         if (query && readFallbackItemState) {
           const fallbackItem = readFallbackItemState(query.itemKey);
+          const overlay = activeOfflineOverlays[result.itemStateKey];
+          const hasOverlay = overlay !== undefined;
+          const fallbackData = hasOverlay
+            ? overlay.data
+            : (fallbackItem?.data ?? null);
+          const fallbackPayload =
+            overlay?.payload ?? fallbackItem?.payload ?? query.payload;
 
-          if (fallbackItem === null) {
+          if (hasOverlay ? overlay.data === null : fallbackItem === null) {
             return {
               itemStateKey: result.itemStateKey,
               status: 'deleted',
@@ -260,13 +305,15 @@ export function useMultipleItems<
               error: null,
               payload: query.omitPayload ? undefined : query.payload,
               isLoading: false,
-              pendingSync: getPendingSync(result.itemStateKey),
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(result.itemStateKey),
+              ),
               queryMetadata: result.queryMetadata,
             };
           }
 
-          if (fallbackItem) {
-            let status = fallbackItem.status;
+          if (fallbackItem || hasOverlay) {
+            let status = fallbackItem?.status ?? 'success';
 
             if (!query.returnRefetchingStatus && status === 'refetching') {
               status = 'success';
@@ -276,15 +323,15 @@ export function useMultipleItems<
               itemStateKey: result.itemStateKey,
               status,
               data: selector
-                ? selector(fallbackItem.data ?? null)
+                ? selector(fallbackData)
                 : // WORKAROUND: Runtime selector presence does not narrow Selected, so fallback item data still has to flow through the caller's generic unchanged.
-                  __LEGIT_CAST__<Selected, ItemState | null>(
-                    fallbackItem.data ?? null,
-                  ),
-              error: fallbackItem.error,
-              payload: query.omitPayload ? undefined : fallbackItem.payload,
+                  __LEGIT_CAST__<Selected, ItemState | null>(fallbackData),
+              error: fallbackItem?.error ?? null,
+              payload: query.omitPayload ? undefined : fallbackPayload,
               isLoading: status === 'loading',
-              pendingSync: getPendingSync(result.itemStateKey),
+              pendingSync: getIsPendingOfflineSync(
+                offlineEntitiesByKey.get(result.itemStateKey),
+              ),
               queryMetadata: result.queryMetadata,
             };
           }
@@ -294,7 +341,8 @@ export function useMultipleItems<
       },
     );
   }, [
-    getPendingSync,
+    activeOfflineOverlays,
+    offlineEntitiesByKey,
     queriesWithId,
     readFallbackItemState,
     selector,

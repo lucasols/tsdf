@@ -19,7 +19,6 @@ import { useListItem as useListItemBase } from '../hooks/useListItem';
 import { useListItemIsDeleted as useListItemIsDeletedBase } from '../hooks/useListItemIsDeleted';
 import { useListItemIsLoading as useListItemIsLoadingBase } from '../hooks/useListItemIsLoading';
 import { setupCollectionPersistence } from '../persistentStorage/collectionStorePersistence';
-import { useGetPendingSync } from '../persistentStorage/offline/entityMetadata';
 import {
   type OfflineMutationResult,
   runHybridOfflineMutation,
@@ -361,10 +360,19 @@ export function createCollectionStore<
 >) {
   type CollectionState = TSFDCollectionState<ItemState, ItemPayload>;
   type CollectionItem = TSFDCollectionItem<ItemState, ItemPayload>;
+  type CollectionOfflineOverlay = {
+    data: ItemState | null;
+    payload?: ItemPayload;
+  };
 
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   const lastCollectionSyncVersions = new Map<string, BrowserTabsSyncVersion>();
+  const offlineOverlayStore = new Store<
+    Record<string, CollectionOfflineOverlay>
+  >({ debugName: `${id}:collection-offline-overlays`, state: () => ({}) });
+  offlineOverlayStore.initializeStore();
+  let offlineOverlaySessionKey: string | null = null;
   const itemCacheRuntime = createLruCacheRuntime();
 
   let initialData:
@@ -431,6 +439,28 @@ export function createCollectionStore<
     return getCompositeKey(
       filterCollectionItemObjKey ? filterCollectionItemObjKey(params) : params,
     );
+  }
+
+  function clearOfflineOverlays(nextSessionKey: string | null = null): void {
+    offlineOverlaySessionKey = nextSessionKey;
+    offlineOverlayStore.setState({});
+  }
+
+  function ensureOfflineOverlaySession(sessionKey: string): void {
+    if (offlineOverlaySessionKey === sessionKey) return;
+
+    clearOfflineOverlays(sessionKey);
+  }
+
+  function captureOfflineOverlay(itemKey: string): void {
+    const item = store.state[itemKey];
+
+    offlineOverlayStore.produceState((draft) => {
+      draft[itemKey] = {
+        data: item ? klona(item.data) : null,
+        payload: item ? klona(item.payload) : undefined,
+      };
+    });
   }
 
   const offlineController = resolvedPersistentStorageConfig?.offlineMode
@@ -512,6 +542,35 @@ export function createCollectionStore<
               ),
               finalData,
             );
+          },
+          captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
+            ensureOfflineOverlaySession(sessionKey);
+
+            for (const ref of entityRefs) {
+              if (ref.entityKind !== 'item') continue;
+              captureOfflineOverlay(ref.entityKey);
+            }
+          },
+          syncEntityOverlays: ({ entities, sessionKey }) => {
+            ensureOfflineOverlaySession(sessionKey);
+
+            const activeItemKeys = new Set(
+              entities
+                .filter((entity) => {
+                  return (
+                    entity.entityKind === 'item' && !entity.requiresResolution
+                  );
+                })
+                .map((entity) => entity.entityKey),
+            );
+
+            offlineOverlayStore.produceState((draft) => {
+              for (const itemKey of Object.keys(draft)) {
+                if (!activeItemKeys.has(itemKey)) {
+                  delete draft[itemKey];
+                }
+              }
+            });
           },
         },
       })
@@ -971,6 +1030,7 @@ export function createCollectionStore<
       onMessage: handleRemoteMessage,
       onSessionChange() {
         lastCollectionSyncVersions.clear();
+        clearOfflineOverlays();
       },
       transportFactory: testOptions?.browserTabsTransportFactory,
       getWindowIsFocused,
@@ -1302,11 +1362,12 @@ export function createCollectionStore<
     items: CollectionUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ) {
-    const getPendingSync = useGetPendingSync({
+    const offlineEntities = useOfflineStoreEntities({
       sessionKey: getSessionKey(),
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
+    const offlineOverlays = offlineOverlayStore.useSelectorRC((state) => state);
 
     return useMultipleItemsBase<
       ItemState,
@@ -1333,7 +1394,8 @@ export function createCollectionStore<
       scheduleAutomaticFetch,
       invalidationWasTriggered,
       globalDisableRefetchOnMount,
-      getPendingSync,
+      offlineEntities,
+      offlineOverlays,
     );
   }
 
@@ -1685,6 +1747,7 @@ export function createCollectionStore<
 
     invalidationWasTriggered.clear();
     lastCollectionSyncVersions.clear();
+    clearOfflineOverlays();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();
     browserTabsPriority.reset();

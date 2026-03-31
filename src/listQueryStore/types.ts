@@ -38,6 +38,15 @@ export type TSFDListQueryState<
   itemFieldInvalidationFields: Record<string, string[]>;
 };
 
+export type ListQueryOfflineOverlay<
+  ItemState extends ValidStoreState,
+  ItemPayload extends ValidPayload,
+> = {
+  item: ItemState | null;
+  itemPayload?: ItemPayload;
+  queryMemberships: Record<string, number>;
+};
+
 export type FieldsInput = string[] | '*';
 
 export type TSFDUseListQueryReturn<
