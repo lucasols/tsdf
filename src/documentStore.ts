@@ -10,7 +10,8 @@ import {
 } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
-import { useCallback, useContext, useEffect } from 'react';
+import { klona } from 'klona/json';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 
@@ -19,7 +20,10 @@ import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useLis
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
-import { getIsPendingOfflineSync } from './persistentStorage/offline/entityMetadata';
+import {
+  createOfflineEntityLookup,
+  getIsPendingOfflineSync,
+} from './persistentStorage/offline/entityMetadata';
 import {
   runOfflineAwareFetch,
   offlineConnectivityError,
@@ -102,6 +106,11 @@ export type DocumentStoreState<State extends ValidStoreState> = {
 };
 
 type DocumentStoreEvents = { invalidateData: FetchType };
+
+type DocumentOfflineOverlay<State extends ValidStoreState> = {
+  hasValue: boolean;
+  data: State | null;
+};
 
 export type OnDocumentInvalidate = (priority: FetchType) => void;
 
@@ -261,6 +270,12 @@ export function createDocumentStore<
   let remoteApplyDepth = 0;
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   let lastDocumentSyncVersion: BrowserTabsSyncVersion | undefined;
+  const offlineOverlayStore = new Store<DocumentOfflineOverlay<State>>({
+    debugName: `${id}:document-offline-overlay`,
+    state: () => ({ hasValue: false, data: null }),
+  });
+  offlineOverlayStore.initializeStore();
+  let offlineOverlaySessionKey: string | null = null;
 
   let initialData: State | null = null;
   let initialRefetchOnMount: FetchType | false = false;
@@ -348,6 +363,34 @@ export function createDocumentStore<
             updateState((draft) =>
               Object.assign(draft, reconciliation.finalData),
             );
+          },
+          captureQueuedMutationOverlays: ({ sessionKey }) => {
+            if (offlineOverlaySessionKey !== sessionKey) {
+              offlineOverlaySessionKey = sessionKey;
+              offlineOverlayStore.setState({ hasValue: false, data: null });
+            }
+
+            offlineOverlayStore.setState({
+              hasValue: true,
+              data: store.state.data === null ? null : klona(store.state.data),
+            });
+          },
+          syncEntityOverlays: ({ entities, sessionKey }) => {
+            if (offlineOverlaySessionKey !== sessionKey) {
+              offlineOverlaySessionKey = sessionKey;
+              offlineOverlayStore.setState({ hasValue: false, data: null });
+            }
+
+            if (
+              !entities.some((entity) => {
+                return (
+                  entity.entityKey === DOC_TARGET_KEY &&
+                  entity.requiresResolution === false
+                );
+              })
+            ) {
+              offlineOverlayStore.setState({ hasValue: false, data: null });
+            }
           },
         },
       })
@@ -520,6 +563,8 @@ export function createDocumentStore<
         onMessage: handleRemoteMessage,
         onSessionChange() {
           lastDocumentSyncVersion = undefined;
+          offlineOverlaySessionKey = null;
+          offlineOverlayStore.setState({ hasValue: false, data: null });
         },
         transportFactory: testOptions?.browserTabsTransportFactory,
         getWindowIsFocused,
@@ -782,6 +827,8 @@ export function createDocumentStore<
   function reset(): void {
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
+    offlineOverlaySessionKey = null;
+    offlineOverlayStore.setState({ hasValue: false, data: null });
     browserTabsPriority.reset();
 
     persistence?.dispose();
@@ -932,17 +979,29 @@ export function createDocumentStore<
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
+    const offlineEntitiesByKey = useMemo(
+      () => createOfflineEntityLookup(offlineEntities),
+      [offlineEntities],
+    );
+    const offlineOverlay = offlineOverlayStore.useSelectorRC((state) => state);
     const isOffScreenFromContext = useContext(IsOffScreenContext);
     const disabled = disabledProp ?? isOffScreenProp ?? isOffScreenFromContext;
     const returnIdleStatus = returnIdleStatusProp ?? !!disabled;
     const storeStateSelector = useCallback(
       (state: DocumentStoreState<State>): TSDFUseDocumentReturn<Selected> => {
         const { error } = state;
+        const activeOfflineEntity = offlineEntitiesByKey.get(DOC_TARGET_KEY);
+        const resolvedData =
+          activeOfflineEntity &&
+          !activeOfflineEntity.requiresResolution &&
+          offlineOverlay.hasValue
+            ? offlineOverlay.data
+            : state.data;
 
         const data = selector
-          ? selector(state.data)
+          ? selector(resolvedData)
           : // WORKAROUND: Runtime selector presence does not narrow Selected, so the default branch must forward the raw document state through the generic.
-            __LEGIT_CAST__<Selected, State | null>(state.data);
+            __LEGIT_CAST__<Selected, State | null>(resolvedData);
         let status = state.status;
 
         if (!returnIdleStatus && status === 'idle') {
@@ -958,14 +1017,16 @@ export function createDocumentStore<
           error,
           status,
           isLoading: status === 'loading',
-          pendingSync: getIsPendingOfflineSync(
-            offlineEntities.find(
-              (entity) => entity.entityKey === DOC_TARGET_KEY,
-            ),
-          ),
+          pendingSync: getIsPendingOfflineSync(activeOfflineEntity),
         };
       },
-      [offlineEntities, selector, returnIdleStatus, returnRefetchingStatus],
+      [
+        offlineEntitiesByKey,
+        offlineOverlay,
+        selector,
+        returnIdleStatus,
+        returnRefetchingStatus,
+      ],
     );
 
     const storeState = store.useSelectorRC(storeStateSelector, {

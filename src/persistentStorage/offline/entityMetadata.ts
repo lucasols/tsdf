@@ -70,6 +70,16 @@ export function getIsPendingOfflineSync(
   return !!entity && !entity.requiresResolution;
 }
 
+export function getActiveOfflineOverlay<Overlay>(
+  entitiesByKey: ReadonlyMap<string, GlobalOfflineEntity>,
+  overlays: Readonly<Record<string, Overlay>>,
+  entityKey: string,
+): Overlay | undefined {
+  return getIsPendingOfflineSync(entitiesByKey.get(entityKey))
+    ? overlays[entityKey]
+    : undefined;
+}
+
 export type OfflineEntitiesMetadata = {
   pendingSync: boolean;
   pendingOfflineMutations: number;

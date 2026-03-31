@@ -6,6 +6,7 @@ import { notNullish } from '@ls-stack/utils/assertions';
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
+import { klona } from 'klona/json';
 import { Store } from 't-state';
 
 import { createLruCacheRuntime } from '../cacheLimits/lruCacheRuntime';
@@ -14,10 +15,6 @@ import {
   createIdleThrottledScheduler,
 } from '../cacheLimits/scheduleIdleThrottled';
 import { setupListQueryPersistence } from '../persistentStorage/listQueryStorePersistence';
-import {
-  useGetPendingSync,
-  useGetPendingSyncForItemKeys,
-} from '../persistentStorage/offline/entityMetadata';
 import { useOfflineStoreEntities } from '../persistentStorage/offline/sessionCoordinator';
 import {
   createOfflineStoreController,
@@ -72,6 +69,7 @@ import {
   type FetchListFnReturn,
   type FieldsInput,
   type FieldsOption,
+  type ListQueryOfflineOverlay,
   type ListQueryStoreInitialData,
   type ListQueryUseMultipleItemsQuery,
   type ListQueryUseMultipleListQueriesQuery,
@@ -414,6 +412,11 @@ export function createListQueryStore<
   let currentBroadcastConsistency: SnapshotConsistency = 'confirmed';
   const lastQuerySyncVersions = new Map<string, BrowserTabsSyncVersion>();
   const lastItemSyncVersions = new Map<string, BrowserTabsSyncVersion>();
+  const offlineOverlayStore = new Store<
+    Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
+  >({ debugName: `${id}:list-query-offline-overlays`, state: () => ({}) });
+  offlineOverlayStore.initializeStore();
+  let offlineOverlaySessionKey: string | null = null;
   const itemCacheRuntime = createLruCacheRuntime();
   const queryCacheRuntime = createLruCacheRuntime();
 
@@ -1258,6 +1261,35 @@ export function createListQueryStore<
             publishQuerySnapshot(queryKey);
           }
         },
+        captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
+          ensureOfflineOverlaySession(sessionKey);
+          captureOfflineOverlays(
+            entityRefs.flatMap((ref) => {
+              return ref.entityKind === 'item' ? [ref.entityKey] : [];
+            }),
+          );
+        },
+        syncEntityOverlays: ({ entities, sessionKey }) => {
+          ensureOfflineOverlaySession(sessionKey);
+
+          const activeItemKeys = new Set(
+            entities
+              .filter((entity) => {
+                return (
+                  entity.entityKind === 'item' && !entity.requiresResolution
+                );
+              })
+              .map((entity) => entity.entityKey),
+          );
+
+          offlineOverlayStore.produceState((draft) => {
+            for (const itemKey of Object.keys(draft)) {
+              if (!activeItemKeys.has(itemKey)) {
+                delete draft[itemKey];
+              }
+            }
+          });
+        },
       },
     });
   }
@@ -1326,6 +1358,54 @@ export function createListQueryStore<
   function cleanupQueryStateMetadata(queryKey: string): void {
     queryInvalidationWasTriggered.delete(queryKey);
     queryCacheRuntime.clear(queryKey);
+  }
+
+  function clearOfflineOverlays(nextSessionKey: string | null = null): void {
+    offlineOverlaySessionKey = nextSessionKey;
+    offlineOverlayStore.setState({});
+  }
+
+  function ensureOfflineOverlaySession(sessionKey: string): void {
+    if (offlineOverlaySessionKey === sessionKey) return;
+
+    clearOfflineOverlays(sessionKey);
+  }
+
+  function captureOfflineOverlays(itemKeys: readonly string[]): void {
+    const targetItemKeys = [...new Set(itemKeys)];
+    if (targetItemKeys.length === 0) return;
+
+    const targetItemKeySet = new Set(targetItemKeys);
+    const queryMembershipsByItemKey = new Map<string, Record<string, number>>();
+
+    for (const itemKey of targetItemKeys) {
+      queryMembershipsByItemKey.set(itemKey, {});
+    }
+
+    for (const [queryKey, query] of Object.entries(store.state.queries)) {
+      for (const [index, itemKey] of query.items.entries()) {
+        if (!targetItemKeySet.has(itemKey)) continue;
+
+        const queryMemberships = queryMembershipsByItemKey.get(itemKey);
+        if (!queryMemberships) continue;
+
+        queryMemberships[queryKey] = index;
+      }
+    }
+
+    offlineOverlayStore.produceState((draft) => {
+      for (const itemKey of targetItemKeys) {
+        const item = store.state.items[itemKey];
+        const itemPayload = store.state.itemQueries[itemKey]?.payload;
+        if (item == null || itemPayload === undefined) continue;
+
+        draft[itemKey] = {
+          item: klona(item),
+          itemPayload: klona(itemPayload),
+          queryMemberships: queryMembershipsByItemKey.get(itemKey) ?? {},
+        };
+      }
+    });
   }
 
   function isQueryProtectedFromEviction(
@@ -1634,6 +1714,7 @@ export function createListQueryStore<
       onSessionChange() {
         lastQuerySyncVersions.clear();
         lastItemSyncVersions.clear();
+        clearOfflineOverlays();
       },
       transportFactory: testOptions?.browserTabsTransportFactory,
       getWindowIsFocused,
@@ -1662,10 +1743,13 @@ export function createListQueryStore<
       QueryPayload,
       QueryMetadata
     >[] {
-      const getPendingSyncForItemKeys = useGetPendingSyncForItemKeys({
+      const offlineEntities = useOfflineStoreEntities({
         sessionKey: getSessionKey(),
         inactiveScope: id,
         storeName: resolvedPersistentStorageConfig ? id : undefined,
+      });
+      const offlineOverlays = offlineOverlayStore.useSelectorRC((state) => {
+        return state;
       });
 
       return useMultipleListQueriesHook<
@@ -1698,7 +1782,8 @@ export function createListQueryStore<
         itemPendingInvalidationFields,
         globalDisableRefetchOnMount,
         partialResources,
-        getPendingSyncForItemKeys,
+        offlineEntities,
+        offlineOverlays,
       );
     };
 
@@ -1736,10 +1821,13 @@ export function createListQueryStore<
     items: ListQueryUseMultipleItemsQuery<ItemPayload, QueryMetadata>[],
     options: UseMultipleItemsOptions<ItemState, Selected> = {},
   ): readonly TSFDUseListItemReturn<Selected, ItemPayload, QueryMetadata>[] {
-    const getPendingSync = useGetPendingSync({
+    const offlineEntities = useOfflineStoreEntities({
       sessionKey: getSessionKey(),
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
+    });
+    const offlineOverlays = offlineOverlayStore.useSelectorRC((state) => {
+      return state;
     });
 
     return useMultipleItemsHook<
@@ -1770,7 +1858,8 @@ export function createListQueryStore<
       itemPendingInvalidationFields,
       globalDisableRefetchOnMount,
       fetchItemFn,
-      getPendingSync,
+      offlineEntities,
+      offlineOverlays,
       partialResources,
     );
   };
@@ -1897,6 +1986,7 @@ export function createListQueryStore<
     resetInvalidationTracking();
     lastQuerySyncVersions.clear();
     lastItemSyncVersions.clear();
+    clearOfflineOverlays();
     queryCacheRuntime.clearAll();
     itemCacheRuntime.clearAll();
     cacheLimitEnforcementScheduler.cancel();

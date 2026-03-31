@@ -10,6 +10,13 @@ import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
+import {
+  createOfflineEntityLookup,
+  getActiveOfflineOverlay,
+  getIsPendingOfflineSync,
+  getOfflineEntitiesMetadata,
+} from '../persistentStorage/offline/entityMetadata';
+import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
 import { FetchType, ScheduleFetchResults } from '../requestScheduler';
 import { shouldScheduleAutomaticFetch } from '../utils/automaticFetchPolicy';
 import {
@@ -26,6 +33,7 @@ import { useIsomorphicLayoutEffect } from '../utils/useIsomorphicLayoutEffect';
 import type { ListQueryStoreEvents } from './listQueryStore';
 import {
   type FieldsInput,
+  type ListQueryOfflineOverlay,
   type ListQueryUseMultipleListQueriesQuery,
   type PartialResourcesConfig,
   type TSDFItemQuery,
@@ -122,7 +130,10 @@ export function useMultipleListQueries<
   itemPendingInvalidationFields: Map<string, string[]>,
   globalDisableRefetchOnMount: boolean | undefined,
   partialResources: PartialResourcesConfig<ItemState> | undefined,
-  getPendingSyncForItemKeys: (itemKeys: string[]) => boolean,
+  offlineEntities: readonly GlobalOfflineEntity[],
+  offlineOverlays: Readonly<
+    Record<string, ListQueryOfflineOverlay<ItemState, ItemPayload>>
+  >,
 ): readonly TSFDUseListQueryReturn<
   SelectedItem,
   QueryPayload,
@@ -204,18 +215,78 @@ export function useMultipleListQueries<
     ? debouncedFetchQueriesWithId
     : queriesWithId;
 
-  const getQueryItems = useCallback(
-    (
-      state: State,
-      query: TSFDListQuery<QueryPayload>,
-      fields: FieldsInput | undefined,
-    ): SelectedItem[] => {
-      return filterAndMap(query.items, (itemKey) => {
-        let item = state.items[itemKey];
-        const itemPayload = state.itemQueries[itemKey]?.payload;
-        if (!item || !itemPayload) return false;
+  const offlineEntitiesByKey = useMemo(
+    () => createOfflineEntityLookup(offlineEntities),
+    [offlineEntities],
+  );
+  const offlineOverlayItemsByQueryKey = useMemo(() => {
+    const overlaysByQueryKey = new Map<
+      string,
+      { itemKey: string; index: number }[]
+    >();
 
-        // Apply field selection for partial resources
+    for (const [itemKey, overlay] of Object.entries(offlineOverlays)) {
+      if (!getIsPendingOfflineSync(offlineEntitiesByKey.get(itemKey))) continue;
+
+      for (const [queryKey, index] of Object.entries(
+        overlay.queryMemberships,
+      )) {
+        const queryItems = overlaysByQueryKey.get(queryKey);
+        const nextItem = { itemKey, index };
+
+        if (queryItems) {
+          queryItems.push(nextItem);
+        } else {
+          overlaysByQueryKey.set(queryKey, [nextItem]);
+        }
+      }
+    }
+
+    for (const queryItems of overlaysByQueryKey.values()) {
+      queryItems.sort((left, right) => {
+        if (left.index !== right.index) {
+          return left.index - right.index;
+        }
+
+        return left.itemKey.localeCompare(right.itemKey);
+      });
+    }
+
+    return overlaysByQueryKey;
+  }, [offlineEntitiesByKey, offlineOverlays]);
+
+  const selectVisibleItems = useCallback(
+    (
+      itemKeys: readonly string[],
+      fields: FieldsInput | undefined,
+      getItemState: (
+        itemKey: string,
+      ) =>
+        | {
+            item: ItemState | null | undefined;
+            itemPayload: ItemPayload | undefined;
+          }
+        | undefined,
+    ): SelectedItem[] => {
+      return filterAndMap(itemKeys, (itemKey) => {
+        const overlay = getActiveOfflineOverlay(
+          offlineEntitiesByKey,
+          offlineOverlays,
+          itemKey,
+        );
+        let item = overlay?.item;
+        let itemPayload = overlay?.itemPayload;
+
+        if (item === undefined || itemPayload === undefined) {
+          const currentItemState = getItemState(itemKey);
+          item = currentItemState?.item ?? undefined;
+          itemPayload = currentItemState?.itemPayload;
+        }
+
+        if (!item || itemPayload === undefined) {
+          return false;
+        }
+
         if (partialResources && Array.isArray(fields) && fields.length > 0) {
           item = partialResources.selectFields(fields, item);
         }
@@ -223,13 +294,14 @@ export function useMultipleListQueries<
         if (itemSelector) {
           return itemSelector(item, itemPayload, itemKey);
         }
-        return (
-          // WORKAROUND: Runtime itemSelector presence does not narrow SelectedItem, so the default branch must forward the raw item through the generic.
-          __LEGIT_CAST__<SelectedItem, ItemState>(item)
-        );
+
+        // WORKAROUND: Runtime itemSelector presence does not narrow
+        // SelectedItem, so the default branch must forward ItemState through
+        // the caller's generic.
+        return __LEGIT_CAST__<SelectedItem, ItemState>(item);
       });
     },
-    [itemSelector, partialResources],
+    [itemSelector, offlineEntitiesByKey, offlineOverlays, partialResources],
   );
 
   const getUnresolvedPendingInvalidationFields = useCallback(
@@ -278,6 +350,31 @@ export function useMultipleListQueries<
       return highestPriority;
     },
     [getUnresolvedPendingInvalidationFields, itemFieldInvalidationPriorities],
+  );
+
+  const getVisibleQueryItemKeys = useCallback(
+    (queryKey: string, itemKeys: readonly string[]): readonly string[] => {
+      const missingOverlayItems = offlineOverlayItemsByQueryKey.get(queryKey);
+      if (!missingOverlayItems || missingOverlayItems.length === 0) {
+        return itemKeys;
+      }
+
+      const visibleItemKeys = [...itemKeys];
+      const existingItemKeys = new Set(visibleItemKeys);
+      for (const { itemKey, index } of missingOverlayItems) {
+        if (existingItemKeys.has(itemKey)) continue;
+
+        visibleItemKeys.splice(
+          Math.min(index, visibleItemKeys.length),
+          0,
+          itemKey,
+        );
+        existingItemKeys.add(itemKey);
+      }
+
+      return visibleItemKeys;
+    },
+    [offlineOverlayItemsByQueryKey],
   );
 
   const resultSelector = useCallback(
@@ -334,6 +431,10 @@ export function useMultipleListQueries<
           }
 
           let status = query.status;
+          const visibleItemKeys = getVisibleQueryItemKeys(
+            queryKey,
+            query.items,
+          );
           const hasCachedItemsInState = query.items.some((itemKey) => {
             return state.items[itemKey] != null;
           });
@@ -434,7 +535,10 @@ export function useMultipleListQueries<
             status,
             items: shouldHideItemsWhileLoading
               ? []
-              : getQueryItems(state, query, fields),
+              : selectVisibleItems(visibleItemKeys, fields, (itemKey) => ({
+                  item: state.items[itemKey],
+                  itemPayload: state.itemQueries[itemKey]?.payload,
+                })),
             error: query.error,
             hasMore: query.hasMore,
             ...(loadingFields ? { loadingFields } : {}),
@@ -442,13 +546,22 @@ export function useMultipleListQueries<
             payload: omitPayload ? undefined : query.payload,
             fields,
             isLoadingMore: status === 'loadingMore',
-            pendingSync: getPendingSyncForItemKeys(query.items),
+            pendingSync: getOfflineEntitiesMetadata(
+              offlineEntitiesByKey,
+              visibleItemKeys,
+            ).pendingSync,
             queryMetadata: resultQueryMetadata,
           };
         },
       );
     },
-    [getPendingSyncForItemKeys, getQueryItems, partialResources, queriesWithId],
+    [
+      getVisibleQueryItemKeys,
+      offlineEntitiesByKey,
+      partialResources,
+      queriesWithId,
+      selectVisibleItems,
+    ],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -469,10 +582,14 @@ export function useMultipleListQueries<
           const fallbackQuery = readFallbackQueryState(queryConfig.key);
 
           if (fallbackQuery && readFallbackItemState) {
+            const visibleItemKeys = getVisibleQueryItemKeys(
+              result.queryKey,
+              fallbackQuery.items,
+            );
             const requestedFields = Array.isArray(queryConfig.fields)
               ? queryConfig.fields
               : undefined;
-            const fallbackItemStates = fallbackQuery.items.map((itemKey) => ({
+            const fallbackItemStates = visibleItemKeys.map((itemKey) => ({
               itemKey,
               fallbackItemState: readFallbackItemState(itemKey),
             }));
@@ -491,34 +608,22 @@ export function useMultipleListQueries<
 
             if (!canUseFallbackItems) return result;
 
-            const fallbackItems = filterAndMap(
-              fallbackItemStates,
-              ({ itemKey, fallbackItemState }): SelectedItem | false => {
-                const item = fallbackItemState?.item;
-                const itemPayload = fallbackItemState?.itemQuery?.payload;
+            const fallbackItemStatesByKey = new Map(
+              fallbackItemStates.map(({ itemKey, fallbackItemState }) => [
+                itemKey,
+                fallbackItemState,
+              ]),
+            );
+            const fallbackItems = selectVisibleItems(
+              visibleItemKeys,
+              queryConfig.fields,
+              (itemKey) => {
+                const fallbackItemState = fallbackItemStatesByKey.get(itemKey);
 
-                if (item == null || itemPayload === undefined) {
-                  return false;
-                }
-
-                let selectedItem = item;
-                if (
-                  partialResources &&
-                  Array.isArray(queryConfig.fields) &&
-                  queryConfig.fields.length > 0
-                ) {
-                  selectedItem = partialResources.selectFields(
-                    queryConfig.fields,
-                    selectedItem,
-                  );
-                }
-
-                if (itemSelector) {
-                  return itemSelector(selectedItem, itemPayload, itemKey);
-                }
-
-                // WORKAROUND: Runtime itemSelector presence does not narrow SelectedItem, so the default branch must forward the raw item through the caller's generic.
-                return __LEGIT_CAST__<SelectedItem, ItemState>(selectedItem);
+                return {
+                  item: fallbackItemState?.item,
+                  itemPayload: fallbackItemState?.itemQuery?.payload,
+                };
               },
             );
 
@@ -534,7 +639,10 @@ export function useMultipleListQueries<
               fields: queryConfig.fields,
               isLoading: false,
               isLoadingMore: false,
-              pendingSync: getPendingSyncForItemKeys(fallbackQuery.items),
+              pendingSync: getOfflineEntitiesMetadata(
+                offlineEntitiesByKey,
+                visibleItemKeys,
+              ).pendingSync,
               queryMetadata: result.queryMetadata,
             };
           }
@@ -549,8 +657,9 @@ export function useMultipleListQueries<
     readFallbackQueryState,
     readFallbackItemState,
     partialResources,
-    itemSelector,
-    getPendingSyncForItemKeys,
+    getVisibleQueryItemKeys,
+    offlineEntitiesByKey,
+    selectVisibleItems,
   ]);
   const autoFetchSignals = store.useSelectorRC(
     useCallback(
