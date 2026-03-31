@@ -249,7 +249,6 @@ export function useMultipleListQueries<
       return filterAndMap(itemKeys, (itemKey) => {
         const overlay = activeOfflineOverlays[itemKey];
         if (overlay?.item === null) return false;
-
         let item = overlay?.item;
         let itemPayload = overlay?.itemPayload;
 

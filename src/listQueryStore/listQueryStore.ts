@@ -1263,11 +1263,11 @@ export function createListQueryStore<
         },
         captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
           ensureOfflineOverlaySession(sessionKey);
-
-          for (const ref of entityRefs) {
-            if (ref.entityKind !== 'item') continue;
-            captureOfflineOverlay(ref.entityKey);
-          }
+          captureOfflineOverlays(
+            entityRefs.flatMap((ref) => {
+              return ref.entityKind === 'item' ? [ref.entityKey] : [];
+            }),
+          );
         },
         syncEntityOverlays: ({ entities, sessionKey }) => {
           ensureOfflineOverlaySession(sessionKey);
@@ -1371,24 +1371,40 @@ export function createListQueryStore<
     clearOfflineOverlays(sessionKey);
   }
 
-  function captureOfflineOverlay(itemKey: string): void {
-    const item = store.state.items[itemKey];
-    const itemPayload = store.state.itemQueries[itemKey]?.payload;
+  function captureOfflineOverlays(itemKeys: readonly string[]): void {
+    const targetItemKeys = [...new Set(itemKeys)];
+    if (targetItemKeys.length === 0) return;
 
-    const queryMemberships: Record<string, number> = {};
+    const targetItemKeySet = new Set(targetItemKeys);
+    const queryMembershipsByItemKey = new Map<string, Record<string, number>>();
+
+    for (const itemKey of targetItemKeys) {
+      queryMembershipsByItemKey.set(itemKey, {});
+    }
+
     for (const [queryKey, query] of Object.entries(store.state.queries)) {
-      const index = query.items.indexOf(itemKey);
-      if (index === -1) continue;
+      for (const [index, itemKey] of query.items.entries()) {
+        if (!targetItemKeySet.has(itemKey)) continue;
 
-      queryMemberships[queryKey] = index;
+        const queryMemberships = queryMembershipsByItemKey.get(itemKey);
+        if (!queryMemberships) continue;
+
+        queryMemberships[queryKey] = index;
+      }
     }
 
     offlineOverlayStore.produceState((draft) => {
-      draft[itemKey] = {
-        item: item == null ? null : klona(item),
-        itemPayload: itemPayload === undefined ? undefined : klona(itemPayload),
-        queryMemberships,
-      };
+      for (const itemKey of targetItemKeys) {
+        const item = store.state.items[itemKey];
+        const itemPayload = store.state.itemQueries[itemKey]?.payload;
+
+        draft[itemKey] = {
+          item: item == null ? null : klona(item),
+          itemPayload:
+            itemPayload === undefined ? undefined : klona(itemPayload),
+          queryMemberships: queryMembershipsByItemKey.get(itemKey) ?? {},
+        };
+      }
     });
   }
 

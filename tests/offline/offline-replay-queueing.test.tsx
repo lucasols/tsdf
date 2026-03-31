@@ -1,7 +1,8 @@
 import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
+import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { rc_string } from 'runcheck';
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
@@ -13,13 +14,16 @@ import {
   getLocalStorageKeys,
   getOfflineQueueEntries,
   getOfflineQueueEntryData,
+  type UpdateValueConflictOperations,
   type UpdateValueOperations,
 } from './offlineReplayTestShared';
 import {
+  classifyMutationOutage,
   collectionCreateInputSchema,
   collectionSchema,
   docMutationInputSchema,
   docSchema,
+  quickRecoveryProbe,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -955,4 +959,254 @@ test('session switches do not leave replayed queue entries in the old namespace'
       key.startsWith('tsdf.replay-session-a.replay-session-switch-doc.oq.'),
     ),
   ).toMatchInlineSnapshot(`[]`);
+});
+
+describe('basic replay lifecycle', () => {
+  test('document offline mutations are queued durably and replay when the browser comes back online', async () => {
+    network.setOffline();
+
+    const sessionKey = 'offline-doc-session';
+    const storeName = 'offline-doc-store';
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute: ({ input }) => {
+                env.apiStore.updateState((draft) => {
+                  draft.value = input.value;
+                });
+                return input;
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const hook = renderHook(() => {
+      const doc = env.apiStore.useDocument();
+      env.trackUIChanges(
+        `value:${doc.data?.value ?? 'null'} pending:${doc.pendingSync ? 'yes' : 'no'}`,
+      );
+      return doc;
+    });
+
+    await Promise.resolve();
+
+    // Queue an optimistic document mutation while the browser is offline.
+    let mutationResult:
+      | Awaited<ReturnType<typeof env.apiStore.performMutation>>
+      | undefined;
+    await act(async () => {
+      mutationResult = await env.apiStore.performMutation({
+        optimisticUpdate: () => {
+          env.apiStore.updateState((draft) => {
+            draft.value = 2;
+          });
+        },
+        mutation: () => Promise.resolve(2),
+        offline: { operation: 'updateValue', input: { value: 2 } },
+      });
+    });
+
+    expect(mutationResult?.ok).toBe(true);
+    expect(env.store.state.data).toMatchInlineSnapshot(`
+      value: 2
+    `);
+    expect(env.apiStore.getOfflineEntities()).toMatchObject([
+      {
+        entityKey: 'document',
+        entityKind: 'document',
+        requiresResolution: false,
+        pendingMutations: 1,
+        sessionKey: 'offline-doc-session',
+        storeName: 'offline-doc-store',
+        storeType: 'document',
+      },
+    ]);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+
+    // The optimistic value should stay visible while replay is still pending.
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: { value: 2 }
+      error: null
+      isLoading: '❌'
+      pendingSync: '✅'
+      status: 'success'
+    `);
+
+    // Once connectivity returns, replay should clear the queue and settle back onto the last confirmed server data.
+    act(() => {
+      network.goOnline();
+    });
+    await advanceTime(250);
+    await flushAllTimers();
+
+    expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toMatchInlineSnapshot(
+      `[]`,
+    );
+    expect(hook.result.current).toMatchInlineSnapshot(`
+      data: { value: 1 }
+      error: null
+      isLoading: '❌'
+      pendingSync: '❌'
+      status: 'success'
+    `);
+    expect(env.timelineString).toMatchInlineSnapshot(`
+      "
+      time  | ui                    |
+      0     | "value:1 pending:no"  | ui-initialized
+      .     | "value:2 pending:no"  | ui-changed
+      .     | "value:2 pending:yes" | ui-changed
+      .     | "value:2 pending:no"  | ui-changed
+      10ms  | "value:2 pending:no"  | 🔴 >fetch-started
+      810ms | "value:2 pending:no"  | 🔴 <fetch-finished (value: 1)
+      .     | "value:1 pending:no"  | ui-changed
+      "
+    `);
+    hook.unmount();
+  });
+});
+
+describe('hybrid fallback integration', () => {
+  test('accumulation still merges entries when the queue starts from a fallback', async () => {
+    const sessionKey = 'hybrid-accumulation-session';
+    const storeName = 'hybrid-accumulation-store';
+    const directMutation = vi.fn(() =>
+      Promise.reject(new Error('offline-fallback')),
+    );
+    const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+      id: storeName,
+      getSessionKey: () => sessionKey,
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          outage: {
+            enabled: true,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            recoveryCheck: () => false,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              accumulation: {
+                mergeInput: ({ incomingInput }) => incomingInput,
+              },
+              execute: ({ input }) => input,
+            },
+          },
+        },
+      },
+    });
+
+    // The first mutation becomes a fallback-queued entry. Once the session is
+    // in outage mode, the next mutation should merge into that persisted entry.
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 2;
+        });
+      },
+      mutation: directMutation,
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+    await env.apiStore.performMutation({
+      optimisticUpdate: () => {
+        env.apiStore.updateState((draft) => {
+          draft.value = 3;
+        });
+      },
+      mutation: () => Promise.resolve(3),
+      offline: { operation: 'updateValue', input: { value: 3 } },
+    });
+
+    expect(directMutation).toHaveBeenCalledTimes(1);
+    expect(env.store.state.data).toMatchInlineSnapshot(`
+      value: 3
+    `);
+    expect(getOfflineQueueEntries(sessionKey, storeName)).toHaveLength(1);
+    expect(
+      getOfflineQueueEntryData(
+        getOfflineQueueEntries(sessionKey, storeName)[0]!,
+      ),
+    ).toMatchObject({ input: { value: 3 } });
+  });
+
+  test('mutations queued via hybrid fallback enter the resolution queue after replay retries are exhausted', async () => {
+    const execute = vi
+      .fn<
+        ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+      >()
+      .mockRejectedValue(new Error('replay failed'));
+    const env = createDocumentStoreTestEnv<
+      number,
+      UpdateValueConflictOperations
+    >(1, {
+      getSessionKey: () => 'hybrid-retry-exhaustion-session',
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          outage: {
+            enabled: true,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            recoveryCheck: () => true,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          replayRetry: { maxFailures: 2, intervalMs: 1 },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              conflictHandling: {
+                detectConflict: () => false,
+                resolveConflict: () => undefined,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = await env.apiStore.performMutation({
+      mutation: () => Promise.reject(new Error('offline-fallback')),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+    expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
+
+    await advanceTime(1);
+    await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+
+    await advanceTime(1);
+    await waitForMicrotaskCondition(
+      () => env.apiStore.getOfflineResolutions().length === 1,
+    );
+
+    expect(env.apiStore.getOfflineResolutions()).toMatchObject([
+      {
+        kind: 'retry-exhausted',
+        input: { value: 2 },
+        lastReplayError: { message: 'replay failed' },
+        operation: 'updateValue',
+      },
+    ]);
+  });
 });

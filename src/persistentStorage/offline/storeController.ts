@@ -649,19 +649,44 @@ export function createOfflineStoreController<
     finalPayload: ValidPayload,
   ): unknown {
     if (deepEqual(value, tempId)) return finalPayload;
-    if (Array.isArray(value)) {
-      return value.map((item) =>
-        replacePayloadReferences(item, tempId, finalPayload),
-      );
-    }
-    if (!isObject(value)) return value;
+    if (!Array.isArray(value) && !isObject(value)) return value;
 
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entryValue]) => [
-        key,
-        replacePayloadReferences(entryValue, tempId, finalPayload),
-      ]),
-    );
+    if (Array.isArray(value)) {
+      const nextValue = [...value];
+      let didChange = false;
+
+      for (const [index, item] of value.entries()) {
+        const replacedItem = replacePayloadReferences(
+          item,
+          tempId,
+          finalPayload,
+        );
+        if (replacedItem !== item) {
+          didChange = true;
+          nextValue[index] = replacedItem;
+        }
+      }
+
+      return didChange ? nextValue : value;
+    }
+
+    let didChange = false;
+    const nextValue: Record<string, unknown> = {};
+
+    for (const [key, entryValue] of Object.entries(value)) {
+      const replacedValue = replacePayloadReferences(
+        entryValue,
+        tempId,
+        finalPayload,
+      );
+      if (replacedValue !== entryValue) {
+        didChange = true;
+      }
+
+      nextValue[key] = replacedValue;
+    }
+
+    return didChange ? nextValue : value;
   }
 
   function resolveEntityRefsForInput(
@@ -706,7 +731,7 @@ export function createOfflineStoreController<
         args.finalPayload,
       );
 
-      if (deepEqual(rewrittenInput, entry.input)) continue;
+      if (rewrittenInput === entry.input) continue;
 
       const operation = offlineMode.operations[entry.operation];
       if (!operation) continue;
@@ -738,9 +763,7 @@ export function createOfflineStoreController<
         args.finalPayload,
       );
 
-      if (deepEqual(rewrittenInput, resolution.input)) {
-        continue;
-      }
+      if (rewrittenInput === resolution.input) continue;
 
       const operation = offlineMode.operations[resolution.operation];
       if (!operation) continue;

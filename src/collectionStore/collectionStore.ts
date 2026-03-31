@@ -452,14 +452,19 @@ export function createCollectionStore<
     clearOfflineOverlays(sessionKey);
   }
 
-  function captureOfflineOverlay(itemKey: string): void {
-    const item = store.state[itemKey];
+  function captureOfflineOverlays(itemKeys: readonly string[]): void {
+    const targetItemKeys = [...new Set(itemKeys)];
+    if (targetItemKeys.length === 0) return;
 
     offlineOverlayStore.produceState((draft) => {
-      draft[itemKey] = {
-        data: item ? klona(item.data) : null,
-        payload: item ? klona(item.payload) : undefined,
-      };
+      for (const itemKey of targetItemKeys) {
+        const item = store.state[itemKey];
+
+        draft[itemKey] = {
+          data: item ? klona(item.data) : null,
+          payload: item ? klona(item.payload) : undefined,
+        };
+      }
     });
   }
 
@@ -545,11 +550,11 @@ export function createCollectionStore<
           },
           captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
             ensureOfflineOverlaySession(sessionKey);
-
-            for (const ref of entityRefs) {
-              if (ref.entityKind !== 'item') continue;
-              captureOfflineOverlay(ref.entityKey);
-            }
+            captureOfflineOverlays(
+              entityRefs.flatMap((ref) => {
+                return ref.entityKind === 'item' ? [ref.entityKey] : [];
+              }),
+            );
           },
           syncEntityOverlays: ({ entities, sessionKey }) => {
             ensureOfflineOverlaySession(sessionKey);

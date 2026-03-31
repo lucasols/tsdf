@@ -11,6 +11,7 @@ import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
 import { IsOffScreenContext } from '../isOffScreenContext';
 import {
   createOfflineEntityLookup,
+  getActiveOfflineOverlay,
   getIsPendingOfflineSync,
 } from '../persistentStorage/offline/entityMetadata';
 import type { GlobalOfflineEntity } from '../persistentStorage/offline/types';
@@ -169,21 +170,6 @@ export function useMultipleItems<
     () => createOfflineEntityLookup(offlineEntities),
     [offlineEntities],
   );
-  const activeOfflineOverlays = useMemo(() => {
-    const nextOverlays: Record<
-      string,
-      { data: ItemState | null; payload?: ItemPayload }
-    > = {};
-
-    for (const [itemKey, overlay] of Object.entries(offlineOverlays)) {
-      const entity = offlineEntitiesByKey.get(itemKey);
-      if (!entity || entity.requiresResolution) continue;
-
-      nextOverlays[itemKey] = overlay;
-    }
-
-    return nextOverlays;
-  }, [offlineEntitiesByKey, offlineOverlays]);
 
   const resultSelector = useCallback(
     (state: CollectionState) => {
@@ -201,7 +187,11 @@ export function useMultipleItems<
           QueryMetadata
         > => {
           const item = state[itemKey];
-          const overlay = activeOfflineOverlays[itemKey];
+          const overlay = getActiveOfflineOverlay(
+            offlineEntitiesByKey,
+            offlineOverlays,
+            itemKey,
+          );
           const hasOverlay = overlay !== undefined;
           const resolvedData = hasOverlay ? overlay.data : (item?.data ?? null);
           const resolvedPayload = overlay?.payload ?? item?.payload ?? payload;
@@ -267,7 +257,7 @@ export function useMultipleItems<
         },
       );
     },
-    [activeOfflineOverlays, offlineEntitiesByKey, queriesWithId, selector],
+    [offlineEntitiesByKey, offlineOverlays, queriesWithId, selector],
   );
 
   const storeState = store.useSelectorRC(resultSelector, {
@@ -286,7 +276,11 @@ export function useMultipleItems<
 
         if (query && readFallbackItemState) {
           const fallbackItem = readFallbackItemState(query.itemKey);
-          const overlay = activeOfflineOverlays[result.itemStateKey];
+          const overlay = getActiveOfflineOverlay(
+            offlineEntitiesByKey,
+            offlineOverlays,
+            result.itemStateKey,
+          );
           const hasOverlay = overlay !== undefined;
           const fallbackData = hasOverlay
             ? overlay.data
@@ -341,8 +335,8 @@ export function useMultipleItems<
       },
     );
   }, [
-    activeOfflineOverlays,
     offlineEntitiesByKey,
+    offlineOverlays,
     queriesWithId,
     readFallbackItemState,
     selector,

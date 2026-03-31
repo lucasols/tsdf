@@ -193,7 +193,6 @@ export function useMultipleItems<
   const fetchQueriesWithId = shouldDebounceFetchQueries
     ? debouncedFetchQueriesWithId
     : queriesWithId;
-
   const offlineEntitiesByKey = useMemo(
     () => createOfflineEntityLookup(offlineEntities),
     [offlineEntities],
@@ -430,8 +429,8 @@ export function useMultipleItems<
     },
     [
       activeOfflineOverlays,
-      offlineEntitiesByKey,
       loadFromStateOnly,
+      offlineEntitiesByKey,
       partialResources,
       queriesWithId,
       selector,

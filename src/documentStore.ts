@@ -11,7 +11,7 @@ import {
 import { evtmitter } from 'evtmitter';
 import { produce } from 'immer';
 import { klona } from 'klona/json';
-import { useCallback, useContext, useEffect } from 'react';
+import { useCallback, useContext, useEffect, useMemo } from 'react';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store, useSubscribeToStore } from 't-state';
 
@@ -20,7 +20,10 @@ import { useListItemIsDeleted as useListItemIsDeletedBase } from './hooks/useLis
 import { useListItemIsLoading as useListItemIsLoadingBase } from './hooks/useListItemIsLoading';
 import { IsOffScreenContext } from './isOffScreenContext';
 import { setupDocumentPersistence } from './persistentStorage/documentStorePersistence';
-import { getIsPendingOfflineSync } from './persistentStorage/offline/entityMetadata';
+import {
+  createOfflineEntityLookup,
+  getIsPendingOfflineSync,
+} from './persistentStorage/offline/entityMetadata';
 import {
   runOfflineAwareFetch,
   offlineConnectivityError,
@@ -976,6 +979,10 @@ export function createDocumentStore<
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
+    const offlineEntitiesByKey = useMemo(
+      () => createOfflineEntityLookup(offlineEntities),
+      [offlineEntities],
+    );
     const offlineOverlay = offlineOverlayStore.useSelectorRC((state) => state);
     const isOffScreenFromContext = useContext(IsOffScreenContext);
     const disabled = disabledProp ?? isOffScreenProp ?? isOffScreenFromContext;
@@ -983,9 +990,7 @@ export function createDocumentStore<
     const storeStateSelector = useCallback(
       (state: DocumentStoreState<State>): TSDFUseDocumentReturn<Selected> => {
         const { error } = state;
-        const activeOfflineEntity = offlineEntities.find(
-          (entity) => entity.entityKey === DOC_TARGET_KEY,
-        );
+        const activeOfflineEntity = offlineEntitiesByKey.get(DOC_TARGET_KEY);
         const resolvedData =
           activeOfflineEntity &&
           !activeOfflineEntity.requiresResolution &&
@@ -1016,7 +1021,7 @@ export function createDocumentStore<
         };
       },
       [
-        offlineEntities,
+        offlineEntitiesByKey,
         offlineOverlay,
         selector,
         returnIdleStatus,

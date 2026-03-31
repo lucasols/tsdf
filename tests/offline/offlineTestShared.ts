@@ -81,6 +81,21 @@ export function parsePersistedObject(raw: string): Record<string, unknown> {
   );
 }
 
+export const quickRecoveryProbe = {
+  intervalMs: 1,
+  maxIntervalMs: 1,
+  backoffMultiplier: 1,
+  jitterRatio: 0,
+} as const;
+
+export function classifyMutationOutage(error: unknown, phase: string): boolean {
+  return (
+    phase === 'mutation' &&
+    error instanceof Error &&
+    error.message === 'offline-fallback'
+  );
+}
+
 export async function waitForMicrotaskCondition(
   condition: () => boolean,
   maxTurns = 20,

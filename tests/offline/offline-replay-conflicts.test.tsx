@@ -8,15 +8,17 @@ import type { CollectionOfflineOperationDefinition } from '../../src/main';
 import { createCollectionStoreTestEnv } from '../mocks/collectionStoreTestEnv';
 import { createDocumentStoreTestEnv } from '../mocks/documentStoreTestEnv';
 import { TEST_INITIAL_TIME } from '../mocks/testEnvUtils';
-import { flushAllTimers } from '../utils/genericTestUtils';
+import { advanceTime, flushAllTimers } from '../utils/genericTestUtils';
 import { createOfflineNetworkMock } from '../utils/networkMock';
 import { type UpdateValueConflictOperations } from './offlineReplayTestShared';
 import {
+  classifyMutationOutage,
   collectionCreateInputSchema,
   collectionSchema,
   docConflictSchema,
   docMutationInputSchema,
   docSchema,
+  quickRecoveryProbe,
   waitForMicrotaskCondition,
 } from './offlineTestShared';
 
@@ -474,4 +476,66 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   act(() => {
     tempAdaHook.unmount();
   });
+});
+
+test('conflict handling still works for mutations queued via fallback', async () => {
+  const execute = vi.fn(({ input }: { input: { value: number } }) => input);
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
+      getSessionKey: () => 'hybrid-conflict-session',
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          outage: {
+            enabled: true,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            recoveryCheck: () => true,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              conflictHandling: {
+                detectConflict: ({ input }) =>
+                  input.value === 2 ? { reason: 'server-changed' } : false,
+                resolveConflict: () => undefined,
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  // A mutation that first fails online should still enter the normal replay
+  // conflict flow once it has been queued by the hybrid fallback.
+  const result = await env.apiStore.performMutation({
+    mutation: () => Promise.reject(new Error('offline-fallback')),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
+
+  await act(async () => {
+    await advanceTime(1);
+  });
+  await waitForMicrotaskCondition(
+    () => env.apiStore.getOfflineResolutions().length === 1,
+  );
+
+  expect(execute).not.toHaveBeenCalled();
+  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
+    {
+      kind: 'conflict',
+      conflict: { reason: 'server-changed' },
+      input: { value: 2 },
+      operation: 'updateValue',
+    },
+  ]);
 });
