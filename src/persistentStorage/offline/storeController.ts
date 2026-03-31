@@ -670,8 +670,7 @@ export function createOfflineStoreController<
       return didChange ? nextValue : value;
     }
 
-    let didChange = false;
-    const nextValue: Record<string, unknown> = {};
+    let nextValue: Record<string, unknown> | undefined;
 
     for (const [key, entryValue] of Object.entries(value)) {
       const replacedValue = replacePayloadReferences(
@@ -680,13 +679,12 @@ export function createOfflineStoreController<
         finalPayload,
       );
       if (replacedValue !== entryValue) {
-        didChange = true;
+        nextValue ??= { ...value };
+        nextValue[key] = replacedValue;
       }
-
-      nextValue[key] = replacedValue;
     }
 
-    return didChange ? nextValue : value;
+    return nextValue ?? value;
   }
 
   function resolveEntityRefsForInput(
@@ -714,6 +712,41 @@ export function createOfflineStoreController<
     return __LEGIT_CAST__<OfflineEntityRef[], unknown[]>(rawEntityRefs);
   }
 
+  function rewriteEntryInput(
+    entry: {
+      input: unknown;
+      operation: string;
+      entityRefs: OfflineEntityRef[];
+    },
+    tempId: ValidPayload,
+    finalPayload: ValidPayload,
+  ): { input: unknown; entityRefs: OfflineEntityRef[] } | null {
+    const rewrittenInput = replacePayloadReferences(
+      entry.input,
+      tempId,
+      finalPayload,
+    );
+    if (rewrittenInput === entry.input) return null;
+
+    const operation = offlineMode.operations[entry.operation];
+    if (!operation) return null;
+
+    const validatedInput = validateWithSchema(
+      operation.inputSchema,
+      rewrittenInput,
+    );
+    if (validatedInput === null) return null;
+
+    return {
+      input: validatedInput,
+      entityRefs: resolveEntityRefsForInput(
+        entry.operation,
+        validatedInput,
+        entry.entityRefs,
+      ),
+    };
+  }
+
   async function rebindQueuedEntriesAfterTempReconciliation(args: {
     current: ActiveSessionState;
     entryIdToSkip: string;
@@ -725,65 +758,23 @@ export function createOfflineStoreController<
     for (const entry of queueEntries.values()) {
       if (entry.id === args.entryIdToSkip) continue;
 
-      const rewrittenInput = replacePayloadReferences(
-        entry.input,
-        args.tempId,
-        args.finalPayload,
-      );
+      const rewrite = rewriteEntryInput(entry, args.tempId, args.finalPayload);
+      if (!rewrite) continue;
 
-      if (rewrittenInput === entry.input) continue;
-
-      const operation = offlineMode.operations[entry.operation];
-      if (!operation) continue;
-
-      const validatedInput = validateWithSchema(
-        operation.inputSchema,
-        rewrittenInput,
-      );
-      if (validatedInput === null) continue;
-
-      const rewrittenEntry = {
-        ...entry,
-        input: validatedInput,
-        entityRefs: resolveEntityRefsForInput(
-          entry.operation,
-          validatedInput,
-          entry.entityRefs,
-        ),
-      };
-
+      const rewrittenEntry = { ...entry, ...rewrite };
       await persistEntry(rewrittenEntry, args.current, true);
       changedQueueEntries.push(rewrittenEntry);
     }
 
     for (const resolution of resolutions.values()) {
-      const rewrittenInput = replacePayloadReferences(
-        resolution.input,
+      const rewrite = rewriteEntryInput(
+        resolution,
         args.tempId,
         args.finalPayload,
       );
+      if (!rewrite) continue;
 
-      if (rewrittenInput === resolution.input) continue;
-
-      const operation = offlineMode.operations[resolution.operation];
-      if (!operation) continue;
-
-      const validatedInput = validateWithSchema(
-        operation.inputSchema,
-        rewrittenInput,
-      );
-      if (validatedInput === null) continue;
-
-      const rewrittenResolution = {
-        ...resolution,
-        input: validatedInput,
-        entityRefs: resolveEntityRefsForInput(
-          resolution.operation,
-          validatedInput,
-          resolution.entityRefs,
-        ),
-      };
-
+      const rewrittenResolution = { ...resolution, ...rewrite };
       resolutions.set(rewrittenResolution.id, rewrittenResolution);
       await args.current.resolutionNamespace.save(
         rewrittenResolution.id,
@@ -791,10 +782,10 @@ export function createOfflineStoreController<
       );
     }
 
-    for (const entry of changedQueueEntries) {
+    if (changedQueueEntries.length > 0) {
       storeAdapter.captureQueuedMutationOverlays?.({
         sessionKey: args.current.sessionKey,
-        entityRefs: entry.entityRefs,
+        entityRefs: changedQueueEntries.flatMap((entry) => entry.entityRefs),
       });
     }
 

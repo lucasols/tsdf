@@ -1262,7 +1262,8 @@ export function createListQueryStore<
           }
         },
         captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
-          ensureOfflineOverlaySession(sessionKey);
+          if (offlineOverlaySessionKey !== sessionKey)
+            clearOfflineOverlays(sessionKey);
           captureOfflineOverlays(
             entityRefs.flatMap((ref) => {
               return ref.entityKind === 'item' ? [ref.entityKey] : [];
@@ -1270,7 +1271,8 @@ export function createListQueryStore<
           );
         },
         syncEntityOverlays: ({ entities, sessionKey }) => {
-          ensureOfflineOverlaySession(sessionKey);
+          if (offlineOverlaySessionKey !== sessionKey)
+            clearOfflineOverlays(sessionKey);
 
           const activeItemKeys = new Set(
             entities
@@ -1365,20 +1367,12 @@ export function createListQueryStore<
     offlineOverlayStore.setState({});
   }
 
-  function ensureOfflineOverlaySession(sessionKey: string): void {
-    if (offlineOverlaySessionKey === sessionKey) return;
-
-    clearOfflineOverlays(sessionKey);
-  }
-
   function captureOfflineOverlays(itemKeys: readonly string[]): void {
-    const targetItemKeys = [...new Set(itemKeys)];
-    if (targetItemKeys.length === 0) return;
-
-    const targetItemKeySet = new Set(targetItemKeys);
+    const targetItemKeySet = new Set(itemKeys);
+    if (targetItemKeySet.size === 0) return;
     const queryMembershipsByItemKey = new Map<string, Record<string, number>>();
 
-    for (const itemKey of targetItemKeys) {
+    for (const itemKey of targetItemKeySet) {
       queryMembershipsByItemKey.set(itemKey, {});
     }
 
@@ -1394,7 +1388,7 @@ export function createListQueryStore<
     }
 
     offlineOverlayStore.produceState((draft) => {
-      for (const itemKey of targetItemKeys) {
+      for (const itemKey of targetItemKeySet) {
         const item = store.state.items[itemKey];
         const itemPayload = store.state.itemQueries[itemKey]?.payload;
         if (item == null || itemPayload === undefined) continue;

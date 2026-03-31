@@ -108,9 +108,8 @@ export type DocumentStoreState<State extends ValidStoreState> = {
 type DocumentStoreEvents = { invalidateData: FetchType };
 
 type DocumentOfflineOverlay<State extends ValidStoreState> = {
-  hasValue: boolean;
   data: State | null;
-};
+} | null;
 
 export type OnDocumentInvalidate = (priority: FetchType) => void;
 
@@ -272,10 +271,15 @@ export function createDocumentStore<
   let lastDocumentSyncVersion: BrowserTabsSyncVersion | undefined;
   const offlineOverlayStore = new Store<DocumentOfflineOverlay<State>>({
     debugName: `${id}:document-offline-overlay`,
-    state: () => ({ hasValue: false, data: null }),
+    state: () => null,
   });
   offlineOverlayStore.initializeStore();
   let offlineOverlaySessionKey: string | null = null;
+
+  function clearOfflineOverlay(nextSessionKey: string | null = null): void {
+    offlineOverlaySessionKey = nextSessionKey;
+    offlineOverlayStore.setState(null);
+  }
 
   let initialData: State | null = null;
   let initialRefetchOnMount: FetchType | false = false;
@@ -366,19 +370,14 @@ export function createDocumentStore<
           },
           captureQueuedMutationOverlays: ({ sessionKey }) => {
             if (offlineOverlaySessionKey !== sessionKey) {
-              offlineOverlaySessionKey = sessionKey;
-              offlineOverlayStore.setState({ hasValue: false, data: null });
+              clearOfflineOverlay(sessionKey);
             }
 
-            offlineOverlayStore.setState({
-              hasValue: true,
-              data: store.state.data === null ? null : klona(store.state.data),
-            });
+            offlineOverlayStore.setState({ data: klona(store.state.data) });
           },
           syncEntityOverlays: ({ entities, sessionKey }) => {
             if (offlineOverlaySessionKey !== sessionKey) {
-              offlineOverlaySessionKey = sessionKey;
-              offlineOverlayStore.setState({ hasValue: false, data: null });
+              clearOfflineOverlay(sessionKey);
             }
 
             if (
@@ -389,7 +388,7 @@ export function createDocumentStore<
                 );
               })
             ) {
-              offlineOverlayStore.setState({ hasValue: false, data: null });
+              offlineOverlayStore.setState(null);
             }
           },
         },
@@ -563,8 +562,7 @@ export function createDocumentStore<
         onMessage: handleRemoteMessage,
         onSessionChange() {
           lastDocumentSyncVersion = undefined;
-          offlineOverlaySessionKey = null;
-          offlineOverlayStore.setState({ hasValue: false, data: null });
+          clearOfflineOverlay();
         },
         transportFactory: testOptions?.browserTabsTransportFactory,
         getWindowIsFocused,
@@ -827,8 +825,7 @@ export function createDocumentStore<
   function reset(): void {
     scheduler.reset();
     lastDocumentSyncVersion = undefined;
-    offlineOverlaySessionKey = null;
-    offlineOverlayStore.setState({ hasValue: false, data: null });
+    clearOfflineOverlay();
     browserTabsPriority.reset();
 
     persistence?.dispose();
@@ -994,7 +991,7 @@ export function createDocumentStore<
         const resolvedData =
           activeOfflineEntity &&
           !activeOfflineEntity.requiresResolution &&
-          offlineOverlay.hasValue
+          offlineOverlay !== null
             ? offlineOverlay.data
             : state.data;
 

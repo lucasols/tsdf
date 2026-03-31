@@ -446,12 +446,6 @@ export function createCollectionStore<
     offlineOverlayStore.setState({});
   }
 
-  function ensureOfflineOverlaySession(sessionKey: string): void {
-    if (offlineOverlaySessionKey === sessionKey) return;
-
-    clearOfflineOverlays(sessionKey);
-  }
-
   function captureOfflineOverlays(itemKeys: readonly string[]): void {
     const targetItemKeys = [...new Set(itemKeys)];
     if (targetItemKeys.length === 0) return;
@@ -550,7 +544,8 @@ export function createCollectionStore<
             );
           },
           captureQueuedMutationOverlays: ({ entityRefs, sessionKey }) => {
-            ensureOfflineOverlaySession(sessionKey);
+            if (offlineOverlaySessionKey !== sessionKey)
+              clearOfflineOverlays(sessionKey);
             captureOfflineOverlays(
               entityRefs.flatMap((ref) => {
                 return ref.entityKind === 'item' ? [ref.entityKey] : [];
@@ -558,7 +553,8 @@ export function createCollectionStore<
             );
           },
           syncEntityOverlays: ({ entities, sessionKey }) => {
-            ensureOfflineOverlaySession(sessionKey);
+            if (offlineOverlaySessionKey !== sessionKey)
+              clearOfflineOverlays(sessionKey);
 
             const activeItemKeys = new Set(
               entities
