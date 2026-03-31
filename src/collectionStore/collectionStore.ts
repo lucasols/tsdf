@@ -1845,9 +1845,10 @@ export function createCollectionStore<
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
     },
-    getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],
-    resolveOfflineConflict: (conflictId: string, resolution: unknown) =>
-      offlineController?.resolveOfflineConflict(conflictId, resolution),
+    getOfflineResolutions: () =>
+      offlineController?.getOfflineResolutions() ?? [],
+    resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
+      offlineController?.resolveOfflineResolution(resolutionId, resolution),
     startMutation,
     invalidateItem,
     updateItemState,

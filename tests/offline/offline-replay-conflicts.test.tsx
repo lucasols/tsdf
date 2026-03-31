@@ -126,30 +126,35 @@ test('offline conflicts are detected before execute, surface through selectors, 
     - createdAt: 1735689600000
       entityKey: 'document'
       entityKind: 'document'
-      hasConflict: '✅'
       id: 'offline-conflict-session:offline-conflict-doc:document'
       pendingMutations: 0
+      requiresResolution: '✅'
       sessionKey: 'offline-conflict-session'
       storeName: 'offline-conflict-doc'
       storeType: 'document'
-      syncState: 'conflict'
+      syncState: 'resolution-required'
       updatedAt: 1735689600000
   `);
   expect(
-    env.apiStore
-      .getOfflineConflicts()
-      .map((conflict) => ({
-        conflict: conflict.conflict,
-        createdAt: conflict.createdAt,
-        enqueuedAt: conflict.enqueuedAt,
-        entityRefs: conflict.entityRefs,
-        input: conflict.input,
-        operation: conflict.operation,
-        sessionKey: conflict.sessionKey,
-        storeName: conflict.storeName,
-        storeType: conflict.storeType,
-        updatedAt: conflict.updatedAt,
-      })),
+    env.apiStore.getOfflineResolutions().map((resolution) => {
+      if (resolution.kind !== 'conflict') {
+        throw new Error('Expected a persisted offline conflict');
+      }
+
+      return {
+        kind: resolution.kind,
+        conflict: resolution.conflict,
+        createdAt: resolution.createdAt,
+        enqueuedAt: resolution.enqueuedAt,
+        entityRefs: resolution.entityRefs,
+        input: resolution.input,
+        operation: resolution.operation,
+        sessionKey: resolution.sessionKey,
+        storeName: resolution.storeName,
+        storeType: resolution.storeType,
+        updatedAt: resolution.updatedAt,
+      };
+    }),
   ).toMatchInlineSnapshot(`
     - conflict: { reason: 'server-changed' }
       createdAt: 1735689600000
@@ -157,6 +162,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
       entityRefs:
         - { entityKey: 'document', entityKind: 'document' }
       input: { value: 2 }
+      kind: 'conflict'
       operation: 'updateValue'
       sessionKey: 'offline-conflict-session'
       storeName: 'offline-conflict-doc'
@@ -164,7 +170,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
       updatedAt: 1735689600000
   `);
 
-  const [conflict] = env.apiStore.getOfflineConflicts();
+  const [conflict] = env.apiStore.getOfflineResolutions();
   expect(conflict).toBeDefined();
   if (!conflict) {
     throw new Error('Expected a persisted offline conflict');
@@ -173,7 +179,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
   // Resolve the stored conflict and confirm the session clears its offline
   // bookkeeping once the resolution is accepted.
   await act(async () => {
-    await env.apiStore.resolveOfflineConflict(conflict.id, {
+    await env.apiStore.resolveOfflineResolution(conflict.id, {
       resolution: 'accept-local',
     });
     await Promise.resolve();
@@ -181,7 +187,7 @@ test('offline conflicts are detected before execute, surface through selectors, 
   });
 
   expect(resolveEnqueuedAt).toBe(TEST_INITIAL_TIME);
-  expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(env.store.state).toMatchInlineSnapshot(`
     data: { value: 2 }
@@ -273,20 +279,20 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
   });
   await flushAllTimers();
 
-  const [conflict] = env.apiStore.getOfflineConflicts();
+  const [conflict] = env.apiStore.getOfflineResolutions();
   expect(conflict).toBeDefined();
   expect(executedInputs).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`
     - createdAt: 1735689600000
       entityKey: 'document'
       entityKind: 'document'
-      hasConflict: '✅'
       id: 'offline-conflict-requeue-session:offline-conflict-requeue-doc:document'
       pendingMutations: 0
+      requiresResolution: '✅'
       sessionKey: 'offline-conflict-requeue-session'
       storeName: 'offline-conflict-requeue-doc'
       storeType: 'document'
-      syncState: 'conflict'
+      syncState: 'resolution-required'
       updatedAt: 1735689600000
   `);
 
@@ -297,7 +303,7 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
   // Resolve the conflict by requeueing a replacement mutation and let it run
   // immediately while the original optimistic state stays visible.
   await act(async () => {
-    await env.apiStore.resolveOfflineConflict(conflict.id, { value: 7 });
+    await env.apiStore.resolveOfflineResolution(conflict.id, { value: 7 });
     await flushAllTimers();
   });
 
@@ -306,7 +312,7 @@ test('resolving a persisted conflict can requeue a replacement mutation and repl
   expect(env.store.state.data).toMatchInlineSnapshot(`
     value: 7
   `);
-  expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
 
@@ -405,7 +411,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   });
   await flushAllTimers();
 
-  const [conflict] = env.apiStore.getOfflineConflicts();
+  const [conflict] = env.apiStore.getOfflineResolutions();
   expect(conflict).toBeDefined();
   if (!conflict) {
     throw new Error('Expected a persisted offline conflict');
@@ -417,7 +423,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
     'resolve the conflict with a new name while keeping the same temp row',
   ]);
   await act(async () => {
-    await env.apiStore.resolveOfflineConflict(conflict.id, {
+    await env.apiStore.resolveOfflineResolution(conflict.id, {
       name: 'Ada resolved',
     });
     await Promise.resolve();
@@ -447,7 +453,7 @@ test('resolving a temp-entity conflict keeps the original temp id when requeuein
   executeResolvers[0]?.({ id: 'users||ada-resolved', name: 'Ada resolved' });
   await flushAllTimers();
 
-  expect(env.apiStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(env.store.state[getCompositeKey('temp:Ada')]).toBeNull();
   expect(

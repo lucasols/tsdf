@@ -1,5 +1,13 @@
 import type { __LEGIT_ANY__ } from '@ls-stack/utils/saferTyping';
-import { rc_literals, rc_object, rc_string } from 'runcheck';
+import {
+  rc_array,
+  rc_discriminated_union,
+  rc_literals,
+  rc_number,
+  rc_object,
+  rc_string,
+  rc_unknown,
+} from 'runcheck';
 
 import type { ValidPayload, ValidStoreState } from '../../utils/storeShared';
 import type { PersistentStorageSchema } from '../types';
@@ -17,6 +25,39 @@ export type OfflineEntityKind = 'document' | 'item' | 'query';
 export const offlineItemEntityRefSchema = rc_object({
   entityKey: rc_string,
   entityKind: rc_literals('item'),
+});
+
+const offlineResolutionEntityRefSchema = rc_object({
+  entityKey: rc_string,
+  entityKind: rc_literals('document', 'item', 'query'),
+});
+
+const offlineResolutionBaseFields = {
+  id: rc_string,
+  entryId: rc_string,
+  sessionKey: rc_string,
+  storeName: rc_string,
+  storeType: rc_string,
+  operation: rc_string,
+  input: rc_unknown,
+  enqueuedAt: rc_number,
+  entityRefs: rc_array(offlineResolutionEntityRefSchema),
+  createdAt: rc_number,
+  updatedAt: rc_number,
+};
+
+/** Runtime schema for validating persisted offline resolution records on hydration. */
+export const offlineResolutionRecordSchema = rc_discriminated_union('kind', {
+  conflict: {
+    ...offlineResolutionBaseFields,
+    kind: rc_literals('conflict'),
+    conflict: rc_unknown,
+  },
+  'retry-exhausted': {
+    ...offlineResolutionBaseFields,
+    kind: rc_literals('retry-exhausted'),
+    lastReplayError: rc_object({ message: rc_string }),
+  },
 });
 
 /** Error shape emitted when runtime is operating in offline mode. */
@@ -51,6 +92,14 @@ export type OfflineRecoveryProbeConfig = {
   backoffMultiplier?: number;
   /** Jitter ratio (0-1) applied to the recovery probe delay. */
   jitterRatio?: number;
+};
+
+/** Fixed replay retry policy for healthy online replay failures. */
+export type OfflineReplayRetryConfig = {
+  /** Max counted failures before manual resolution is required. */
+  maxFailures?: number;
+  /** Fixed delay between replay retries, in milliseconds. */
+  intervalMs?: number;
 };
 
 /** Network availability mode configuration for offline controls. */
@@ -129,9 +178,9 @@ export type GlobalOfflineEntity = {
   /** Number of pending mutations waiting for sync. */
   pendingMutations: number;
   /** Current sync state for the entity. */
-  syncState: OfflineSyncState | 'conflict';
-  /** Whether the entity is currently in conflict state. */
-  hasConflict: boolean;
+  syncState: OfflineSyncState | 'resolution-required';
+  /** Whether the entity currently requires manual resolution. */
+  requiresResolution: boolean;
   /** Creation timestamp for lifecycle bookkeeping. */
   createdAt: number;
   /** Last mutation/update timestamp. */
@@ -146,9 +195,14 @@ export type GlobalOfflineEntity = {
  * @typeParam TConflict - Conflict payload stored for later resolution.
  * @typeParam TInput - Original mutation input associated with the conflict.
  */
-export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
-  /** Conflict record identifier. */
+export type OfflineConflictResolutionRecord<
+  TConflict = unknown,
+  TInput = unknown,
+> = {
+  /** Resolution record identifier. */
   id: string;
+  /** Resolution kind. */
+  kind: 'conflict';
   /** Queue entry identifier that produced this conflict. */
   entryId: string;
   /** Session key that owns this conflict record. */
@@ -177,6 +231,55 @@ export type OfflineConflictRecord<TConflict = unknown, TInput = unknown> = {
   /** Optional temporary ID associated with optimistic entity flow. */
   tempId?: ValidPayload;
 };
+
+/**
+ * Persisted resolution record created when replay retries are exhausted.
+ *
+ * @typeParam TInput - Original mutation input associated with the replay failure.
+ */
+export type OfflineRetryExhaustedResolutionRecord<TInput = unknown> = {
+  /** Resolution record identifier. */
+  id: string;
+  /** Resolution kind. */
+  kind: 'retry-exhausted';
+  /** Queue entry identifier that exhausted replay retries. */
+  entryId: string;
+  /** Session key that owns this resolution record. */
+  sessionKey: string;
+  /** Store name associated with the resolution. */
+  storeName: string;
+  /** Store type associated with the resolution. */
+  storeType: OfflineStoreType;
+  /** Operation name linked to the replay failure. */
+  operation: string;
+  /** Input value that exhausted replay retries. */
+  input: TInput;
+  /** Timestamp when the original queued mutation was enqueued. */
+  enqueuedAt: number;
+  /** Entity references involved in the resolution, each shaped as `{ entityKey, entityKind }`. */
+  entityRefs: {
+    entityKey: string;
+    entityKind: 'document' | 'item' | 'query';
+  }[];
+  /** Last replay error snapshot captured before exhaustion. */
+  lastReplayError: { message: string };
+  /** Resolution creation timestamp. */
+  createdAt: number;
+  /** Resolution update timestamp. */
+  updatedAt: number;
+  /** Optional temporary ID associated with optimistic entity flow. */
+  tempId?: ValidPayload;
+};
+
+/**
+ * Persisted offline resolution payload.
+ *
+ * @typeParam TConflict - Conflict payload stored for later resolution.
+ * @typeParam TInput - Original mutation input associated with the resolution.
+ */
+export type OfflineResolutionRecord<TConflict = unknown, TInput = unknown> =
+  | OfflineConflictResolutionRecord<TConflict, TInput>
+  | OfflineRetryExhaustedResolutionRecord<TInput>;
 
 /**
  * Persisted offline mutation queue entry.
@@ -221,6 +324,11 @@ export type OfflineQueueEntry<TInput = unknown, TConflict = unknown> = {
   /** Pending conflict payload when confirmation or resolution is required. */
   pendingConflict?: TConflict;
 };
+
+/** Built-in resolution actions for retry exhaustion records. */
+export type OfflineRetryExhaustedResolutionAction =
+  | { action: 'retry' }
+  | { action: 'discard' };
 
 /**
  * Base shape for each offline operation entry in `offlineMode.operations`.
@@ -1011,6 +1119,8 @@ export type OfflineModeConfig<
   network?: OfflineNetworkModeConfig;
   /** Outage detection and recovery strategy for remote failures. */
   outage?: OfflineOutageModeConfig;
+  /** Fixed retry policy for healthy online replay failures. */
+  replayRetry?: OfflineReplayRetryConfig;
   /** Mutation operation definitions keyed by operation name. */
   operations: TOperations;
 };

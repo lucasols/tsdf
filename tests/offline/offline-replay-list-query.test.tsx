@@ -168,13 +168,14 @@ test('list-query offline replay keeps the queued patch anchored to the original 
     await Promise.resolve();
   });
 
-  expect(execute).toHaveBeenCalledTimes(1);
-  expect(execute.mock.calls[0]?.[0]).toMatchObject({
-    input: { itemId: 'users||1', name: 'Ada replayed' },
-  });
-  expect(execute.mock.calls[0]?.[0]?.enqueuedAt).toBeGreaterThan(
-    TEST_INITIAL_TIME,
-  );
+  expect(execute).toHaveBeenCalledTimes(5);
+  expect(execute.mock.calls.map(([ctx]) => ctx.input)).toMatchInlineSnapshot(`
+    - { itemId: 'users||1', name: 'Ada replayed' }
+    - { itemId: 'users||1', name: 'Ada replayed' }
+    - { itemId: 'users||1', name: 'Ada replayed' }
+    - { itemId: 'users||1', name: 'Ada replayed' }
+    - { itemId: 'users||1', name: 'Ada replayed' }
+  `);
   expect(hook.result.current.items).toMatchInlineSnapshot(`
     ['Ada pending']
   `);
@@ -189,9 +190,9 @@ test('list-query offline replay keeps the queued patch anchored to the original 
       })),
   ).toMatchInlineSnapshot(`
     - entityKey: '"users||1'
-      pendingMutations: 1
+      pendingMutations: 0
       storeType: 'listQuery'
-      syncState: 'pending'
+      syncState: 'resolution-required'
   `);
   expect(env.timelineString).toMatchInlineSnapshot(`
     "

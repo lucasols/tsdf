@@ -302,9 +302,7 @@ describe('document mutations', () => {
       value: { kind: 'online', data: undefined },
     });
 
-    await act(async () => {
-      await advanceTime(1_200);
-    });
+    await advanceTime(1_200);
     await waitForMicrotaskCondition(
       () => documentHook.result.current.data?.value === 2,
     );
@@ -1226,14 +1224,79 @@ test('conflict handling still works for mutations queued via fallback', async ()
     await advanceTime(1);
   });
   await waitForMicrotaskCondition(
-    () => env.apiStore.getOfflineConflicts().length === 1,
+    () => env.apiStore.getOfflineResolutions().length === 1,
   );
 
   expect(execute).not.toHaveBeenCalled();
-  expect(env.apiStore.getOfflineConflicts()).toMatchObject([
+  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
     {
+      kind: 'conflict',
       conflict: { reason: 'server-changed' },
       input: { value: 2 },
+      operation: 'updateValue',
+    },
+  ]);
+});
+
+test('mutations queued via hybrid fallback enter the resolution queue after replay retries are exhausted', async () => {
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockRejectedValue(new Error('replay failed'));
+  const env = createDocumentStoreTestEnv<number, UpdateValueConflictOperations>(
+    1,
+    {
+      getSessionKey: () => 'hybrid-retry-exhaustion-session',
+      testScenario: 'loaded',
+      persistentStorage: {
+        adapter: 'local-sync',
+        schema: docSchema,
+        offlineMode: {
+          network: network.config,
+          outage: {
+            enabled: true,
+            classifyFailure: (error, ctx) =>
+              classifyMutationOutage(error, ctx.phase) ? 'outage' : 'ignore',
+            recoveryCheck: () => true,
+            recoveryProbe: quickRecoveryProbe,
+          },
+          replayRetry: { maxFailures: 2, intervalMs: 1 },
+          operations: {
+            updateValue: {
+              inputSchema: docMutationInputSchema,
+              execute,
+              conflictHandling: {
+                detectConflict: () => false,
+                resolveConflict: () => undefined,
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+
+  const result = await env.apiStore.performMutation({
+    mutation: () => Promise.reject(new Error('offline-fallback')),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  expect(result).toMatchObject({ ok: true, value: { kind: 'queued' } });
+
+  await advanceTime(1);
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+
+  await advanceTime(1);
+  await waitForMicrotaskCondition(
+    () => env.apiStore.getOfflineResolutions().length === 1,
+  );
+
+  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
+    {
+      kind: 'retry-exhausted',
+      input: { value: 2 },
+      lastReplayError: { message: 'replay failed' },
       operation: 'updateValue',
     },
   ]);

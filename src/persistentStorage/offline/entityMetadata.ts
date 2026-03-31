@@ -67,15 +67,15 @@ export function createOfflineEntityLookup(
 export function getIsPendingOfflineSync(
   entity: GlobalOfflineEntity | null | undefined,
 ): boolean {
-  return !!entity && !entity.hasConflict;
+  return !!entity && !entity.requiresResolution;
 }
 
 export type OfflineEntitiesMetadata = {
   pendingSync: boolean;
   pendingOfflineMutations: number;
-  hasOfflineConflict: boolean;
+  hasOfflineResolution: boolean;
   pendingItemKeys: string[];
-  conflictedItemKeys: string[];
+  resolutionRequiredItemKeys: string[];
 };
 
 export function getOfflineEntitiesMetadata(
@@ -83,15 +83,15 @@ export function getOfflineEntitiesMetadata(
   entityKeys: readonly string[],
 ): OfflineEntitiesMetadata {
   const pendingItemKeys: string[] = [];
-  const conflictedItemKeys: string[] = [];
+  const resolutionRequiredItemKeys: string[] = [];
   let pendingOfflineMutations = 0;
 
   for (const entityKey of entityKeys) {
     const entity = entitiesByKey.get(entityKey);
     if (!entity) continue;
 
-    if (entity.hasConflict) {
-      conflictedItemKeys.push(entityKey);
+    if (entity.requiresResolution) {
+      resolutionRequiredItemKeys.push(entityKey);
       continue;
     }
 
@@ -102,8 +102,8 @@ export function getOfflineEntitiesMetadata(
   return {
     pendingSync: pendingItemKeys.length > 0,
     pendingOfflineMutations,
-    hasOfflineConflict: conflictedItemKeys.length > 0,
+    hasOfflineResolution: resolutionRequiredItemKeys.length > 0,
     pendingItemKeys,
-    conflictedItemKeys,
+    resolutionRequiredItemKeys,
   };
 }

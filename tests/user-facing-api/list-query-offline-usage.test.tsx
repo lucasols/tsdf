@@ -393,8 +393,8 @@ test('direct list-query store offline public api', async () => {
   });
   await Promise.resolve();
 
-  expect(listQueryStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
-  await listQueryStore.resolveOfflineConflict('missing', {
+  expect(listQueryStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  await listQueryStore.resolveOfflineResolution('missing', {
     resolution: 'noop',
   });
   expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))
@@ -444,7 +444,7 @@ test('direct list-query store offline public api', async () => {
     await flushAllTimers();
   });
 
-  const [conflict] = listQueryStore.getOfflineConflicts();
+  const [conflict] = listQueryStore.getOfflineResolutions();
   expect(conflict).toMatchObject({
     conflict: { reason: 'server-changed' },
     input: { id: 1, name: 'Ada conflict' },
@@ -456,10 +456,10 @@ test('direct list-query store offline public api', async () => {
   expect(listQueryStore.getOfflineEntities()).toMatchObject([
     {
       entityKey: getCompositeKey(getUserEntityKey(1)),
-      hasConflict: true,
+      requiresResolution: true,
       pendingMutations: 0,
       storeType: 'listQuery',
-      syncState: 'conflict',
+      syncState: 'resolution-required',
     },
   ]);
 
@@ -476,13 +476,13 @@ test('direct list-query store offline public api', async () => {
   `);
 
   await act(async () => {
-    await listQueryStore.resolveOfflineConflict(conflict!.id, {
+    await listQueryStore.resolveOfflineResolution(conflict!.id, {
       name: 'Ada resolved',
     });
     await flushAllTimers();
   });
 
-  expect(listQueryStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
+  expect(listQueryStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(listQueryStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
   expect(pick(listHook.result.current, ['items', 'status', 'pendingSync']))

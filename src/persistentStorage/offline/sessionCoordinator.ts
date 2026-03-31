@@ -31,14 +31,14 @@ import type {
 type SessionStoreState = {
   status: GlobalOfflineStatus;
   entities: GlobalOfflineEntity[];
-  conflicts: unknown[];
+  resolutions: unknown[];
 };
 
 type SessionSnapshotMessage = BrowserTabsMessageMeta & {
   kind: 'offline-session-snapshot';
   status: GlobalOfflineStatus;
   entities: GlobalOfflineEntity[];
-  conflicts: unknown[];
+  resolutions: unknown[];
 };
 
 type OfflineSessionMessage =
@@ -47,11 +47,15 @@ type OfflineSessionMessage =
 
 type SessionStoreContribution = {
   entities: GlobalOfflineEntity[];
-  conflicts: unknown[];
+  resolutions: unknown[];
   protectedKeys: string[];
 };
 
-type SessionRegistration = { storeName: string; onGreenCycle?: () => void };
+type SessionRegistration = {
+  storeName: string;
+  onGreenCycle?: () => void;
+  onOfflineCycle?: () => void;
+};
 
 type SessionCoordinatorOptions = {
   sessionKey: string;
@@ -255,7 +259,7 @@ export class SessionOfflineCoordinator {
       state: () => ({
         status: resolveDefaultStatus(sessionKey),
         entities: [],
-        conflicts: [],
+        resolutions: [],
       }),
     });
 
@@ -421,8 +425,8 @@ export class SessionOfflineCoordinator {
     return this.store.state.entities;
   }
 
-  getConflicts(): unknown[] {
-    return this.store.state.conflicts;
+  getResolutions(): unknown[] {
+    return this.store.state.resolutions;
   }
 
   isLeader(): boolean {
@@ -448,6 +452,8 @@ export class SessionOfflineCoordinator {
   }
 
   setNetworkActive(active: boolean): void {
+    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+
     this.#updateStatus((current) => ({
       ...current,
       network: { enabled: this.#canonicalConfig.networkEnabled, active },
@@ -455,6 +461,9 @@ export class SessionOfflineCoordinator {
 
     if (active) {
       this.#stopRecoveryProbe();
+      if (!wasEffectivelyOffline && this.store.state.status.effectiveOffline) {
+        this.#notifyOfflineCycle();
+      }
       return;
     }
 
@@ -463,6 +472,8 @@ export class SessionOfflineCoordinator {
   }
 
   setOutageActive(active: boolean): void {
+    const wasEffectivelyOffline = this.store.state.status.effectiveOffline;
+
     this.#updateStatus((current) => ({
       ...current,
       outage: { enabled: this.#canonicalConfig.outageEnabled, active },
@@ -471,6 +482,9 @@ export class SessionOfflineCoordinator {
 
     if (active) {
       this.#maybeStartRecoveryProbe();
+      if (!wasEffectivelyOffline && this.store.state.status.effectiveOffline) {
+        this.#notifyOfflineCycle();
+      }
       return;
     }
 
@@ -507,6 +521,13 @@ export class SessionOfflineCoordinator {
     if (this.store.state.status.effectiveOffline || !this.isLeader()) return;
     for (const registration of this.#registrations.values()) {
       registration.onGreenCycle?.();
+    }
+  }
+
+  #notifyOfflineCycle(): void {
+    if (!this.store.state.status.effectiveOffline || !this.isLeader()) return;
+    for (const registration of this.#registrations.values()) {
+      registration.onOfflineCycle?.();
     }
   }
 
@@ -558,8 +579,8 @@ export class SessionOfflineCoordinator {
     const entities = [...this.#storeContributions.values()]
       .flatMap((entry) => entry.entities)
       .sort((left, right) => left.id.localeCompare(right.id));
-    const conflicts = [...this.#storeContributions.values()].flatMap(
-      (entry) => entry.conflicts,
+    const resolutions = [...this.#storeContributions.values()].flatMap(
+      (entry) => entry.resolutions,
     );
     const nextProtectedKeys = [...this.#storeContributions.values()]
       .flatMap((entry) => entry.protectedKeys)
@@ -592,7 +613,7 @@ export class SessionOfflineCoordinator {
     }
 
     this.store.setPartialState(
-      { entities, conflicts },
+      { entities, resolutions },
       { action: 'offline-session-aggregate' },
     );
     this.#publishSnapshot();
@@ -642,7 +663,7 @@ export class SessionOfflineCoordinator {
       kind: 'offline-session-snapshot',
       status,
       entities: this.store.state.entities,
-      conflicts: this.store.state.conflicts,
+      resolutions: this.store.state.resolutions,
     });
   }
 
@@ -654,7 +675,7 @@ export class SessionOfflineCoordinator {
       {
         status: this.#stampLocalStatus(message.status),
         entities: message.entities,
-        conflicts: message.conflicts,
+        resolutions: message.resolutions,
       },
       { action: 'offline-session-remote' },
     );

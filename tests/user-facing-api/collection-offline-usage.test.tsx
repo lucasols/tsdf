@@ -365,8 +365,8 @@ test('direct collection store offline public api', async () => {
   });
   await Promise.resolve();
 
-  expect(collectionStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
-  await collectionStore.resolveOfflineConflict('missing', {
+  expect(collectionStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  await collectionStore.resolveOfflineResolution('missing', {
     resolution: 'noop',
   });
   expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))
@@ -410,7 +410,7 @@ test('direct collection store offline public api', async () => {
     await flushAllTimers();
   });
 
-  const [conflict] = collectionStore.getOfflineConflicts();
+  const [conflict] = collectionStore.getOfflineResolutions();
   expect(conflict).toMatchObject({
     conflict: { reason: 'server-changed' },
     input: { id: '1', title: 'Todo 1 conflict' },
@@ -422,10 +422,10 @@ test('direct collection store offline public api', async () => {
   expect(collectionStore.getOfflineEntities()).toMatchObject([
     {
       entityKey: getCompositeKey('1'),
-      hasConflict: true,
+      requiresResolution: true,
       pendingMutations: 0,
       storeType: 'collection',
-      syncState: 'conflict',
+      syncState: 'resolution-required',
     },
   ]);
   expect(todoTwoHook.result.current.data).toMatchInlineSnapshot(`
@@ -443,13 +443,13 @@ test('direct collection store offline public api', async () => {
     `);
 
   await act(async () => {
-    await collectionStore.resolveOfflineConflict(conflict!.id, {
+    await collectionStore.resolveOfflineResolution(conflict!.id, {
       title: 'Todo 1 resolved',
     });
     await flushAllTimers();
   });
 
-  expect(collectionStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
+  expect(collectionStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(collectionStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
   expect(pick(todoOneHook.result.current, ['data', 'status', 'pendingSync']))

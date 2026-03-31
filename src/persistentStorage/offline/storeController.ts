@@ -1,5 +1,7 @@
 import { createAsyncQueue } from '@ls-stack/utils/asyncQueue';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { isObject } from '@ls-stack/utils/typeGuards';
+import { rc_parse } from 'runcheck';
 
 import type { ValidPayload } from '../../utils/storeShared';
 import { createPersistentStorageNamespaceHandle } from '../persistentStorageManager';
@@ -12,19 +14,21 @@ import type { StorageAdapter } from '../types';
 import { validateWithSchema } from '../validateWithSchema';
 import type { PreparedOfflineMutation } from './mutationRuntime';
 import { getOrCreateSessionOfflineCoordinator } from './sessionCoordinator';
-import type {
-  AnyOfflineOperationDefinition,
-  GlobalOfflineEntity,
-  OfflineConflictRecord,
-  OfflineMutationInput,
-  OfflineModeConfig,
-  OfflineOperationSchemaShape,
-  OfflineQueueEntry,
-  OfflineResolveConflictResult,
-  OfflineStoreType,
+import {
+  offlineResolutionRecordSchema,
+  type AnyOfflineOperationDefinition,
+  type GlobalOfflineEntity,
+  type OfflineMutationInput,
+  type OfflineModeConfig,
+  type OfflineOperationSchemaShape,
+  type OfflineQueueEntry,
+  type OfflineResolutionRecord,
+  type OfflineResolveConflictResult,
+  type OfflineStoreType,
 } from './types';
 
-const NEEDS_CONFIRMATION_RETRY_MS = 250;
+const DEFAULT_REPLAY_RETRY_MAX_FAILURES = 5;
+const DEFAULT_REPLAY_RETRY_INTERVAL_MS = 5_000;
 
 type OfflineEntityRef = {
   entityKey: string;
@@ -78,8 +82,8 @@ type ActiveSessionState = {
   queueNamespace: ReturnType<
     typeof createPersistentStorageNamespaceHandle<OfflineQueueEntry>
   >;
-  conflictNamespace: ReturnType<
-    typeof createPersistentStorageNamespaceHandle<OfflineConflictRecord>
+  resolutionNamespace: ReturnType<
+    typeof createPersistentStorageNamespaceHandle<OfflineResolutionRecord>
   >;
   entityNamespace: ReturnType<
     typeof createPersistentStorageNamespaceHandle<GlobalOfflineEntity>
@@ -155,9 +159,9 @@ export type OfflineStoreController<
     args: OfflineMutationInput<TOperations, TName>,
   ) => Promise<void>;
   getOfflineEntities: () => GlobalOfflineEntity[];
-  getOfflineConflicts: () => OfflineConflictRecord[];
-  resolveOfflineConflict: (
-    conflictId: string,
+  getOfflineResolutions: () => OfflineResolutionRecord[];
+  resolveOfflineResolution: (
+    resolutionId: string,
     resolution: unknown,
   ) => Promise<void>;
   prepareForFetch: () => Promise<void>;
@@ -200,9 +204,13 @@ export function createOfflineStoreController<
   let hydratedSessionKey: string | null = null;
   let hydratedPromise: Promise<void> | null = null;
   let nextQueueOrder = 0;
+  const replayRetryMaxFailures =
+    offlineMode.replayRetry?.maxFailures ?? DEFAULT_REPLAY_RETRY_MAX_FAILURES;
+  const replayRetryIntervalMs =
+    offlineMode.replayRetry?.intervalMs ?? DEFAULT_REPLAY_RETRY_INTERVAL_MS;
   const queueEntries = new Map<string, OfflineQueueEntry>();
-  const conflicts = new Map<string, OfflineConflictRecord>();
-  const confirmationRetriesConsumed = new Set<string>();
+  const resolutions = new Map<string, OfflineResolutionRecord>();
+  const countedReplayFailures = new Map<string, number>();
 
   type InternalQueuedMutationArgs<TName extends keyof TOperations & string> = {
     operation: TName;
@@ -258,20 +266,18 @@ export function createOfflineStoreController<
     }
   }
 
-  function resetConfirmationRetries(): void {
+  function resetReplayRetryState(): void {
     clearReplayRetryTimer();
-    confirmationRetriesConsumed.clear();
+    countedReplayFailures.clear();
   }
 
-  function scheduleReplayRetry(entryId: string): void {
-    if (confirmationRetriesConsumed.has(entryId)) return;
+  function scheduleReplayRetry(): void {
     if (replayRetryTimer !== null) return;
-    confirmationRetriesConsumed.add(entryId);
 
     replayRetryTimer = setTimeout(() => {
       replayRetryTimer = null;
       void ensureReplayScheduled();
-    }, NEEDS_CONFIRMATION_RETRY_MS);
+    }, replayRetryIntervalMs);
   }
 
   function isActiveSessionState(current: ActiveSessionState): boolean {
@@ -281,9 +287,9 @@ export function createOfflineStoreController<
   function teardownActiveSession(): void {
     activeSession?.unregister?.();
     activeSession = null;
-    resetConfirmationRetries();
+    resetReplayRetryState();
     queueEntries.clear();
-    conflicts.clear();
+    resolutions.clear();
     nextQueueOrder = 0;
     hydratedSessionKey = null;
     hydratedPromise = null;
@@ -320,8 +326,8 @@ export function createOfflineStoreController<
         onPersistentStorageError,
         entryPrefix: OFFLINE_QUEUE_STORAGE_ENTRY_PREFIX,
       });
-    const conflictNamespace =
-      createPersistentStorageNamespaceHandle<OfflineConflictRecord>({
+    const resolutionNamespace =
+      createPersistentStorageNamespaceHandle<OfflineResolutionRecord>({
         storeName,
         adapter,
         getSessionKey: () => sessionKey,
@@ -340,8 +346,10 @@ export function createOfflineStoreController<
     const unregister = session.registerStore({
       storeName,
       onGreenCycle: () => {
-        confirmationRetriesConsumed.clear();
         void ensureReplayScheduled();
+      },
+      onOfflineCycle: () => {
+        resetReplayRetryState();
       },
     });
 
@@ -350,7 +358,7 @@ export function createOfflineStoreController<
       session,
       unregister,
       queueNamespace,
-      conflictNamespace,
+      resolutionNamespace,
       entityNamespace,
     };
 
@@ -364,20 +372,25 @@ export function createOfflineStoreController<
     if (hydratedPromise) return hydratedPromise;
 
     hydratedPromise = (async () => {
-      const [loadedQueueEntries, loadedConflictEntries] = await Promise.all([
+      const [loadedQueueEntries, loadedResolutionEntries] = await Promise.all([
         loadNamespaceRecords(current.queueNamespace),
-        loadNamespaceRecords(current.conflictNamespace),
+        loadNamespaceRecords(current.resolutionNamespace),
       ]);
 
       if (!isActiveSessionState(current)) return;
 
       queueEntries.clear();
-      conflicts.clear();
+      resolutions.clear();
       for (const entry of loadedQueueEntries.values()) {
         queueEntries.set(entry.id, entry);
       }
-      for (const conflict of loadedConflictEntries.values()) {
-        conflicts.set(conflict.id, conflict);
+      for (const resolution of loadedResolutionEntries.values()) {
+        const parsed = rc_parse(resolution, offlineResolutionRecordSchema);
+        if (!parsed.ok) {
+          void current.resolutionNamespace.remove(resolution.id);
+          continue;
+        }
+        resolutions.set(resolution.id, resolution);
       }
       nextQueueOrder = getNextQueueOrder(loadedQueueEntries.values());
       hydratedSessionKey = current.sessionKey;
@@ -428,7 +441,7 @@ export function createOfflineStoreController<
             existing?.syncState === 'needs-confirmation'
               ? existing.syncState
               : entry.syncState,
-          hasConflict: existing?.hasConflict ?? false,
+          requiresResolution: existing?.requiresResolution ?? false,
           createdAt: existing?.createdAt ?? entry.createdAt,
           updatedAt: entry.updatedAt,
           tempId: entry.tempId ?? existing?.tempId,
@@ -436,18 +449,18 @@ export function createOfflineStoreController<
       }
     }
 
-    for (const conflict of conflicts.values()) {
-      for (const ref of conflict.entityRefs) {
+    for (const resolution of resolutions.values()) {
+      for (const ref of resolution.entityRefs) {
         const existing = entitiesByKey.get(ref.entityKey);
 
         entitiesByKey.set(ref.entityKey, {
           ...createEntityBase(ref),
           pendingMutations: existing?.pendingMutations ?? 0,
-          syncState: 'conflict',
-          hasConflict: true,
-          createdAt: existing?.createdAt ?? conflict.createdAt,
-          updatedAt: conflict.updatedAt,
-          tempId: conflict.tempId ?? existing?.tempId,
+          syncState: 'resolution-required',
+          requiresResolution: true,
+          createdAt: existing?.createdAt ?? resolution.createdAt,
+          updatedAt: resolution.updatedAt,
+          tempId: resolution.tempId ?? existing?.tempId,
         });
       }
     }
@@ -464,7 +477,7 @@ export function createOfflineStoreController<
 
     sessionState.session.syncStoreData(storeName, {
       entities,
-      conflicts: [...conflicts.values()],
+      resolutions: [...resolutions.values()],
       protectedKeys,
     });
 
@@ -517,6 +530,34 @@ export function createOfflineStoreController<
     return { queueOrders, nextQueueOrderValue: baseQueueOrder + count };
   }
 
+  function buildFreshQueueEntry(args: {
+    current: ActiveSessionState;
+    operation: string;
+    input: unknown;
+    entityRefs: OfflineEntityRef[];
+    queueOrder: number;
+    tempId?: ValidPayload;
+  }): OfflineQueueEntry {
+    const now = Date.now();
+
+    return {
+      id: `${storeName}:${now}:${Math.random().toString(36).slice(2, 10)}`,
+      sessionKey: args.current.sessionKey,
+      storeName,
+      storeType,
+      operation: args.operation,
+      input: args.input,
+      queueOrder: args.queueOrder,
+      entityRefs: args.entityRefs,
+      attempts: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastAttemptAt: null,
+      syncState: 'pending',
+      tempId: args.tempId,
+    };
+  }
+
   function findAccumulationCandidate(args: {
     operationName: string;
     entityRefs: OfflineEntityRef[];
@@ -542,27 +583,50 @@ export function createOfflineStoreController<
     return candidate;
   }
 
-  function buildConflictRecord(
+  function buildResolutionRecordBase(
     current: ActiveSessionState,
     entry: OfflineQueueEntry,
-    conflict: unknown,
-  ): OfflineConflictRecord {
+  ) {
     const now = Date.now();
 
     return {
-      id: `conflict:${entry.id}`,
       entryId: entry.id,
       sessionKey: current.sessionKey,
       storeName,
       storeType,
       operation: entry.operation,
       input: entry.input,
-      conflict,
       enqueuedAt: entry.createdAt,
       entityRefs: entry.entityRefs,
       createdAt: now,
       updatedAt: now,
       tempId: entry.tempId,
+    };
+  }
+
+  function buildConflictResolutionRecord(
+    current: ActiveSessionState,
+    entry: OfflineQueueEntry,
+    conflict: unknown,
+  ): OfflineResolutionRecord {
+    return {
+      ...buildResolutionRecordBase(current, entry),
+      id: `conflict:${entry.id}`,
+      kind: 'conflict',
+      conflict,
+    };
+  }
+
+  function buildRetryExhaustedResolutionRecord(
+    current: ActiveSessionState,
+    entry: OfflineQueueEntry,
+    lastReplayError: { message: string },
+  ): OfflineResolutionRecord {
+    return {
+      ...buildResolutionRecordBase(current, entry),
+      id: `retry-exhausted:${entry.id}`,
+      kind: 'retry-exhausted',
+      lastReplayError,
     };
   }
 
@@ -591,9 +655,9 @@ export function createOfflineStoreController<
     if (!session) return;
     if (isActiveSessionState(session)) {
       queueEntries.delete(entryId);
-      confirmationRetriesConsumed.delete(entryId);
+      countedReplayFailures.delete(entryId);
       if (queueEntries.size === 0) {
-        resetConfirmationRetries();
+        clearReplayRetryTimer();
       }
     }
     await session.queueNamespace.remove(entryId);
@@ -602,37 +666,37 @@ export function createOfflineStoreController<
     }
   }
 
-  async function persistConflict(
-    conflict: OfflineConflictRecord,
+  async function persistResolution(
+    resolution: OfflineResolutionRecord,
     current?: ActiveSessionState,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
     if (isActiveSessionState(session)) {
-      conflicts.set(conflict.id, conflict);
+      resolutions.set(resolution.id, resolution);
     }
-    await session.conflictNamespace.save(conflict.id, conflict);
+    await session.resolutionNamespace.save(resolution.id, resolution);
     if (isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
   }
 
-  async function removeConflict(
-    conflictId: string,
+  async function removeResolution(
+    resolutionId: string,
     current?: ActiveSessionState,
   ): Promise<void> {
     const session = current ?? ensureActiveSession();
     if (!session) return;
     if (isActiveSessionState(session)) {
-      conflicts.delete(conflictId);
+      resolutions.delete(resolutionId);
     }
-    await session.conflictNamespace.remove(conflictId);
+    await session.resolutionNamespace.remove(resolutionId);
     if (isActiveSessionState(session)) {
       refreshDerivedState(session);
     }
   }
 
-  async function persistValidatedConflict(args: {
+  async function persistValidatedConflictResolution(args: {
     current: ActiveSessionState;
     entry: OfflineQueueEntry;
     conflict: unknown;
@@ -649,8 +713,8 @@ export function createOfflineStoreController<
       );
     }
 
-    await persistConflict(
-      buildConflictRecord(args.current, args.entry, args.conflict),
+    await persistResolution(
+      buildConflictResolutionRecord(args.current, args.entry, args.conflict),
       args.current,
     );
     await removeEntry(args.entry.id, args.current);
@@ -835,22 +899,14 @@ export function createOfflineStoreController<
       }
     }
 
-    const nextEntry = {
-      id: `${storeName}:${now}:${Math.random().toString(36).slice(2, 10)}`,
-      sessionKey: current.sessionKey,
-      storeName,
-      storeType,
+    const nextEntry = buildFreshQueueEntry({
+      current,
       operation: operationName,
       input: validatedInput,
       queueOrder,
       entityRefs,
-      attempts: 0,
-      createdAt: now,
-      updatedAt: now,
-      lastAttemptAt: null,
-      syncState: 'pending' as const,
       tempId,
-    };
+    });
     workingQueue.set(nextEntry.id, nextEntry);
 
     return { operationName, validatedInput, tempId, pendingEntity, nextEntry };
@@ -955,7 +1011,6 @@ export function createOfflineStoreController<
   async function ensureReplayScheduled(): Promise<void> {
     let current = ensureActiveSession();
     if (!current) return;
-    clearReplayRetryTimer();
     if (hydratedSessionKey !== current.sessionKey || hydratedPromise !== null) {
       await hydrateIfNeeded();
       current = ensureActiveSession();
@@ -963,6 +1018,7 @@ export function createOfflineStoreController<
     }
     if (
       replayScheduled ||
+      replayRetryTimer !== null ||
       current.session.getStatus().effectiveOffline ||
       !current.session.isLeader() ||
       queueEntries.size === 0
@@ -979,7 +1035,7 @@ export function createOfflineStoreController<
 
         const nextEntry = getSortedEntries()[0];
         if (nextEntry?.syncState === 'needs-confirmation') {
-          scheduleReplayRetry(nextEntry.id);
+          scheduleReplayRetry();
         }
       }
     });
@@ -1062,7 +1118,7 @@ export function createOfflineStoreController<
             );
           }
 
-          await persistValidatedConflict({
+          await persistValidatedConflictResolution({
             current,
             entry: entryToUse,
             conflict,
@@ -1097,26 +1153,53 @@ export function createOfflineStoreController<
 
         await removeEntry(entryToUse.id, current);
       } catch (error) {
-        entryToUse = {
-          ...entryToUse,
-          attempts: entryToUse.attempts + 1,
-          updatedAt: Date.now(),
-          lastAttemptAt: Date.now(),
-          syncState: operation.shouldSkipSync
-            ? 'needs-confirmation'
-            : 'pending',
-          lastError: { message: toMessage(error) },
-        };
-        await persistEntry(entryToUse, current);
-        await current.session.classifyFailure(error, {
+        const lastError = { message: toMessage(error) };
+        const classification = await current.session.classifyFailure(error, {
           phase: 'sync',
           storeType,
           operationName: entryToUse.operation,
           sessionKey: current.sessionKey,
         });
-        if (operation.shouldSkipSync) {
-          scheduleReplayRetry(entryToUse.id);
+
+        if (
+          classification === 'outage' ||
+          current.session.getStatus().effectiveOffline
+        ) {
+          entryToUse = {
+            ...entryToUse,
+            attempts: entryToUse.attempts + 1,
+            updatedAt: Date.now(),
+            lastAttemptAt: Date.now(),
+            syncState: 'pending',
+            lastError,
+          };
+          await persistEntry(entryToUse, current);
+          return;
         }
+
+        const nextFailures =
+          (countedReplayFailures.get(entryToUse.id) ?? 0) + 1;
+        countedReplayFailures.set(entryToUse.id, nextFailures);
+
+        entryToUse = {
+          ...entryToUse,
+          attempts: entryToUse.attempts + 1,
+          updatedAt: Date.now(),
+          lastAttemptAt: Date.now(),
+          syncState: 'needs-confirmation',
+          lastError,
+        };
+
+        if (nextFailures >= replayRetryMaxFailures) {
+          await removeEntry(entryToUse.id, current, true);
+          await persistResolution(
+            buildRetryExhaustedResolutionRecord(current, entryToUse, lastError),
+            current,
+          );
+          return;
+        }
+
+        await persistEntry(entryToUse, current);
         return;
       }
     }
@@ -1192,42 +1275,74 @@ export function createOfflineStoreController<
       .filter((entity) => entity.storeName === storeName);
   }
 
-  function getOfflineConflicts(): OfflineConflictRecord[] {
-    return [...conflicts.values()].sort((left, right) =>
+  function getOfflineResolutions(): OfflineResolutionRecord[] {
+    return [...resolutions.values()].sort((left, right) =>
       left.id.localeCompare(right.id),
     );
   }
 
-  async function resolveOfflineConflict(
-    conflictId: string,
+  async function resolveOfflineResolution(
+    resolutionId: string,
     resolution: unknown,
   ): Promise<void> {
     await hydrateIfNeeded();
     const current = ensureActiveSession();
     if (!current) return;
 
-    const conflict = conflicts.get(conflictId);
-    if (!conflict) return;
+    const resolutionRecord = resolutions.get(resolutionId);
+    if (!resolutionRecord) return;
 
-    const operation = offlineMode.operations[conflict.operation];
+    const operation = offlineMode.operations[resolutionRecord.operation];
     if (!operation) {
-      await removeConflict(conflictId, current);
+      await removeResolution(resolutionId, current);
       return;
     }
+
+    if (resolutionRecord.kind === 'retry-exhausted') {
+      const action = isObject(resolution) ? resolution.action : undefined;
+
+      if (action !== 'retry' && action !== 'discard') {
+        throw new Error('Invalid offline resolution action');
+      }
+
+      await removeResolution(resolutionId, current);
+
+      if (action === 'discard') return;
+
+      const { queueOrders, nextQueueOrderValue } = previewQueueOrders(1);
+      const queueOrder = queueOrders[0];
+      if (queueOrder === undefined) {
+        throw new Error('Missing queue order for replay resolution requeue');
+      }
+      nextQueueOrder = nextQueueOrderValue;
+
+      const nextEntry = buildFreshQueueEntry({
+        current,
+        operation: resolutionRecord.operation,
+        input: resolutionRecord.input,
+        entityRefs: resolutionRecord.entityRefs,
+        queueOrder,
+        tempId: resolutionRecord.tempId,
+      });
+      await persistEntry(nextEntry, current);
+      await ensureReplayScheduled();
+      return;
+    }
+
     if (!operation.conflictHandling) {
-      await removeConflict(conflictId, current);
+      await removeResolution(resolutionId, current);
       return;
     }
 
     const result = await operation.conflictHandling.resolveConflict({
-      input: conflict.input,
-      conflict: conflict.conflict,
-      enqueuedAt: conflict.enqueuedAt,
-      updatedAt: conflict.updatedAt,
+      input: resolutionRecord.input,
+      conflict: resolutionRecord.conflict,
+      enqueuedAt: resolutionRecord.enqueuedAt,
+      updatedAt: resolutionRecord.updatedAt,
       resolution,
     });
 
-    await removeConflict(conflictId, current);
+    await removeResolution(resolutionId, current);
 
     const typedResult: OfflineResolveConflictResult<unknown> = result;
     if (!typedResult) return;
@@ -1239,13 +1354,13 @@ export function createOfflineStoreController<
         currentSessionKey: current.sessionKey,
         mutations: [
           prepareMutationWithSession(current, {
-            // WORKAROUND: Conflict records persist operation names as plain strings, and requeueing needs to rebind the validated name to the operation-map key type.
+            // WORKAROUND: Resolution records persist operation names as plain strings, and requeueing needs to rebind the validated name to the operation-map key type.
             operation: __LEGIT_CAST__<keyof TOperations & string, string>(
-              conflict.operation,
+              resolutionRecord.operation,
             ),
             input: requeue.input,
-            tempId: conflict.tempId,
-            entityRefs: conflict.entityRefs,
+            tempId: resolutionRecord.tempId,
+            entityRefs: resolutionRecord.entityRefs,
           }),
         ],
       });
@@ -1289,8 +1404,8 @@ export function createOfflineStoreController<
     prepareForMutation,
     queueMutation,
     getOfflineEntities,
-    getOfflineConflicts,
-    resolveOfflineConflict,
+    getOfflineResolutions,
+    resolveOfflineResolution,
     prepareForFetch,
     getSessionStatus,
     evaluateOfflineFetchError,

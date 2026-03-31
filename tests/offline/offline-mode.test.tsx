@@ -500,7 +500,7 @@ test('document offline mutations are queued durably and replay when the browser 
     {
       entityKey: 'document',
       entityKind: 'document',
-      hasConflict: false,
+      requiresResolution: false,
       pendingMutations: 1,
       sessionKey: 'offline-doc-session',
       storeName: 'offline-doc-store',
@@ -609,7 +609,7 @@ test('plain stores do not inherit offline state from other stores in the same se
   expect(
     Object.prototype.hasOwnProperty.call(
       documentHook.result.current,
-      'hasOfflineConflict',
+      'hasOfflineResolution',
     ),
   ).toBe(false);
   documentHook.unmount();

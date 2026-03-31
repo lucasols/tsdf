@@ -214,9 +214,9 @@ test('document offline accumulation keeps a single persisted queue entry and rep
     - createdAt: 1735689600000
       entityKey: 'document'
       entityKind: 'document'
-      hasConflict: '❌'
       id: 'offline-accumulation-session:offline-accumulation-doc:document'
       pendingMutations: 1
+      requiresResolution: '❌'
       sessionKey: 'offline-accumulation-session'
       storeName: 'offline-accumulation-doc'
       storeType: 'document'
@@ -308,10 +308,6 @@ test('needs-confirmation entries are skipped when shouldSkipSync returns true', 
       expect(input.value).toBe(2);
       return Promise.resolve(true);
     });
-  const recoveryCheck = vi
-    .fn<({ sessionKey }: { sessionKey: string }) => boolean>()
-    .mockReturnValue(true);
-
   const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
     getSessionKey: () => 'needs-confirmation-session',
     testScenario: 'loaded',
@@ -319,19 +315,7 @@ test('needs-confirmation entries are skipped when shouldSkipSync returns true', 
       adapter: 'local-sync',
       schema: docSchema,
       offlineMode: {
-        network: { enabled: true },
-        outage: {
-          enabled: true,
-          classifyFailure: (_error, ctx) =>
-            ctx.phase === 'sync' ? 'outage' : 'ignore',
-          recoveryCheck,
-          recoveryProbe: {
-            intervalMs: 50,
-            maxIntervalMs: 50,
-            backoffMultiplier: 1,
-            jitterRatio: 0,
-          },
-        },
+        network: network.config,
         operations: {
           updateValue: {
             inputSchema: docMutationInputSchema,
@@ -356,13 +340,13 @@ test('needs-confirmation entries are skipped when shouldSkipSync returns true', 
   act(() => {
     network.goOnline();
   });
-  await advanceTime(60);
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  await advanceTime(5_000);
   await flushAllTimers();
 
   expect(execute).toHaveBeenCalledTimes(1);
   expect(shouldSkipSync).toHaveBeenCalledTimes(1);
   expect(skipCheckEnqueuedAt).toBe(TEST_INITIAL_TIME);
-  expect(recoveryCheck).toHaveBeenCalledTimes(1);
   expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
 });
 
@@ -453,7 +437,7 @@ test('needs-confirmation entries retry execute when shouldSkipSync returns false
   env.addTimelineComments('beforeNextAction', [
     'advance the retry window so shouldSkipSync can allow the queued mutation to replay again',
   ]);
-  await advanceTime(300);
+  await advanceTime(5_000);
   await flushAllTimers();
   trackDocumentReplayState(env);
 
@@ -468,10 +452,302 @@ test('needs-confirmation entries retry execute when shouldSkipSync returns false
     .    | "value:2 sync:pending pending:1" | ui-changed
     .    | "value:2 sync:pending pending:1" | -- bring the session online and wait for the first replay attempt to settle into syncing
     .    | "value:2 sync:syncing pending:1" | ui-changed
-    1s   | "value:2 sync:syncing pending:1" | -- advance the retry window so shouldSkipSync can allow the queued mutation to replay again
+    5s   | "value:2 sync:syncing pending:1" | -- advance the retry window so shouldSkipSync can allow the queued mutation to replay again
     .    | "value:2 sync:none pending:0"    | ui-changed
     "
   `);
+});
+
+test('healthy replay failures are retried 5 times and then move into the resolution queue', async () => {
+  network.setOffline();
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockRejectedValue(new Error('replay failed'));
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    getSessionKey: () => 'retry-exhaustion-session',
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        network: network.config,
+        operations: {
+          updateValue: { inputSchema: docMutationInputSchema, execute },
+        },
+      },
+    },
+  });
+
+  await env.apiStore.performMutation({
+    mutation: () => Promise.resolve(2),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  act(() => {
+    network.goOnline();
+  });
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+
+  for (const attempt of [2, 3, 4, 5]) {
+    await advanceTime(5_000);
+    await waitForMicrotaskCondition(
+      () => execute.mock.calls.length === attempt,
+    );
+  }
+  await flushAllTimers();
+
+  expect(execute).toHaveBeenCalledTimes(5);
+  expect(env.apiStore.getOfflineEntities()).toMatchObject([
+    {
+      entityKey: 'document',
+      pendingMutations: 0,
+      requiresResolution: true,
+      sessionKey: 'retry-exhaustion-session',
+      storeType: 'document',
+      syncState: 'resolution-required',
+    },
+  ]);
+  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
+    {
+      kind: 'retry-exhausted',
+      input: { value: 2 },
+      lastReplayError: { message: 'replay failed' },
+      operation: 'updateValue',
+    },
+  ]);
+});
+
+test('retry-exhausted resolutions can retry or discard queued work', async () => {
+  network.setOffline();
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockRejectedValueOnce(new Error('replay failed'))
+    .mockRejectedValueOnce(new Error('replay failed'))
+    .mockRejectedValueOnce(new Error('replay failed'))
+    .mockRejectedValueOnce(new Error('replay failed'))
+    .mockRejectedValueOnce(new Error('replay failed'))
+    .mockResolvedValueOnce({ value: 2 })
+    .mockRejectedValue(new Error('replay failed'));
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    getSessionKey: () => 'retry-resolution-actions-session',
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        network: network.config,
+        operations: {
+          updateValue: { inputSchema: docMutationInputSchema, execute },
+        },
+      },
+    },
+  });
+
+  const queueOfflineMutation = () =>
+    env.apiStore.performMutation({
+      mutation: () => Promise.resolve(2),
+      offline: { operation: 'updateValue', input: { value: 2 } },
+    });
+
+  await queueOfflineMutation();
+
+  act(() => {
+    network.goOnline();
+  });
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  for (const attempt of [2, 3, 4, 5]) {
+    await advanceTime(5_000);
+    await waitForMicrotaskCondition(
+      () => execute.mock.calls.length === attempt,
+    );
+  }
+  await flushAllTimers();
+
+  const [resolution] = env.apiStore.getOfflineResolutions();
+  expect(resolution).toMatchObject({ kind: 'retry-exhausted' });
+  if (!resolution) {
+    throw new Error('Expected a retry-exhausted resolution');
+  }
+
+  await env.apiStore.resolveOfflineResolution(resolution.id, {
+    action: 'retry',
+  });
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineEntities()).toMatchObject([
+    { entityKey: 'document', pendingMutations: 1, syncState: 'pending' },
+  ]);
+
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 6);
+  await flushAllTimers();
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+  await queueOfflineMutation();
+  act(() => {
+    network.goOnline();
+  });
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 7);
+  for (const attempt of [8, 9, 10, 11]) {
+    await advanceTime(5_000);
+    await waitForMicrotaskCondition(
+      () => execute.mock.calls.length === attempt,
+    );
+  }
+  await flushAllTimers();
+
+  const [discardResolution] = env.apiStore.getOfflineResolutions();
+  expect(discardResolution).toMatchObject({ kind: 'retry-exhausted' });
+  if (!discardResolution) {
+    throw new Error('Expected a retry-exhausted resolution');
+  }
+
+  await env.apiStore.resolveOfflineResolution(discardResolution.id, {
+    action: 'discard',
+  });
+
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
+});
+
+test('outage-classified replay failures do not count toward retry exhaustion', async () => {
+  network.setOffline();
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockRejectedValueOnce(new Error('outage'))
+    .mockRejectedValueOnce(new Error('healthy failure'))
+    .mockResolvedValue({ value: 2 });
+  const recoveryCheck = vi
+    .fn<({ sessionKey }: { sessionKey: string }) => boolean>()
+    .mockReturnValue(true);
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    getSessionKey: () => 'retry-outage-session',
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        network: { enabled: true },
+        outage: {
+          enabled: true,
+          classifyFailure: (error, ctx) =>
+            ctx.phase === 'sync' &&
+            error instanceof Error &&
+            error.message === 'outage'
+              ? 'outage'
+              : 'ignore',
+          recoveryCheck,
+          recoveryProbe: {
+            intervalMs: 50,
+            maxIntervalMs: 50,
+            backoffMultiplier: 1,
+            jitterRatio: 0,
+          },
+        },
+        replayRetry: { maxFailures: 2 },
+        operations: {
+          updateValue: { inputSchema: docMutationInputSchema, execute },
+        },
+      },
+    },
+  });
+
+  await env.apiStore.performMutation({
+    mutation: () => Promise.resolve(2),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  act(() => {
+    network.goOnline();
+  });
+  await advanceTime(60);
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 2);
+
+  expect(recoveryCheck).toHaveBeenCalledTimes(1);
+  expect(env.apiStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  expect(env.apiStore.getOfflineEntities()).toMatchObject([
+    {
+      entityKey: 'document',
+      pendingMutations: 1,
+      syncState: 'needs-confirmation',
+    },
+  ]);
+});
+
+test('going offline again resets the healthy replay failure budget', async () => {
+  network.setOffline();
+  let countedFailures = 0;
+  const execute = vi
+    .fn<
+      ({ input }: { input: { value: number } }) => Promise<{ value: number }>
+    >()
+    .mockImplementation(() => {
+      countedFailures += 1;
+      throw new Error(`healthy failure ${countedFailures}`);
+    });
+
+  const env = createDocumentStoreTestEnv<number, UpdateValueOperations>(1, {
+    getSessionKey: () => 'retry-budget-reset-session',
+    testScenario: 'loaded',
+    persistentStorage: {
+      adapter: 'local-sync',
+      schema: docSchema,
+      offlineMode: {
+        network: network.config,
+        operations: {
+          updateValue: { inputSchema: docMutationInputSchema, execute },
+        },
+      },
+    },
+  });
+
+  await env.apiStore.performMutation({
+    mutation: () => Promise.resolve(2),
+    offline: { operation: 'updateValue', input: { value: 2 } },
+  });
+
+  act(() => {
+    network.goOnline();
+  });
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 1);
+  for (const attempt of [2, 3]) {
+    await advanceTime(5_000);
+    await waitForMicrotaskCondition(
+      () => execute.mock.calls.length === attempt,
+    );
+  }
+
+  act(() => {
+    network.goOffline();
+  });
+  await Promise.resolve();
+
+  act(() => {
+    network.goOnline();
+  });
+  await waitForMicrotaskCondition(() => execute.mock.calls.length === 4);
+  for (const attempt of [5, 6, 7, 8]) {
+    await advanceTime(5_000);
+    await waitForMicrotaskCondition(
+      () => execute.mock.calls.length === attempt,
+    );
+  }
+  await flushAllTimers();
+
+  expect(env.apiStore.getOfflineResolutions()).toMatchObject([
+    { kind: 'retry-exhausted', input: { value: 2 }, operation: 'updateValue' },
+  ]);
 });
 
 test('needs-confirmation entries do not accept new accumulation before shouldSkipSync runs', async () => {
@@ -618,7 +894,7 @@ test('needs-confirmation entries keep retrying shouldSkipSync while the session 
     },
   ]);
 
-  await advanceTime(300);
+  await advanceTime(5_000);
   await flushAllTimers();
 
   expect(shouldSkipSync).toHaveBeenCalledTimes(1);

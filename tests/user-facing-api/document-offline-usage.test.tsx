@@ -332,8 +332,10 @@ test('direct document store offline public api', async () => {
   });
   await Promise.resolve();
 
-  expect(documentStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
-  await documentStore.resolveOfflineConflict('missing', { resolution: 'noop' });
+  expect(documentStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
+  await documentStore.resolveOfflineResolution('missing', {
+    resolution: 'noop',
+  });
   expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))
     .toMatchInlineSnapshot(`
       data: { label: 'conflict:6', value: 6 }
@@ -361,7 +363,7 @@ test('direct document store offline public api', async () => {
   expect(documentHook.result.current.status).toBe('success');
   expect(documentHook.result.current.pendingSync).toBe(false);
 
-  const [conflict] = documentStore.getOfflineConflicts();
+  const [conflict] = documentStore.getOfflineResolutions();
   expect(conflict).toMatchObject({
     conflict: { reason: 'stale-server-value' },
     entityRefs: [{ entityKey: 'document', entityKind: 'document' }],
@@ -374,10 +376,10 @@ test('direct document store offline public api', async () => {
   expect(documentStore.getOfflineEntities()).toMatchObject([
     {
       entityKey: 'document',
-      hasConflict: true,
+      requiresResolution: true,
       pendingMutations: 0,
       storeType: 'document',
-      syncState: 'conflict',
+      syncState: 'resolution-required',
     },
   ]);
   expect(skipSyncReplayOrder).toMatchInlineSnapshot(
@@ -388,11 +390,11 @@ test('direct document store offline public api', async () => {
   );
 
   await act(async () => {
-    await documentStore.resolveOfflineConflict(conflict!.id, { value: 7 });
+    await documentStore.resolveOfflineResolution(conflict!.id, { value: 7 });
     await flushAllTimers();
   });
 
-  expect(documentStore.getOfflineConflicts()).toMatchInlineSnapshot(`[]`);
+  expect(documentStore.getOfflineResolutions()).toMatchInlineSnapshot(`[]`);
   expect(documentStore.getOfflineEntities()).toMatchInlineSnapshot(`[]`);
   expect(getGlobalOfflineEntities(sessionKey)).toMatchInlineSnapshot(`[]`);
   expect(pick(documentHook.result.current, ['data', 'status', 'pendingSync']))

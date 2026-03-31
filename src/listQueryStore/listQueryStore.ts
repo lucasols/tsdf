@@ -2136,9 +2136,10 @@ export function createListQueryStore<
         storeName: resolvedPersistentStorageConfig ? id : undefined,
       });
     },
-    getOfflineConflicts: () => offlineController?.getOfflineConflicts() ?? [],
-    resolveOfflineConflict: (conflictId: string, resolution: unknown) =>
-      offlineController?.resolveOfflineConflict(conflictId, resolution),
+    getOfflineResolutions: () =>
+      offlineController?.getOfflineResolutions() ?? [],
+    resolveOfflineResolution: (resolutionId: string, resolution: unknown) =>
+      offlineController?.resolveOfflineResolution(resolutionId, resolution),
     preloadItemFromStorage: preloadItemFromPersistentStorage,
     scheduleItemFetch: scheduleItemFetchApi,
     awaitItemFetch: awaitItemFetchApi,

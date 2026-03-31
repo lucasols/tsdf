@@ -114,12 +114,12 @@ test('remote offline session snapshots do not echo back to the sender tab', asyn
         entityKind: 'document',
         pendingMutations: 1,
         syncState: 'pending',
-        hasConflict: false,
+        requiresResolution: false,
         createdAt: TEST_INITIAL_TIME,
         updatedAt: TEST_INITIAL_TIME,
       },
     ],
-    conflicts: [],
+    resolutions: [],
     protectedKeys: [],
   });
 
