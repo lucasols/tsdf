@@ -1,6 +1,7 @@
 import { findAndMap } from '@ls-stack/utils/arrayUtils';
 import { deepEqual } from '@ls-stack/utils/deepEqual';
 import { __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
+import { useCallback } from 'react';
 import { Store } from 't-state';
 
 import { useRegisterActiveKeys } from '../cacheLimits/useRegisterActiveKeys';
@@ -21,8 +22,8 @@ export function useFindItem<
   registerActiveItems: (itemKeys: string[]) => () => void,
   touchItems: (itemKeys: string[]) => void,
 ): SelectedItem | null {
-  const selectedItem = store.useSelectorRC(
-    (state) => {
+  const selectedItemSelector = useCallback(
+    (state: TSFDListQueryState<ItemState, QueryPayload, ItemPayload>) => {
       const matchedItem = findAndMap(
         Object.entries(state.items),
         ([itemKey, item]) => {
@@ -50,8 +51,11 @@ export function useFindItem<
             __LEGIT_CAST__<SelectedItem, ItemState>(matchedItem.item),
       };
     },
-    { equalityFn: deepEqual },
+    [findItemFn, selector],
   );
+  const selectedItem = store.useSelectorRC(selectedItemSelector, {
+    equalityFn: deepEqual,
+  });
 
   useRegisterActiveKeys(
     selectedItem?.itemKey ? [selectedItem.itemKey] : [],

@@ -980,7 +980,13 @@ export function createDocumentStore<
       () => createOfflineEntityLookup(offlineEntities),
       [offlineEntities],
     );
-    const offlineOverlay = offlineOverlayStore.useSelectorRC((state) => state);
+    const offlineOverlaySelector = useCallback(
+      (state: DocumentOfflineOverlay<State>) => state,
+      [],
+    );
+    const offlineOverlay = offlineOverlayStore.useSelectorRC(
+      offlineOverlaySelector,
+    );
     const isOffScreenFromContext = useContext(IsOffScreenContext);
     const disabled = disabledProp ?? isOffScreenProp ?? isOffScreenFromContext;
     const returnIdleStatus = returnIdleStatusProp ?? !!disabled;

@@ -1,5 +1,5 @@
 import { deepEqual } from '@ls-stack/utils/deepEqual';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Store } from 't-state';
 
 import type { BrowserTabsTabStatusMessage } from '../../utils/browserTabsPriority';
@@ -867,8 +867,12 @@ export function useGlobalOfflineStatus(
   sessionKey: string,
 ): GlobalOfflineStatus {
   const coordinator = useSessionOfflineCoordinator(sessionKey);
+  const statusSelector = useCallback(
+    (state: SessionStoreState) => state.status,
+    [],
+  );
 
-  return coordinator.store.useSelectorRC((state) => state.status);
+  return coordinator.store.useSelectorRC(statusSelector);
 }
 
 /**
@@ -878,8 +882,12 @@ export function useGlobalOfflineEntities(
   sessionKey: string,
 ): readonly GlobalOfflineEntity[] {
   const coordinator = useSessionOfflineCoordinator(sessionKey);
+  const entitiesSelector = useCallback(
+    (state: SessionStoreState) => state.entities,
+    [],
+  );
 
-  return coordinator.store.useSelectorRC((state) => state.entities);
+  return coordinator.store.useSelectorRC(entitiesSelector);
 }
 
 /**
@@ -893,15 +901,18 @@ export function useOfflineStoreEntities(args: {
   const coordinator = useSessionOfflineCoordinator(
     resolveOfflineSessionScope(args.sessionKey, args.inactiveScope),
   );
-
-  return coordinator.store.useSelectorRC(
-    (state) => {
+  const entitiesSelector = useCallback(
+    (state: SessionStoreState) => {
       if (!args.storeName) return [];
 
       return state.entities.filter(
         (entity) => entity.storeName === args.storeName,
       );
     },
-    { equalityFn: deepEqual },
+    [args.storeName],
   );
+
+  return coordinator.store.useSelectorRC(entitiesSelector, {
+    equalityFn: deepEqual,
+  });
 }

@@ -7,6 +7,7 @@ import { getCompositeKey } from '@ls-stack/utils/getCompositeKey';
 import { __LEGIT_ANY__, __LEGIT_CAST__ } from '@ls-stack/utils/saferTyping';
 import { evtmitter } from 'evtmitter';
 import { klona } from 'klona/json';
+import { useCallback } from 'react';
 import { Result, unknownToError, type Result as ResultType } from 't-result';
 import { Store } from 't-state';
 
@@ -1368,7 +1369,15 @@ export function createCollectionStore<
       inactiveScope: id,
       storeName: resolvedPersistentStorageConfig ? id : undefined,
     });
-    const offlineOverlays = offlineOverlayStore.useSelectorRC((state) => state);
+    const offlineOverlaysSelector = useCallback(
+      (state: Record<string, CollectionOfflineOverlay>) => {
+        return state;
+      },
+      [],
+    );
+    const offlineOverlays = offlineOverlayStore.useSelectorRC(
+      offlineOverlaysSelector,
+    );
 
     return useMultipleItemsBase<
       ItemState,
